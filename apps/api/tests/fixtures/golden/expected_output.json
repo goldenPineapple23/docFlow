@@ -1,0 +1,24 @@
+{
+  "_fixture_provenance": "Hand-built from the build prompt's Section 8.3 known-good values and D-011, NOT a captured live model response. Phase 1 wires the real extraction service and records an actual API response here (per CLAUDE.md Section 5: CI replays a recorded response; a live run is required at every checkpoint). Do not treat this file as evidence extraction has been run.",
+  "header": {
+    "po_number": "BCH-2291",
+    "order_date": "2026-03-14",
+    "requested_delivery_date": "2026-03-21",
+    "buyer_name": "Bella's Coffee House",
+    "buyer_contact_email": "orders@bellascoffee.com",
+    "ship_to_address": "Bella's Coffee House, 1442 Oak Street, Portland, OR 97204",
+    "payment_terms": "Net 30",
+    "order_total": "1356.00",
+    "currency": "USD",
+    "notes": "Please deliver before 10am. Back door access only."
+  },
+  "line_items": [
+    { "line_number": 1, "sku": "CF-1001", "description": "Colombian Whole Bean 5lb", "quantity": "12", "unit": "CS", "unit_price": "47.50", "line_total": "570.00" },
+    { "line_number": 2, "sku": "CF-2210", "description": "Ethiopian Yirgacheffe 5lb", "quantity": "6", "unit": "CS", "unit_price": "62.00", "line_total": "372.00" },
+    { "line_number": 3, "sku": "SY-0045", "description": "Vanilla Syrup 750ml", "quantity": "24", "unit": "EA", "unit_price": "8.25", "line_total": "198.00" },
+    { "line_number": 4, "sku": "CUP-12", "description": "12oz Paper Cups (1000ct)", "quantity": "4", "unit": "BOX", "unit_price": "54.00", "line_total": "216.00" }
+  ],
+  "document_notes": null,
+  "injection_suspected": false,
+  "currency_inferred": true
+}

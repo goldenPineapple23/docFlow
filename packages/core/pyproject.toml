@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docflow-core"
+version = "0.1.0"
+description = "Shared DocFlow backend code: config, tenant-scoped data access, adminDataAccess, file allowlist, error catalog."
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.1",
+    "pyjwt>=2.8",
+]
+
+[tool.setuptools.packages.find]
+include = ["docflow_core*"]

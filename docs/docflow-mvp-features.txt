@@ -1,0 +1,104 @@
+DocFlow — MVP & Future Feature Roadmap
+ 
+*Internal reference · Version 2 · September 2026 · Updated: approved-example prompting added to MVP scope*
+ 
+| Version 2 change: approved-example prompting added to the Extraction and matching section. This feature was added after the initial document was written; the build prompt (docflow-claude-code-build-prompt.md) is the authority on the full specification of how it works. |
+| --- |
+ 
+# MVP scope
+ 
+## Intake
+ 
+- Upload PO (PDF, Excel, image or scan)
+ 
+- Dedicated inbound email address per tenant (forward or BCC)
+ 
+## Extraction and matching
+ 
+- AI extraction of header and line-item fields
+ 
+- Item/SKU catalog (required upload) as the reference matching runs against
+ 
+- Learned mappings — buyer-specific description-to-SKU corrections, reused on future POs
+ 
+- Confidence scoring, per field and overall
+ 
+- Rule-based validation (totals, required fields, sanity checks)
+ 
+- Duplicate PO detection
+ 
+- Possible change-order detection with a simple diff view
+ 
+- Approved-example prompting — for tenants with the feature enabled, up to 3 human-approved past extractions from the same buyer are included in the extraction prompt as examples, so the engine adapts to each buyer's document layout and phrasing over time without any model training. Activation requires 10+ approved documents for that buyer and a founder-controlled per-tenant flag (default off). See the build prompt (Section 7.13) for the full specification.
+ 
+## Review
+ 
+- Side-by-side review UI (original document vs. extracted data)
+ 
+- Manual correction, approve / reject / needs-attention
+ 
+- Target: under 2 minutes per document
+ 
+## Output
+ 
+- Export as CSV, Excel, JSON, and IIF (QuickBooks Desktop)
+ 
+- No ERP writeback — customer imports the export file themselves
+ 
+- One-click “Approve & Export”
+ 
+## Account and operations
+ 
+- Multi-tenant with basic roles (owner / admin / reviewer)
+ 
+- Email notification when a document needs review
+ 
+- Simple dashboard (documents by status, recent activity)
+ 
+- Audit log of key actions
+ 
+- Billing via Stripe (manual invoicing acceptable at first)
+ 
+## Onboarding
+ 
+- Catalog upload and cleanup
+ 
+- Test against 5–10 real POs before go-live
+ 
+- Intake email setup
+ 
+- Buyer identity built from POs as they arrive — no separate customer-list upload required (see the Onboarding Process document)
+ 
+*Open scoping question: a prospect with no formal SKU catalog doesn’t fit this matching model. Decide whether that’s a hard disqualifier or worth a lighter fallback later.*
+ 
+# Future releases
+ 
+- Native ERP integrations — build only once specific paying customers ask
+ 
+- Invoice module, as a separate flow from inbound POs
+ 
+- Refined / advanced change-order diff UX
+ 
+- Webhook or API delivery, in addition to file download
+ 
+- Formal customer-list upload and management, beyond inferred-from-POs
+ 
+- Auto-accept high-confidence documents without human review
+ 
+- Secondary model verification / visual grounding for extraction QA
+ 
+- Analytics (time-saved reporting, touchless-rate trends)
+ 
+- Mobile app / mobile review
+ 
+- Roles beyond owner / admin / reviewer
+ 
+- Non-English document support
+ 
+- EDI or buyer-portal intake
+ 
+- Multi-currency and complex unit-of-measure conversion edge cases
+ 
+- Multi-location / multi-entity refinements
+ 
+- Rule proposals — system notices recurring corrections and proposes a new learned rule; founder approves before it activates
