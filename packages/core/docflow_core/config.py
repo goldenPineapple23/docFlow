@@ -5,12 +5,18 @@ reads os.environ directly outside this module -- see CLAUDE.md Section 6
 """
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# This file lives at <repo_root>/packages/core/docflow_core/config.py. Resolved
+# by path (not cwd) so Settings finds the one root .env regardless of which
+# app/worker directory a process is launched from -- see DECISIONS.md.
+_REPO_ROOT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=_REPO_ROOT_ENV_FILE, extra="ignore")
 
     docflow_env: str = "staging"
     app_base_url: str = "http://localhost:3000"

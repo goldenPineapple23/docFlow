@@ -78,8 +78,7 @@ Stripe handles billing. We're only using **test mode** for now — no real charg
 ## 5. Apply the database migration and make yourself a platform admin
 
 1. In the Supabase dashboard, go to **SQL Editor** → **New query**, paste in the entire contents of `supabase/migrations/0001_foundations.sql`, and run it. This creates the Phase 0 tables.
-2. Sign up once through the app's normal login screen with your own email (this creates your Supabase Auth account — there's no separate "admin signup," you use the same login everyone does).
-3. From the repo root, with your `.env` filled in: `python scripts/seed_platform_admin.py you@example.com` (use the email you just signed up with). This is the one-time step that makes your account able to see `/admin` — see the script's own comments for why this can't just be an API call.
+2. From the repo root, with your `.env` filled in: `apps/api/.venv/Scripts/python.exe scripts/seed_platform_admin.py you@example.com` (use `apps/api/.venv`'s Python specifically — that's where `docflow_core` and its dependencies are installed). There's no separate signup step: this script creates your Supabase Auth account directly (there's deliberately no public `/signup` route to sign up through) and grants it platform-admin status in one action. It prints a generated password the first time — use it to sign in, then change it. This is the one-time step that makes your account able to see `/admin` — see the script's own comments for why this can't just be an ordinary API call.
 
 ## 6. Confirm everything's wired up
 

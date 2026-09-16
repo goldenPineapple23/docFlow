@@ -10,7 +10,7 @@ database, not just by application code:
 
     ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;
     CREATE POLICY tenant_isolation ON <table>
-      USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+      USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 
 Both this module and `admin_data_access.py` connect as the same Postgres
 role (`docflow_app`, created with NOBYPASSRLS -- see SETUP.md / DECISIONS.md
@@ -36,7 +36,7 @@ gets its own minimal policy instead of borrowing the admin bypass for
 something that isn't an admin action:
 
     CREATE POLICY self_lookup ON users
-      USING (auth_user_id = current_setting('app.auth_user_id', true)::uuid);
+      USING (auth_user_id = nullif(current_setting('app.auth_user_id', true), '')::uuid);
 
 `identity_lookup_session()` sets that variable and nothing else -- it can
 never see another user's row, let alone another tenant's data.
@@ -52,13 +52,37 @@ from contextlib import contextmanager
 from typing import Iterator
 from uuid import UUID
 
+import psycopg
+from psycopg.types.json import JsonbBinaryDumper, JsonbDumper
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
+
+# psycopg3 doesn't know a bare Python dict/list should serialize as jsonb --
+# every jsonb column in this schema (admin_actions.payload,
+# tenant_lifecycle_events.payload, etc.) is written from a plain dict, so
+# register this globally once rather than wrapping every call site in Jsonb().
+psycopg.adapters.register_dumper(dict, JsonbDumper)
+psycopg.adapters.register_dumper(dict, JsonbBinaryDumper)
+psycopg.adapters.register_dumper(list, JsonbDumper)
+psycopg.adapters.register_dumper(list, JsonbBinaryDumper)
 
 from docflow_core.config import get_settings
 
 _engine: Engine | None = None
 _SessionLocal: sessionmaker[Session] | None = None
+
+
+def _psycopg3_url(database_url: str) -> str:
+    """
+    Supabase's connection strings use the bare "postgresql://" scheme, which
+    makes SQLAlchemy default to the psycopg2 dialect. We depend on psycopg
+    (v3, see pyproject.toml) instead, so force that dialect explicitly rather
+    than requiring everyone pasting a Supabase URL into .env to remember to
+    edit the scheme too.
+    """
+    if database_url.startswith("postgresql+"):
+        return database_url
+    return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
 
 
 def get_engine() -> Engine:
@@ -70,7 +94,20 @@ def get_engine() -> Engine:
                 "DATABASE_URL is not set. See SETUP.md Step 1 -- copy the pooled "
                 "connection string from Supabase Project Settings -> Database."
             )
-        _engine = create_engine(settings.database_url, pool_pre_ping=True)
+        _engine = create_engine(
+            _psycopg3_url(settings.database_url),
+            pool_pre_ping=True,
+            # DATABASE_URL is Supabase's transaction-mode pooler (port 6543):
+            # a given logical "connection" can be handed a different backend
+            # Postgres connection between transactions. Server-side prepared
+            # statements (which psycopg3 creates automatically after a query
+            # shape repeats -- the default prepare_threshold) are tied to one
+            # specific backend connection, so they're unsafe under this kind
+            # of pooling. Supabase's own docs recommend disabling them for
+            # exactly this reason; see also _reset_rls_settings below for the
+            # other pooling-specific defense this connection needs.
+            connect_args={"prepare_threshold": None},
+        )
     return _engine
 
 
@@ -79,6 +116,32 @@ def get_session_factory() -> sessionmaker[Session]:
     if _SessionLocal is None:
         _SessionLocal = sessionmaker(bind=get_engine(), expire_on_commit=False)
     return _SessionLocal
+
+
+def _reset_rls_settings(session: Session) -> None:
+    """
+    Reset all three app.* RLS settings to their unset (NULL) state at the
+    start of every transaction, before setting whichever one this
+    transaction actually needs.
+
+    This matters because DATABASE_URL is Supabase's transaction-mode pooler
+    (port 6543): each transaction can be handed a different backend Postgres
+    connection than the last, potentially one still carrying leftover
+    app.* state from a different transaction entirely. `set_config(..., true)`
+    ("local") settings are transaction-scoped and undone on COMMIT/ROLLBACK,
+    so nothing WE set here can leak -- but nothing guarantees the connection
+    we're handed hasn't picked up a stray committed value some other way. A
+    stray non-NULL app.tenant_id or app.is_platform_admin would be a tenant-
+    isolation bypass (CLAUDE.md Section 7.5, "the one thing that cannot ever
+    fail"), so we defensively RESET (not just skip) every setting this
+    transaction doesn't explicitly set, rather than trusting the connection's
+    ambient state. Plain RESET (not RESET ... LOCAL, which doesn't exist) is
+    itself transactional -- undone on ROLLBACK, and safely re-applied by the
+    next transaction on COMMIT -- so this is correct under pooling either way.
+    """
+    session.execute(text("RESET app.tenant_id"))
+    session.execute(text("RESET app.auth_user_id"))
+    session.execute(text("RESET app.is_platform_admin"))
 
 
 @contextmanager
@@ -91,7 +154,13 @@ def tenant_session(tenant_id: UUID) -> Iterator[Session]:
     session_factory = get_session_factory()
     session = session_factory()
     try:
-        session.execute(text("SET LOCAL app.tenant_id = :tenant_id"), {"tenant_id": str(tenant_id)})
+        _reset_rls_settings(session)
+        # Postgres's SET/SET LOCAL grammar takes a literal, not a bind parameter --
+        # set_config() is a plain function call, so it can be parameterized safely.
+        session.execute(
+            text("SELECT set_config('app.tenant_id', :tenant_id, true)"),
+            {"tenant_id": str(tenant_id)},
+        )
         yield session
         session.commit()
     except Exception:
@@ -116,6 +185,7 @@ def platform_session() -> Iterator[Session]:
     session_factory = get_session_factory()
     session = session_factory()
     try:
+        _reset_rls_settings(session)
         session.execute(text("SET LOCAL app.is_platform_admin = 'true'"))
         yield session
         session.commit()
@@ -137,7 +207,11 @@ def identity_lookup_session(auth_user_id: str) -> Iterator[Session]:
     session_factory = get_session_factory()
     session = session_factory()
     try:
-        session.execute(text("SET LOCAL app.auth_user_id = :auth_user_id"), {"auth_user_id": auth_user_id})
+        _reset_rls_settings(session)
+        session.execute(
+            text("SELECT set_config('app.auth_user_id', :auth_user_id, true)"),
+            {"auth_user_id": auth_user_id},
+        )
         yield session
         session.commit()
     except Exception:

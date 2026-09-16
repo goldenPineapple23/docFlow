@@ -11,11 +11,17 @@
 -- correctly, but only take effect for connections that use docflow_app.
 --
 -- RLS model (see packages/core/docflow_core/db.py for the full explanation):
---   - tenant_isolation: tenant_id = current_setting('app.tenant_id', true)::uuid
+--   - tenant_isolation: tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
 --   - platform_admin_access: current_setting('app.is_platform_admin', true) = 'true'
---   - users also gets self_lookup: auth_user_id = current_setting('app.auth_user_id', true)::uuid
+--   - users also gets self_lookup: auth_user_id = nullif(current_setting('app.auth_user_id', true), '')::uuid
 -- Postgres RLS policies are permissive and OR'd together, so a row is
 -- visible if ANY policy matches.
+--
+-- The nullif(..., '')::uuid wrapper (rather than a bare ::uuid cast) matters
+-- because DATABASE_URL is a transaction-mode pooler connection: RESET on a
+-- custom GUC restores it to an empty string, not SQL NULL, and a bare
+-- ''::uuid cast raises an error rather than evaluating to false. See
+-- docflow_core.db._reset_rls_settings for the corresponding app-side defense.
 
 create extension if not exists pgcrypto;
 
@@ -58,7 +64,7 @@ create table tenants (
 alter table tenants enable row level security;
 
 create policy tenant_isolation on tenants
-    using (id = current_setting('app.tenant_id', true)::uuid);
+    using (id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 
 -- A bare USING clause (no FOR clause) governs SELECT/UPDATE/DELETE directly
 -- and, per Postgres's default, doubles as WITH CHECK for INSERT/UPDATE when
@@ -97,7 +103,7 @@ create unique index idx_users_email_global on users(email) where tenant_id is nu
 alter table users enable row level security;
 
 create policy tenant_isolation on users
-    using (tenant_id = current_setting('app.tenant_id', true)::uuid);
+    using (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 
 create policy platform_admin_access on users
     using (current_setting('app.is_platform_admin', true) = 'true');
@@ -106,7 +112,7 @@ create policy platform_admin_access on users
 -- token for" without needing the platform-admin bypass for an ordinary
 -- tenant user's own identity check (see packages/core/docflow_core/db.py).
 create policy self_lookup on users
-    using (auth_user_id = current_setting('app.auth_user_id', true)::uuid);
+    using (auth_user_id = nullif(current_setting('app.auth_user_id', true), '')::uuid);
 
 
 -- ══════════════════ GLOBAL TABLES — no tenant_id, no RLS ══════════════════
@@ -151,7 +157,7 @@ create unique index idx_intake_addresses_one_active on intake_addresses(tenant_i
 alter table intake_addresses enable row level security;
 
 create policy tenant_isolation on intake_addresses
-    using (tenant_id = current_setting('app.tenant_id', true)::uuid);
+    using (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 
 create policy platform_admin_access on intake_addresses
     using (current_setting('app.is_platform_admin', true) = 'true');
@@ -176,7 +182,7 @@ create index idx_tenant_lifecycle_events_tenant on tenant_lifecycle_events(tenan
 alter table tenant_lifecycle_events enable row level security;
 
 create policy tenant_isolation on tenant_lifecycle_events
-    using (tenant_id = current_setting('app.tenant_id', true)::uuid);
+    using (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 
 create policy platform_admin_access on tenant_lifecycle_events
     using (current_setting('app.is_platform_admin', true) = 'true');
