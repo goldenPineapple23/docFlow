@@ -10,6 +10,14 @@ and, separately, checks `platform_admins` for cross-tenant capability.
 
 `tenant_id` is NEVER read from the request here or anywhere else -- it comes
 only from the `users` row matched to the verified auth identity (Section 7.5).
+
+Token verification, two paths: if `SUPABASE_JWT_SECRET` is set (the
+project's "Legacy JWT Secret" -- still available and simplest, no network
+call per request), verify with HS256 against that shared secret. Otherwise,
+fall back to the project's JWKS endpoint
+(`{SUPABASE_URL}/auth/v1/.well-known/jwks.json`) for projects that only use
+the newer asymmetric signing keys. Tests use the shared-secret path so they
+don't need network access (see apps/api/tests/test_admin_access.py).
 """
 
 from __future__ import annotations
@@ -21,7 +29,20 @@ import jwt
 from docflow_core.config import get_settings
 from docflow_core.db import identity_lookup_session
 from fastapi import Header, HTTPException
+from jwt import PyJWKClient
 from sqlalchemy import text
+
+_jwks_client: PyJWKClient | None = None
+
+
+def _get_jwks_client() -> PyJWKClient:
+    global _jwks_client
+    if _jwks_client is None:
+        settings = get_settings()
+        if not settings.supabase_url:
+            raise RuntimeError("SUPABASE_URL is not set. See SETUP.md Step 1.")
+        _jwks_client = PyJWKClient(f"{settings.supabase_url}/auth/v1/.well-known/jwks.json")
+    return _jwks_client
 
 
 @dataclass(frozen=True)
@@ -35,23 +56,41 @@ class AuthenticatedIdentity:
 
 
 def _decode_bearer_token(authorization: str | None) -> dict | None:
-    """Returns the decoded claims, or None if there's no usable token at all."""
+    """Returns the decoded claims, or None if there's no usable/valid token."""
     if not authorization or not authorization.lower().startswith("bearer "):
         return None
     token = authorization.split(" ", 1)[1]
     settings = get_settings()
-    if not settings.supabase_jwt_secret:
+
+    if settings.supabase_jwt_secret:
+        try:
+            return jwt.decode(
+                token,
+                settings.supabase_jwt_secret,
+                algorithms=["HS256"],
+                audience="authenticated",
+            )
+        except jwt.PyJWTError:
+            return None
+
+    if not settings.supabase_url:
         raise RuntimeError(
-            "SUPABASE_JWT_SECRET is not set. See SETUP.md Step 1 (Project Settings -> API -> JWT Secret)."
+            "Neither SUPABASE_JWT_SECRET nor SUPABASE_URL is set -- there's no way to verify a "
+            "session token. See SETUP.md Step 1."
         )
     try:
+        signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
         return jwt.decode(
             token,
-            settings.supabase_jwt_secret,
-            algorithms=["HS256"],
+            signing_key.key,
+            algorithms=["ES256", "RS256"],
             audience="authenticated",
         )
-    except jwt.PyJWTError:
+    except Exception:
+        # Covers jwt.PyJWTError as well as JWKS-fetch failures (network, bad
+        # url, unknown kid) -- all of them mean "can't verify this token",
+        # not "the server is broken", so this fails closed like the HS256
+        # path above rather than raising.
         return None
 
 

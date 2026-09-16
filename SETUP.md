@@ -27,11 +27,11 @@ Supabase gives us the database, login system, and file storage in one place. We'
    - **Database password:** click "Generate a password," then **copy it somewhere safe** (a password manager, not a sticky note) — you won't see it again.
    - **Region:** pick whichever is closest to you.
 4. Click **Create new project**. This takes a minute or two to provision.
-5. Once it's ready, go to **Project Settings → API** (gear icon in the left sidebar, then "API"). You'll need three values from this page:
-   - **Project URL** (looks like `https://xxxxxxxx.supabase.co`)
-   - **`anon` `public` key** (a long string starting with `eyJ...`)
-   - **`service_role` `secret` key** (also starts with `eyJ...` — this one is powerful, treat it like a password, never share it or put it in frontend code)
-   - **JWT Secret** (further down the same page — the backend uses this to verify that a login session is genuinely from your Supabase project)
+5. Once it's ready, go to **Project Settings → API** (gear icon in the left sidebar, then "API"). You'll need four values from this page — the exact labels vary a bit by Supabase account, so look for whichever of these appears:
+   - **Project URL** (looks like `https://xxxxxxxx.supabase.co` — not the dashboard page URL you see in your browser's address bar, the actual project URL shown on this settings page)
+   - **Publishable key** (starts with `sb_publishable_...`) — or, on older accounts, the **`anon` `public` key** (starts with `eyJ...`). Either is fine.
+   - **Secret key** (starts with `sb_secret_...`) — or, on older accounts, the **`service_role` `secret` key** (starts with `eyJ...`). This one is powerful, treat it like a password, never share it or put it in frontend code.
+   - **Legacy JWT Secret** (further down the same page, sometimes under a "JWT Keys" or "Legacy" section) — the backend uses this to verify that a login session is genuinely from your Supabase project. If your project only shows asymmetric signing keys with no legacy secret option, that's fine too — leave this one blank and say so, there's a fallback for that case.
 6. **Create a dedicated database role for the app to use — don't skip this.** Supabase's default connection string logs in as the `postgres` role, which is allowed to bypass every row-level-security rule in the database. If our app connected as that role, the tenant-isolation protections in the schema would silently do nothing. Instead:
    1. In the Supabase dashboard, go to **SQL Editor** → **New query**.
    2. Paste and run this (replace `CHOOSE-A-STRONG-PASSWORD` with a real generated password, saved the same way as your database password above):
