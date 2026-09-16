@@ -1,5 +1,9 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "live_api: makes a real Anthropic API call -- excluded from the default run; see CLAUDE.md Section 5/7.1 for when it must be run explicitly (pytest -m live_api).",
+]
+addopts = "-m \"not live_api\""
 
 [tool.ruff]
 line-length = 110

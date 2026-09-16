@@ -1,0 +1,95 @@
+AUTH-001 [warning/tenant] This link has expired
+  what+why: Your invite link is no longer valid.
+  next:     Ask your account owner to resend the invite.
+
+DOC-001 [warning/tenant] We couldn't read this file
+  what+why: This PDF is password-protected. DocFlow doesn't open protected files.
+  next:     Ask the sender for an unprotected copy, or remove the password and upload it again.
+
+DOC-002 [warning/tenant] This file is too large
+  what+why: This file is larger than the 25 MB limit DocFlow can safely process.
+  next:     Split the document, compress it, or send a smaller file.
+
+DOC-003 [high/tenant] This file couldn't be verified as safe
+  what+why: This file's internal structure doesn't look like a normal document, so DocFlow didn't open it.
+  next:     Re-save the file from its original source and upload it again.
+
+DOC-004 [warning/tenant] We can't read this format
+  what+why: This is an Office file type DocFlow doesn't read as a purchase order, such as PowerPoint or Visio.
+  next:     Send the purchase order as a PDF, Word (.doc/.docx) or Excel (.xls/.xlsx) file instead.
+
+DOC-005 [warning/tenant] This file appears to be corrupted
+  what+why: DocFlow could not open this file's internal structure to read it.
+  next:     Re-save or re-export the file from its original source and upload it again.
+
+DOC-006 [high/tenant] This file's contents don't match its name
+  what+why: The file's actual content doesn't match the file type its name suggests.
+  next:     Check the file and upload the original, unmodified document.
+
+DOC-007 [warning/tenant] This scan is too low-quality to trust
+  what+why: We extracted what we could, but the image resolution is low and confidence is below our threshold.
+  next:     Review every field carefully before approving, or request a clearer copy from the buyer.
+
+DOC-008 [high/both] Extraction failed
+  what+why: DocFlow could not get a valid response from the extraction service for this document.
+  next:     This document has been held as failed. Try re-running it; if it fails again, DocFlow has already been alerted.
+
+DOC-009 [critical/both] Extraction response was invalid
+  what+why: The extraction service's response for this document didn't match the expected structure.
+  next:     This document has been held as failed and the raw response was saved. DocFlow has already been alerted.
+
+DOC-010 [warning/tenant] We can't read archive files
+  what+why: This is a .zip, .rar or .7z archive. DocFlow doesn't open archives, because there's no way to tell which file inside is the purchase order.
+  next:     Send the purchase order itself as a separate attachment -- PDF, Word, Excel or a photo all work.
+
+DOC-011 [warning/tenant] We can't read Apple iWork files
+  what+why: This is a Pages, Numbers or Keynote file, which only Apple's own apps can open.
+  next:     In Pages or Numbers choose File > Export To > PDF (or Word/Excel) and send that file instead.
+
+DOC-012 [warning/tenant] We can't read CAD or EDI files
+  what+why: This is a CAD drawing or a raw EDI interchange payload, not a document DocFlow can read as a purchase order.
+  next:     Send the purchase order as a PDF, Word, Excel or image file. If your buyer sends EDI, contact us -- that needs a different setup.
+
+DOC-013 [warning/tenant] This file is password-protected
+  what+why: This file is encrypted or password-protected. DocFlow never tries to guess or break a password, so it can't open it.
+  next:     Ask the sender for an unprotected copy, or remove the password and send it again.
+
+DOC-014 [warning/tenant] This file isn't a document we recognize
+  what+why: Whatever its name says, this file's contents don't match any document format DocFlow reads, so nothing was opened.
+  next:     Send the purchase order as a PDF, Word (.doc/.docx), Excel (.xls/.xlsx), or a photo or scan (PNG, JPG, TIFF, HEIC).
+
+DOC-015 [high/both] This file contains an unsafe instruction
+  what+why: This Word, Excel or OpenDocument file includes an XML instruction that tries to pull in outside content, which DocFlow refuses to process.
+  next:     Re-save the document from its original program and send it again. If it keeps failing, DocFlow has already been alerted.
+
+DOC-016 [warning/tenant] This document has too many pages
+  what+why: This file has more than 100 pages, which is far more than a purchase order needs and more than DocFlow will read in one document.
+  next:     Send just the purchase-order pages, or split the file and send it in parts.
+
+DOC-017 [high/both] We couldn't convert this older file
+  what+why: This is a legacy Word (.doc), Excel (.xls), OpenDocument, TIFF, HEIC or Outlook (.msg) file, which DocFlow converts before reading -- and the conversion didn't complete.
+  next:     Re-save or export it as PDF, .docx or .xlsx and send it again -- DocFlow reads those directly. DocFlow has already been alerted.
+
+DOC-018 [warning/tenant] This image is too large to open
+  what+why: This image's pixel dimensions are far beyond a normal scan or photo, so DocFlow didn't decode it.
+  next:     Send a normal-resolution scan or photo of the purchase order, or a PDF.
+
+DOC-019 [warning/tenant] This attachment is buried too deep
+  what+why: This purchase order arrived as an attachment inside an attachment inside another message. DocFlow opens one level of forwarding, not more.
+  next:     Forward the purchase order with the file attached directly to the email.
+
+INT-001 [warning/tenant] No attachment to process
+  what+why: This email didn't include an attachment DocFlow recognizes as a document, so nothing was processed.
+  next:     Resend with the purchase order attached as a PDF, Word, or Excel file.
+
+INT-002 [warning/tenant] Held: too many attachments
+  what+why: This email had more attachments than DocFlow allows in one message, so we're holding all of them until someone confirms they're real.
+  next:     Open 'Held for review' to release these attachments, or resend them in smaller batches.
+
+INT-003 [warning/tenant] Held: unusual volume from new senders
+  what+why: This account received more than 20 documents from unknown senders in the last hour, so we're holding new ones until someone confirms they're real.
+  next:     Open 'Held for review' to release the ones you recognize.
+
+INT-004 [high/both] Held: sender couldn't be verified
+  what+why: This email failed the sending domain's own authentication check, so DocFlow held it instead of processing it automatically.
+  next:     DocFlow will review this before releasing it -- no action is needed from you right now.

@@ -142,6 +142,7 @@ def _reset_rls_settings(session: Session) -> None:
     session.execute(text("RESET app.tenant_id"))
     session.execute(text("RESET app.auth_user_id"))
     session.execute(text("RESET app.is_platform_admin"))
+    session.execute(text("RESET app.intake_token"))
 
 
 @contextmanager
@@ -187,6 +188,36 @@ def platform_session() -> Iterator[Session]:
     try:
         _reset_rls_settings(session)
         session.execute(text("SET LOCAL app.is_platform_admin = 'true'"))
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@contextmanager
+def token_lookup_session(token: str) -> Iterator[Session]:
+    """
+    Used only by the email-intake webhook (app/routers/email_intake.py) to
+    resolve a per-tenant intake token to its tenant_id before any tenant_id
+    is known -- there is no tenant context yet at this point in the request,
+    so neither tenant_session() nor platform_session() applies. Mirrors
+    identity_lookup_session()'s narrow shape: this grants visibility into
+    exactly one intake_addresses row (the one matching this exact token, per
+    the `token_lookup` RLS policy added in
+    supabase/migrations/0003_email_intake.sql), and nothing else. This is
+    not the Section 7.15.1 admin bypass and must never be used as one.
+    """
+    session_factory = get_session_factory()
+    session = session_factory()
+    try:
+        _reset_rls_settings(session)
+        session.execute(
+            text("SELECT set_config('app.intake_token', :token, true)"),
+            {"token": token},
+        )
         yield session
         session.commit()
     except Exception:

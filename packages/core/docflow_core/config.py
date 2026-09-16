@@ -52,6 +52,24 @@ class Settings(BaseSettings):
 
     worker_egress_allowlist: str = "api.anthropic.com,*.supabase.co"
 
+    # Absolute path to the LibreOffice binary used for Tier 2 conversion of
+    # legacy binary `.doc` files inside the parsing worker (CLAUDE.md
+    # Section 7.11). Blank means "look in the usual install locations and on
+    # PATH"; when it is not installed at all, `.doc` documents fail cleanly
+    # with catalog code DOC-017 rather than degrading silently. A hosted
+    # conversion service is never an option (Section 7.10). See SETUP.md.
+    libreoffice_path: str = ""
+
+    # Phase 1 stand-in for Supabase Storage (see DECISIONS.md): no Storage
+    # bucket/client wiring exists yet anywhere in this codebase, and adding
+    # real object storage is out of scope for this slice. Local filesystem
+    # under the same `tenants/{tenant_id}/...` path convention Section 7.5
+    # requires, so the storage-path/prefix enforcement logic doesn't change
+    # when this is swapped for real Supabase Storage later. Both the API and
+    # worker processes must be able to see this path (true in local dev;
+    # a real deploy needs shared/object storage -- tracked as a TODO).
+    storage_root: str = "storage"
+
     @property
     def is_staging(self) -> bool:
         return self.docflow_env == "staging"

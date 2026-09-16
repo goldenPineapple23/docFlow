@@ -2,6 +2,29 @@
 
 celery[redis]>=5.4
 
+# Phase 1: Tier 1 text/image extraction inside the isolated parsing worker
+# (CLAUDE.md Section 7.11 -- parsing never runs in the web process).
+pdfplumber>=0.11
+python-docx>=1.1
+openpyxl>=3.1
+Pillow>=10.4
+
+# Phase 1 (Tier 2): conversion libraries. These only ever run in this
+# worker -- apps/api must never depend on them (CLAUDE.md Section 7.11:
+# "Tier 2 is where the risk is -- treat conversion as parsing"). Every one
+# of them is a parser of hostile input, so they are pinned here, locked in
+# requirements.lock.txt, and upgraded deliberately when a CVE lands.
+pillow-heif>=1.0      # .heic/.heif phone photos of paper POs
+olefile>=0.47         # .msg -- pure-Python reader of the OLE container's streams
+xlrd>=2.0.1           # .xls -- pure-Python BIFF reader (xlrd 2.x reads .xls only)
+defusedxml>=0.7.1     # .odt/.ods XML, with DTD + external entities disabled
+# .doc (legacy binary Word) additionally needs a local LibreOffice install;
+# it is not a Python dependency. See SETUP.md and DECISIONS.md D-041.
+
 pytest>=8.2
 ruff>=0.5
 mypy>=1.10
+
+# Test-fixture generation only -- never imported by the parsing path.
+# xlwt writes the legacy .xls test fixtures that xlrd then reads.
+xlwt>=1.3

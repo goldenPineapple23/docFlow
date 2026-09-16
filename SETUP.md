@@ -78,11 +78,29 @@ Stripe handles billing. We're only using **test mode** for now — no real charg
 ## 5. Apply the database migration and make yourself a platform admin
 
 1. In the Supabase dashboard, go to **SQL Editor** → **New query**, paste in the entire contents of `supabase/migrations/0001_foundations.sql`, and run it. This creates the Phase 0 tables.
+   - **Phase 1 update:** once `documents`, `document_headers`, `document_lines`, and `intake_rejections` are needed (Phase 1 onward), repeat this step with `supabase/migrations/0002_documents.sql`. The `docflow_app` role deliberately has no `CREATE` privilege on the `public` schema (see DECISIONS.md D-013/D-017), so every migration is applied this way, as the project owner, not programmatically by the app or its test suite. Until this is run, every test that needs the real `documents` table (see `apps/api/tests/conftest.py:requires_documents_schema`) skips itself cleanly rather than failing.
+   - **Phase 1 email-intake update:** once the email intake pipeline is needed, repeat this step again with `supabase/migrations/0003_email_intake.sql` (adds `raw_emails` plus the quarantine/`sender_email`/`message_id` columns on `documents`). Same manual-application reason as above. Tests needing these (see `apps/api/tests/conftest.py:requires_email_intake_schema`) skip cleanly until it's applied. No Postmark account exists yet at this point -- creating one and pointing its inbound webhook at `POST /intake/email/{token}` is a manual step for later, once there's a real domain to receive mail at (see DECISIONS.md).
 2. From the repo root, with your `.env` filled in: `apps/api/.venv/Scripts/python.exe scripts/seed_platform_admin.py you@example.com` (use `apps/api/.venv`'s Python specifically — that's where `docflow_core` and its dependencies are installed). There's no separate signup step: this script creates your Supabase Auth account directly (there's deliberately no public `/signup` route to sign up through) and grants it platform-admin status in one action. It prints a generated password the first time — use it to sign in, then change it. This is the one-time step that makes your account able to see `/admin` — see the script's own comments for why this can't just be an ordinary API call.
 
 ## 6. Confirm everything's wired up
 
 Once Phase 0's scaffolding is in place, I'll run a quick check that reads each of these values and confirms the app can reach Supabase and Anthropic. If anything's missing or wrong, I'll tell you exactly which value and where to find it again — I will never silently fake a credential to keep moving (see `CLAUDE.md` Section 5).
+
+## 7. Install LibreOffice (one command — needed only for legacy `.doc` files)
+
+**What this is for.** Buyers send purchase orders in whatever their system produces. DocFlow reads almost all of those formats itself, including modern Word (`.docx`), modern and legacy Excel (`.xlsx`/`.xls`), OpenDocument (`.odt`/`.ods`), RTF, Outlook messages (`.msg`), faxes and scans (TIFF), phone photos (HEIC) and PDFs. There is exactly one format it cannot read on its own: **legacy binary Word (`.doc`)**, the pre-2007 format. There is no reliable way to read it in Python, and sending a customer's purchase order to an online conversion service is forbidden by our own rules (`CLAUDE.md` Section 7.10) — it would hand their data to a third party. So the conversion has to happen on our own machine, and LibreOffice is the tool that does it.
+
+**Install it:**
+
+```powershell
+winget install TheDocumentFoundation.LibreOffice
+```
+
+(On a Linux server later: `apt-get install -y libreoffice-writer`.) Nothing else to configure — DocFlow looks for it on `PATH` and in the usual install locations. If yours ends up somewhere unusual, set `LIBREOFFICE_PATH` in `.env` to the full path of `soffice.exe`.
+
+**If you skip this:** everything else keeps working. A buyer who sends a legacy `.doc` gets a clear message ("We couldn't convert this older file — re-save it as .docx or PDF and send it again"), and the document is marked failed rather than silently mis-read. Nothing is faked and nothing is lost. But that's a purchase order your customer has to key in by hand, which is the exact thing DocFlow exists to prevent — so install it before go-live.
+
+**Ongoing duty (this one is real, not a one-off).** Every file-parsing library in the worker — including LibreOffice — reads files sent by people we have no relationship with, so they are the largest attack surface in the system. `CLAUDE.md` Section 7.11 requires them to be kept patched: pinned versions in `apps/worker/requirements.lock.txt`, a dependency audit in CI, and a deliberate upgrade whenever a CVE lands in one of them (`pdfplumber`, `python-docx`, `openpyxl`, `Pillow`, `pillow-heif`, `olefile`, `xlrd`, `defusedxml`, and LibreOffice itself). This belongs in `RUNBOOK.md` once that file exists.
 
 ---
 
