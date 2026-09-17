@@ -225,6 +225,9 @@ describe("the approval gate (Section 7.3)", () => {
   const warning: DocumentWarning = {
     id: "33333333-3333-3333-3333-333333333333",
     code: "VAL-002",
+    title: "Order total doesn't match the line items",
+    message: "The order total doesn't equal the sum of the line totals.",
+    action: "Compare the total with the original document and correct whichever value is wrong.",
     severity: "high",
     field_name: "order_total",
     line_number: null,
@@ -261,8 +264,25 @@ describe("the approval gate (Section 7.3)", () => {
       />,
     );
     const row = screen.getByTestId("warning-VAL-002");
-    expect(row).toHaveTextContent("order_total: 100.00");
-    expect(row).toHaveTextContent("sum_of_lines: 570.00");
+    // Keys are shown as words, values verbatim as strings (Section 7.1).
+    expect(row).toHaveTextContent("order total: 100.00");
+    expect(row).toHaveTextContent("sum of lines: 570.00");
+  });
+
+  it("shows the catalog's plain English, not just a code", () => {
+    // Section 7.16.5: the UI renders the catalog entry. A reviewer should
+    // not have to decode "VAL-002".
+    render(
+      <WarningsPanel
+        warnings={[warning]}
+        acknowledged={new Set()}
+        disabled={false}
+        onToggle={() => {}}
+      />,
+    );
+    const row = screen.getByTestId("warning-VAL-002");
+    expect(row).toHaveTextContent(/Order total doesn't match the line items/i);
+    expect(row).toHaveTextContent(/doesn't equal the sum of the line totals/i);
   });
 
   it("says so plainly when nothing needs attention", () => {

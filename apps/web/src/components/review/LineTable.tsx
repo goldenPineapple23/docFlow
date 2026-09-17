@@ -46,13 +46,16 @@ export function LineTable({
   return (
     <section
       aria-labelledby="lines-heading"
-      className="space-y-3 rounded-lg border border-indigo-200 bg-indigo-50/50 p-4"
+      className="space-y-4 rounded-xl border border-gray-200 p-5"
     >
-      <div>
-        <h2 id="lines-heading" className="text-sm font-semibold uppercase tracking-wide text-indigo-900">
-          Line items ({lines.length})
+      <div className="space-y-0.5">
+        <h2
+          id="lines-heading"
+          className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500"
+        >
+          Line items · {lines.length}
         </h2>
-        <p className="text-xs text-indigo-900/70">
+        <p className="text-sm text-gray-500">
           The products being ordered, one row per line on the document.
         </p>
       </div>
@@ -98,8 +101,8 @@ function LineRow({
     <div
       data-testid={`line-${line.line_number}`}
       className={[
-        "rounded border p-3",
-        low ? "border-amber-400 bg-amber-50/40" : "border-gray-200",
+        "rounded-lg border p-4",
+        low ? "border-amber-300 bg-amber-50/30" : "border-gray-200",
       ].join(" ")}
     >
       <div className="flex items-center justify-between">
@@ -134,9 +137,11 @@ function LineRow({
                 data-testid={`line-${line.line_number}-${name}`}
                 data-dirty={name in edits ? "true" : "false"}
                 className={[
-                  "mt-0.5 w-full rounded border px-2 py-1 text-sm",
+                  "mt-1 w-full rounded-md border px-2.5 py-1.5 text-sm transition-colors",
+                  "focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100",
                   "disabled:bg-gray-50 disabled:text-gray-500",
-                  name in edits ? "border-blue-400 ring-1 ring-blue-300" : "border-gray-300",
+                  numeric ? "numeric" : "",
+                  name in edits ? "border-blue-400 bg-blue-50/40" : "border-gray-300",
                 ].join(" ")}
               />
             </div>

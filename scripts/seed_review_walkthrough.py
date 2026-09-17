@@ -49,14 +49,12 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import httpx
-from sqlalchemy import text
-
-from docflow_core.buyers import normalize_buyer_name
 from docflow_core.config import get_settings
 from docflow_core.db import platform_session, tenant_session
 from docflow_core.matching import match_document_lines
 from docflow_core.storage import save_file
 from docflow_core.validation import validate_document
+from sqlalchemy import text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOLDEN = REPO_ROOT / "apps" / "api" / "tests" / "fixtures" / "golden" / "recorded_response.json"

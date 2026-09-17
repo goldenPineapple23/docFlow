@@ -34,6 +34,7 @@ from uuid import UUID
 from docflow_core import file_types
 from docflow_core.config import get_settings
 from docflow_core.db import tenant_session
+from docflow_core.errors import get_error
 from docflow_core.matching import confirm_sku_mapping
 from docflow_core.review import (
     EditRequest,
@@ -368,9 +369,18 @@ def _line_payload(line) -> dict[str, Any]:
 
 
 def _warning_payload(w) -> dict[str, Any]:
+    # Section 7.16.5: "UI, email, API responses, and intake auto-replies all
+    # render from the catalog." The UI was being sent a bare code and a
+    # key/value payload, so a reviewer read "VAL-002" and a row of numbers
+    # and had to infer the rest. The prose belongs to the catalog, so the
+    # catalog is what ships with the warning.
+    entry = get_error(w["code"])
     return {
         "id": str(w["id"]),
         "code": w["code"],
+        "title": entry.title,
+        "message": entry.message,
+        "action": entry.action,
         "severity": w["severity"],
         "field_name": w["field_name"],
         "line_number": w["line_number"],

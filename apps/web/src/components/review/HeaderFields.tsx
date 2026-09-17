@@ -44,16 +44,20 @@ export function HeaderFields({
   return (
     <section
       aria-labelledby="header-heading"
-      // A tinted, titled card. The first walkthrough tester could not tell
-      // where the order's own details ended and the line items began,
-      // because both were plain fields on white.
-      className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4"
+      // A titled card. The first walkthrough tester could not tell where the
+      // order's own details ended and the line items began, because both
+      // were unlabelled fields on one flat surface. The separation is made
+      // with a hairline border and a heading rather than a block of colour.
+      className="space-y-4 rounded-xl border border-gray-200 p-5"
     >
-      <div>
-        <h2 id="header-heading" className="text-sm font-semibold uppercase tracking-wide text-slate-700">
+      <div className="space-y-0.5">
+        <h2
+          id="header-heading"
+          className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500"
+        >
           Order details
         </h2>
-        <p className="text-xs text-slate-500">
+        <p className="text-sm text-gray-500">
           What this order says as a whole — who sent it, when, and the total.
         </p>
       </div>
@@ -96,10 +100,11 @@ export function HeaderFields({
                 data-testid={`header-input-${name}`}
                 data-dirty={name in edits ? "true" : "false"}
                 className={[
-                  "mt-1 w-full rounded border px-2 py-1.5 text-sm",
+                  "mt-1.5 w-full rounded-md border px-2.5 py-1.5 text-sm transition-colors",
+                  "focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100",
                   "disabled:bg-gray-50 disabled:text-gray-500",
-                  low ? "border-amber-400 bg-amber-50" : "border-gray-300",
-                  name in edits ? "ring-2 ring-blue-300" : "",
+                  low ? "border-amber-300 bg-amber-50/60" : "border-gray-300",
+                  name in edits ? "border-blue-400 bg-blue-50/40" : "",
                 ].join(" ")}
               />
             </div>

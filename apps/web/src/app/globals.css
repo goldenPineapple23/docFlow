@@ -1,26 +1,66 @@
 @import "tailwindcss";
 
+/*
+ * DocFlow's base styles.
+ *
+ * Two things here are deliberate and were previously wrong:
+ *
+ *   1. `body` set `font-family: Arial`, which overrode the Geist font the
+ *      layout goes to the trouble of loading. The app rendered in Arial
+ *      throughout.
+ *   2. A `prefers-color-scheme: dark` block flipped the page to near-black,
+ *      but not one component has a dark variant -- every card, table and
+ *      panel is built on light surfaces. A reviewer whose machine is set to
+ *      dark got white cards on a black page with unreadable seams. Dark mode
+ *      is a design that has not been done, not a switch to leave on, so the
+ *      surface is pinned to light until it is. Worth revisiting once the
+ *      surfaces settle.
+ */
+
 :root {
+  /* White page. Structure comes from spacing, hairline borders and
+     typography rather than from blocks of colour -- colour is reserved for
+     the few places it carries meaning (a warning, a status, a low
+     confidence score), so that when something IS tinted it means something. */
   --background: #ffffff;
-  --foreground: #171717;
+  --surface: #ffffff;
+  --foreground: #0f172a; /* slate-900 */
+  --muted: #475569; /* slate-600 */
+  --border: #e5e7eb; /* a hairline, not a frame */
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numbers in a purchase order are read in columns and compared against a
+   document. Tabular figures keep them aligned; the monospace face keeps a
+   quantity from looking like a price. */
+.numeric {
+  font-family: var(--font-geist-mono), ui-monospace, "SFMono-Regular", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A visible focus ring everywhere, because this screen is meant to be driven
+   from the keyboard (Section 6: "keyboard-friendly"). */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  border-radius: 2px;
 }

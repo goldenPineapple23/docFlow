@@ -22,24 +22,33 @@ export function AppHeader({ email }: { email?: string | null }) {
   }
 
   return (
-    <header className="border-b border-gray-200">
-      <div className="mx-auto flex max-w-[110rem] items-center justify-between gap-4 px-4 py-2">
-        <nav className="flex items-center gap-4">
-          <Link href="/review" className="font-semibold">
-            DocFlow
+    <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
+      <div className="mx-auto flex max-w-[110rem] items-center justify-between gap-4 px-5 py-3">
+        <nav className="flex items-center gap-5">
+          <Link href="/review" className="flex items-center gap-2">
+            <span
+              aria-hidden="true"
+              className="grid h-7 w-7 place-items-center rounded-md bg-slate-900 text-xs font-bold text-white"
+            >
+              DF
+            </span>
+            <span className="text-[15px] font-semibold tracking-tight text-slate-900">DocFlow</span>
           </Link>
-          <Link href="/review" className="text-sm text-blue-700 underline">
-            Orders to review
+          <Link
+            href="/review"
+            className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900"
+          >
+            Purchase orders
           </Link>
         </nav>
 
         <div className="flex items-center gap-3 text-sm">
-          {email ? <span className="text-gray-600">{email}</span> : null}
+          {email ? <span className="hidden text-slate-500 sm:inline">{email}</span> : null}
           <button
             type="button"
             onClick={() => void signOut()}
             data-testid="sign-out"
-            className="rounded border border-gray-300 px-2 py-1"
+            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-700 transition-colors hover:bg-slate-50"
           >
             Sign out
           </button>

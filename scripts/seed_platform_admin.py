@@ -35,10 +35,9 @@ import sys
 from uuid import uuid4
 
 import httpx
-from sqlalchemy import text
-
 from docflow_core.config import get_settings
 from docflow_core.db import platform_session
+from sqlalchemy import text
 
 
 def _get_or_create_auth_user(email: str, password: str | None) -> str:

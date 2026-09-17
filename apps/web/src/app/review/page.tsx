@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ReviewApiError, listDocuments, type QueueDocument } from "@/lib/review";
 import { ConfidenceBadge } from "@/components/review/confidence";
+import { StatusBadge } from "@/components/StatusBadge";
 import { AppHeader } from "@/components/AppHeader";
 
 /**
@@ -94,10 +95,10 @@ export default function ReviewQueuePage() {
             aria-pressed={status === filter.value}
             title={filter.blurb}
             className={[
-              "rounded border px-3 py-1 text-sm",
+              "rounded-full border px-3 py-1 text-sm font-medium transition-colors",
               status === filter.value
-                ? "border-blue-500 bg-blue-50 text-blue-900"
-                : "border-gray-300",
+                ? "border-slate-900 bg-slate-900 text-white"
+                : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
             ].join(" ")}
           >
             {filter.label}
@@ -128,35 +129,47 @@ export default function ReviewQueuePage() {
       ) : null}
 
       {documents !== null && documents.length > 0 ? (
-        <table className="mt-6 w-full border-collapse text-sm">
-          <caption className="sr-only">Orders waiting to be reviewed, oldest first</caption>
+        <div className="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full border-collapse text-sm">
+          <caption className="sr-only">Purchase orders, oldest first</caption>
           <thead>
-            <tr className="border-b border-gray-300 text-left">
-              <th scope="col" className="py-2 pr-3">PO number</th>
-              <th scope="col" className="py-2 pr-3">Buyer</th>
-              <th scope="col" className="py-2 pr-3">Total</th>
-              <th scope="col" className="py-2 pr-3">Received</th>
-              <th scope="col" className="py-2 pr-3">Confidence</th>
-              <th scope="col" className="py-2 pr-3">Checks</th>
-              <th scope="col" className="py-2">Flags</th>
+            <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+              <th scope="col" className="px-4 py-2.5 font-medium">PO number</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Buyer</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Total</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Received</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Status</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Confidence</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Checks</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Flags</th>
             </tr>
           </thead>
           <tbody>
             {documents.map((doc) => (
-              <tr key={doc.id} data-testid={`queue-row-${doc.id}`} className="border-b border-gray-200">
-                <td className="py-2 pr-3">
-                  <Link href={`/review/${doc.id}`} className="text-blue-700 underline">
+              <tr
+                key={doc.id}
+                data-testid={`queue-row-${doc.id}`}
+                className="border-b border-slate-100 last:border-0 transition-colors hover:bg-slate-50"
+              >
+                <td className="px-4 py-3">
+                  <Link
+                    href={`/review/${doc.id}`}
+                    className="font-medium text-blue-700 hover:underline"
+                  >
                     {doc.po_number ?? doc.original_filename}
                   </Link>
                 </td>
-                <td className="py-2 pr-3">{doc.buyer_name ?? "—"}</td>
-                <td className="py-2 pr-3 font-mono">
+                <td className="px-4 py-3 text-slate-700">{doc.buyer_name ?? "—"}</td>
+                <td className="numeric px-4 py-3 text-slate-900">
                   {doc.order_total ?? "—"} {doc.currency ?? ""}
                 </td>
-                <td className="py-2 pr-3">
+                <td className="px-4 py-3 text-slate-600">
                   {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : "—"}
                 </td>
-                <td className="py-2 pr-3">
+                <td className="px-4 py-3">
+                  <StatusBadge status={doc.status} />
+                </td>
+                <td className="px-4 py-3">
                   {/*
                     Confidence describes how sure DocFlow was when it read
                     the document. Once a person has checked and approved it,
@@ -170,22 +183,23 @@ export default function ReviewQueuePage() {
                     <ConfidenceBadge value={doc.overall_confidence} />
                   )}
                 </td>
-                <td className="py-2 pr-3">
+                <td className="px-4 py-3">
                   {doc.open_warnings > 0 ? (
-                    <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900">
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
                       {doc.open_warnings} to look at
                     </span>
                   ) : (
                     <span className="text-xs text-gray-500">clear</span>
                   )}
                 </td>
-                <td className="py-2 text-xs">
+                <td className="px-4 py-3 text-xs">
                   <Flags doc={doc} />
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       ) : null}
       </main>
     </>

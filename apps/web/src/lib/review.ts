@@ -76,6 +76,11 @@ export type DocumentLine = {
 export type DocumentWarning = {
   id: string;
   code: string;
+  // Rendered from the error catalog by the API (Section 7.16.5) -- the UI
+  // never writes its own sentence for a failure.
+  title: string;
+  message: string;
+  action: string;
   severity: string;
   field_name: string | null;
   line_number: number | null;

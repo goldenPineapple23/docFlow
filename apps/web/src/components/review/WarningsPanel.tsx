@@ -38,9 +38,9 @@ export function WarningsPanel({
     return (
       <section
         aria-labelledby="warnings-heading"
-        className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/40 p-4"
+        className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/30 p-5"
       >
-        <h2 id="warnings-heading" className="text-sm font-semibold uppercase tracking-wide text-amber-900">
+        <h2 id="warnings-heading" className="text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-800">
           Checks
         </h2>
         <p data-testid="no-warnings" className="text-sm text-green-800">
@@ -53,10 +53,10 @@ export function WarningsPanel({
   return (
     <section
       aria-labelledby="warnings-heading"
-      className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/40 p-4"
+      className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/30 p-5"
     >
       <div>
-        <h2 id="warnings-heading" className="text-sm font-semibold uppercase tracking-wide text-amber-900">
+        <h2 id="warnings-heading" className="text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-800">
           Checks — {open.length} to tick
         </h2>
         {/*
@@ -77,10 +77,10 @@ export function WarningsPanel({
             key={warning.id}
             data-testid={`warning-${warning.code}`}
             className={[
-              "rounded border p-3 text-sm",
+              "rounded-lg border bg-white p-4 text-sm",
               warning.severity === "high" || warning.severity === "critical"
-                ? "border-red-300 bg-red-50"
-                : "border-amber-300 bg-amber-50",
+                ? "border-red-200"
+                : "border-amber-200",
             ].join(" ")}
           >
             <div className="flex items-start gap-2">
@@ -93,15 +93,20 @@ export function WarningsPanel({
                 data-testid={`ack-${warning.id}`}
                 className="mt-1"
               />
-              <label htmlFor={`ack-${warning.id}`} className="flex-1">
-                <span className="font-medium">
-                  {warning.code}
+              <label htmlFor={`ack-${warning.id}`} className="flex-1 cursor-pointer">
+                <span className="block font-medium text-gray-900">
+                  {warning.title ?? warning.code}
                   {warning.line_number !== null ? ` · line ${warning.line_number}` : ""}
-                  {warning.field_name ? ` · ${warning.field_name}` : ""}
                 </span>
+                {warning.message ? (
+                  <span className="mt-0.5 block text-sm text-gray-700">{warning.message}</span>
+                ) : null}
+                {warning.action ? (
+                  <span className="mt-0.5 block text-sm text-gray-600">{warning.action}</span>
+                ) : null}
                 <WarningDetail detail={warning.detail} />
-                <span className="mt-1 block text-xs text-gray-600">
-                  Tick to confirm you&apos;ve checked this against the original.
+                <span className="mt-1.5 block text-xs text-gray-500">
+                  {warning.code} · tick to confirm you&apos;ve checked this against the original.
                 </span>
               </label>
             </div>
@@ -128,10 +133,10 @@ function WarningDetail({ detail }: { detail: Record<string, string> }) {
   if (entries.length === 0) return null;
 
   return (
-    <span className="mt-1 block font-mono text-xs text-gray-700">
+    <span className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
       {entries.map(([key, value]) => (
-        <span key={key} className="mr-3 inline-block">
-          {key}: {String(value)}
+        <span key={key} className="text-xs text-gray-600">
+          {key.replace(/_/g, " ")}: <span className="numeric text-gray-900">{String(value)}</span>
         </span>
       ))}
     </span>
