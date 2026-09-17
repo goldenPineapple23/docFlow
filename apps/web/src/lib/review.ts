@@ -247,6 +247,14 @@ export function createMapping(
   });
 }
 
-export function originalDocumentUrl(id: string): Promise<{ url: string; expires_at: number }> {
+export function originalDocumentUrl(id: string): Promise<{
+  url: string;
+  expires_at: number;
+  // Word, Excel, email and TIFF are all valid intake formats that no browser
+  // renders, so the API says whether there is anything to show.
+  previewable: boolean;
+  format: string | null;
+  filename: string;
+}> {
   return request(`/review/documents/${id}/original`);
 }

@@ -778,3 +778,13 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Why no test caught it:** nothing signs in and then looks around. The Playwright suite navigates straight to the document URL it already knows, which is the correct shape for testing the review screen and exactly the wrong shape for noticing that nobody can reach it. The new component test asserts the header offers a route to the queue and a way out; the deeper gap — "can a person who knows nothing get from the front door to the work" — is the kind only a person finds, which is what the walkthrough is for. It found it in under a minute.
 
 **Related:** Section 6 (Phase 3), D-086, D-089.
+
+## D-091 — The viewer says when a format cannot be shown, rather than showing nothing
+
+**Context:** Section 7.11 admits a deliberately broad intake allowlist, including Word, Excel, raw email and TIFF. No browser renders any of those. The viewer served every original into a sandboxed iframe regardless, so those documents produced a blank panel beside the extracted data — indistinguishable from a broken screen, on the very screen whose whole purpose is side-by-side comparison.
+
+**TIFF is the one that matters most.** It is not an exotic case: Section 7.11 calls it "fax and scanner output — common in this industry, multi-page". A product that silently fails to display the format its customers fax in would fail quietly and constantly.
+
+**Decision:** the mint route detects the type from the file's own bytes and returns  plus a human name for the format. The viewer renders the iframe when it can, and otherwise says which format it is, that DocFlow read it fine, and offers the file itself.  and  are permanently on the not-previewable list regardless of what a browser could do with them — rendering document-derived markup is precisely what Section 7.12 forbids.
+
+**Related:** Section 7.11, Section 7.12, D-089, .

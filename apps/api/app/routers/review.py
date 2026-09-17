@@ -616,18 +616,34 @@ def original_document_url(
     """
     tenant_id = require_tenant_member(identity)
     with tenant_session(tenant_id) as session:
-        exists = session.execute(
-            text("SELECT 1 FROM documents WHERE id = :id AND deleted_at IS NULL"),
+        row = session.execute(
+            text(
+                "SELECT storage_path, original_filename FROM documents "
+                "WHERE id = :id AND deleted_at IS NULL"
+            ),
             {"id": str(document_id)},
-        ).first()
-    if not exists:
+        ).mappings().first()
+    if row is None:
         raise HTTPException(status_code=404)
+
+    content = read_file(row["storage_path"])
+    detected = file_types.detect_file_type(content, _extension(row["original_filename"]))
+    previewable = detected is not None and detected.name not in _NOT_PREVIEWABLE
 
     token, expires_at = mint_document_token(document_id, tenant_id)
     return {
         "url": f"/review/documents/{document_id}/original/content?token={token}",
         "expires_at": expires_at,
+        "previewable": previewable,
+        "format": _FORMAT_NAMES.get(detected.name) if detected else None,
+        "filename": row["original_filename"],
     }
+
+
+def _extension(filename: str | None) -> str:
+    if not filename or "." not in filename:
+        return ""
+    return filename[filename.rindex(".") :].lower()
 
 
 @router.get("/documents/{document_id}/original/content")
@@ -691,10 +707,49 @@ _VIEWABLE_MEDIA_TYPES: dict[file_types.FileTypeName, str] = {
     file_types.FileTypeName.JPEG: "image/jpeg",
     file_types.FileTypeName.GIF: "image/gif",
     file_types.FileTypeName.WEBP: "image/webp",
-    file_types.FileTypeName.TIFF: "image/tiff",
     file_types.FileTypeName.TXT: "text/plain; charset=utf-8",
     file_types.FileTypeName.CSV: "text/plain; charset=utf-8",
     file_types.FileTypeName.MD: "text/plain; charset=utf-8",
+}
+
+# Formats a browser will not display, however correctly they are served.
+# TIFF is the surprise on this list: it is a first-class intake format --
+# fax and scanner output, which this industry still runs on -- and no major
+# browser renders it. A Word or Excel file is the same story. Serving these
+# into the iframe produces a blank panel that looks like a bug, so the
+# viewer is told up front that there is nothing to show and offers the file
+# instead (DECISIONS.md D-091).
+_NOT_PREVIEWABLE = {
+    file_types.FileTypeName.TIFF,
+    file_types.FileTypeName.DOCX,
+    file_types.FileTypeName.XLSX,
+    file_types.FileTypeName.DOC,
+    file_types.FileTypeName.XLS,
+    file_types.FileTypeName.ODT,
+    file_types.FileTypeName.ODS,
+    file_types.FileTypeName.EML,
+    file_types.FileTypeName.MSG,
+    file_types.FileTypeName.RTF,
+    file_types.FileTypeName.HEIC,
+    # HTML is excluded on purpose and permanently: rendering document-derived
+    # markup is precisely what Section 7.12 forbids.
+    file_types.FileTypeName.HTML,
+}
+
+# What a person calls the format, for the "we can't show this one" message.
+_FORMAT_NAMES: dict[file_types.FileTypeName, str] = {
+    file_types.FileTypeName.TIFF: "a TIFF scan",
+    file_types.FileTypeName.DOCX: "a Word document",
+    file_types.FileTypeName.DOC: "a Word document",
+    file_types.FileTypeName.XLSX: "an Excel spreadsheet",
+    file_types.FileTypeName.XLS: "an Excel spreadsheet",
+    file_types.FileTypeName.ODT: "an OpenDocument file",
+    file_types.FileTypeName.ODS: "an OpenDocument spreadsheet",
+    file_types.FileTypeName.EML: "an email",
+    file_types.FileTypeName.MSG: "an Outlook message",
+    file_types.FileTypeName.RTF: "a rich-text document",
+    file_types.FileTypeName.HEIC: "an iPhone photo",
+    file_types.FileTypeName.HTML: "a web page",
 }
 
 

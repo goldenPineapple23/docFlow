@@ -40,8 +40,12 @@ import random
 import sys
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 from uuid import UUID, uuid4
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import po_formats
 from docflow_core.db import platform_session, tenant_session
 from docflow_core.matching import match_document_lines
 from docflow_core.storage import save_file
@@ -207,6 +211,7 @@ def _build_order(index: int, rng: random.Random) -> dict:
 
     chosen = rng.sample(CATALOG, rng.randint(2, 5))
     printed_rows: list[str] = []
+    structured_rows: list[dict] = []
     extracted_lines: list[dict] = []
     printed_total = Decimal("0.00")
 
@@ -235,6 +240,16 @@ def _build_order(index: int, rng: random.Random) -> dict:
 
         printed_rows.append(
             _render_line(printed_sku, description, str(qty), printed_uom, price, _money(line_total))
+        )
+        structured_rows.append(
+            {
+                "sku": printed_sku,
+                "description": description,
+                "qty": str(qty),
+                "uom": printed_uom,
+                "price": price,
+                "total": _money(line_total),
+            }
         )
         extracted_lines.append(
             {
@@ -294,7 +309,26 @@ def _build_order(index: int, rng: random.Random) -> dict:
         ),
     )
 
+    fmt = po_formats.FORMATS[index % len(po_formats.FORMATS)]
+    filename, content = po_formats.render(
+        fmt,
+        text=document_text,
+        po_number=po_number,
+        rows=structured_rows,
+        header={
+            "buyer": buyer,
+            "order_date": order_date.isoformat(),
+            "delivery_date": delivery.isoformat(),
+            "order_total": _money(extracted_total),
+        },
+        sender=email,
+        buyer=buyer,
+    )
+
     return {
+        "format": fmt,
+        "filename": filename,
+        "content": content,
         "po_number": po_number,
         "buyer": buyer,
         "email": email,
@@ -311,8 +345,8 @@ def _build_order(index: int, rng: random.Random) -> dict:
 
 
 def _insert(tenant_id: UUID, order: dict, *, content_sha: str | None = None) -> UUID:
-    content = order["text"].encode("utf-8")
-    storage_path = save_file(tenant_id, f"{order['po_number']}.txt", content)
+    content = order["content"]
+    storage_path = save_file(tenant_id, order["filename"], content)
     document_id = uuid4()
     sha = content_sha or hashlib.sha256(content).hexdigest()
     overall = min(Decimal(str(v)) for v in order["header_confidence"].values())
@@ -332,9 +366,9 @@ def _insert(tenant_id: UUID, order: dict, *, content_sha: str | None = None) -> 
             {
                 "id": str(document_id),
                 "tenant_id": str(tenant_id),
-                "filename": f"{order['po_number']}.txt",
+                "filename": order["filename"],
                 "storage_path": storage_path,
-                "source": "email",
+                "source": "email" if order["format"] == "eml" else "upload",
                 "sha": sha,
                 "confidence": str(overall),
                 "created_at": order["received"],
@@ -451,6 +485,12 @@ def main() -> None:
     for order, document_id in created:
         if order["defect"]:
             print(f"    {order['po_number']:<12} {order['defect']}")
+    print()
+    spread: dict[str, int] = {}
+    for order, _ in created:
+        spread[order["format"]] = spread.get(order["format"], 0) + 1
+    print("  Formats, as a buyer's inbox actually looks:")
+    print("    " + ", ".join(f"{fmt} x{n}" for fmt, n in sorted(spread.items())))
     print()
     print("  Everything else reconciles and should approve with only the")
     print("  currency check to acknowledge.")
