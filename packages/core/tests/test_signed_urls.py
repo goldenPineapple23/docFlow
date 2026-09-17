@@ -37,7 +37,7 @@ def test_a_freshly_minted_token_verifies():
     document_id, tenant_id = uuid4(), uuid4()
     token, expires_at = mint_document_token(document_id, tenant_id)
 
-    verified = verify_document_token(token, document_id, tenant_id)
+    verified = verify_document_token(token, document_id)
 
     assert verified.document_id == document_id
     assert verified.tenant_id == tenant_id
@@ -50,20 +50,39 @@ def test_a_token_for_one_document_does_not_open_another():
     token, _ = mint_document_token(uuid4(), tenant_id)
 
     with pytest.raises(InvalidSignedUrl):
-        verify_document_token(token, uuid4(), tenant_id)
+        verify_document_token(token, uuid4())
 
 
-def test_a_token_for_one_tenant_does_not_open_anothers():
+def test_the_tenant_cannot_be_swapped_without_breaking_the_signature():
     """
     Section 7.5's "a signed URL for one tenant's file cannot be reused across
-    tenants", as a property of the signature rather than a check someone has
-    to remember to write.
+    tenants".
+
+    The tenant now travels inside the token, because the viewer's iframe
+    cannot send an Authorization header (D-089) -- so the guarantee is that
+    the tenant segment is *covered by the signature*. Editing it to name
+    another tenant invalidates the token, and minting a fresh one requires
+    the signing secret.
     """
-    document_id = uuid4()
-    token, _ = mint_document_token(document_id, uuid4())
+    document_id, tenant_id = uuid4(), uuid4()
+    token, expires_at = mint_document_token(document_id, tenant_id)
+    _, _, rest = token.partition(".")
+    _, _, signature = rest.partition(".")
+
+    other_tenant = uuid4()
+    forged = f"{other_tenant}.{expires_at}.{signature}"
 
     with pytest.raises(InvalidSignedUrl):
-        verify_document_token(token, document_id, uuid4())
+        verify_document_token(forged, document_id)
+
+
+def test_the_verified_tenant_is_the_one_the_token_was_minted_for():
+    """The route opens a tenant-scoped session with this, so it has to be the
+    tenant that minted it and never anything the caller chose."""
+    document_id, tenant_id = uuid4(), uuid4()
+    token, _ = mint_document_token(document_id, tenant_id)
+
+    assert verify_document_token(token, document_id).tenant_id == tenant_id
 
 
 def test_an_expired_token_is_refused():
@@ -71,7 +90,7 @@ def test_an_expired_token_is_refused():
     token, _ = mint_document_token(document_id, tenant_id, ttl_seconds=-1)
 
     with pytest.raises(InvalidSignedUrl):
-        verify_document_token(token, document_id, tenant_id)
+        verify_document_token(token, document_id)
 
 
 def test_extending_the_expiry_invalidates_the_signature():
@@ -79,11 +98,12 @@ def test_extending_the_expiry_invalidates_the_signature():
     itself more time by editing the part of the token it can read."""
     document_id, tenant_id = uuid4(), uuid4()
     token, expires_at = mint_document_token(document_id, tenant_id)
-    _, _, signature = token.partition(".")
-    forged = f"{expires_at + 86400}.{signature}"
+    _, _, rest = token.partition(".")
+    _, _, signature = rest.partition(".")
+    forged = f"{tenant_id}.{expires_at + 86400}.{signature}"
 
     with pytest.raises(InvalidSignedUrl):
-        verify_document_token(forged, document_id, tenant_id)
+        verify_document_token(forged, document_id)
 
 
 def test_a_tampered_signature_is_refused():
@@ -91,13 +111,13 @@ def test_a_tampered_signature_is_refused():
     token, expires_at = mint_document_token(document_id, tenant_id)
 
     with pytest.raises(InvalidSignedUrl):
-        verify_document_token(f"{expires_at}.not-the-signature", document_id, tenant_id)
+        verify_document_token(f"{tenant_id}.{expires_at}.not-the-signature", document_id)
 
 
 @pytest.mark.parametrize("malformed", ["", "no-dot", ".", "abc.def", "12x.sig"])
 def test_a_malformed_token_is_refused_without_crashing(malformed):
     with pytest.raises(InvalidSignedUrl):
-        verify_document_token(malformed, uuid4(), uuid4())
+        verify_document_token(malformed, uuid4())
 
 
 def test_a_token_minted_under_a_different_secret_is_refused(monkeypatch):
@@ -110,7 +130,7 @@ def test_a_token_minted_under_a_different_secret_is_refused(monkeypatch):
     get_settings.cache_clear()
 
     with pytest.raises(InvalidSignedUrl):
-        verify_document_token(token, document_id, tenant_id)
+        verify_document_token(token, document_id)
 
 
 def test_the_token_never_contains_the_storage_path():

@@ -31,6 +31,8 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+from docflow_core import file_types
+from docflow_core.config import get_settings
 from docflow_core.db import tenant_session
 from docflow_core.matching import confirm_sku_mapping
 from docflow_core.review import (
@@ -69,16 +71,30 @@ QUEUE_STATUSES = ("needs_review", "approved", "rejected", "exported", "failed")
 # CSP. These headers are what make "sandboxed" true of the response itself,
 # so a document that somehow contained active content still could not run it
 # or call home.
-VIEWER_HEADERS = {
-    "Content-Security-Policy": (
-        "default-src 'none'; img-src 'self' data:; object-src 'none'; "
-        "script-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'; "
-        "base-uri 'none'; form-action 'none'"
-    ),
-    "X-Content-Type-Options": "nosniff",
-    "Cache-Control": "private, no-store",
-    "Referrer-Policy": "no-referrer",
-}
+#
+# `frame-ancestors` names the web app's origins rather than `'self'`. The API
+# and the web app are always separate origins, so `'self'` means "only a page
+# served by the API may frame this" -- which is no page at all. An earlier
+# version used `'self'` and the browser refused to render the document, so
+# the viewer panel was blank for every document while every request returned
+# 200 (DECISIONS.md D-089).
+def _viewer_headers() -> dict[str, str]:
+    settings = get_settings()
+    origins = " ".join(
+        origin.strip().rstrip("/")
+        for origin in settings.cors_allowed_origins.split(",")
+        if origin.strip()
+    ) or "'self'"
+    return {
+        "Content-Security-Policy": (
+            "default-src 'none'; img-src 'self' data:; object-src 'none'; "
+            "script-src 'none'; style-src 'unsafe-inline'; "
+            f"frame-ancestors {origins}; base-uri 'none'; form-action 'none'"
+        ),
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store",
+        "Referrer-Policy": "no-referrer",
+    }
 
 
 def _review_error(exc: ReviewError) -> HTTPException:
@@ -608,21 +624,27 @@ def original_document_url(
 def original_document_content(
     document_id: UUID,
     token: str = Query(min_length=1),
-    identity: AuthenticatedIdentity = Depends(get_current_identity),
 ) -> Response:
     """
     Serve the original file for the sandboxed viewer.
 
-    Still authenticated: the token is a second factor scoped to one document,
-    not a replacement for the session. A leaked URL is useless to anyone who
-    is not already signed in to the same tenant, because the tenant the
-    signature is checked against comes from the session, never the request.
+    **Authenticated by the signed token alone, deliberately.** The viewer is
+    an `<iframe>`, and an iframe's request is a plain browser GET: it carries
+    no `Authorization` header, so a route that also required the session
+    answered 401 to the only client that ever calls it, and the reviewer saw
+    an empty panel where the document should be (DECISIONS.md D-089).
+
+    What the token proves is what matters: it was minted by this server, for
+    this document, for one tenant, within the last few minutes. Minting it
+    required a session that had already passed `require_tenant_member`. The
+    tenant then comes out of the token and opens an ordinary tenant-scoped
+    session, so RLS still decides what can be read.
     """
-    tenant_id = require_tenant_member(identity)
     try:
-        verify_document_token(token, document_id, tenant_id)
+        verified = verify_document_token(token, document_id)
     except InvalidSignedUrl as exc:
         raise HTTPException(status_code=404) from exc
+    tenant_id = verified.tenant_id
 
     with tenant_session(tenant_id) as session:
         row = session.execute(
@@ -638,13 +660,49 @@ def original_document_content(
     content = read_file(row["storage_path"])
     return Response(
         content=content,
-        # Deliberately not the detected type: serving every original as an
-        # opaque stream means a file that lied about being a PDF cannot be
-        # rendered as something active by the browser. The viewer knows what
-        # it asked for.
-        media_type="application/octet-stream",
-        headers=VIEWER_HEADERS,
+        media_type=_viewable_media_type(content),
+        headers=_viewer_headers(),
     )
+
+
+# What the browser is allowed to render in the viewer, keyed by the type
+# detected from the file's own bytes -- never from its extension and never
+# from anything the sender claimed (Section 7.11: "magic-byte type detection
+# (never trust the extension or the Content-Type header)").
+#
+# The allowlist is what makes this safe. `text/html` and `image/svg+xml` are
+# deliberately absent: both can carry script, and a document that renders as
+# HTML inside the viewer would be exactly the injection surface Section 7.12
+# exists to close. Anything not listed is served as an opaque stream, which
+# a browser will not execute.
+_VIEWABLE_MEDIA_TYPES: dict[file_types.FileTypeName, str] = {
+    file_types.FileTypeName.PDF: "application/pdf",
+    file_types.FileTypeName.PNG: "image/png",
+    file_types.FileTypeName.JPEG: "image/jpeg",
+    file_types.FileTypeName.GIF: "image/gif",
+    file_types.FileTypeName.WEBP: "image/webp",
+    file_types.FileTypeName.TIFF: "image/tiff",
+    file_types.FileTypeName.TXT: "text/plain; charset=utf-8",
+    file_types.FileTypeName.CSV: "text/plain; charset=utf-8",
+    file_types.FileTypeName.MD: "text/plain; charset=utf-8",
+}
+
+
+def _viewable_media_type(content: bytes) -> str:
+    """
+    The media type to serve the original under.
+
+    An earlier version served everything as `application/octet-stream`, on
+    the reasoning that an opaque stream cannot be rendered as anything
+    active. That was true and useless: the browser rendered nothing at all,
+    so the review screen's left-hand panel was blank for every document and
+    the side-by-side comparison the whole phase is built around did not
+    happen (DECISIONS.md D-089).
+    """
+    detected = file_types.detect_file_type(content)
+    if detected is None:
+        return "application/octet-stream"
+    return _VIEWABLE_MEDIA_TYPES.get(detected.name, "application/octet-stream")
 
 
 def _user_id(identity: AuthenticatedIdentity) -> UUID:

@@ -88,25 +88,40 @@ def mint_document_token(
     Callers must already have established that this tenant may read this
     document -- minting is not an authorization check, it is a way of
     carrying one that has already happened.
+
+    The tenant travels **inside** the token, and inside the signature. The
+    viewer loads the document in an `<iframe>`, and an iframe's request is a
+    plain browser GET that carries no `Authorization` header -- so the URL
+    has to be able to stand on its own. That is what Section 7.4's "downloads
+    use short-lived signed URLs" means. See DECISIONS.md D-089.
     """
     expires_at = int(time.time()) + ttl_seconds
     payload = _payload(document_id, tenant_id, expires_at)
-    return f"{expires_at}.{_sign(payload)}", expires_at
+    return f"{tenant_id}.{expires_at}.{_sign(payload)}", expires_at
 
 
-def verify_document_token(token: str, document_id: UUID, tenant_id: UUID) -> SignedDocumentToken:
+def verify_document_token(token: str, document_id: UUID) -> SignedDocumentToken:
     """
-    Check a token against the document and tenant the route is serving.
+    Check a token against the document the route is serving, and return the
+    tenant it was minted for.
 
-    Raises `InvalidSignedUrl` for a malformed, tampered or expired token. The
-    caller passes the tenant from the authenticated session, never from the
-    request, so a valid token for Tenant A presented on Tenant B's session
-    fails the signature comparison (Section 7.5).
+    Raises `InvalidSignedUrl` for a malformed, tampered or expired token.
+
+    **The tenant comes out of the token, and that is not a violation of
+    Section 7.5.** That section forbids trusting a tenant_id supplied by the
+    client; this one is not client-supplied in any meaningful sense -- it is
+    covered by an HMAC the server computed with a secret only the server
+    holds. Changing the tenant changes the signature, so a token cannot be
+    edited to point at another tenant's copy of a document, and one cannot be
+    minted at all without the secret. The caller then opens an ordinary
+    tenant-scoped session with it, so RLS still decides what can be read.
     """
-    expires_part, _, signature = token.partition(".")
-    if not signature:
+    tenant_part, _, rest = token.partition(".")
+    expires_part, _, signature = rest.partition(".")
+    if not signature or not expires_part:
         raise InvalidSignedUrl("malformed token")
     try:
+        tenant_id = UUID(tenant_part)
         expires_at = int(expires_part)
     except ValueError as exc:
         raise InvalidSignedUrl("malformed token") from exc

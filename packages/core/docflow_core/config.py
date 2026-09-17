@@ -20,6 +20,13 @@ class Settings(BaseSettings):
 
     docflow_env: str = "staging"
     app_base_url: str = "http://localhost:3000"
+
+    # Origins the browser app is served from, comma-separated. The API and
+    # the web app are always separate origins, so without this the browser
+    # refuses every call (see apps/api/app/main.py). Both spellings of "this
+    # machine" are included by default because a developer may open either
+    # and the failure is invisible when they get it wrong.
+    cors_allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     api_base_url: str = "http://localhost:8000"
 
     supabase_url: str = ""

@@ -471,19 +471,48 @@ def test_the_viewer_url_is_minted_then_served_with_a_strict_csp(client):
 
 
 @requires_review_schema
-def test_a_viewer_token_cannot_be_replayed_across_tenants(client):
+def test_a_tenant_cannot_mint_a_viewer_url_for_another_tenants_document(client):
     """
-    Section 7.5's "a signed URL for one tenant's file cannot be reused across
-    tenants", over HTTP: Tenant B presenting Tenant A's token, on Tenant B's
-    own session, gets nothing.
+    Section 7.5, at the point where it is enforceable.
+
+    The content route authenticates from the signed token alone, because the
+    viewer is an iframe and an iframe sends no Authorization header (D-089).
+    So the boundary that matters is *minting*: Tenant B cannot obtain a URL
+    for Tenant A's document, because RLS hides the document from the mint
+    route entirely.
     """
     with _ReviewTenant("Acme Test Distributor A") as a, _ReviewTenant("Beacon Test Supply B") as b:
         document = a.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
-        minted = client.get(
-            f"/review/documents/{document}/original", headers=a.headers()
-        ).json()
 
-        replayed = client.get(minted["url"], headers=b.headers())
+        refused = client.get(f"/review/documents/{document}/original", headers=b.headers())
+
+        assert refused.status_code == 404
+
+
+@requires_review_schema
+def test_a_viewer_token_edited_to_name_another_tenant_is_refused(client):
+    """
+    The tenant travels inside the token, so the guarantee is that it is
+    covered by the signature: editing it invalidates the token, and minting
+    a fresh one needs the signing secret.
+
+    **What this deliberately does not claim:** a signed URL that is passed to
+    someone else still works until it expires. That is what a signed URL is,
+    and Section 7.4 asks for exactly that -- possession for a few minutes is
+    the access grant. The mitigations are the short TTL, the unguessable
+    signature, and that the storage path never appears in it.
+    """
+    with _ReviewTenant("Acme Test Distributor A") as a, _ReviewTenant("Beacon Test Supply B") as b:
+        document = a.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        url = client.get(
+            f"/review/documents/{document}/original", headers=a.headers()
+        ).json()["url"]
+
+        token = url.split("token=")[1]
+        _tenant, rest = token.split(".", 1)
+        forged = f"{b.tenant_id}.{rest}"
+
+        replayed = client.get(url.split("?")[0] + f"?token={forged}")
 
         assert replayed.status_code == 404
 
