@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ReviewApiError, listDocuments, type QueueDocument } from "@/lib/review";
 import { ConfidenceBadge } from "@/components/review/confidence";
+import { AppHeader } from "@/components/AppHeader";
 
 /**
  * The review queue (CLAUDE.md Section 7.3, Phase 3).
@@ -51,7 +52,9 @@ export default function ReviewQueuePage() {
   const documents = stale ? null : loaded.documents;
 
   return (
-    <main className="mx-auto max-w-6xl p-6">
+    <>
+      <AppHeader />
+      <main className="mx-auto max-w-6xl p-6">
       <h1 className="text-xl font-semibold">Orders to review</h1>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -140,7 +143,8 @@ export default function ReviewQueuePage() {
           </tbody>
         </table>
       ) : null}
-    </main>
+      </main>
+    </>
   );
 }
 

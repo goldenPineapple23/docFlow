@@ -7,6 +7,13 @@ import { LineTable } from "./LineTable";
 import { TrailPanel } from "./TrailPanel";
 import { WarningsPanel } from "./WarningsPanel";
 import type { DocumentHeader, DocumentLine, DocumentWarning, TrailEntry } from "@/lib/review";
+import { AppHeader } from "@/components/AppHeader";
+
+// The app router only exists inside a Next app; these tests render
+// components on their own.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+}));
 
 /**
  * The review surface's own guarantees (CLAUDE.md Sections 7.1, 7.3, 7.6, 7.12).
@@ -296,5 +303,18 @@ describe("the audit trail (Phase 3 exit criterion)", () => {
   it("labels an action the founder took inside the tenant", () => {
     render(<TrailPanel trail={[{ ...trail[0], by_docflow_support: true }]} />);
     expect(screen.getByTestId("docflow-support")).toHaveTextContent(/docflow support/i);
+  });
+});
+
+describe("getting around the app (D-090)", () => {
+  it("always offers a way to the queue and a way out", () => {
+    // A reviewer signed in, landed on a page with their own email on it and
+    // no link to their work, and no way to sign out. Every screen was
+    // reachable only by typing a URL.
+    render(<AppHeader email="reviewer@example.test" />);
+
+    const links = screen.getAllByRole("link");
+    expect(links.some((a) => a.getAttribute("href") === "/review")).toBe(true);
+    expect(screen.getByTestId("sign-out")).toBeInTheDocument();
   });
 });

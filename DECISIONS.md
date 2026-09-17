@@ -766,3 +766,15 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **The correction to take forward:** a green suite is evidence about the layer it covers, never about the product. Before any phase is called complete, someone or something has to drive the real thing end to end — real browser, real API, real database. That is now how Phase 3 was actually verified, and it is the only reason these were found before a customer met them.
 
 **Related:** Section 7.4, Section 7.11, Section 7.12, D-086, D-087, D-088.
+
+## D-090 — Signing in now lands a reviewer on their queue
+
+**Context:** the first person to attempt the Phase 3 walkthrough signed in, saw a page reading "Signed in as walkthrough@example.test / Role: reviewer", and stopped. There was no link to the review queue anywhere on it, and no way to sign out. Every screen in the app was reachable only by typing its URL.
+
+**Decision:** a tenant user is redirected from `/` to `/review`, and every review screen carries a header with the product name, a link to the queue, the signed-in address and a sign-out button. The founder's account has no tenant, so it stays on `/` and gets the Console links instead.
+
+**How it happened:** the root page was written in Phase 0, before a review screen existed. Slice 3 added the screens and never revisited where signing in lands you — the screens were built and tested as destinations, by someone who always arrived at them by URL.
+
+**Why no test caught it:** nothing signs in and then looks around. The Playwright suite navigates straight to the document URL it already knows, which is the correct shape for testing the review screen and exactly the wrong shape for noticing that nobody can reach it. The new component test asserts the header offers a route to the queue and a way out; the deeper gap — "can a person who knows nothing get from the front door to the work" — is the kind only a person finds, which is what the walkthrough is for. It found it in under a minute.
+
+**Related:** Section 6 (Phase 3), D-086, D-089.

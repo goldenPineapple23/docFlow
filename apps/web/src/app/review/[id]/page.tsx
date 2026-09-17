@@ -16,6 +16,7 @@ import { HeaderFields } from "@/components/review/HeaderFields";
 import { LineTable } from "@/components/review/LineTable";
 import { TrailPanel } from "@/components/review/TrailPanel";
 import { WarningsPanel } from "@/components/review/WarningsPanel";
+import { AppHeader } from "@/components/AppHeader";
 
 /**
  * The review screen (CLAUDE.md Section 7.3 — "the most important UX" in
@@ -171,18 +172,23 @@ export default function ReviewDocumentPage({ params }: { params: Promise<{ id: s
 
   if (detail === null) {
     return (
+      <>
+      <AppHeader />
       <main className="mx-auto max-w-6xl p-6">
         {banner ? <BannerView banner={banner} /> : <p className="text-sm text-gray-500">Loading…</p>}
         <Link href="/review" className="mt-4 inline-block text-sm text-blue-700 underline">
           Back to the queue
         </Link>
       </main>
+      </>
     );
   }
 
   const readOnly = !detail.can_edit || detail.document.status !== "needs_review";
 
   return (
+    <>
+    <AppHeader />
     <main className="mx-auto max-w-[110rem] p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
@@ -339,6 +345,7 @@ export default function ReviewDocumentPage({ params }: { params: Promise<{ id: s
         </div>
       </div>
     </main>
+    </>
   );
 }
 
