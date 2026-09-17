@@ -24,7 +24,10 @@ const ACTION_LABEL: Record<TrailEntry["action"], string> = {
 
 export function TrailPanel({ trail }: { trail: TrailEntry[] }) {
   return (
-    <section aria-labelledby="trail-heading" className="space-y-2">
+    <section
+      aria-labelledby="trail-heading"
+      className="space-y-2 rounded-lg border border-gray-200 bg-white p-4"
+    >
       <h2 id="trail-heading" className="text-sm font-semibold uppercase tracking-wide text-gray-500">
         History
       </h2>

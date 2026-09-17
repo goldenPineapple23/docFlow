@@ -226,7 +226,8 @@ def _seed_document(tenant_id: UUID) -> UUID:
                 VALUES
                     (:document_id, :tenant_id, :po_number, :order_date, :requested_delivery_date,
                      :buyer_name, :buyer_contact_email, :ship_to_address, :payment_terms,
-                     :order_total, :currency, :notes, :header_confidence, false, now(), now())
+                     :order_total, :currency, :notes, :header_confidence, :currency_inferred,
+                     now(), now())
                 """
             ),
             {
@@ -238,6 +239,13 @@ def _seed_document(tenant_id: UUID) -> UUID:
                 )},
                 "order_total": header["order_total"],
                 "header_confidence": json.dumps(golden["header_confidence"]),
+                # The golden PO prints "$47.50" and never the letters "USD",
+                # so the model inferred the currency from a symbol and capped
+                # its confidence at 0.6 (Section 7.1). Hardcoding this False
+                # suppressed the banner that explains WHY that field is
+                # flagged, and the first walkthrough tester reasonably asked
+                # why "everything is USD" was being questioned.
+                "currency_inferred": bool(golden.get("currency_inferred")),
             },
         )
 

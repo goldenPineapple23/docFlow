@@ -42,10 +42,21 @@ export function HeaderFields({
   onChange: (field: string, value: string) => void;
 }) {
   return (
-    <section aria-labelledby="header-heading" className="space-y-3">
-      <h2 id="header-heading" className="text-sm font-semibold uppercase tracking-wide text-gray-500">
-        Order details
-      </h2>
+    <section
+      aria-labelledby="header-heading"
+      // A tinted, titled card. The first walkthrough tester could not tell
+      // where the order's own details ended and the line items began,
+      // because both were plain fields on white.
+      className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4"
+    >
+      <div>
+        <h2 id="header-heading" className="text-sm font-semibold uppercase tracking-wide text-slate-700">
+          Order details
+        </h2>
+        <p className="text-xs text-slate-500">
+          What this order says as a whole — who sent it, when, and the total.
+        </p>
+      </div>
 
       {header.currency_inferred ? (
         <p

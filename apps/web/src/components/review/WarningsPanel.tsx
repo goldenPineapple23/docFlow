@@ -36,8 +36,11 @@ export function WarningsPanel({
 
   if (warnings.length === 0) {
     return (
-      <section aria-labelledby="warnings-heading" className="space-y-2">
-        <h2 id="warnings-heading" className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+      <section
+        aria-labelledby="warnings-heading"
+        className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/40 p-4"
+      >
+        <h2 id="warnings-heading" className="text-sm font-semibold uppercase tracking-wide text-amber-900">
           Checks
         </h2>
         <p data-testid="no-warnings" className="text-sm text-green-800">
@@ -48,10 +51,25 @@ export function WarningsPanel({
   }
 
   return (
-    <section aria-labelledby="warnings-heading" className="space-y-2">
-      <h2 id="warnings-heading" className="text-sm font-semibold uppercase tracking-wide text-gray-500">
-        Checks ({open.length} to look at)
-      </h2>
+    <section
+      aria-labelledby="warnings-heading"
+      className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/40 p-4"
+    >
+      <div>
+        <h2 id="warnings-heading" className="text-sm font-semibold uppercase tracking-wide text-amber-900">
+          Checks — {open.length} to tick
+        </h2>
+        {/*
+          Ticking a check is not an edit and is not saved on its own; it is
+          how you tell DocFlow you have looked at something before approving.
+          The first walkthrough tester ticked one, pressed Save, and nothing
+          happened -- because Save is for changed values, and nothing said so.
+        */}
+        <p className="text-xs text-amber-900/80">
+          These don&apos;t need saving. Tick each one to confirm you&apos;ve looked at it — that&apos;s
+          what unlocks Approve.
+        </p>
+      </div>
 
       <ul className="space-y-2">
         {open.map((warning) => (

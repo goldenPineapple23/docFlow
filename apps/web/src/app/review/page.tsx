@@ -15,13 +15,36 @@ import { AppHeader } from "@/components/AppHeader";
  * change order, a suspected injection — are on the row, not behind a click.
  */
 
-const FILTERS: Array<{ value: string; label: string }> = [
-  { value: "needs_review", label: "Needs review" },
-  { value: "approved", label: "Approved" },
-  { value: "rejected", label: "Rejected" },
-  { value: "exported", label: "Exported" },
-  { value: "failed", label: "Failed" },
-  { value: "", label: "All" },
+/**
+ * Tab labels are what a warehouse or office person reads, not what the
+ * database column says.
+ *
+ * "Exported" was read by the first walkthrough tester as possibly meaning
+ * *imported* -- the two words swap easily when you are moving quickly. It is
+ * now "Exported to file", which names the thing that happened and cannot be
+ * confused with intake. Each tab also carries a one-line explanation,
+ * because the tester's first question was what this page even was.
+ */
+const FILTERS: Array<{ value: string; label: string; blurb: string }> = [
+  {
+    value: "needs_review",
+    label: "Needs review",
+    blurb:
+      "Every order lands here first. A person checks each one before it counts — DocFlow never approves an order by itself.",
+  },
+  {
+    value: "approved",
+    label: "Approved",
+    blurb: "Checked by a person and ready to hand to your accounting or ERP system.",
+  },
+  { value: "rejected", label: "Rejected", blurb: "Set aside by a reviewer, with the reason recorded." },
+  {
+    value: "exported",
+    label: "Exported to file",
+    blurb: "Approved orders that have already been downloaded as a file.",
+  },
+  { value: "failed", label: "Couldn't be read", blurb: "DocFlow couldn't read these — the sender may need to resend." },
+  { value: "", label: "All", blurb: "Every order on this account." },
 ];
 
 export default function ReviewQueuePage() {
@@ -55,7 +78,12 @@ export default function ReviewQueuePage() {
     <>
       <AppHeader />
       <main className="mx-auto max-w-6xl p-6">
-      <h1 className="text-xl font-semibold">Orders to review</h1>
+      <h1 className="text-xl font-semibold">Purchase orders</h1>
+      <p className="mt-1 max-w-3xl text-sm text-gray-600">
+        Every purchase order that arrives — by email or upload — is read by DocFlow and then
+        shown to a person before it counts. Nothing is approved automatically, so this list is
+        the whole account, not just the ones that looked wrong.
+      </p>
 
       <div className="mt-4 flex flex-wrap gap-2">
         {FILTERS.map((filter) => (
@@ -64,6 +92,7 @@ export default function ReviewQueuePage() {
             type="button"
             onClick={() => setStatus(filter.value)}
             aria-pressed={status === filter.value}
+            title={filter.blurb}
             className={[
               "rounded border px-3 py-1 text-sm",
               status === filter.value
@@ -75,6 +104,10 @@ export default function ReviewQueuePage() {
           </button>
         ))}
       </div>
+
+      <p data-testid="tab-blurb" className="mt-2 text-sm text-gray-600">
+        {FILTERS.find((f) => f.value === status)?.blurb}
+      </p>
 
       {error ? (
         <div role="alert" className="mt-6 rounded border border-red-300 bg-red-50 p-4">
@@ -124,7 +157,18 @@ export default function ReviewQueuePage() {
                   {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : "—"}
                 </td>
                 <td className="py-2 pr-3">
-                  <ConfidenceBadge value={doc.overall_confidence} />
+                  {/*
+                    Confidence describes how sure DocFlow was when it read
+                    the document. Once a person has checked and approved it,
+                    that number is history -- leaving "Low confidence" on an
+                    approved order made a walkthrough tester think something
+                    was still wrong with it.
+                  */}
+                  {doc.status === "approved" || doc.status === "exported" ? (
+                    <span className="text-xs text-green-800">Checked by a person</span>
+                  ) : (
+                    <ConfidenceBadge value={doc.overall_confidence} />
+                  )}
                 </td>
                 <td className="py-2 pr-3">
                   {doc.open_warnings > 0 ? (

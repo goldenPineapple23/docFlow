@@ -203,38 +203,54 @@ export default function ReviewDocumentPage({ params }: { params: Promise<{ id: s
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void save()}
-            disabled={!dirty || busy || readOnly}
-            data-testid="save-button"
-            className="rounded border border-gray-300 px-3 py-1.5 text-sm disabled:text-gray-400"
-          >
-            Save <kbd className="text-xs text-gray-500">⌘S</kbd>
-          </button>
-          <button
-            type="button"
-            onClick={() => setRejecting((r) => !r)}
-            disabled={busy || readOnly}
-            className="rounded border border-gray-300 px-3 py-1.5 text-sm disabled:text-gray-400"
-          >
-            Reject
-          </button>
-          <button
-            type="button"
-            onClick={() => void approve()}
-            disabled={busy || readOnly || !everyWarningAcknowledged}
-            data-testid="approve-button"
-            title={
-              !everyWarningAcknowledged
-                ? "Tick each check below to confirm you've looked at it"
-                : undefined
-            }
-            className="rounded bg-green-700 px-3 py-1.5 text-sm font-medium text-white disabled:bg-gray-300"
-          >
-            Approve <kbd className="text-xs opacity-80">⌘↵</kbd>
-          </button>
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={!dirty || busy || readOnly}
+              data-testid="save-button"
+              title={
+                !dirty ? "Nothing to save yet — this saves changes you make to the values" : undefined
+              }
+              className="rounded border border-gray-300 px-3 py-1.5 text-sm disabled:text-gray-400"
+            >
+              {dirty ? "Save changes" : "Save"} <kbd className="text-xs text-gray-500">⌘S</kbd>
+            </button>
+            <button
+              type="button"
+              onClick={() => setRejecting((r) => !r)}
+              disabled={busy || readOnly}
+              className="rounded border border-gray-300 px-3 py-1.5 text-sm disabled:text-gray-400"
+            >
+              Reject
+            </button>
+            <button
+              type="button"
+              onClick={() => void approve()}
+              disabled={busy || readOnly || !everyWarningAcknowledged}
+              data-testid="approve-button"
+              className="rounded bg-green-700 px-3 py-1.5 text-sm font-medium text-white disabled:bg-gray-300"
+            >
+              Approve <kbd className="text-xs opacity-80">⌘↵</kbd>
+            </button>
+          </div>
+
+          {/*
+            A disabled button with no reason reads as a broken button. The
+            first walkthrough tester ticked a check, pressed Save, and saw
+            nothing happen -- Save was disabled because ticking a check is
+            not an edit, and nothing on screen said so.
+          */}
+          <p data-testid="action-hint" className="text-right text-xs text-gray-600">
+            {actionHint({
+              readOnly,
+              status: detail.document.status,
+              canEdit: detail.can_edit,
+              dirty,
+              remaining: openWarnings.filter((w) => !acknowledged.has(w.id)).length,
+            })}
+          </p>
         </div>
       </div>
 
@@ -347,6 +363,46 @@ export default function ReviewDocumentPage({ params }: { params: Promise<{ id: s
     </main>
     </>
   );
+}
+
+/**
+ * Why the buttons are in the state they are in, in one sentence.
+ *
+ * Every branch here corresponds to something a walkthrough tester actually
+ * hit and could not explain from the screen.
+ */
+function actionHint({
+  readOnly,
+  status,
+  canEdit,
+  dirty,
+  remaining,
+}: {
+  readOnly: boolean;
+  status: string;
+  canEdit: boolean;
+  dirty: boolean;
+  remaining: number;
+}): string {
+  if (!canEdit) {
+    return "Your account can view orders but not change them.";
+  }
+  if (status === "approved" || status === "exported") {
+    return "Already approved. Editing any value reopens it for review.";
+  }
+  if (status === "rejected") {
+    return "This order was rejected. Editing any value reopens it for review.";
+  }
+  if (readOnly) {
+    return `This order is ${status}, so it can't be reviewed yet.`;
+  }
+  if (remaining > 0) {
+    return `${remaining} check${remaining === 1 ? "" : "s"} still to tick below before you can approve.`;
+  }
+  if (dirty) {
+    return "You have unsaved changes — save them, then approve.";
+  }
+  return "Everything checked. Ready to approve.";
 }
 
 function BannerView({ banner }: { banner: Banner }) {

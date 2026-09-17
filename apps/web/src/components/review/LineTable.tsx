@@ -44,10 +44,18 @@ export function LineTable({
   onConfirmMapping: (lineId: string, itemId: string) => Promise<void>;
 }) {
   return (
-    <section aria-labelledby="lines-heading" className="space-y-3">
-      <h2 id="lines-heading" className="text-sm font-semibold uppercase tracking-wide text-gray-500">
-        Line items
-      </h2>
+    <section
+      aria-labelledby="lines-heading"
+      className="space-y-3 rounded-lg border border-indigo-200 bg-indigo-50/50 p-4"
+    >
+      <div>
+        <h2 id="lines-heading" className="text-sm font-semibold uppercase tracking-wide text-indigo-900">
+          Line items ({lines.length})
+        </h2>
+        <p className="text-xs text-indigo-900/70">
+          The products being ordered, one row per line on the document.
+        </p>
+      </div>
 
       {lines.length === 0 ? (
         <p className="text-sm text-gray-600">
