@@ -16,6 +16,7 @@ import { HeaderFields } from "@/components/review/HeaderFields";
 import { LineTable } from "@/components/review/LineTable";
 import { TrailPanel } from "@/components/review/TrailPanel";
 import { WarningsPanel } from "@/components/review/WarningsPanel";
+import { StatusBadge } from "@/components/StatusBadge";
 import { AppHeader } from "@/components/AppHeader";
 
 /**
@@ -198,8 +199,9 @@ export default function ReviewDocumentPage({ params }: { params: Promise<{ id: s
           <h1 className="text-lg font-semibold">
             {detail.header.po_number ?? detail.document.original_filename}
           </h1>
-          <p className="text-sm text-gray-600">
-            {detail.header.buyer_name ?? "Buyer not read"} · {detail.document.status}
+          <p className="mt-1 flex items-center gap-2 text-sm text-gray-600">
+            <span>{detail.header.buyer_name ?? "Buyer not read"}</span>
+            <StatusBadge status={detail.document.status} />
           </p>
         </div>
 

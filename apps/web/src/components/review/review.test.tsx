@@ -101,22 +101,6 @@ describe("header fields (Sections 7.1, 7.12)", () => {
     }
   });
 
-  it("never puts a comma inside the editable amount", () => {
-    // The input's value goes straight to a NUMERIC column. A comma would be
-    // rejected or silently reinterpreted, and Section 7.1 keeps money exact
-    // end to end -- so grouping is shown BESIDE the field, never in it.
-    const big = { ...header, order_total: "1356.00" };
-    render(<HeaderFields header={big} edits={{}} disabled={false} onChange={() => {}} />);
-
-    expect(screen.getByTestId("header-input-order_total")).toHaveValue("1356.00");
-    expect(screen.getByTestId("header-grouped-order_total")).toHaveTextContent("1,356.00");
-  });
-
-  it("shows no grouped reading when grouping changes nothing", () => {
-    render(<HeaderFields header={header} edits={{}} disabled={false} onChange={() => {}} />);
-    expect(screen.queryByTestId("header-grouped-order_total")).toBeNull();
-  });
-
   it("marks a low-confidence field visibly", () => {
     render(<HeaderFields header={header} edits={{}} disabled={false} onChange={() => {}} />);
     const badges = screen.getAllByTestId("confidence-badge");

@@ -2,7 +2,6 @@
 
 import type { DocumentHeader } from "@/lib/review";
 import { ConfidenceBadge, ProvenanceNote, isLowConfidence } from "./confidence";
-import { formatAmount } from "@/lib/money";
 
 /**
  * The editable header (CLAUDE.md Section 7.3 / 7.12).
@@ -17,9 +16,6 @@ import { formatAmount } from "@/lib/money";
  * and Section 7.1 does not allow a float anywhere near money. `type="date"`
  * would silently reformat or reject what the document actually printed.
  */
-
-// The header fields that hold an amount.
-const MONEY_FIELDS = new Set(["order_total"]);
 
 export const HEADER_FIELDS: Array<{ name: keyof DocumentHeader & string; label: string; wide?: boolean }> = [
   { name: "po_number", label: "PO number" },
@@ -53,16 +49,16 @@ export function HeaderFields({
       // began; a hairline border alone was not enough, so the three kinds of
       // information are now three surfaces -- slate for the order, indigo
       // for its lines, amber for the things needing attention.
-      className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-5"
+      className="space-y-4 rounded-xl border border-violet-200 bg-violet-50 p-5"
     >
       <div className="space-y-0.5">
         <h2
           id="header-heading"
-          className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600"
+          className="text-[11px] font-semibold uppercase tracking-[0.08em] text-violet-800"
         >
           Order details
         </h2>
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-violet-900/60">
           What this order says as a whole — who sent it, when, and the total.
         </p>
       </div>
@@ -95,18 +91,6 @@ export function HeaderFields({
                   <ConfidenceBadge value={confidence} />
                 </span>
               </div>
-              {/*
-                A grouped reading of the amount, BESIDE the field and never
-                inside it. The input has to hold exactly what will be sent to
-                a NUMERIC column, so it shows "1356.00"; this shows
-                "1,356.00" so the figure can be checked against the document
-                at a glance. Only rendered when grouping changes anything.
-              */}
-              {MONEY_FIELDS.has(name) && formatAmount(current) !== (current ?? "") ? (
-                <p data-testid={`header-grouped-${name}`} className="mt-1 text-xs text-gray-500">
-                  reads as {formatAmount(current)}
-                </p>
-              ) : null}
               <input
                 id={`header-${name}`}
                 name={name}

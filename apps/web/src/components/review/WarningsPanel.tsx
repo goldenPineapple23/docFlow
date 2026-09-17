@@ -1,7 +1,6 @@
 "use client";
 
 import type { DocumentWarning } from "@/lib/review";
-import { formatAmount } from "@/lib/money";
 
 /**
  * Warnings, and the acknowledgement gate on approval (CLAUDE.md Section 7.3:
@@ -18,19 +17,6 @@ import { formatAmount } from "@/lib/money";
  */
 
 const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, warning: 2, info: 3 };
-
-// Which keys in a warning's detail payload are amounts. Grouping is applied
-// only to these -- a line number or a confidence score with a comma in it
-// would be worse than one without.
-const MONEY_KEYS = new Set([
-  "order_total",
-  "sum_of_lines",
-  "difference",
-  "expected",
-  "line_total",
-  "unit_price",
-  "tolerance",
-]);
 
 export function WarningsPanel({
   warnings,
@@ -52,9 +38,9 @@ export function WarningsPanel({
     return (
       <section
         aria-labelledby="warnings-heading"
-        className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/30 p-5"
+        className="space-y-3 rounded-xl border border-amber-400 bg-amber-100/80 p-5"
       >
-        <h2 id="warnings-heading" className="text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-800">
+        <h2 id="warnings-heading" className="text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-900">
           Checks
         </h2>
         <p data-testid="no-warnings" className="text-sm text-green-800">
@@ -67,10 +53,10 @@ export function WarningsPanel({
   return (
     <section
       aria-labelledby="warnings-heading"
-      className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/30 p-5"
+      className="space-y-3 rounded-xl border border-amber-400 bg-amber-100/80 p-5"
     >
       <div>
-        <h2 id="warnings-heading" className="text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-800">
+        <h2 id="warnings-heading" className="text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-900">
           Checks — {open.length} to tick
         </h2>
         {/*
@@ -151,9 +137,7 @@ function WarningDetail({ detail }: { detail: Record<string, string> }) {
       {entries.map(([key, value]) => (
         <span key={key} className="text-xs text-gray-600">
           {key.replace(/_/g, " ")}:{" "}
-          <span className="numeric text-gray-900">
-            {MONEY_KEYS.has(key) ? formatAmount(String(value)) : String(value)}
-          </span>
+          <span className="numeric text-gray-900">{String(value)}</span>
         </span>
       ))}
     </span>

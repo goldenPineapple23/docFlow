@@ -5,7 +5,6 @@ import Link from "next/link";
 import { ReviewApiError, listDocuments, type QueueDocument } from "@/lib/review";
 import { ConfidenceBadge } from "@/components/review/confidence";
 import { StatusBadge } from "@/components/StatusBadge";
-import { formatMoney } from "@/lib/money";
 import { AppHeader } from "@/components/AppHeader";
 
 /**
@@ -162,7 +161,7 @@ export default function ReviewQueuePage() {
                 </td>
                 <td className="px-4 py-3 text-slate-700">{doc.buyer_name ?? "—"}</td>
                 <td className="numeric px-4 py-3 text-right text-slate-900">
-                  {formatMoney(doc.order_total, doc.currency)}
+                  {doc.order_total ?? "—"} {doc.currency ?? ""}
                 </td>
                 <td className="px-4 py-3 text-slate-600">
                   {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : "—"}

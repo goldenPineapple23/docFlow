@@ -46,16 +46,16 @@ export function LineTable({
   return (
     <section
       aria-labelledby="lines-heading"
-      className="space-y-4 rounded-xl border border-indigo-200 bg-indigo-50/60 p-5"
+      className="space-y-4 rounded-xl border border-sky-200 bg-sky-50 p-5"
     >
       <div className="space-y-0.5">
         <h2
           id="lines-heading"
-          className="text-[11px] font-semibold uppercase tracking-[0.08em] text-indigo-700"
+          className="text-[11px] font-semibold uppercase tracking-[0.08em] text-sky-800"
         >
           Line items · {lines.length}
         </h2>
-        <p className="text-sm text-indigo-900/60">
+        <p className="text-sm text-sky-900/60">
           The products being ordered, one row per line on the document.
         </p>
       </div>
@@ -102,7 +102,7 @@ function LineRow({
       data-testid={`line-${line.line_number}`}
       className={[
         "rounded-lg border p-4",
-        low ? "border-amber-300 bg-amber-50" : "border-indigo-100 bg-white",
+        low ? "border-amber-400 bg-amber-50" : "border-sky-200 bg-white",
       ].join(" ")}
     >
       <div className="flex items-center justify-between">
