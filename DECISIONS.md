@@ -339,3 +339,293 @@ Every judgment call made during the build: what was ambiguous, what was chosen, 
 **Context:** Section 7.11 requires "a positive fixture for every Tier 1 and Tier 2 format — a real PO in each."
 **Decision:** every Tier 1 format and every Tier 2 format except `.doc` has a programmatically generated PO fixture (`apps/worker/tests/fixture_builders.py`) that is asserted to reach extraction. For `.doc`, nothing on this machine can *write* a legacy binary Word file either, so the end-to-end test is marked `requires_libreoffice` and currently skips, with the skip reason naming D-041. What is still tested without LibreOffice: that a `.doc` is detected and accepted by the allowlist, that a malformed one fails cleanly with `DOC-017`, and that a missing LibreOffice degrades to `DOC-017` rather than crashing. **No fake `.doc` file was committed** — a fixture that doesn't exercise the path is worse than a visible skip.
 **Related:** Section 7.11, D-041.
+
+## D-051 — The buyer table is `buyers`, not `customers`; Section 9's `learned_rules.customer_id` becomes `buyer_id`
+
+**Context:** `docflow-database-schema.docx` calls the table that holds the businesses sending purchase orders `customers`. CLAUDE.md and the master build prompt call them *buyers* everywhere it matters (Section 7.6 "Buyer auto-creation", Section 7.13's `buyer_alias` rule type, Section 7.15.2 Step 5's `/admin/tenants/{id}/buyers/import`), while Section 9's `learned_rules` spec still says `customer_id`. Two documents, two names, one table.
+**Decision:** `buyers`, used consistently for the table, every foreign key (`buyers.id`, `document_headers.buyer_id`, `learned_rules.buyer_id`, `buyer_merge_candidates`), and every function and variable in `docflow_core.buyers`. Section 9's `customer_id` is implemented as `buyer_id`; the spelling is the only thing that changed, the column's meaning and the `UNIQUE (tenant_id, <buyer>, rule_type, match_key)` constraint are exactly as specified.
+**Why:** "customer" is genuinely ambiguous in this product and would stay ambiguous in every query written for the rest of the build. DocFlow's customers are the tenants (the distributors who pay for it); the tenants' customers are the buyers who send them POs. A `customers` table that means the second thing sits one join away from a `tenants` table that means the first, and `SELECT ... FROM customers WHERE tenant_id = ...` reads as if it answers the wrong question. CLAUDE.md is also the authority the build follows when documents disagree (Section 0 rule 8), and it says buyers.
+**Pending document update (not a question for the founder, per Section 0 rule 8's logging requirement):** `docflow-database-schema.docx` should be updated to rename `customers` → `buyers`, and Section 9's `learned_rules.customer_id` → `buyer_id`, so the schema doc and the code stop disagreeing.
+**Related:** Section 7.6, Section 7.13, Section 9, `docflow-database-schema.docx`, `supabase/migrations/0004_matching_foundations.sql`, `packages/core/docflow_core/buyers.py`.
+
+## D-052 — `learned_rules` is created fresh; the "keep `customer_item_mappings` as a view or migrate it" question is moot
+
+**Context:** Section 9 says "Keep `customer_item_mappings` as a view or migrate it into this table — propose which", and D-006 already chose "drop it outright".
+**Decision:** neither, because there is nothing to keep or migrate: `customer_item_mappings` exists only in `docflow-database-schema.docx`. It was never created by `0001`, `0002` or `0003`, so no table, no data and no dependent code exists. `0004` creates `learned_rules` as a new table and that closes the question; D-006 stands, with this as the concrete confirmation rather than a forward-looking intent.
+**Related:** Section 9, D-006, `supabase/migrations/0004_matching_foundations.sql`.
+
+## D-053 — `learned_rules` uniqueness is two partial indexes, because NULL `buyer_id` defeats a single one
+
+**Context:** Section 9 specifies `UNIQUE (tenant_id, customer_id, rule_type, match_key)`, and `buyer_id IS NULL` is the meaningful value that marks a tenant-wide rule (a `uom_alias` is explicitly tenant-level per Section 7.13).
+**Decision:** two partial unique indexes instead of one constraint — `(tenant_id, buyer_id, rule_type, match_key) WHERE buyer_id IS NOT NULL AND deleted_at IS NULL` and `(tenant_id, rule_type, match_key) WHERE buyer_id IS NULL AND deleted_at IS NULL`.
+**Why:** Postgres treats NULLs as distinct in a unique index, so the single constraint as written would enforce nothing at all for tenant-wide rules — unlimited duplicate `uom_alias` rows for the same `match_key` could exist, and "which one wins" would become a silent correctness question at apply time. The `deleted_at IS NULL` predicate is the same treatment `items` and `buyers` get: a soft-deleted rule must not block re-creating the same rule later. Same pattern as the existing `idx_users_tenant_email` / `idx_users_email_global` pair from `0001` (D-004).
+**Related:** Section 9, Section 7.13, D-004.
+
+## D-054 — Two buyer-name normalizations: a match key that keeps legal suffixes, a comparison key that drops them
+
+**Context:** Section 7.6 requires both "the same buyer written slightly differently is the same record" and "a near-duplicate is flagged, never merged". One normalization cannot do both: whatever it collapses becomes an automatic merge, and whatever it keeps becomes a duplicate record.
+**Decision:** `normalize_buyer_name` produces the **match key** (lowercase, apostrophes removed, all other punctuation to spaces, whitespace collapsed) and is what decides identity — it is stored on `buyers.normalized_name` and carries the partial unique index. `buyer_similarity_key` additionally strips trailing legal suffixes (`inc`, `llc`, `ltd`, `corp`, `co`, `gmbh`, …) and is used **only** for similarity scoring.
+**Why the match key deliberately keeps suffixes:** "Acme Test Inc" and "Acme Test LLC" can be two genuinely different legal entities, and in a distributor's buyer list often are. Stripping the suffix at the identity layer would silently file one company's POs under another's — an auto-merge by another name, which Section 10 forbids outright. Keeping them means two rows plus a flagged candidate scoring 1.0000, which is exactly the outcome Section 7.6 asks for: surfaced, scored, and left to the human.
+**Apostrophes are deleted, not spaced:** "Bella's" and "Bellas" are one word spelled two ways; turning the apostrophe into a space produces the token pair `bella s`, which scores *worse* against both spellings than either does against the other.
+**Related:** Section 7.6, Section 10, `packages/core/docflow_core/buyers.py`.
+
+## D-055 — `rapidfuzz` in `packages/core`; `token_sort_ratio` with a 0.88 flagging threshold, measured not guessed
+
+**Decision:** `rapidfuzz>=3.9` (pinned `3.14.6` in both lock files) is a dependency of `packages/core`, not of the worker alone, because the same one scoring function is called by the worker today and by the matching/Console code in the following slices; a second copy of a similarity rule is how two parts of the product start disagreeing about what "the same buyer" means. `NEAR_DUPLICATE_THRESHOLD = 0.88` (a `Decimal`), scorer `fuzz.token_sort_ratio` over the comparison keys from D-054.
+**Why these two choices, with the numbers that produced them** (measured on the real implementation before the threshold was picked, not assumed):
+
+| Pair | score | flagged at 0.88 |
+|---|---|---|
+| `Bella's Coffee House` / `Bella's Coffee House, LLC` | 1.00 | yes — correct |
+| `Bella's Coffee House` / `Bellas Coffee House Inc` | 1.00 | yes — correct |
+| `Acme Test Distributor` / `Acme Test Distributors` | 0.98 | yes — correct |
+| `Northwind Test Supply Co` / `Northstar Test Supply Co` | 0.81 | no — correct, different companies |
+| `Bella's Coffee House` / `Bella's Tea House` | 0.77 | no — correct, different companies |
+| `Acme Test Distributor` / `Acme Test Manufacturing` | 0.59 | no — correct |
+| `Bella's Coffee House` / `Riverbend Test Hardware` | 0.33 | no — correct |
+
+`token_sort_ratio` (word order irrelevant, changed words still penalized) was chosen over `token_set_ratio`, which scores `Acme Test Distributor` vs `Acme Test Distributor - West Branch` at 1.00 — a containment match that would flag every buyer whose name is a prefix of another's. The cost of that choice, recorded honestly: a genuine branch/division variant scores 0.78 and is **not** flagged. That is the deliberate direction to err in — an unflagged pair is two correct records the founder can still merge manually, while a stream of false pairs is how a wrong merge eventually gets clicked.
+**This is a flagging threshold, never an auto-apply threshold.** There is no score at which any code path merges two buyers (Section 7.6, Section 10).
+**Related:** Section 7.6, Section 10, `packages/core/docflow_core/buyers.py`, `packages/core/tests/test_buyers.py`.
+
+## D-056 — Contact email outranks name for identification; a matched buyer's empty email is filled, never overwritten
+
+**Context:** this slice's brief asks how an exact `buyer_contact_email` match is weighed against a name match.
+**Decision:** three rules. (1) An exact, case-insensitive `contact_email` match on a live buyer wins outright — it is checked first, and when it hits, no name comparison happens and nothing is created. (2) A buyer matched by name whose `contact_email IS NULL` has it filled in from the document; a buyer that already has one is never overwritten (Section 10: "never overwrite a human correction with a machine value" — this module cannot tell a founder-entered address from a machine-derived one, so it treats every existing value as if a human put it there). (3) An email alone never creates a buyer: `buyers.name` is `NOT NULL` and a name is not something this module may invent (Section 7.1).
+**Why email first:** an ordering address is a unique, machine-generated string that a buyer's systems reproduce exactly, while the company name printed on a PO is free text that varies between the buyer's own documents. When the two disagree, the email is the stronger evidence.
+**Deliberate omission, recorded rather than built:** when the email matches buyer X but the name normalizes onto a *different* existing buyer Y, this slice links to X and does **not** open a merge candidate for the X/Y pair. It is a real signal, but the two names may score arbitrarily low against each other, and flagging a pair whose stored `similarity_score` doesn't explain the flag would make the founder's merge queue harder to trust, not easier. Revisit with the Console's merge screen (Phase 5), where the flag can carry its own reason.
+**Related:** Section 7.1, Section 7.6, Section 10, `packages/core/docflow_core/buyers.py`.
+
+## D-057 — `deleted_at` added to Phase 1's tables too; append-only tables deliberately excluded
+
+**Context:** Section 9 says "Add `deleted_at` to every business table for soft delete." Phase 1's tables (`documents`, `document_headers`, `document_lines`, `intake_rejections`, `raw_emails`, `intake_addresses`) were created before that instruction was in scope.
+**Decision:** `0004` adds `deleted_at` to all of them alongside the new tables, so the rule holds uniformly rather than only for tables created after it was noticed. `extraction_runs` is excluded because Section 9 defines it as append-only — the same treatment `admin_actions`, `tenant_lifecycle_events` and `platform_admins` already get in `0001`; a soft-delete column on an audit log invites exactly the edit the log exists to prevent.
+**Recorded honestly:** nothing sets these columns yet and no query filters on them, so behavior is unchanged today. The filter goes in with the slice that builds a delete path (Section 7.10's soft-delete-everywhere rule), and the `buyers`/`items`/`learned_rules` queries written in this slice already filter `deleted_at IS NULL` because their soft-delete semantics are load-bearing from the start (a retired SKU, a disabled rule).
+**Related:** Section 7.10, Section 9, `supabase/migrations/0004_matching_foundations.sql`.
+
+## D-058 — Buyer identification runs in its own transaction, after the extraction transaction commits
+
+**Context:** `parse_and_extract` writes `documents`, `document_headers` and `document_lines` in one `tenant_session()` transaction. Buyer identification could have joined it.
+**Decision:** it runs in a second `tenant_session()` immediately afterwards, wrapped in a `try/except` that logs and returns.
+**Why:** extraction is the expensive, irreplaceable work — one model call the tenant has already paid for. A failure while creating a buyer (a unique-index race, a transient pooler error) inside the same transaction would roll back the header and lines with it and cost the document its extraction. Failing separately leaves the document exactly as `needs_review` with `buyer_id IS NULL`, which is the same, entirely valid state a document with no extracted buyer name has (Section 7.1: every field is nullable); a re-run links it. Nothing downstream in this slice depends on the link existing.
+**Logging:** the handler logs `document_id` and `type(exc).__name__` only — never `str(exc)`. A SQLAlchemy/psycopg error message can carry the bound parameters, which here are a buyer's name and email, and Section 7.10 forbids customer data in application logs.
+**Related:** Section 7.1, Section 7.6, Section 7.10, `apps/worker/app/tasks/parse_and_extract.py`.
+
+## D-059 — `field_provenance` is written now, with `extracted` for every present field; `buyer_id` gets no provenance entry yet
+
+**Decision:** `0004` adds `field_provenance` JSONB to `document_headers` and `document_lines`, and `parse_and_extract` populates it on write: every field the model returned a non-null value for is recorded as `extracted`. A field the model returned as null has no value and therefore no provenance entry. `learned_rule:<id>` and `human_edit:<review_action_id>` are written by the slices that produce them (matching, review).
+**Why populate it in this slice at all:** an always-empty provenance column is indistinguishable from a broken one, and Section 7.1 requires provenance "for every value" — the base case is the one that has to be right before the interesting cases are added.
+**`document_headers.buyer_id` deliberately has no provenance entry:** it is not an extracted field. It is the output of deterministic matching, and its provenance vocabulary (which buyer rule or match produced it) belongs with the matching slice that introduces the other match types. `BuyerIdentification.matched_on` already carries that information in-process; it simply has nowhere to be stored yet.
+**Related:** Section 7.1, Section 9, `apps/worker/app/tasks/parse_and_extract.py`.
+
+## D-060 — Near-duplicate flags live in a `buyer_merge_candidates` table, with the new buyer always on the left
+
+**Context:** Section 7.6 requires near-duplicate buyer names to be "flagged for founder merge" but names no table.
+**Decision:** a tenant-scoped, RLS'd `buyer_merge_candidates` table: `buyer_id` (always the newly created buyer), `existing_buyer_id` (the older one it resembled), `similarity_score NUMERIC(5,4)`, `status` (`open` | `dismissed` | `merged`), `detected_from_document_id`, and the resolver/resolved-at columns the Phase 5 merge action will fill. A partial unique index on `(tenant_id, buyer_id, existing_buyer_id) WHERE deleted_at IS NULL` plus `ON CONFLICT DO NOTHING` means re-processing the same document never re-flags a pair a founder already dismissed.
+**Why a table rather than a boolean or a flag on `buyers`:** a near-duplicate is a property of a *pair*, and one new name can resemble several existing ones. A column on `buyers` could not hold the score, could not hold more than one candidate, and would have nowhere to record that a founder looked at it and said no.
+**Fixed pair order, not a `LEAST/GREATEST` index:** candidates are only ever created at the moment the newer buyer is created, so the order is already deterministic and a plain column-pair index enforces uniqueness without an expression index over functions whose immutability would need checking.
+**Scope:** flagging only. Executing a merge (re-pointing foreign keys in a transaction, logged) is Phase 5 Console work and is explicitly not built here — `status` has the `merged` value it will one day be set to, and nothing sets it.
+**Similarity score is `NUMERIC`, bound as a string:** it is a stored, founder-visible number, so it gets the same no-float discipline as money (Section 7.1) rather than an exception carved out for it.
+**Related:** Section 7.6, Section 10, `supabase/migrations/0004_matching_foundations.sql`.
+
+## D-061 — `items`, `learned_rules` and `extraction_runs` are created in `0004` but written by nothing in this slice
+
+**Context:** Section 0 rule 3 (work phase by phase, never run ahead) versus the practical fact that the founder applies each migration by hand in the Supabase SQL Editor (D-013/D-017/D-037).
+**Decision:** all of Phase 2's tables land in one migration, but only `buyers` and `buyer_merge_candidates` have code that writes to them in this slice. `items` (catalog), `learned_rules` (Section 7.13's rule family) and `extraction_runs` (append-only per-model-call log), plus `documents.current_extraction_run_id` and the three duplicate/change-order columns, are created and left empty for the slices that own them — SKU matching, then duplicate/change-order detection.
+**Why not split them across three migrations:** each additional migration is another manual apply-and-verify round-trip for a solo founder, and the schema is far easier to review as one coherent object graph (`learned_rules.buyer_id` → `buyers`, `extraction_runs.document_id` → `documents`) than as three partial ones. No code path can use an empty table by accident, and the tables' emptiness is asserted by nothing behaving differently.
+**Related:** Section 0 rule 3, Section 7.13, D-037.
+
+## D-062 — `0004_matching_foundations.sql` needs the founder's manual Supabase SQL Editor step; 8 tests skip until then
+
+**Context:** identical to D-017/D-037 — `DATABASE_URL` connects as `docflow_app`, which has no `CREATE` privilege on `public` by design, so RLS is genuinely enforced (D-013).
+**Decision:** the migration is written but **not applied**. The eight database-dependent buyer tests in `apps/api/tests/test_buyers.py` are gated on a new `requires_matching_schema` marker (`apps/api/tests/conftest.py`, checking `buyers`, `buyer_merge_candidates` and `document_headers.buyer_id`) and currently report as **skipped**, not passing. The 16 normalization/scoring tests in `packages/core/tests/test_buyers.py` need no database and pass now.
+**What is therefore unverified until the founder applies it:** the SQL itself (syntax, the `ON CONFLICT (…) WHERE deleted_at IS NULL` inference against the partial unique indexes, the new RLS policies), and every runtime behavior that needs real rows — auto-creation, re-link on second sighting, the merge-candidate flag, the email match, the null-name case, and the Section 7.5 cross-tenant isolation assertion. Re-run all three suites at the next checkpoint once `0004` is applied.
+**Related:** Section 7.5, D-013, D-017, D-037, `SETUP.md` Step 5.
+**Closed:** `0004` was applied to `docflow-staging` before the SKU-matching slice; all eight tests now pass.
+
+## D-063 — Matching results live in new columns on `document_lines`, not a new table; the catalog is loaded once per document
+
+**Context:** Section 7.6 requires that a fuzzy match "always surface candidate + score" and that a sub-threshold result be recorded as a suggestion. `document_lines` (0002) had nowhere to put any of that, so this slice needs `supabase/migrations/0005_sku_matching.sql`.
+**Decision:** seven columns on `document_lines` and no new table: `matched_item_id`, `match_method`, `match_score`, `matched_uom`, `uom_mismatch`, `match_candidates` (jsonb), `matched_at`, plus a `CHECK ((matched_item_id IS NULL) = (match_method IS NULL))` so a row can never claim a method without a match. `document_lines` already carries `tenant_id` and both RLS policies from 0002, so this adds no new isolation surface — a separate `line_matches` table would have needed its own `tenant_id`, its own policies and a join on every read, for a strictly 1:1 relationship.
+**`match_candidates` is deliberately independent of `matched_item_id`.** A line with five scored candidates and no match is the *normal* below-threshold outcome, not an error state, and the schema has to be able to say that.
+**Catalog loading — one query per document, scored in Python.** `load_catalog` reads the tenant's live items once per document and `rapidfuzz` scores every line against them in memory, rather than pushing a normalized comparison into SQL. **Why:** the normalization is the correctness-critical part (D-066, D-068), and having one Python implementation that the DB-free unit tests exercise directly is worth more than an index-backed exact lookup whose SQL expression could silently drift from it. **The cost, measured honestly:** a 50,000-row catalog times ~10 lines is ~500k short-string comparisons per document — well under a second, and a rounding error next to the model call that precedes it. If a tenant's catalog ever makes this matter, the exact-SKU step is the one to push into SQL first, behind the existing `idx_items_tenant_sku`.
+**Related:** Section 7.5, Section 7.6, `supabase/migrations/0005_sku_matching.sql`, `packages/core/docflow_core/matching.py`.
+
+## D-064 — A learned mapping raises the *match* score to a fixed 0.99; it never touches the line's extraction confidence
+
+**Context:** Section 7.6 says "Applying a learned mapping raises confidence to a high fixed value." `document_lines` has two numbers that could be called confidence: `confidence` (the model's per-line extraction confidence, from 0002) and the new `match_score`.
+**Decision:** `LEARNED_RULE_MATCH_SCORE = Decimal("0.9900")` is written to `match_score`. `document_lines.confidence` is never modified by this module.
+**Why:** the two numbers answer different questions. `confidence` answers "did the model read this line off the page correctly"; `match_score` answers "is this the right catalog item". A human confirming a mapping is evidence about the second and no evidence at all about the first — raising `confidence` on the strength of it would hide a poorly-scanned line behind a confident mapping, which is the precise direction Section 7.1 forbids erring in. It would also be a machine value overwriting a model output, which nothing in this codebase does.
+**Why 0.99 and not 1.00:** `EXACT_MATCH_SCORE = 1.0000` is reserved for "the printed SKU and the catalog SKU are the same string", which is an identity. A human-confirmed mapping is the strongest evidence this system has about *meaning*, but it is still a person's assertion about a buyer's wording and can be wrong. Keeping the two distinguishable costs nothing and keeps "certain" meaningful. Precedence between the two is decided by the pipeline order in Section 7.6, not by comparing these numbers, so the gap has no behavioral effect — it is there to be read.
+**Related:** Section 7.1, Section 7.6, `packages/core/docflow_core/matching.py`.
+
+## D-065 — A buyer-scoped learned rule beats a tenant-wide one for the same key
+
+**Context:** Section 7.13 makes rules "tenant-scoped, optionally buyer-scoped" and 0004 encodes tenant-wide as `buyer_id IS NULL`, but nothing states which wins when both exist for one `match_key`. This slice has to pick.
+**Decision:** the buyer-scoped rule wins; the tenant-wide rule is the fallback. Implemented by ordering the single rule query `ORDER BY (buyer_id IS NULL)` and building the lookup with `setdefault`, so the specific rule is seen first and the general one cannot displace it.
+**Why:** the alternative makes a whole feature unreachable. A tenant-wide rule exists to say "in this business, this wording means that SKU"; a buyer-scoped rule exists to say "except when *this* buyer says it". If general beat specific, no exception could ever be expressed, and the founder's only way to record one would be to delete the general rule — losing a human confirmation to record another. Specific-over-general is also the only ordering under which adding a rule can never change the behavior of an existing, narrower one.
+**A document whose buyer could not be identified is not a special case:** the predicate `(buyer_id IS NULL OR buyer_id = CAST(:buyer_id AS uuid))` evaluates the second branch to NULL when no buyer is bound, so such a document gets the tenant-wide rules alone and no other buyer's. Matching therefore never depends on buyer identification having succeeded.
+**Related:** Section 7.6, Section 7.13, D-053, `packages/core/docflow_core/matching.py`.
+
+## D-066 — `token_sort_ratio` at 0.90, plus a hard measure guard, because no similarity threshold can separate these pairs on its own
+
+**Context:** this slice's brief asked whether D-055's rejection of `token_set_ratio` holds or inverts for product descriptions, and for measured pairs rather than a guess. Both were measured on the real implementation before anything was chosen.
+**The finding that shaped everything else:** string similarity is blind to the single character that distinguishes two products. Measured, after normalization:
+
+| Pair | ratio | token_sort | token_set | correct answer |
+|---|---|---|---|---|
+| `Colombian Whole Bean 5lb` / `Colombian Whole Bean 5 lb` | 1.00 | **1.00** | 1.00 | match |
+| `Syrup, Vanilla 750ml` / `Vanilla Syrup 750ml` | 0.68 | **1.00** | 1.00 | match |
+| `12 oz Paper Cups 1000 ct` / `12oz Paper Cups (1000ct)` | 1.00 | **1.00** | 1.00 | match |
+| `Colombian Whole Bean 5lb` / `Columbian Whole Bean 5lb` (typo) | 0.96 | **0.96** | 0.96 | match |
+| `Colombian Whole Bean, 5lb Bag` / `Colombian Whole Bean 5lb` | 0.92 | **0.92** | 1.00 | match |
+| `Colombian Whole Bean 5lb` / `Colombian Whole Bean 2lb` | 0.96 | **0.96** | 0.96 | **different SKU** |
+| `12oz Paper Cups (1000ct)` / `16oz Paper Cups (1000ct)` | 0.95 | **0.95** | 0.95 | **different SKU** |
+| `Vanilla Syrup 750ml` / `Vanilla Syrup 1L` | 0.86 | **0.86** | 0.90 | **different SKU** |
+| `Colombian Whole Bean 5lb` / `Colombian Whole Bean 5lb Organic` | 0.86 | **0.86** | **1.00** | **different SKU** |
+| `Vanilla Syrup 750ml` / `Vanilla Syrup 750ml Sugar Free` | 0.78 | **0.78** | **1.00** | **different SKU** |
+| `Colombian WB 5lb` / `Colombian Whole Bean 5lb` | 0.80 | **0.75** | 0.90 | same SKU, but abbreviated |
+| `Colombian Whole Bean 5lb` / `Colombian Ground 5lb` | 0.73 | **0.68** | 0.79 | **different SKU** |
+| `Vanilla Syrup 750ml` / `Hazelnut Syrup 750ml` | 0.72 | **0.56** | 0.73 | **different SKU** |
+| `CF-1001` / `CF-1002` | 0.86 | 0.86 | 0.86 | **different SKU** |
+
+Rows 4 and 6 score **0.96 on every scorer** and have opposite correct answers. There is no threshold that admits a misspelling and rejects a pack size.
+**Decision — three mechanisms, not one threshold:**
+1. **Scorer: `fuzz.token_sort_ratio`** over descriptions (word order is noise on a PO; a changed or added word is signal), `fuzz.ratio` over SKU comparison keys (a SKU's character order *is* its meaning). **D-055's reasoning holds and gets stronger, it does not invert:** `token_set_ratio` scores both containment rows at 1.00, and "Organic" / "Sugar Free" are two different shipments.
+2. **A hard measure guard.** `measure_signature` extracts every number-with-unit from both strings and they must match exactly. A candidate that fails it can never be auto-applied *whatever it scores*; it is still surfaced with its real score and `blocked_reason: "measure_mismatch"`. This is what catches rows 6, 7, 8 and the `CF-1001`/`CF-1002` row, all of which clear or nearly clear any usable threshold.
+3. **`FUZZY_MATCH_THRESHOLD = 0.90`**, which now sits in a clean measured gap: the worst genuine variant that survives the guard scores **0.92**, the best wrong pair that survives it scores **0.86**.
+
+**What this deliberately gives up, recorded honestly:** `Colombian WB 5lb` is the same product as `Colombian Whole Bean 5lb` and scores 0.75, so it stays a **suggestion** with the right candidate ranked first. That is the correct direction to err — a reviewer confirms it once and D-070's learned rule matches it forever afterwards, whereas a wrongly auto-matched line is a wrong shipment nobody looked at. A second known limitation: a description that embeds its own quantity ("24 Vanilla Syrup 750ml") carries a measure the catalog row does not, so the guard blocks it and it degrades to a suggestion. PO line descriptions normally do not repeat the quantity column, and the failure mode is the safe one.
+**Related:** Section 7.6, Section 10, D-055, `packages/core/docflow_core/matching.py`, `packages/core/tests/test_matching.py`.
+
+## D-067 — Matching provenance uses its own `matched_item_id` key, with `learned_rule:<id>` / `mapped:*` / `human_edit` values
+
+**Context:** D-059 established `field_provenance` on `document_lines` with `extracted` for every present field, and reserved `learned_rule:<id>` and `human_edit:<review_action_id>` for the slices that produce them. Section 7.1's vocabulary is "extracted, edited-by-human, or mapped".
+**Decision:** matching writes one key, `matched_item_id`, which is not an extracted field but a conclusion *about* the line — so it gets its own key rather than overloading `sku` or `description`, whose provenance must keep saying `extracted` because that is still exactly what they hold. Values: `learned_rule:<uuid>`, `mapped:exact_sku`, `mapped:fuzzy`, `human_edit` (or `human_edit:<review_action_id>` once Phase 3 has review actions to reference). A `uom_alias` rule writes `matched_uom: learned_rule:<uuid>` the same way.
+**Why this shape:** Section 7.15.3's "mapping reuse rate" is defined as "the share of matched line items whose provenance is `learned_rule:*`", so the rollup is a prefix test on one key rather than a join. Section 7.13's "every learned rule that fires is recorded as provenance on the affected field, so a reviewer can... disable the rule from the review screen" needs the rule's ID to be *in* the provenance value, which it is.
+**Unmatching clears the key rather than writing a "no match" value.** Re-running after a SKU is retired removes `matched_item_id` from the map entirely, so "this line has no provenance for a match" and "this line has no match" are the same statement instead of two that could disagree.
+**Related:** Section 7.1, Section 7.13, Section 7.15.3, D-059.
+
+## D-068 — Two SKU keys and one description key, all derived and never written back to the document
+
+**Context:** the brief flagged that normalizing the *catalog's* SKU and normalizing the *document's* SKU are different acts, and that Section 7.15.2 Step 4 expects catalogs to carry "leading/trailing whitespace and invisible characters in SKUs".
+**Decision:** three normalizations, applied symmetrically to both sides at comparison time only. Nothing in this module writes to `document_lines.sku`, `.description` or `.unit`, and nothing writes to `items.sku` — the stored values stay exactly as the document printed them and as the catalog was uploaded (Section 7.1). This mirrors D-054's two-key pattern for buyer names.
+
+| Key | Used for | What it removes |
+|---|---|---|
+| `normalize_sku` | **exact** SKU identity | padding, invisible characters (zero-width, BOM, NBSP), internal whitespace runs, letter case |
+| `sku_comparison_key` | SKU **similarity** only | the above, plus every remaining non-alphanumeric character |
+| `normalize_description` | description similarity and every rule `match_key` | case, apostrophes, punctuation, whitespace runs; and joins a spaced measure (`5 lb` → `5lb`) |
+
+**Why `normalize_sku` deliberately keeps punctuation:** `CF-1001` and `CF1001` can be two different products in a real catalog, and collapsing them at the *identity* layer would invent a match — the same reasoning that keeps legal suffixes in `normalize_buyer_name` (D-054). A buyer who drops the hyphen still resolves, but through the fuzzy path where the measure guard and the threshold both apply, which is a suggestion-grade answer arriving by a suggestion-grade route.
+**Trimming invisible characters is not "fixing the catalog":** the import screen that cleans and reports them is Phase 5 Step 4. This is matching refusing to be defeated by a character nobody can see, in the meantime.
+**Why the measure glue is limited to short alpha tokens:** `5 lb` and `1000 ct` join, `24 Vanilla` does not. A four-character ceiling covers every unit a PO uses and no real word.
+**Related:** Section 7.1, Section 7.15.2, D-054, `packages/core/docflow_core/matching.py`.
+
+## D-069 — An ambiguity margin of 0.02, and candidates recorded for the fuzzy path only
+
+**Context:** Section 7.15.2 Step 4 states outright that a tenant's catalog containing "duplicate description with different SKUs" is a warning, not a blocker — so a catalog where two live items score identically against one line is a catalog a real tenant has.
+**Decision:** `FUZZY_AMBIGUITY_MARGIN = Decimal("0.0200")`. If the runner-up is within that of the winner, nothing is auto-applied and every candidate is surfaced. The runner-up test counts measure-blocked candidates too: a disqualified near-neighbour scoring just as well means the catalog holds a confusable sibling, which is exactly when a person should look. Separately, an exact SKU lookup that resolves to more than one live item (possible, because the partial unique index on `items` is on the *raw* SKU, so `CF-1001` and a padded `CF-1001 ` are two rows) is not treated as an exact match at all.
+**Why so narrow:** this guards arbitrary tie-breaking, not close-but-clear calls. Picking one of two 1.00-scoring items by sort order would be an answer the system invented; a 0.96 winner over a 0.86 runner-up is a genuine decision the threshold already sanctioned.
+**Candidates are recorded only when the fuzzy step ran.** Section 7.6's "always surface candidate + score" sits in its fuzzy bullet, and a learned-rule or exact-SKU match has no meaningful alternatives to offer — both are unique by construction (the two partial unique indexes on `learned_rules`, and the exact-SKU uniqueness above). Recording five fuzzy also-rans beside a certain answer would add noise to the review row and to the jsonb without adding information. `MAX_CANDIDATES = 5` covers a typical size/pack family without turning one review row into a scrolling list.
+**Related:** Section 7.6, Section 7.15.2, Section 10, `packages/core/docflow_core/matching.py`.
+
+## D-070 — Units of measure: a `matched_uom` suggestion and a `uom_mismatch` flag now; warnings proper deferred to the validation slice
+
+**Context:** Section 7.6 says "Never silently 'normalize' units of measure or quantities. Suggest, flag, let the human decide", and Section 7.13 gives `uom_alias` as a tenant-level rule type. Warnings as first-class rows are the next slice, so this slice had to decide how much to record now.
+**Decision:** two columns and nothing more. A firing `uom_alias` rule writes its canonical unit to **`matched_uom`**, a separate column, with `learned_rule:<id>` provenance — `document_lines.unit` keeps what the document printed, forever. A disagreement between the line's effective unit and the matched item's `unit_of_measure` sets **`uom_mismatch = true`**, which changes no value and never unmatches the line.
+**Why a separate column rather than rewriting `unit`:** if the alias wrote into `unit`, applying a learned rule and correcting the document would be the same operation, and a reviewer could no longer see what the buyer actually sent. The whole point of Section 7.6's sentence is that those must stay distinguishable.
+**What is deferred, deliberately:** `uom_mismatch` is a boolean, not a warning row with a catalog code and an acknowledgement trail. Section 7.3 requires unresolved warnings to be acknowledged at approval and recorded in `review_actions`, and that machinery belongs with the validation slice that builds it for every rule at once. Building a one-off warning path here would guarantee a second one exists a week later. The boolean is the fact that slice will read.
+**Related:** Section 7.3, Section 7.6, Section 7.13, `supabase/migrations/0005_sku_matching.sql`.
+
+## D-071 — `0005_sku_matching.sql` needs the founder's manual Supabase SQL Editor step; 20 tests skip, and what was verified anyway
+
+**Context:** identical to D-017/D-037/D-062 — `DATABASE_URL` connects as `docflow_app`, which has no `CREATE` privilege on `public` by design (D-013).
+**Decision:** the migration is written but **not applied**. The 20 database-dependent tests in `apps/api/tests/test_matching.py` that need the new `document_lines` columns are gated on a new `requires_sku_matching_schema` marker (`apps/api/tests/conftest.py`) and report as **skipped**, not passing.
+**What was deliberately structured so it could be verified now anyway:** the SQL with the most in it does not touch 0005's columns, so five tests run against the real `docflow-staging` today — `load_catalog` (live-items-only and cross-tenant invisibility), `load_sku_rules` (buyer-scoped-over-tenant-wide precedence, `proposed`/other-buyer exclusion, cross-tenant invisibility), `load_uom_rules`, and the `INSERT … ON CONFLICT` rule upsert against both partial unique indexes from 0004. The upsert was extracted into `_upsert_sku_mapping_rule` specifically so it could be exercised ahead of the migration rather than reviewed by eye. **This already caught a real bug:** `text()` treats `:` as a bind-parameter marker, so `:buyer_id::uuid` was a Postgres syntax error; it is now `CAST(:buyer_id AS uuid)`.
+**What remains unverified until the founder applies it:** the migration SQL itself, the `document_lines` UPDATE in `match_document_lines` and `confirm_sku_mapping`, the `CHECK ((matched_item_id IS NULL) = (match_method IS NULL))` constraint against real writes, `numeric(5,4)` round-tripping of the scores, jsonb round-tripping of `match_candidates`, and every end-to-end behavior including the Phase 2 exit criterion and the two Section 7.5 isolation assertions. The 35 DB-free tests in `packages/core/tests/test_matching.py` cover all of the precedence, threshold, guard and normalization logic and pass now. Re-run all three suites at the next checkpoint once `0005` is applied.
+**Related:** Section 7.5, D-013, D-017, D-037, D-062, `SETUP.md` Step 5.
+
+## D-072 — Validation warnings are error-catalog entries, not free-text strings on the document
+
+**Context:** Section 7.7 requires a failed rule to produce "a warning on the document". Section 7.16.5 requires that "no user-facing string that describes a failure exists outside" the error catalog. A warning is user-facing text describing something wrong with a document, so the two sections meet here — and the obvious shortcut, a `message` column on a warnings table, would have put warning prose outside the catalog on day one.
+**Decision:** a warning row stores a **catalog code** (`VAL-001` through `VAL-013`) and a `detail` jsonb payload, and nothing else a human reads. The catalog holds the what/why/what-next prose; `detail` holds this occurrence's specifics (which field, which line, which two numbers disagreed, the tolerance applied). The review UI renders the catalog entry and interpolates the detail.
+**Why this way round:** changing a warning's wording becomes a code change reviewed as a diff by `test_catalog_snapshot_matches`, rather than an UPDATE across customer data that nobody reviews. It also means one warning cannot say different things to two tenants.
+**Consequence accepted:** `severity` is stored per occurrence rather than read from the catalog, because a money discrepancy is escalated by magnitude (D-073) and a total that is out by $4,000 must not look like a missing payment term. The catalog entry's severity is the default, not the only value.
+**Related:** Section 7.3, Section 7.7, Section 7.16.5, `packages/core/docflow_core/validation.py`, `supabase/migrations/0006_validation_and_duplicates.sql`.
+
+## D-073 — The validation tolerances, and why each number is what it is
+
+**Context:** Section 7.7 says `line_total ≈ quantity × unit_price` "within a stated tolerance" and leaves the number to the build. The failure mode that matters is not a missed discrepancy; it is a rule that fires on every correct 40-line purchase order, because reviewers learn to click past it — and the first warning a reviewer learns to ignore is the last warning that ever protects them.
+**Decision:** tolerances are `Decimal` constants in one place at the top of `validation.py`, and a discrepancy must beat **both** an absolute and a relative term to be reported.
+- **Line total:** `LINE_TOTAL_TOLERANCE_ABS = 0.01` absorbs rounding of the computed product into a 2-decimal-place column; `LINE_TOTAL_TOLERANCE_REL = 0.005` absorbs a unit price the document printed already rounded (1,000 units at a true 0.12345 printed as "0.1235").
+- **Header total:** `HEADER_TOTAL_PER_LINE_ALLOWANCE = 0.01` scales with line count because per-line rounding accumulates — 40 legitimately rounded lines can drift 40 cents from a total the originating system computed from unrounded values, and a fixed one-cent tolerance would fire on every one of those documents. Plus `HEADER_TOTAL_TOLERANCE_REL = 0.005` and a `0.01` floor.
+- **Materiality:** above `MATERIAL_DISCREPANCY_ABS = 100.00` or `MATERIAL_DISCREPANCY_REL = 0.05`, a discrepancy stops being a rounding artifact and the warning is raised from `warning` to `high`.
+**What this deliberately gives up:** a real error smaller than a cent per line goes unreported. That is the correct direction to err — the alternative trains reviewers to dismiss the warning that matters.
+**Related:** Section 7.7, D-072, `packages/core/docflow_core/validation.py`.
+
+## D-074 — Re-validation reconciles by fingerprint, so a human's acknowledgement survives re-processing
+
+**Context:** Section 7.3 requires that an unresolved warning be explicitly acknowledged at approval and the acknowledgement recorded. Section 10 forbids overwriting a human correction with a machine value. Documents are re-validated (re-extraction, a correction, a re-run), so the naive "delete all warnings and re-insert" would destroy every acknowledgement on every re-run.
+**Decision:** every warning carries a **fingerprint** — a hash over `(code, field, line, detail)` — and `sync_warnings` reconciles by it: computed-and-not-stored becomes a new `open` row; computed-and-stored is **left completely untouched**; stored-and-no-longer-computed is resolved and soft-deleted, keeping who acknowledged it and when. A unique partial index on `(document_id, fingerprint) WHERE deleted_at IS NULL` makes the database enforce this rather than the application remembering to.
+**Why the fingerprint covers the compared values:** an acknowledgement of "this total is off by two cents" must not silently carry over to "this total is off by four thousand dollars". Changing the numbers resolves the old warning and raises a new, unacknowledged one.
+**The consequence for date rules:** plausibility is measured against the document's own `created_at`, never against "today". Otherwise a document would slowly acquire and lose warnings as the calendar moved, and re-validation would not be idempotent.
+**Related:** Section 7.3, Section 10, D-072, `packages/core/docflow_core/validation.py`.
+
+## D-075 — ISO 4217 is a hardcoded frozenset, not a dependency
+
+**Context:** Section 7.7 requires "currency is a valid ISO code". The obvious move is a currency package.
+**Decision:** ~180 three-letter strings, defined once in `validation.py`. The list changes roughly once a decade, and the isolated parsing worker (Section 7.11) is the last place in this system that wants another pinned package to audit for CVEs every time one lands.
+**Two deliberate contents decisions:** codes withdrawn in the last few years (ANG, HRK, SLL, VEF, ZWL, MRO, STD, BYR) are **included**, because a backdated or archived purchase order can legitimately carry one and warning on a historically correct document is exactly the false positive this module exists not to produce. `XXX` ("no currency involved") and `XTS` (reserved for testing) are **excluded**: both are valid ISO 4217 and neither is a valid answer to "what money is this order in".
+**Related:** Section 7.7, Section 7.11, `packages/core/docflow_core/validation.py`.
+
+## D-076 — Ingest-time duplicate detection now stores the link, closing D-020
+
+**Context:** D-020 recorded that `POST /documents/upload` computed the hash and surfaced a possible duplicate **in the HTTP response only**, because the `documents` table had no column to store the relationship. 0004 added `is_possible_duplicate` and `duplicate_of_document_id`, so the reason for that compromise is gone.
+**Decision:** both intake paths — the upload endpoint and email intake — call the same `find_content_duplicate_at_ingest` before inserting, and write the result **into the INSERT** rather than issuing a second UPDATE. One function, so the two paths cannot disagree about what a duplicate is.
+**What does not change:** nothing is rejected or delayed. Both documents exist and both process normally (Section 7.8: "duplicate/change-order handling never deletes or overwrites the earlier document").
+**Related:** Section 7.8, D-020, `apps/api/app/routers/documents.py`, `packages/core/docflow_core/email_intake.py`.
+
+## D-077 — The newer document points at the earliest match, not at its immediate predecessor
+
+**Context:** Section 7.8 requires the relationship to be recorded but does not say which way it points, or what happens on the third, fourth and fifth resend.
+**Decision:** direction is fixed and never reversed — the **newer** document points at the **earliest** matching older one. Ordering is `(created_at, id)`, so a tie in timestamps still resolves deterministically.
+**Why earliest rather than immediate predecessor:** five resends of the same PO all point at the original, instead of forming a linked list nobody can follow. A reviewer opening the fifth sees the document it duplicates, not a chain to walk.
+**Why never reversed:** the earlier document is read and never written. That is what makes Section 10's "never overwrites the earlier document" structurally true — there is no UPDATE in `duplicates.py` whose WHERE clause can name a document other than the one being detected on.
+**Related:** Section 7.8, Section 10, `packages/core/docflow_core/duplicates.py`.
+
+## D-078 — An unknown buyer on either side still flags a change order
+
+**Context:** the same PO number with different content is a revision — unless the two documents come from different buyers, because "PO-1001" is the thousand-and-first order a business ever placed and two of a distributor's buyers reaching that number independently is ordinary. Buyer identity is often unknown at detection time.
+**Decision:** a candidate is excluded only when **both** buyers are known and different. An unknown buyer on either side still flags.
+**Why this errs the opposite way from D-055:** the buyer-merge threshold is deliberately conservative because a wrong merge re-points foreign keys. Nothing here can be auto-applied — a change-order flag is a flag and a warning row, and it changes no value. A false flag costs a reviewer one glance at two documents; a missed revision ships the wrong order.
+**One further rule:** identical content is a duplicate and **never also** a change order. The same bytes carry the same PO number by definition, and "this is a copy of that exact document" is the stronger statement. If 1 is revision A, 2 is revision B and 3 is a resend of B, then 3 points at 2 as a duplicate and 2 already carries the change-order flag — the chain is intact without claiming 3 revises 1.
+**Related:** Section 7.6, Section 7.8, D-055, D-077, `packages/core/docflow_core/duplicates.py`.
+
+## D-079 — `0006_validation_and_duplicates.sql` needs the founder's manual Supabase SQL Editor step; 33 tests skip
+
+**Context:** identical to D-017/D-037/D-062/D-071 — `DATABASE_URL` connects as `docflow_app`, which has no `CREATE` privilege on `public` by design (D-013).
+**Decision:** the migration is written but **not applied**. The 33 database-dependent tests that need `document_warnings` and `documents.change_order_of_document_id` — 17 in `apps/api/tests/test_validation.py` and 16 in `apps/api/tests/test_duplicates.py` — are gated on the `requires_validation_schema` marker (`apps/api/tests/conftest.py`) and report as **skipped**, not passing.
+**What the migration deliberately does not contain:** no column anywhere in it can hold a corrected value. There is no "suggested total", no "reconciled amount", no "normalized date". Section 10 forbids altering a model-extracted value to make validation pass, and the cheapest way to keep that true forever is for the schema to have nowhere to put such a value.
+**What is verified now anyway:** the DB-free tests in `packages/core/tests/test_validation.py` and `packages/core/tests/test_duplicates.py` cover every tolerance, every rule, the fingerprint, the `relationship_to` decision table and the PO-number key, and pass today.
+**What remains unverified until the founder applies it:** the migration SQL itself, the `document_warnings` writes in `sync_warnings`, the unique partial index on `(document_id, fingerprint)` against real writes, jsonb round-tripping of `detail`, the expression index on the PO key, and every end-to-end behavior including both Phase 2 exit criteria and the Section 7.5 isolation assertions. Re-run all three suites at the checkpoint once `0006` is applied.
+**Resolved 2026-09-17:** the founder applied `0006` to `docflow-staging`. All 33 tests now run: `apps/api` is 91 passed with zero skips. Two failures surfaced on the first real run and both are recorded in D-080 -- one a money-rendering inconsistency in the `detail` payload, one a test-fixture defect. Neither was a validation error.
+**Related:** Section 7.5, Section 10, D-013, D-017, D-037, D-062, D-071, `SETUP.md` Step 5.
+
+## D-080 — Computed money in a warning's `detail` renders at money scale; extracted values render exactly as stored
+
+**Context:** applying `0006` ran the 33 database-backed validation and duplicate tests for the first time, and one failed on a string comparison: `detail["expected"]` came back as `"570.00000000"` where the test expected `"570.00"`. Nothing was wrong with the number. `quantity` and `unit_price` are both `numeric(14,4)`, so `quantity × unit_price` is a `Decimal` with eight decimal places, while a sum of `numeric(14,2)` line totals has two. The same amount of money was being written two different ways in the same payload depending on which columns it came from — `"570.00000000"` for a product, `"570.00"` for a sum, `"2.8500000000"` for a tolerance.
+
+**Decision:** two helpers in `validation.py`, and the distinction is which side of Section 10 the value falls on.
+- `_money()` — an **as-extracted** value (`quantity`, `unit_price`, `line_total`, `order_total`). Rendered exactly as the database handed it over, never re-scaled. A `unit_price` is `numeric(14,4)` because a price legitimately carries four decimal places, and a reviewer comparing the payload against the document must see the digits the document printed.
+- `_derived_money()` — a value **DocFlow computed** for display (`expected`, `sum_of_lines`, `difference`, `tolerance`). Quantized to two places, `ROUND_HALF_UP`.
+
+**Why this is not "altering a model-extracted value":** Section 10 forbids changing an extracted value to make validation pass. A derived amount is not an extracted value, no rule's outcome depends on the rendering (every comparison happens on the full-precision `Decimal` before the payload is built), and no extracted column is written. The rounding is presentation of a number DocFlow itself calculated.
+
+**The second reason, which matters more than presentation:** `detail` is hashed into the warning fingerprint (D-074). With raw `str(Decimal)`, the fingerprint inherits the *column scale* of the operands — so widening `quantity` to `numeric(14,6)` in some future migration would silently change every fingerprint on every existing warning, resolving them all and re-raising them as new, unacknowledged rows. A reviewer's acknowledgements would evaporate on a migration that had nothing to do with them. Fixing derived money at two places makes the fingerprint depend on the amount rather than on a column definition the reviewer cannot see.
+
+**Evidence this was an oversight rather than a deliberate choice:** three assertions across the test suite expect two-decimal money strings. Two of them passed only because their values happened to come from `numeric(_,2)` columns; the third was the one that failed. The intent was uniform, the implementation was accidental.
+
+**Also fixed alongside:** `test_the_loaded_snapshot_carries_decimals_not_floats` asserted `evaluate_document(snapshot) == []` while building a document with the fixture's default `order_total` of `100.00` against a single `570.00` line. That document genuinely does not reconcile, so the assertion was testing VAL-002 rather than Decimal round-tripping. The header total is now set to match the line. **This was a test defect, not a product one — validation was right.**
+
+**Related:** Section 7.1, Section 10, D-072, D-074, D-079, `packages/core/docflow_core/validation.py`.

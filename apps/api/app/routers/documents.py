@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from docflow_core import file_types
 from docflow_core.db import tenant_session
+from docflow_core.duplicates import find_content_duplicate_at_ingest
 from docflow_core.errors import get_error
 from docflow_core.storage import save_file
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -79,13 +80,12 @@ async def upload_document(
     content_sha256 = hashlib.sha256(content).hexdigest()
 
     with tenant_session(tenant_id) as session:
-        existing = session.execute(
-            text(
-                "SELECT id FROM documents WHERE tenant_id = :tenant_id AND content_sha256 = :sha256 "
-                "ORDER BY created_at ASC LIMIT 1"
-            ),
-            {"tenant_id": str(tenant_id), "sha256": content_sha256},
-        ).mappings().first()
+        # CLAUDE.md Section 7.8: the same content for the same tenant "is
+        # linked to the existing document and surfaced as a possible
+        # duplicate". The link is written into the INSERT below rather than
+        # returned and forgotten -- see DECISIONS.md D-076, which closes D-020.
+        # The upload is never rejected: both documents exist and both process.
+        existing = find_content_duplicate_at_ingest(session, tenant_id, content_sha256)
 
         storage_path = save_file(tenant_id, original_filename, content)
         document_id = uuid4()
@@ -95,10 +95,12 @@ async def upload_document(
                 """
                 INSERT INTO documents
                     (id, tenant_id, original_filename, storage_path,
-                     source, status, content_sha256, created_at)
+                     source, status, content_sha256, is_possible_duplicate,
+                     duplicate_of_document_id, created_at)
                 VALUES
                     (:id, :tenant_id, :original_filename, :storage_path,
-                     'upload', 'pending', :content_sha256, now())
+                     'upload', 'pending', :content_sha256, :is_possible_duplicate,
+                     :duplicate_of_document_id, now())
                 """
             ),
             {
@@ -107,6 +109,8 @@ async def upload_document(
                 "original_filename": original_filename,
                 "storage_path": storage_path,
                 "content_sha256": content_sha256,
+                "is_possible_duplicate": existing is not None,
+                "duplicate_of_document_id": str(existing) if existing else None,
             },
         )
 
@@ -121,9 +125,5 @@ async def upload_document(
 
     response = {"document_id": str(document_id), "status": "pending"}
     if existing is not None:
-        # CLAUDE.md Section 7.8: same content isn't silently re-ingested --
-        # surfaced here for now; full duplicate-linking (a stored
-        # relationship, not just a response field) is a Phase 2 concern --
-        # see DECISIONS.md.
-        response["possible_duplicate_of"] = str(existing["id"])
+        response["possible_duplicate_of"] = str(existing)
     return response

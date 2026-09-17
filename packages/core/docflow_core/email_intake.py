@@ -40,6 +40,7 @@ from sqlalchemy.orm import Session
 from docflow_core import file_types
 from docflow_core.config import get_settings
 from docflow_core.db import tenant_session, token_lookup_session
+from docflow_core.duplicates import find_content_duplicate_at_ingest
 from docflow_core.storage import save_file
 
 # ── Named constants (CLAUDE.md Section 7.15.4) ─────────────────────────────
@@ -476,13 +477,10 @@ def _accept_attachment(
         )
 
     content_sha256 = hashlib.sha256(attachment.content).hexdigest()
-    existing = session.execute(
-        text(
-            "SELECT id FROM documents WHERE tenant_id = :tenant_id AND content_sha256 = :sha256 "
-            "ORDER BY created_at ASC LIMIT 1"
-        ),
-        {"tenant_id": str(tenant_id), "sha256": content_sha256},
-    ).mappings().first()
+    # CLAUDE.md Section 7.8, through the same one function the upload endpoint
+    # calls, so the two intake paths cannot disagree about what a duplicate
+    # is. The link is stored on the new row, not merely returned (D-076).
+    existing = find_content_duplicate_at_ingest(session, tenant_id, content_sha256)
 
     storage_path = save_file(tenant_id, attachment.filename, attachment.content)
     document_id = uuid4()
@@ -491,10 +489,12 @@ def _accept_attachment(
             """
             INSERT INTO documents
                 (id, tenant_id, original_filename, storage_path, source, status,
-                 content_sha256, sender_email, message_id, created_at)
+                 content_sha256, sender_email, message_id, is_possible_duplicate,
+                 duplicate_of_document_id, created_at)
             VALUES
                 (:id, :tenant_id, :original_filename, :storage_path, 'email', 'pending',
-                 :content_sha256, :sender_email, :message_id, now())
+                 :content_sha256, :sender_email, :message_id, :is_possible_duplicate,
+                 :duplicate_of_document_id, now())
             """
         ),
         {
@@ -505,6 +505,8 @@ def _accept_attachment(
             "content_sha256": content_sha256,
             "sender_email": parsed.sender_email,
             "message_id": parsed.message_id,
+            "is_possible_duplicate": existing is not None,
+            "duplicate_of_document_id": str(existing) if existing else None,
         },
     )
     return AttachmentOutcome(
@@ -512,7 +514,7 @@ def _accept_attachment(
         accepted=True,
         document_id=document_id,
         error_code=None,
-        possible_duplicate_of=UUID(str(existing["id"])) if existing else None,
+        possible_duplicate_of=existing,
     )
 
 

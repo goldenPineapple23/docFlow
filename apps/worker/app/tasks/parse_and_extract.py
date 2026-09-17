@@ -29,14 +29,18 @@ from uuid import UUID, uuid4
 
 import anthropic
 from docflow_core import file_types
+from docflow_core.buyers import identify_and_link_buyer
 from docflow_core.config import get_settings
 from docflow_core.db import tenant_session
+from docflow_core.duplicates import detect_document_relationships
 from docflow_core.extraction import (
     build_text_content,
     extract_document,
     wrap_document_content,
 )
+from docflow_core.matching import match_document_lines
 from docflow_core.storage import read_file
+from docflow_core.validation import validate_document
 from sqlalchemy import text
 
 from app.celery_app import celery_app
@@ -292,6 +296,35 @@ def _mark_failed(tenant_id: UUID, document_id: UUID, *, raw_response: dict | Non
         )
 
 
+_PROVENANCE_HEADER_FIELDS = (
+    "po_number",
+    "order_date",
+    "requested_delivery_date",
+    "buyer_name",
+    "buyer_contact_email",
+    "ship_to_address",
+    "payment_terms",
+    "order_total",
+    "currency",
+    "notes",
+)
+
+_PROVENANCE_LINE_FIELDS = ("sku", "description", "quantity", "unit", "unit_price", "line_total")
+
+
+def _extracted_provenance(values: dict, fields: tuple[str, ...]) -> dict:
+    """
+    Per-field provenance (Section 9 / Section 7.1: "Provenance for every
+    value: extracted, edited-by-human, or mapped"). Every value this task
+    writes came straight from the model, so every present field is
+    `extracted`; a field the model returned as null has no value and
+    therefore no provenance. `learned_rule:<id>` and
+    `human_edit:<review_action_id>` are written by the matching and review
+    slices that produce them.
+    """
+    return {name: "extracted" for name in fields if values.get(name) is not None}
+
+
 def _overall_confidence(header_confidence: dict) -> Decimal:
     """
     CLAUDE.md Section 7.1: "Overall document confidence is the minimum of
@@ -421,11 +454,13 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                 INSERT INTO document_headers
                     (document_id, tenant_id, po_number, order_date, requested_delivery_date,
                      buyer_name, buyer_contact_email, ship_to_address, payment_terms,
-                     order_total, currency, notes, header_confidence, currency_inferred)
+                     order_total, currency, notes, header_confidence, currency_inferred,
+                     field_provenance)
                 VALUES
                     (:document_id, :tenant_id, :po_number, :order_date, :requested_delivery_date,
                      :buyer_name, :buyer_contact_email, :ship_to_address, :payment_terms,
-                     :order_total, :currency, :notes, :header_confidence, :currency_inferred)
+                     :order_total, :currency, :notes, :header_confidence, :currency_inferred,
+                     :field_provenance)
                 """
             ),
             {
@@ -443,6 +478,7 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                 "notes": header["notes"],
                 "header_confidence": result.header_confidence,
                 "currency_inferred": result.currency_inferred,
+                "field_provenance": _extracted_provenance(header, _PROVENANCE_HEADER_FIELDS),
             },
         )
 
@@ -452,10 +488,10 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                     """
                     INSERT INTO document_lines
                         (id, document_id, tenant_id, line_number, sku, description,
-                         quantity, unit, unit_price, line_total, confidence)
+                         quantity, unit, unit_price, line_total, confidence, field_provenance)
                     VALUES
                         (:id, :document_id, :tenant_id, :line_number, :sku, :description,
-                         :quantity, :unit, :unit_price, :line_total, :confidence)
+                         :quantity, :unit, :unit_price, :line_total, :confidence, :field_provenance)
                     """
                 ),
                 {
@@ -470,5 +506,96 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                     "unit_price": str(line["unit_price"]) if line["unit_price"] is not None else None,
                     "line_total": str(line["line_total"]) if line["line_total"] is not None else None,
                     "confidence": str(line["confidence"]) if line["confidence"] is not None else None,
+                    "field_provenance": _extracted_provenance(line, _PROVENANCE_LINE_FIELDS),
                 },
             )
+
+    # Buyer identification runs in its own transaction, after the extraction
+    # above has committed (CLAUDE.md Section 7.6). Deliberately not part of
+    # the same transaction: a failure here must never roll back a successful
+    # extraction and cost the document its header and lines. The document is
+    # already `needs_review` and simply has no buyer link, which is the same
+    # state a document with no extracted buyer name legitimately has; a
+    # re-run links it.
+    buyer_id: UUID | None = None
+    try:
+        with tenant_session(tid) as session:
+            buyer_id = identify_and_link_buyer(
+                session,
+                tid,
+                did,
+                buyer_name=header["buyer_name"],
+                buyer_contact_email=header["buyer_contact_email"],
+            ).buyer_id
+    except Exception as exc:  # noqa: BLE001 -- see the comment above
+        # No exception message is logged: a database error's text can contain
+        # the bound parameters, which here are customer data (Section 7.10).
+        logger.error(
+            "buyer_identification_failed document_id=%s error_type=%s", did, type(exc).__name__
+        )
+
+    # Catalog matching runs after buyer identification, because Section 7.6's
+    # learned mappings are scoped to a buyer -- and in its own transaction for
+    # the same reason buyer identification is (D-058): a matching failure must
+    # never roll back the paid-for model call. A document whose matching
+    # failed is `needs_review` with unmatched lines, which is exactly the
+    # state a document with no catalog hits legitimately has; a re-run matches
+    # it, and re-running is idempotent (it never overwrites a human's answer).
+    #
+    # `buyer_id` being None is not a failure path: matching simply runs with
+    # the tenant-wide rules only, and never with another buyer's.
+    try:
+        with tenant_session(tid) as session:
+            summary = match_document_lines(session, tid, did, buyer_id=buyer_id)
+        # Counts and IDs only -- never a SKU, a description or a score, which
+        # are customer/document data (Section 7.10).
+        logger.info(
+            "matching_complete document_id=%s considered=%d matched=%d",
+            did,
+            summary.lines_considered,
+            summary.lines_matched,
+        )
+    except Exception as exc:  # noqa: BLE001 -- see the comment above
+        logger.error("matching_failed document_id=%s error_type=%s", did, type(exc).__name__)
+
+    # Duplicate / change-order detection (CLAUDE.md Section 7.8). It runs here
+    # rather than only at ingest because the PO number the change-order case
+    # needs does not exist until extraction has run. The exact-content half
+    # already ran at ingest, where the hash was final; re-running it is
+    # idempotent and reaches the same answer, and running both halves in one
+    # place is what keeps a document uploaded by any path consistently
+    # flagged. Own transaction, same reason as above (D-058): nothing here is
+    # worth losing a paid-for model call over, and a document with no
+    # relationship flags is the state the overwhelming majority of documents
+    # are legitimately in.
+    try:
+        with tenant_session(tid) as session:
+            relationships = detect_document_relationships(session, tid, did)
+        # Booleans and IDs only -- never a PO number or a hash (Section 7.10).
+        logger.info(
+            "duplicate_detection_complete document_id=%s duplicate=%s change_order=%s",
+            did,
+            relationships.is_possible_duplicate,
+            relationships.is_possible_change_order,
+        )
+    except Exception as exc:  # noqa: BLE001 -- see the comment above
+        logger.error("duplicate_detection_failed document_id=%s error_type=%s", did, type(exc).__name__)
+
+    # Validation runs last (CLAUDE.md Section 7.7), because it reports on
+    # everything the steps before it concluded: the extracted values, the
+    # matching slice's `uom_mismatch`, and the duplicate/change-order flags
+    # just written. It changes no value -- it only writes `document_warnings`.
+    try:
+        with tenant_session(tid) as session:
+            validation = validate_document(session, tid, did)
+        # Counts only -- never a field name's value, a total or a date
+        # (Section 7.10).
+        logger.info(
+            "validation_complete document_id=%s warnings=%d created=%d resolved=%d",
+            did,
+            validation.evaluated,
+            validation.created,
+            validation.resolved,
+        )
+    except Exception as exc:  # noqa: BLE001 -- see the comment above
+        logger.error("validation_failed document_id=%s error_type=%s", did, type(exc).__name__)

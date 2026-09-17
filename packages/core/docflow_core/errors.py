@@ -312,6 +312,164 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="high",
         audience="both",
     ),
+    # ── Phase 2 (validation slice): CLAUDE.md Section 7.7 / 7.8 ─────────────
+    # Review warnings, not failures -- nothing below stops a document, changes
+    # a value, or blocks processing. They are in this catalog because Section
+    # 7.16.5's rule is about user-facing text describing something wrong
+    # ("no user-facing string that describes a failure exists outside it"),
+    # and a warning is exactly that; see DECISIONS.md D-072. Each entry holds
+    # the what/why/what-next prose; the `document_warnings.detail` payload
+    # holds the specifics (which field, which line, which numbers disagreed).
+    "VAL-001": ErrorCatalogEntry(
+        code="VAL-001",
+        title="Line total doesn't match quantity times price",
+        message=(
+            "On this line, the printed total isn't the quantity multiplied by the unit price. "
+            "DocFlow changed nothing -- all three numbers are exactly as the document printed them."
+        ),
+        action="Check the line against the original document and correct whichever number is wrong.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "VAL-002": ErrorCatalogEntry(
+        code="VAL-002",
+        title="Order total doesn't match the line items",
+        message=(
+            "The order total doesn't equal the sum of the line totals. Often that means tax, "
+            "freight or a discount isn't itemized on the order -- sometimes it means a number "
+            "was misread. DocFlow changed nothing either way."
+        ),
+        action=(
+            "Compare the total with the original document and correct whichever value is wrong, "
+            "or acknowledge the difference before approving."
+        ),
+        severity="warning",
+        audience="tenant",
+    ),
+    "VAL-003": ErrorCatalogEntry(
+        code="VAL-003",
+        title="A quantity isn't a positive number",
+        message="This line's quantity is zero or negative, so it can't be fulfilled as written.",
+        action="Correct the quantity from the original document, or remove the line, before approving.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "VAL-004": ErrorCatalogEntry(
+        code="VAL-004",
+        title="We couldn't read a date on this order",
+        message=(
+            "One of the dates on this order isn't in a form DocFlow can read, so it was left "
+            "exactly as printed rather than reinterpreted."
+        ),
+        action="Enter the correct date from the original document before approving.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "VAL-005": ErrorCatalogEntry(
+        code="VAL-005",
+        title="A date on this order looks wrong",
+        message=(
+            "One of the dates is far outside the range a purchase order normally carries, "
+            "which usually means a digit was misread on the page."
+        ),
+        action="Check the date against the original document and correct it, or acknowledge it if it's right.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "VAL-006": ErrorCatalogEntry(
+        code="VAL-006",
+        title="A required field is missing",
+        message=(
+            "DocFlow couldn't find one of the fields an order needs, so it was left empty "
+            "rather than guessed at."
+        ),
+        action="Fill the field in from the original document before approving.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "VAL-007": ErrorCatalogEntry(
+        code="VAL-007",
+        title="Currency code isn't one we recognize",
+        message=(
+            "The currency on this order isn't a valid ISO 4217 code, so DocFlow can't be sure "
+            "what money the amounts are in."
+        ),
+        action="Set the correct currency from the original document before approving.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "VAL-008": ErrorCatalogEntry(
+        code="VAL-008",
+        title="Unit of measure disagrees with the catalog",
+        message=(
+            "This line's unit doesn't match the unit on the catalog item it matched. DocFlow "
+            "never changes a unit on its own, so both are shown exactly as they are."
+        ),
+        action=(
+            "Confirm which unit is right before approving -- a case ordered as an each ships "
+            "the wrong quantity."
+        ),
+        severity="warning",
+        audience="tenant",
+    ),
+    "VAL-009": ErrorCatalogEntry(
+        code="VAL-009",
+        title="This document contains an embedded instruction",
+        message=(
+            "Text in this document tried to give DocFlow's extraction instructions instead of "
+            "being order data. It was ignored, not followed, and the document is held for review."
+        ),
+        action=(
+            "Read every field against the original document before approving, and treat this "
+            "sender with caution. DocFlow has already flagged it."
+        ),
+        severity="high",
+        audience="both",
+    ),
+    "VAL-010": ErrorCatalogEntry(
+        code="VAL-010",
+        title="A value here is below our confidence threshold",
+        message=(
+            "DocFlow isn't confident it read this value correctly -- usually a low-quality scan, "
+            "a handwritten entry, or an ambiguous layout."
+        ),
+        action="Check this value against the original document before approving.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "VAL-011": ErrorCatalogEntry(
+        code="VAL-011",
+        title="Currency was inferred from a symbol",
+        message=(
+            "This order doesn't state its currency. DocFlow read it from a currency symbol, "
+            "which is a guess about the country rather than something printed on the page."
+        ),
+        action="Confirm the currency is right before approving.",
+        severity="info",
+        audience="tenant",
+    ),
+    "VAL-012": ErrorCatalogEntry(
+        code="VAL-012",
+        title="This looks like a document we already have",
+        message=(
+            "Another document on this account has exactly the same contents, so this is "
+            "probably a resend. Both have been kept -- nothing was replaced or deleted."
+        ),
+        action="Open the earlier document to compare, then reject this one if it's a duplicate.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "VAL-013": ErrorCatalogEntry(
+        code="VAL-013",
+        title="This may revise an earlier order",
+        message=(
+            "An earlier document on this account has the same PO number but different contents, "
+            "which usually means this is a change order or a revised copy. Both have been kept."
+        ),
+        action="Compare the two before approving, so the version that gets exported is the right one.",
+        severity="high",
+        audience="tenant",
+    ),
 }
 
 

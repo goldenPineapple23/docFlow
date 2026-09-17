@@ -18,6 +18,11 @@ dependencies = [
     # producer side of Celery is a real dependency of this package, not just
     # of the api/worker apps that happen to install it too.
     "celery[redis]>=5.4",
+    # docflow_core.buyers (near-duplicate buyer-name flagging) and, next
+    # slice, catalog SKU fuzzy matching. Lives here rather than in the
+    # worker's requirements because both the worker and the Console's
+    # matching code call the same one scoring function -- see DECISIONS.md D-055.
+    "rapidfuzz>=3.9",
 ]
 
 [project.optional-dependencies]
