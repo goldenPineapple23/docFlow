@@ -672,3 +672,33 @@ Rows 4 and 6 score **0.96 on every scorer** and have opposite correct answers. T
 **The general lesson, recorded because it will recur:** a passing test proves the behaviour was right *that time*. Where an assertion depends on an ordering, a uuid, a hash or a timestamp, prefer an assertion that pins the mechanism — the replacement test asserts both that the two timestamps tie and that the sequence separates them, so it fails for the right reason rather than at random.
 
 **Related:** Section 7.3, D-081, D-083, `supabase/migrations/0008_review_action_sequence.sql`.
+
+## D-085 — Every field on the review screen is a text input, including money and dates
+
+**Context:** the obvious markup for an order total is `<input type="number">` and for an order date `<input type="date">`. Both are wrong here, for the same underlying reason.
+
+**Decision:** every editable field on the review screen is `<input type="text">`. Numeric fields get `inputMode="decimal"` so a phone shows the right keyboard, and nothing else.
+
+**Why not `type="number"`:** the browser hands that value to its own numeric parser, which is an IEEE double. `"570.00"` becomes `570`, `"47.5000"` becomes `47.5`, and the scale the document printed is gone before the value reaches our code. Section 7.1 says no float ever touches money; a number input puts one directly between the reviewer and the value. It also lets a scroll wheel silently change a total that has focus.
+
+**Why not `type="date"`:** the value a reviewer is checking is *what the document printed*. A date input reformats it to the browser's locale, or refuses it outright if the buyer wrote "28/05/25". Section 7.1 has the model return exactly what is printed and leave interpretation to a validation rule that warns; the input must not undo that by normalizing on the way in.
+
+**Enforced, not just intended:** a component test asserts that every input the header renders has `type="text"`, so adding a number input is a failing test rather than a code review someone has to catch.
+
+**The related guard:** a second test scans the whole web source for `dangerouslySetInnerHTML` used as a prop or key, and asserts the app contains exactly one `<iframe>` whose `sandbox` attribute is the empty string (Section 7.12, Section 10). Both patterns match *usage* rather than mention — the first version matched the bare word and failed on comments that stated the rule, which is a decent reminder that a guard asserting the wrong thing is worse than none.
+
+**Related:** Section 7.1, Section 7.12, Section 10, `apps/web/src/components/review/`.
+
+## D-086 — The end-to-end suite stubs the API at the network boundary
+
+**Context:** Phase 3 adds Playwright. The question is what sits behind it: a real API with real Postgres, a worker and a Redis, or a stub.
+
+**Decision:** Playwright drives a real browser against a real Next.js build, and the review API is stubbed at the network boundary with `page.route`. The API's own behaviour is proven separately in `apps/api/tests/test_review_api.py`, against real Postgres and real RLS.
+
+**Why not a full stack:** the thing a browser test can prove that nothing else can is routing, rendering, focus, keyboard handling and the state machine the reviewer actually drives. Everything else it would exercise is already covered by a faster test closer to the code. A browser suite that also needed a database, a worker and a broker would be slow, would fail for reasons unrelated to the UI, and would become the suite someone disables the first time it blocks a merge — which CLAUDE.md Section 10 forbids outright ("merge to main with CI red, or disable a CI check to get a merge through"). The cheapest way to never disable a check is to build one that does not go flaky.
+
+**What this deliberately gives up:** the stub encodes the API's contract, so a backend change that broke the contract without breaking its own tests would not be caught here. The mitigation is that both sides are generated from the same understanding and the API tests assert the response shapes the stub returns; if the two drift, that is a real risk and the honest place to catch it is a contract test, which is not MVP scope.
+
+**Also decided here:** `@types/node` moves from `^20` to `^22`. CI runs Node 22 and so does the founder's machine, so the types were already a major version behind the runtime; vitest 5 refusing to install against `^20` surfaced a mismatch that predated it.
+
+**Related:** Section 6 (Phase 3), Section 10, `apps/web/playwright.config.ts`, `.github/workflows/ci.yml`.

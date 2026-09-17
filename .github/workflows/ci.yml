@@ -6,7 +6,7 @@ on:
 
 jobs:
   web:
-    name: web (lint, typecheck, build, audit)
+    name: web (lint, typecheck, test, build, e2e, audit)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -21,7 +21,18 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npx tsc --noEmit
+      # Component tests first: they are seconds, and a failure here explains
+      # an e2e failure that would otherwise take a browser to diagnose.
+      - name: Component tests (vitest)
+        run: npm test
       - run: npm run build
+      # The review flow in a real browser (CLAUDE.md Section 6, Phase 3).
+      # The API is stubbed at the network boundary -- its own behaviour is
+      # proven against real Postgres in the api job below.
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests (playwright)
+        run: npm run test:e2e
       - name: Dependency audit (fail on high/critical)
         run: npm audit --audit-level=high
 

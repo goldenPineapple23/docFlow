@@ -1,0 +1,100 @@
+"use client";
+
+import type { DocumentHeader } from "@/lib/review";
+import { ConfidenceBadge, ProvenanceNote, isLowConfidence } from "./confidence";
+
+/**
+ * The editable header (CLAUDE.md Section 7.3 / 7.12).
+ *
+ * Every value here came out of an untrusted document and is rendered as
+ * text, never as HTML -- React escapes by default and this file contains no
+ * `dangerouslySetInnerHTML`, which Section 10 forbids outright in the review
+ * surface.
+ *
+ * Money and dates are `<input type="text">` on purpose. `type="number"`
+ * would hand the value to the browser's numeric parser, which is a float,
+ * and Section 7.1 does not allow a float anywhere near money. `type="date"`
+ * would silently reformat or reject what the document actually printed.
+ */
+
+export const HEADER_FIELDS: Array<{ name: keyof DocumentHeader & string; label: string; wide?: boolean }> = [
+  { name: "po_number", label: "PO number" },
+  { name: "buyer_name", label: "Buyer" },
+  { name: "order_date", label: "Order date" },
+  { name: "requested_delivery_date", label: "Requested delivery" },
+  { name: "order_total", label: "Order total" },
+  { name: "currency", label: "Currency" },
+  { name: "payment_terms", label: "Payment terms" },
+  { name: "buyer_contact_email", label: "Buyer email" },
+  { name: "ship_to_address", label: "Ship to", wide: true },
+  { name: "notes", label: "Notes", wide: true },
+];
+
+export function HeaderFields({
+  header,
+  edits,
+  disabled,
+  onChange,
+}: {
+  header: DocumentHeader;
+  edits: Record<string, string | null>;
+  disabled: boolean;
+  onChange: (field: string, value: string) => void;
+}) {
+  return (
+    <section aria-labelledby="header-heading" className="space-y-3">
+      <h2 id="header-heading" className="text-sm font-semibold uppercase tracking-wide text-gray-500">
+        Order details
+      </h2>
+
+      {header.currency_inferred ? (
+        <p
+          data-testid="currency-inferred"
+          className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+        >
+          The currency wasn&apos;t stated on this order — DocFlow read it from a symbol. Confirm
+          it before approving.
+        </p>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {HEADER_FIELDS.map(({ name, label, wide }) => {
+          const stored = header[name];
+          const current = name in edits ? edits[name] : (stored as string | null);
+          const confidence = header.confidence?.[name];
+          const low = isLowConfidence(confidence);
+
+          return (
+            <div key={name} className={wide ? "sm:col-span-2" : undefined}>
+              <div className="flex items-baseline justify-between gap-2">
+                <label htmlFor={`header-${name}`} className="block text-sm font-medium">
+                  {label}
+                </label>
+                <span className="flex items-center gap-2">
+                  <ProvenanceNote provenance={header.provenance?.[name]} />
+                  <ConfidenceBadge value={confidence} />
+                </span>
+              </div>
+              <input
+                id={`header-${name}`}
+                name={name}
+                type="text"
+                disabled={disabled}
+                value={current ?? ""}
+                onChange={(e) => onChange(name, e.target.value)}
+                data-testid={`header-input-${name}`}
+                data-dirty={name in edits ? "true" : "false"}
+                className={[
+                  "mt-1 w-full rounded border px-2 py-1.5 text-sm",
+                  "disabled:bg-gray-50 disabled:text-gray-500",
+                  low ? "border-amber-400 bg-amber-50" : "border-gray-300",
+                  name in edits ? "ring-2 ring-blue-300" : "",
+                ].join(" ")}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}

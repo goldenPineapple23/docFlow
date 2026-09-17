@@ -1,0 +1,256 @@
+import { expect, test, type Page } from "@playwright/test";
+
+/**
+ * The review flow, end to end in a real browser (CLAUDE.md Section 6, Phase 3).
+ *
+ * All data is fictional (CLAUDE.md Section 0 rule 4).
+ */
+
+const DOCUMENT_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+const LINE_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+const WARNING_ID = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+
+function detail(overrides: Record<string, unknown> = {}) {
+  return {
+    document: {
+      id: DOCUMENT_ID,
+      original_filename: "po.pdf",
+      status: "needs_review",
+      source: "email",
+      created_at: "2026-09-16T09:00:00Z",
+      approved_at: null,
+      approved_by: null,
+      approved_snapshot_hash: null,
+      overall_confidence: "0.91",
+      injection_suspected: false,
+      is_test_batch: false,
+      is_possible_duplicate: false,
+      duplicate_of_document_id: null,
+      is_possible_change_order: false,
+      change_order_of_document_id: null,
+    },
+    header: {
+      po_number: "BCH-2291",
+      order_date: "2025-05-28",
+      requested_delivery_date: null,
+      buyer_name: "Bella's Test Coffee House",
+      buyer_contact_email: null,
+      ship_to_address: null,
+      payment_terms: null,
+      order_total: "570.00",
+      currency: "USD",
+      notes: null,
+      currency_inferred: false,
+      confidence: { po_number: 0.98, order_total: 0.62 },
+      provenance: {},
+    },
+    lines: [
+      {
+        id: LINE_ID,
+        line_number: 1,
+        sku: "CF-1001",
+        description: "Colombian Whole Bean 5lb",
+        unit: "CS",
+        quantity: "12.0000",
+        unit_price: "47.5000",
+        line_total: "570.00",
+        confidence: "0.97",
+        matched_item_id: null,
+        match_method: null,
+        match_score: null,
+        matched_uom: null,
+        uom_mismatch: false,
+        match_candidates: [],
+        provenance: {},
+      },
+    ],
+    warnings: [],
+    trail: [],
+    version: "version-1",
+    can_edit: true,
+    ...overrides,
+  };
+}
+
+/** Stubs the review API at the network boundary. */
+async function stubApi(page: Page, state: { detail: ReturnType<typeof detail>; approved?: boolean }) {
+  await page.route("**/review/documents/*/original", (route) =>
+    route.fulfill({ json: { url: "/review/documents/x/original/content?token=t", expires_at: 0 } }),
+  );
+  await page.route("**/review/documents/*/original/content*", (route) =>
+    route.fulfill({ body: "PO Number: BCH-2291", contentType: "application/octet-stream" }),
+  );
+
+  await page.route("**/review/documents/*/approve", async (route) => {
+    const body = route.request().postDataJSON();
+    const open = state.detail.warnings as Array<{ id: string }>;
+    const acked = new Set((body.acknowledgements ?? []).map((a: { warning_id: string }) => a.warning_id));
+    if (open.some((w) => !acked.has(w.id))) {
+      await route.fulfill({
+        status: 409,
+        json: {
+          detail: {
+            code: "REV-001",
+            title: "Some warnings still need a look",
+            message: "This order has warnings nobody has acknowledged yet.",
+            action: "Open each warning, fix the value or confirm it's right, then approve.",
+          },
+        },
+      });
+      return;
+    }
+    state.approved = true;
+    state.detail.document.status = "approved";
+    await route.fulfill({ json: { review_action_id: "r1", status: "approved" } });
+  });
+
+  await page.route("**/review/documents/*", async (route) => {
+    const request = route.request();
+    if (request.method() === "PATCH") {
+      const body = request.postDataJSON();
+      const changes: Array<Record<string, unknown>> = [];
+      for (const [field, after] of Object.entries(body.header ?? {})) {
+        const before = (state.detail.header as Record<string, unknown>)[field];
+        if (before !== after) {
+          changes.push({ field, before, after });
+          (state.detail.header as Record<string, unknown>)[field] = after;
+        }
+      }
+      state.detail.version = "version-2";
+      state.detail.trail = [
+        {
+          id: "t1",
+          action: "edited",
+          user_id: "u1",
+          by_docflow_support: false,
+          changes,
+          warning_acknowledgements: [],
+          note: null,
+          created_at: "2026-09-17T10:00:00Z",
+        },
+      ] as never;
+      await route.fulfill({ json: { review_action_id: "r0", version: "version-2" } });
+      return;
+    }
+    await route.fulfill({ json: state.detail });
+  });
+}
+
+test("a reviewer corrects a field, saves, and sees exactly what changed", async ({ page }) => {
+  const state = { detail: detail() };
+  await stubApi(page, state);
+
+  await page.goto(`/review/${DOCUMENT_ID}`);
+
+  const poNumber = page.getByTestId("header-input-po_number");
+  await expect(poNumber).toHaveValue("BCH-2291");
+
+  await poNumber.fill("BCH-2292");
+  await page.getByTestId("save-button").click();
+
+  // The trail names the value before and after -- the Phase 3 exit criterion.
+  const trail = page.getByTestId("trail");
+  await expect(trail).toContainText("po_number");
+  await expect(trail).toContainText("BCH-2291");
+  await expect(trail).toContainText("BCH-2292");
+});
+
+test("money keeps its scale through an edit", async ({ page }) => {
+  const state = { detail: detail() };
+  await stubApi(page, state);
+  await page.goto(`/review/${DOCUMENT_ID}`);
+
+  // "570.00", not 570 -- the scale is part of the value (Section 7.1).
+  await expect(page.getByTestId("header-input-order_total")).toHaveValue("570.00");
+  await expect(page.getByTestId("line-1-quantity")).toHaveValue("12.0000");
+});
+
+test("the keyboard shortcut saves, and is not the only way to save", async ({ page }) => {
+  const state = { detail: detail() };
+  await stubApi(page, state);
+  await page.goto(`/review/${DOCUMENT_ID}`);
+
+  await page.getByTestId("header-input-po_number").fill("BCH-3000");
+  await page.keyboard.press("ControlOrMeta+s");
+
+  await expect(page.getByTestId("banner-success")).toContainText("Saved");
+  // The visible button exists for anyone who does not know the shortcut.
+  await expect(page.getByTestId("save-button")).toBeVisible();
+});
+
+test("escape abandons an unsaved edit without touching the document", async ({ page }) => {
+  const state = { detail: detail() };
+  await stubApi(page, state);
+  await page.goto(`/review/${DOCUMENT_ID}`);
+
+  const poNumber = page.getByTestId("header-input-po_number");
+  await poNumber.fill("BCH-9999");
+  await page.keyboard.press("Escape");
+
+  await expect(poNumber).toHaveValue("BCH-2291");
+  await expect(page.getByTestId("trail")).toHaveCount(0);
+});
+
+test("approval is blocked until every warning is ticked", async ({ page }) => {
+  const state = {
+    detail: detail({
+      warnings: [
+        {
+          id: WARNING_ID,
+          code: "VAL-002",
+          severity: "high",
+          field_name: "order_total",
+          line_number: null,
+          document_line_id: null,
+          detail: { order_total: "100.00", sum_of_lines: "570.00" },
+          status: "open",
+          acknowledged_at: null,
+        },
+      ],
+    }),
+  };
+  await stubApi(page, state);
+  await page.goto(`/review/${DOCUMENT_ID}`);
+
+  // Section 7.3: an unresolved warning must be explicitly acknowledged.
+  await expect(page.getByTestId("approve-button")).toBeDisabled();
+
+  await page.getByTestId(`ack-${WARNING_ID}`).check();
+  await expect(page.getByTestId("approve-button")).toBeEnabled();
+
+  await page.getByTestId("approve-button").click();
+  await expect(page.getByTestId("banner-success")).toContainText("Approved");
+});
+
+test("a document carrying an embedded instruction says so before anything else", async ({ page }) => {
+  const state = {
+    detail: detail({
+      document: { ...detail().document, injection_suspected: true },
+    }),
+  };
+  await stubApi(page, state);
+  await page.goto(`/review/${DOCUMENT_ID}`);
+
+  // Section 7.2: forced to review with a visible banner, regardless of confidence.
+  await expect(page.getByTestId("injection-banner")).toContainText("embedded instruction");
+});
+
+test("the original document renders in a sandboxed frame", async ({ page }) => {
+  const state = { detail: detail() };
+  await stubApi(page, state);
+  await page.goto(`/review/${DOCUMENT_ID}`);
+
+  const viewer = page.getByTestId("document-viewer");
+  await expect(viewer).toBeVisible();
+  // Section 7.12: no scripts, no same-origin, nothing.
+  await expect(viewer).toHaveAttribute("sandbox", "");
+});
+
+test("a read-only reviewer cannot edit or approve", async ({ page }) => {
+  const state = { detail: detail({ can_edit: false }) };
+  await stubApi(page, state);
+  await page.goto(`/review/${DOCUMENT_ID}`);
+
+  await expect(page.getByTestId("header-input-po_number")).toBeDisabled();
+  await expect(page.getByTestId("approve-button")).toBeDisabled();
+});
