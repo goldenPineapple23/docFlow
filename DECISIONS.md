@@ -702,3 +702,23 @@ Rows 4 and 6 score **0.96 on every scorer** and have opposite correct answers. T
 **Also decided here:** `@types/node` moves from `^20` to `^22`. CI runs Node 22 and so does the founder's machine, so the types were already a major version behind the runtime; vitest 5 refusing to install against `^20` surfaced a mismatch that predated it.
 
 **Related:** Section 6 (Phase 3), Section 10, `apps/web/playwright.config.ts`, `.github/workflows/ci.yml`.
+
+## D-087 — The web CI job builds before it typechecks, and had never passed until it did
+
+**Context:** the `web` job ran `npm ci`, `npm run lint`, `npx tsc --noEmit`, `npm run build`, `npm audit`, in that order. It failed at the typecheck step with:
+
+```
+src/app/layout.tsx(20,50): error TS2304: Cannot find name 'LayoutProps'.
+```
+
+`LayoutProps` and `PageProps` are **global types Next generates into `.next/types` as part of the build**. On a clean checkout that directory does not exist, so a typecheck run before the build cannot resolve them. Locally the error is invisible: any previous `next build` or `next dev` has already produced `.next/types`, so `tsc` finds them.
+
+**Decision:** `npm run build` moves ahead of `npx tsc --noEmit` in the web job. The explicit `tsc` pass is kept rather than relying on the build's own TypeScript check, because it also covers the test and e2e files that the build does not compile.
+
+**How long this had been broken:** the web job had **never passed in CI**. The failure is present on `eb76329` (Phase 1) and `aaca780` with the identical step and the identical error, and it predates every Phase 2 and Phase 3 commit. It went unnoticed because `git push` had been failing over workflow scope earlier in the build, so nobody had watched a run to completion, and every local check was green.
+
+**Two things worth taking from this, since the same shape will recur:**
+- **A local pass and a CI pass are different claims.** The difference here was a generated directory that exists on a developer machine and never on a fresh checkout. Anything generated — types, migrations, fixtures, caches — is a candidate for the same mistake.
+- **Red CI that nobody has looked at is indistinguishable from no CI.** Section 10 forbids merging with CI red; that rule only does any work if someone reads the result. Three phases shipped on top of a job that had never gone green once.
+
+**Related:** Section 10, D-086, `.github/workflows/ci.yml`, `apps/web/src/app/layout.tsx`.

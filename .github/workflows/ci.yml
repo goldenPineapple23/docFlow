@@ -20,12 +20,19 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
       - run: npm run lint
+      # The build MUST come before `tsc --noEmit`. Next generates the global
+      # route types -- `LayoutProps`, `PageProps` -- into `.next/types` as
+      # part of the build, and `src/app/layout.tsx` uses `LayoutProps`. On a
+      # clean checkout those types do not exist yet, so a typecheck run first
+      # fails with "Cannot find name 'LayoutProps'". This job had never
+      # passed in CI for exactly that reason; see DECISIONS.md D-087.
+      - run: npm run build
       - run: npx tsc --noEmit
-      # Component tests first: they are seconds, and a failure here explains
-      # an e2e failure that would otherwise take a browser to diagnose.
+      # Component tests before the browser: they are seconds, and a failure
+      # here explains an e2e failure that would otherwise take a browser to
+      # diagnose.
       - name: Component tests (vitest)
         run: npm test
-      - run: npm run build
       # The review flow in a real browser (CLAUDE.md Section 6, Phase 3).
       # The API is stubbed at the network boundary -- its own behaviour is
       # proven against real Postgres in the api job below.
