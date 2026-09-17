@@ -8,6 +8,8 @@
  * unreadable in a printout.
  */
 
+import { PILL } from "@/components/StatusBadge";
+
 export const CONFIDENCE_THRESHOLD = 0.8;
 
 export function isLowConfidence(value: string | number | null | undefined): boolean {
@@ -33,14 +35,26 @@ export function ConfidenceBadge({ value }: { value: string | number | null | und
     <span
       data-testid="confidence-badge"
       data-low={low ? "true" : "false"}
-      title={low ? "Below the 80% confidence threshold — check this against the document" : undefined}
+      // The visible label is short because it sits in a narrow column, but
+      // the meaning must not depend on reading a tooltip or seeing a colour
+      // (Section 7.1: "visibly flagged"). Assistive tech gets the sentence.
+      aria-label={
+        low
+          ? `Low confidence, ${percent}. Below the 80% threshold — check this against the document.`
+          : `Confidence ${percent}.`
+      }
+      title={
+        low
+          ? `Low confidence (${percent}) — below the 80% threshold. Check this against the document.`
+          : `DocFlow was ${percent} confident reading this.`
+      }
       className={
         low
-          ? "rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-900 ring-1 ring-amber-400"
-          : "rounded px-1.5 py-0.5 text-xs text-gray-500"
+          ? `${PILL} bg-amber-100 text-amber-800`
+          : "whitespace-nowrap text-xs tabular-nums text-gray-500"
       }
     >
-      {low ? `Low confidence · ${percent}` : percent}
+      {low ? `Low · ${percent}` : percent}
     </span>
   );
 }

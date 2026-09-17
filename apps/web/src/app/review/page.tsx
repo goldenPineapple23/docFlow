@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ReviewApiError, listDocuments, type QueueDocument } from "@/lib/review";
 import { ConfidenceBadge } from "@/components/review/confidence";
-import { StatusBadge } from "@/components/StatusBadge";
+import { PILL, StatusBadge } from "@/components/StatusBadge";
 import { AppHeader } from "@/components/AppHeader";
 
 /**
@@ -95,10 +95,10 @@ export default function ReviewQueuePage() {
             aria-pressed={status === filter.value}
             title={filter.blurb}
             className={[
-              "rounded-full border px-3 py-1 text-sm font-medium transition-colors",
+              "rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors",
               status === filter.value
-                ? "border-slate-900 bg-slate-900 text-white"
-                : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+                ? "bg-slate-800 text-white shadow-sm"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200",
             ].join(" ")}
           >
             {filter.label}
@@ -129,19 +129,19 @@ export default function ReviewQueuePage() {
       ) : null}
 
       {documents !== null && documents.length > 0 ? (
-        <div className="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.06),0_8px_24px_-12px_rgba(15,23,42,0.25)]">
         <table className="w-full border-collapse text-sm">
           <caption className="sr-only">Purchase orders, oldest first</caption>
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-              <th scope="col" className="px-4 py-2.5 font-medium">PO number</th>
-              <th scope="col" className="px-4 py-2.5 font-medium">Buyer</th>
-              <th scope="col" className="px-4 py-2.5 text-right font-medium">Total</th>
-              <th scope="col" className="px-4 py-2.5 font-medium">Received</th>
-              <th scope="col" className="px-4 py-2.5 font-medium">Status</th>
-              <th scope="col" className="px-4 py-2.5 font-medium">Confidence</th>
-              <th scope="col" className="px-4 py-2.5 font-medium">Checks</th>
-              <th scope="col" className="px-4 py-2.5 font-medium">Flags</th>
+            <tr className="bg-slate-800 text-left text-[11px] uppercase tracking-[0.06em] text-slate-200">
+              <th scope="col" className="px-4 py-3 font-semibold">PO number</th>
+              <th scope="col" className="px-4 py-3 font-semibold">Buyer</th>
+              <th scope="col" className="px-4 py-3 text-right font-semibold">Total</th>
+              <th scope="col" className="px-4 py-3 font-semibold">Received</th>
+              <th scope="col" className="px-4 py-3 font-semibold">Status</th>
+              <th scope="col" className="px-4 py-3 font-semibold">Confidence</th>
+              <th scope="col" className="px-4 py-3 font-semibold">Checks</th>
+              <th scope="col" className="px-4 py-3 font-semibold">Flags</th>
             </tr>
           </thead>
           <tbody>
@@ -149,7 +149,7 @@ export default function ReviewQueuePage() {
               <tr
                 key={doc.id}
                 data-testid={`queue-row-${doc.id}`}
-                className="border-b border-slate-100 last:border-0 transition-colors hover:bg-slate-50"
+                className="border-b border-slate-100 transition-colors last:border-0 odd:bg-white even:bg-violet-50/50 hover:bg-violet-100/60"
               >
                 <td className="px-4 py-3">
                   <Link
@@ -185,11 +185,11 @@ export default function ReviewQueuePage() {
                 </td>
                 <td className="px-4 py-3">
                   {doc.open_warnings > 0 ? (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                    <span className={`${PILL} bg-amber-100 text-amber-800`}>
                       {doc.open_warnings} to look at
                     </span>
                   ) : (
-                    <span className="text-xs text-gray-500">clear</span>
+                    <span className="text-xs text-slate-400">clear</span>
                   )}
                 </td>
                 <td className="px-4 py-3 text-xs">
@@ -217,7 +217,7 @@ function Flags({ doc }: { doc: QueueDocument }) {
   return (
     <span className="flex flex-wrap gap-1">
       {flags.map((flag) => (
-        <span key={flag} className="rounded bg-gray-100 px-1.5 py-0.5">
+        <span key={flag} className={`${PILL} bg-slate-100 text-slate-600`}>
           {flag}
         </span>
       ))}

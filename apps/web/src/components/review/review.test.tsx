@@ -68,9 +68,13 @@ describe("confidence flagging (Section 7.1)", () => {
 
   it("flags a low value with words, not only a colour", () => {
     // A reviewer who cannot distinguish the colour, or who prints the page,
-    // still has to be able to see that the value is doubtful.
+    // still has to be able to see that the value is doubtful. The visible
+    // label is short because the column is narrow; the full sentence is on
+    // the element for anyone using assistive tech.
     render(<ConfidenceBadge value="0.42" />);
-    expect(screen.getByTestId("confidence-badge")).toHaveTextContent(/low confidence/i);
+    const badge = screen.getByTestId("confidence-badge");
+    expect(badge).toHaveTextContent(/low/i);
+    expect(badge).toHaveAccessibleName(/low confidence.*below the 80% threshold/i);
   });
 
   it("does not shout about a confident value", () => {
