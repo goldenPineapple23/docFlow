@@ -654,3 +654,21 @@ Rows 4 and 6 score **0.96 on every scorer** and have opposite correct answers. T
 **Explicitly noted, because it already cost a day once:** D-080 recorded that applying `0006` immediately surfaced two defects the skip markers had been hiding. The same applies here — until `0007` is applied, this slice is written, not proven, and the suite being green means nothing about it.
 **Resolved 2026-09-17:** the founder applied `0007` to `docflow-staging`. All 19 tests now run and pass; `apps/api` is 110 passed with zero skips. One failure surfaced on the first real run and it was a test assertion, not a defect: the reopen test expected the trail to read [edited, reopened] and forgot that the approval is itself part of the trail. The behaviour was right -- [approved, edited, reopened], with the edit preceding the reopen it caused. Everything the test actually guards (status reverted, all four approval columns cleared, the old snapshot superseded rather than deleted, its hash unchanged) passed unaltered.
 **Related:** Section 7.3, Section 7.5, D-013, D-017, D-079, D-080, D-081, D-082, `SETUP.md` Step 5.
+
+## D-084 — The audit trail is ordered by a monotonic sequence, not by `created_at`
+
+**Context:** 0007 read the review trail with `ORDER BY created_at, id`. Postgres `now()` is **transaction start time**, not statement time. An edit to an already-approved document writes two rows in one transaction — the `edited` action and the `reopened` action it causes (Section 7.3's "if someone edits after approval, the document reverts to `needs_review`") — so both carry an identical `created_at`, and the tiebreaker was `gen_random_uuid()`.
+
+**The trail could therefore render the reopen before the edit that caused it, at random, document by document.** It was found when a test that had passed on the first run failed on a later one with no relevant code change in between. The test had been passing by luck, roughly half the time.
+
+**Decision:** `review_actions` gains a `bigserial` `sequence` column (migration 0008) and `review_trail` orders by it alone. A unique index on `(document_id, sequence)` backs the read.
+
+**Why not `clock_timestamp()`,** which was the cheaper fix: it would make `created_at` on this table mean something different from `created_at` on every other table, where it is the transaction timestamp — and it still ties at microsecond resolution under a fast enough insert pair. "These happened in this order" is what a sequence means; a timestamp only approximates it.
+
+**Why this mattered enough to add a migration rather than accept it:** the Phase 3 exit criterion is "the audit trail shows exactly what changed". A trail that reorders cause and effect does not meet it. Worse, an audit trail that is *usually* right is more dangerous than one that is obviously broken, because nobody goes looking — and this one would only ever be read when something had already gone wrong.
+
+**What is not recoverable:** rows written before 0008 are backfilled in arbitrary order, because for rows that already tied there is no information left to recover the true order from. At the time of writing those are test fixtures on staging and nothing else.
+
+**The general lesson, recorded because it will recur:** a passing test proves the behaviour was right *that time*. Where an assertion depends on an ordering, a uuid, a hash or a timestamp, prefer an assertion that pins the mechanism — the replacement test asserts both that the two timestamps tie and that the sequence separates them, so it fails for the right reason rather than at random.
+
+**Related:** Section 7.3, D-081, D-083, `supabase/migrations/0008_review_action_sequence.sql`.

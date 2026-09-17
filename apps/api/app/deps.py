@@ -129,6 +129,49 @@ def get_current_identity(authorization: str | None = Header(default=None)) -> Au
     return identity
 
 
+# CLAUDE.md Section 3: "Roles: owner, admin, reviewer, viewer -- all
+# tenant-scoped. Permissions enforced at the API layer, never only in the UI."
+#
+# The only distinction the MVP needs: a `viewer` reads, everyone else reviews.
+# Splitting admin from reviewer would be a permissions model the product does
+# not yet have opinions about, and Section 3 defers "roles beyond the four
+# above" anyway.
+REVIEWING_ROLES: frozenset[str] = frozenset({"owner", "admin", "reviewer"})
+
+
+def require_tenant_member(identity: AuthenticatedIdentity) -> UUID:
+    """
+    The tenant this request acts in, or 403.
+
+    A platform-admin-only account (D-004) has no tenant of its own; the
+    Console reaches a tenant's documents through its own acting-as path
+    (Section 7.15.1), not through these routes.
+    """
+    if identity.tenant_id is None:
+        raise HTTPException(
+            status_code=403, detail="This account is not associated with a tenant."
+        )
+    return identity.tenant_id
+
+
+def require_reviewer(identity: AuthenticatedIdentity) -> UUID:
+    """
+    The tenant, for a route that changes something.
+
+    Enforced here rather than in the UI, so hiding a button is a courtesy
+    rather than the control (Section 3). Raised as a catalog code, because a
+    permission refusal is a user-facing failure like any other (7.16.5).
+    """
+    tenant_id = require_tenant_member(identity)
+    if identity.role not in REVIEWING_ROLES:
+        # Imported here rather than at module scope: app.errors imports from
+        # docflow_core, and deps is imported by everything.
+        from app.errors import catalog_error
+
+        raise catalog_error("AUTH-002", status_code=403, extra={"role": identity.role})
+    return tenant_id
+
+
 def require_platform_admin(authorization: str | None = Header(default=None)) -> AuthenticatedIdentity:
     """
     Dependency for every /admin/* route. Returns 404, never 401/403, for

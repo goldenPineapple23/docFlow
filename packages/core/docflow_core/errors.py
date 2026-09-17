@@ -473,6 +473,17 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="high",
         audience="tenant",
     ),
+    "AUTH-002": ErrorCatalogEntry(
+        code="AUTH-002",
+        title="Your account can view this, not change it",
+        message=(
+            "Viewer accounts can read orders and download exports, but editing and approving "
+            "are left to reviewers so it's always clear who signed off on an order."
+        ),
+        action="Ask an owner or admin on your account to change your role, or to approve this order.",
+        severity="warning",
+        audience="tenant",
+    ),
     # ── REV-0xx · human review and approval (Section 7.3) ────────────────────
     "REV-001": ErrorCatalogEntry(
         code="REV-001",

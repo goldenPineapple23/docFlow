@@ -217,8 +217,10 @@ def review_schema_available() -> bool:
         with get_engine().connect() as conn:
             conn.execute(
                 _text(
+                    # `sequence` arrives in 0008 and the trail read depends on
+                    # it (D-084), so both migrations gate these tests together.
                     "SELECT id, tenant_id, document_id, user_id, acting_as_tenant_id, action, "
-                    "changes, warning_acknowledgements, note, deleted_at "
+                    "changes, warning_acknowledgements, note, deleted_at, sequence "
                     "FROM review_actions LIMIT 0"
                 )
             )
@@ -245,7 +247,8 @@ def review_schema_available() -> bool:
 requires_review_schema = pytest.mark.skipif(
     not review_schema_available(),
     reason=(
-        "supabase/migrations/0007_review_and_approval.sql has not been applied to this "
-        "database yet -- see SETUP.md Step 5 / DECISIONS.md D-083."
+        "supabase/migrations/0007_review_and_approval.sql and 0008_review_action_sequence.sql "
+        "have not both been applied to this database yet -- see SETUP.md Step 5 / "
+        "DECISIONS.md D-083 and D-084."
     ),
 )

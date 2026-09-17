@@ -883,11 +883,17 @@ def review_trail(session: Session, document_id: UUID) -> list[dict[str, Any]]:
     """
     rows = session.execute(
         text(
-            "SELECT id, user_id, acting_as_tenant_id, action, changes, "
+            "SELECT id, sequence, user_id, acting_as_tenant_id, action, changes, "
             "warning_acknowledgements, note, created_at "
             "FROM review_actions "
             "WHERE document_id = :document_id AND deleted_at IS NULL "
-            "ORDER BY created_at, id"
+            # By `sequence`, never by `created_at`: an edit to an approved
+            # document writes its `edited` and `reopened` rows in ONE
+            # transaction, and `now()` is transaction start time, so both
+            # carry the same timestamp. Ordering by the timestamp and a
+            # random uuid rendered cause and effect in arbitrary order
+            # (DECISIONS.md D-084).
+            "ORDER BY sequence"
         ),
         {"document_id": str(document_id)},
     ).mappings().all()

@@ -39,6 +39,12 @@ class Settings(BaseSettings):
 
     redis_url: str = "redis://localhost:6379/0"
 
+    # Signs the short-lived URLs the review screen's document viewer loads
+    # from (Section 7.4 / 7.12). Separate from the Supabase secrets on
+    # purpose: rotating it invalidates in-flight viewer URLs and nothing
+    # else, so it can be rotated freely without signing anyone out.
+    document_url_signing_secret: str = ""
+
     email_provider_api_key: str = ""
     email_from_address: str = "notifications@docflow.example"
     intake_email_domain: str = "mail.docflow.example"

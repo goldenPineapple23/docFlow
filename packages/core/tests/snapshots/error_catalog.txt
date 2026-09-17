@@ -2,6 +2,10 @@ AUTH-001 [warning/tenant] This link has expired
   what+why: Your invite link is no longer valid.
   next:     Ask your account owner to resend the invite.
 
+AUTH-002 [warning/tenant] Your account can view this, not change it
+  what+why: Viewer accounts can read orders and download exports, but editing and approving are left to reviewers so it's always clear who signed off on an order.
+  next:     Ask an owner or admin on your account to change your role, or to approve this order.
+
 DOC-001 [warning/tenant] We couldn't read this file
   what+why: This PDF is password-protected. DocFlow doesn't open protected files.
   next:     Ask the sender for an unprotected copy, or remove the password and upload it again.

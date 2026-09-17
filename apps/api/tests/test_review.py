@@ -468,6 +468,35 @@ def test_editing_an_approved_document_reopens_it_and_keeps_the_old_snapshot():
 
 
 @requires_review_schema
+def test_the_edit_and_the_reopen_it_causes_are_ordered_by_sequence_not_time():
+    """
+    D-084, pinned to the exact hazard rather than to luck.
+
+    The `edited` row and the `reopened` row it triggers are written in ONE
+    transaction, and Postgres `now()` is transaction start time -- so their
+    `created_at` values are identical and cannot order them. Ordering by
+    `(created_at, id)` with a random uuid tiebreaker rendered cause and
+    effect in arbitrary order; this asserts both halves of that: the
+    timestamps really do tie, and `sequence` really does separate them.
+    """
+    with _TestValidationTenant("Acme Test Distributor -- ordering") as tenant:
+        document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        with tenant_session(tenant.tenant_id) as session:
+            approve_document(session, tenant.tenant_id, document, user_id=tenant.user_id)
+
+        _edit(tenant, document, EditRequest(header={"order_total": "600.00"}))
+
+        trail = review_trail_for(tenant, document)
+        edited = next(r for r in trail if r["action"] == ACTION_EDITED)
+        reopened = next(r for r in trail if r["action"] == ACTION_REOPENED)
+
+        # The hazard: nothing in the timestamps distinguishes them.
+        assert edited["created_at"] == reopened["created_at"]
+        # The fix: the sequence does, and it puts the cause first.
+        assert edited["sequence"] < reopened["sequence"]
+
+
+@requires_review_schema
 def test_re_approving_supersedes_the_first_snapshot_and_keeps_both():
     with _TestValidationTenant("Acme Test Distributor -- reapprove") as tenant:
         document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
