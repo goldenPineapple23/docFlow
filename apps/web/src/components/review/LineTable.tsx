@@ -137,7 +137,12 @@ function LineRow({
                 data-testid={`line-${line.line_number}-${name}`}
                 data-dirty={name in edits ? "true" : "false"}
                 className={[
-                  "mt-1 w-full rounded-md border px-2.5 py-1.5 text-sm transition-colors",
+                  // A notch smaller than the order-details fields, and
+                  // tabular for the numeric ones: line values are read down
+                  // a column and compared against the document, so they
+                  // want to be dense and aligned rather than prominent.
+                  "mt-1 w-full rounded-md border px-2.5 py-1.5 text-[13px] transition-colors",
+                  numeric ? "numeric text-right" : "",
                   "focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100",
                   "disabled:bg-gray-50 disabled:text-gray-500",
                   numeric ? "numeric" : "",
