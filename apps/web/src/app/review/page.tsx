@@ -133,10 +133,10 @@ export default function ReviewQueuePage() {
         <table className="w-full border-collapse text-sm">
           <caption className="sr-only">Purchase orders, oldest first</caption>
           <thead>
-            <tr className="bg-slate-800 text-left text-[11px] uppercase tracking-[0.06em] text-slate-200">
+            <tr className="bg-slate-800 text-center text-[11px] uppercase tracking-[0.06em] text-slate-200">
               <th scope="col" className="px-4 py-3 font-semibold">PO number</th>
               <th scope="col" className="px-4 py-3 font-semibold">Buyer</th>
-              <th scope="col" className="px-4 py-3 text-right font-semibold">Total</th>
+              <th scope="col" className="px-4 py-3 font-semibold">Total</th>
               <th scope="col" className="px-4 py-3 font-semibold">Received</th>
               <th scope="col" className="px-4 py-3 font-semibold">Status</th>
               <th scope="col" className="px-4 py-3 font-semibold">Confidence</th>
