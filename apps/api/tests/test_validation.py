@@ -46,7 +46,7 @@ from docflow_core.validation import (
 )
 from sqlalchemy import text
 
-from tests.conftest import requires_validation_schema
+from tests.conftest import requires_validation_schema, review_schema_available
 
 
 class _TestValidationTenant:
@@ -271,7 +271,18 @@ class _TestValidationTenant:
     def __exit__(self, *exc):
         tid = str(self.tenant_id)
         with platform_session() as session:
+            # 0007's tables, when it has been applied. Snapshots reference
+            # review_actions and warnings reference them too, so both go
+            # before review_actions itself.
+            if review_schema_available():
+                session.execute(
+                    text("DELETE FROM document_snapshots WHERE tenant_id = :tid"), {"tid": tid}
+                )
             session.execute(text("DELETE FROM document_warnings WHERE tenant_id = :tid"), {"tid": tid})
+            if review_schema_available():
+                session.execute(
+                    text("DELETE FROM review_actions WHERE tenant_id = :tid"), {"tid": tid}
+                )
             session.execute(text("DELETE FROM learned_rules WHERE tenant_id = :tid"), {"tid": tid})
             session.execute(text("DELETE FROM document_lines WHERE tenant_id = :tid"), {"tid": tid})
             session.execute(text("DELETE FROM document_headers WHERE tenant_id = :tid"), {"tid": tid})

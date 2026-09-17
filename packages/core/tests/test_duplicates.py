@@ -14,9 +14,9 @@ from __future__ import annotations
 from uuid import uuid4
 
 from docflow_core.duplicates import (
+    PO_NUMBER_KEY_SQL,
     RELATION_CHANGE_ORDER,
     RELATION_DUPLICATE,
-    PO_NUMBER_KEY_SQL,
     normalize_po_number,
     relationship_to,
 )

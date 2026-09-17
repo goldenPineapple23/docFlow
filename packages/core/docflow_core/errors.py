@@ -372,7 +372,10 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
             "One of the dates is far outside the range a purchase order normally carries, "
             "which usually means a digit was misread on the page."
         ),
-        action="Check the date against the original document and correct it, or acknowledge it if it's right.",
+        action=(
+            "Check the date against the original document and correct it, "
+            "or acknowledge it if it's right."
+        ),
         severity="warning",
         audience="tenant",
     ),
@@ -468,6 +471,65 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         ),
         action="Compare the two before approving, so the version that gets exported is the right one.",
         severity="high",
+        audience="tenant",
+    ),
+    # ── REV-0xx · human review and approval (Section 7.3) ────────────────────
+    "REV-001": ErrorCatalogEntry(
+        code="REV-001",
+        title="Some warnings still need a look",
+        message=(
+            "This order has warnings nobody has acknowledged yet. DocFlow doesn't approve an "
+            "order while something on it is still unexplained."
+        ),
+        action="Open each warning, fix the value or confirm it's right, then approve.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "REV-002": ErrorCatalogEntry(
+        code="REV-002",
+        title="This order was already approved",
+        message=(
+            "Someone approved this order before you did. Approving it twice would create a "
+            "second frozen copy, so DocFlow stopped."
+        ),
+        action=(
+            "Reload the order to see the approved version. Edit it if something is wrong "
+            "-- that reopens it for review."
+        ),
+        severity="warning",
+        audience="tenant",
+    ),
+    "REV-003": ErrorCatalogEntry(
+        code="REV-003",
+        title="That field can't be edited here",
+        message=(
+            "The review screen can change the values read off the order. It can't change how "
+            "DocFlow recorded or processed the document."
+        ),
+        action="Edit the order's own fields -- the PO number, dates, buyer, totals, and line items.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "REV-004": ErrorCatalogEntry(
+        code="REV-004",
+        title="This order isn't ready to approve",
+        message=(
+            "Only an order that has finished processing and is waiting for review can be "
+            "approved. This one is in another state."
+        ),
+        action="Wait for processing to finish, or open the order to see why it stopped.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "REV-005": ErrorCatalogEntry(
+        code="REV-005",
+        title="Someone else changed this order first",
+        message=(
+            "This order changed while you had it open, so saving now would quietly overwrite "
+            "what the other person did."
+        ),
+        action="Reload the order, check what changed, then make your edit again.",
+        severity="warning",
         audience="tenant",
     ),
 }

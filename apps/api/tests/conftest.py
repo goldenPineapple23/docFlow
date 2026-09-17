@@ -197,3 +197,55 @@ requires_validation_schema = pytest.mark.skipif(
         "database yet -- see SETUP.md Step 5 / DECISIONS.md D-079."
     ),
 )
+
+
+def review_schema_available() -> bool:
+    """
+    True once supabase/migrations/0007_review_and_approval.sql has been
+    applied (the `review_actions` and `document_snapshots` tables, the
+    approval columns on `documents`, and the acknowledgement link on
+    `document_warnings`). Same manual-application constraint as 0002-0006 --
+    the docflow_app role has no CREATE privilege (D-013/D-017) -- so tests
+    needing these skip cleanly until the founder applies it (D-083).
+    """
+    if not validation_schema_available():
+        return False
+    from docflow_core.db import get_engine
+    from sqlalchemy import text as _text
+
+    try:
+        with get_engine().connect() as conn:
+            conn.execute(
+                _text(
+                    "SELECT id, tenant_id, document_id, user_id, acting_as_tenant_id, action, "
+                    "changes, warning_acknowledgements, note, deleted_at "
+                    "FROM review_actions LIMIT 0"
+                )
+            )
+            conn.execute(
+                _text(
+                    "SELECT id, tenant_id, document_id, review_action_id, snapshot, "
+                    "snapshot_sha256, superseded_at FROM document_snapshots LIMIT 0"
+                )
+            )
+            conn.execute(
+                _text(
+                    "SELECT approved_at, approved_by, approved_snapshot_hash, review_started_at "
+                    "FROM documents LIMIT 0"
+                )
+            )
+            conn.execute(
+                _text("SELECT acknowledged_review_action_id FROM document_warnings LIMIT 0")
+            )
+        return True
+    except Exception:
+        return False
+
+
+requires_review_schema = pytest.mark.skipif(
+    not review_schema_available(),
+    reason=(
+        "supabase/migrations/0007_review_and_approval.sql has not been applied to this "
+        "database yet -- see SETUP.md Step 5 / DECISIONS.md D-083."
+    ),
+)

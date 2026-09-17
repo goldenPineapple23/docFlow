@@ -94,6 +94,26 @@ INT-004 [high/both] Held: sender couldn't be verified
   what+why: This email failed the sending domain's own authentication check, so DocFlow held it instead of processing it automatically.
   next:     DocFlow will review this before releasing it -- no action is needed from you right now.
 
+REV-001 [warning/tenant] Some warnings still need a look
+  what+why: This order has warnings nobody has acknowledged yet. DocFlow doesn't approve an order while something on it is still unexplained.
+  next:     Open each warning, fix the value or confirm it's right, then approve.
+
+REV-002 [warning/tenant] This order was already approved
+  what+why: Someone approved this order before you did. Approving it twice would create a second frozen copy, so DocFlow stopped.
+  next:     Reload the order to see the approved version. Edit it if something is wrong -- that reopens it for review.
+
+REV-003 [warning/tenant] That field can't be edited here
+  what+why: The review screen can change the values read off the order. It can't change how DocFlow recorded or processed the document.
+  next:     Edit the order's own fields -- the PO number, dates, buyer, totals, and line items.
+
+REV-004 [warning/tenant] This order isn't ready to approve
+  what+why: Only an order that has finished processing and is waiting for review can be approved. This one is in another state.
+  next:     Wait for processing to finish, or open the order to see why it stopped.
+
+REV-005 [warning/tenant] Someone else changed this order first
+  what+why: This order changed while you had it open, so saving now would quietly overwrite what the other person did.
+  next:     Reload the order, check what changed, then make your edit again.
+
 VAL-001 [warning/tenant] Line total doesn't match quantity times price
   what+why: On this line, the printed total isn't the quantity multiplied by the unit price. DocFlow changed nothing -- all three numbers are exactly as the document printed them.
   next:     Check the line against the original document and correct whichever number is wrong.
