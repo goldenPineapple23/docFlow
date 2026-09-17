@@ -788,3 +788,21 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Decision:** the mint route detects the type from the file's own bytes and returns `previewable` plus a human name for the format. The viewer renders the iframe when it can, and otherwise says which format it is, that DocFlow read it fine, and offers the file itself. `text/html` and `image/svg+xml` are permanently on the not-previewable list regardless of what a browser could do with them — rendering document-derived markup is precisely what Section 7.12 forbids.
 
 **Related:** Section 7.11, Section 7.12, D-089, `scripts/po_formats.py`.
+
+## D-092 — Previews for unviewable formats are built in the worker, never in the API
+
+**Context:** Section 7.11 accepts Word, Excel, raw email, RTF and TIFF on purpose, and no browser renders any of them. The review screen exists to show the original beside the extracted values, so for those formats the most important screen in the product was half empty and the reviewer's only recourse was to download the file and open it in another application. The founder asked, reasonably, whether the rule keeping parsers out of the web process could be overridden to fix it.
+
+**It cannot, and the reason is the whole point of the section.** Section 7.11 opens: "Parsing libraries are the largest unowned attack surface in this system." These files arrive from a distributor's buyers, through a public intake address, from people DocFlow has no relationship with. A malformed TIFF that hangs, exhausts memory, or achieves execution inside the API process takes down the application for every tenant and does it inside the process holding the database credentials. The same file inside the worker takes one document to `failed`. Section 10 states it as a prohibition outright: "Parse or convert any uploaded file in the web process."
+
+**Decision:** the preview is produced where parsing already happens — the worker for real intake, a seeding script for demo data — written to storage under the tenant prefix like any other file, and recorded on `documents` (migration 0009). The API serves stored bytes it never decoded. The feature the founder wanted ships; the rule stands untouched.
+
+**Two kinds of preview, and the difference is shown to the reviewer rather than hidden:**
+- `converted_image` — a TIFF fax re-encoded as PNG. The page as it was sent.
+- `extracted_text` — the text out of a Word file, spreadsheet or email. This is **not** the original layout, and someone checking a figure against it is reading DocFlow's rendering rather than the document, so the screen says so in as many words.
+
+**Constrained at the database, not just in code:** `preview_media_type` has a CHECK allowing only PNG, JPEG, PDF and plain text. `text/html` and `image/svg+xml` can never be stored, so this cannot become a path to rendering document-derived markup (Section 7.12).
+
+**Enforced structurally:** `apps/api/tests/test_parsing_boundary.py` walks the AST of everything under `apps/api/app/` and fails if any file imports Pillow, python-docx, openpyxl, a PDF library, `zipfile`, or `docflow_core.previews`. A second test proves the scan catches a planted offender, so a green result means "nothing found" rather than "nothing looked at". This rule is easy to break by accident precisely because importing a parser is always the shortest path to a working screen — it was nearly broken that way here.
+
+**Related:** Section 7.11, Section 7.12, Section 10, D-091, `packages/core/docflow_core/previews.py`.

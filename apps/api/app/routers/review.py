@@ -618,17 +618,27 @@ def original_document_url(
     with tenant_session(tenant_id) as session:
         row = session.execute(
             text(
-                "SELECT storage_path, original_filename FROM documents "
-                "WHERE id = :id AND deleted_at IS NULL"
+                "SELECT storage_path, original_filename, preview_storage_path, preview_kind "
+                "FROM documents WHERE id = :id AND deleted_at IS NULL"
             ),
             {"id": str(document_id)},
         ).mappings().first()
     if row is None:
         raise HTTPException(status_code=404)
 
-    content = read_file(row["storage_path"])
-    detected = file_types.detect_file_type(content, _extension(row["original_filename"]))
-    previewable = detected is not None and detected.name not in _NOT_PREVIEWABLE
+    # A stored preview means the worker (or a seeding script) already turned
+    # this into something a browser shows. The API never decodes a document
+    # itself -- Section 7.11 keeps parsing out of the web process -- so all
+    # it does here is notice that a viewable rendering exists.
+    has_preview = bool(row["preview_storage_path"])
+    detected = (
+        None
+        if has_preview
+        else file_types.detect_file_type(
+            read_file(row["storage_path"]), _extension(row["original_filename"])
+        )
+    )
+    previewable = has_preview or (detected is not None and detected.name not in _NOT_PREVIEWABLE)
 
     token, expires_at = mint_document_token(document_id, tenant_id)
     return {
@@ -637,6 +647,9 @@ def original_document_url(
         "previewable": previewable,
         "format": _FORMAT_NAMES.get(detected.name) if detected else None,
         "filename": row["original_filename"],
+        # Told honestly: a converted image is the page as it was sent;
+        # extracted text is DocFlow's rendering, not the original layout.
+        "preview_kind": row["preview_kind"],
     }
 
 
@@ -675,13 +688,25 @@ def original_document_content(
     with tenant_session(tenant_id) as session:
         row = session.execute(
             text(
-                "SELECT storage_path, original_filename FROM documents "
-                "WHERE id = :id AND deleted_at IS NULL"
+                "SELECT storage_path, original_filename, preview_storage_path, "
+                "preview_media_type FROM documents WHERE id = :id AND deleted_at IS NULL"
             ),
             {"id": str(document_id)},
         ).mappings().first()
     if row is None:
         raise HTTPException(status_code=404)
+
+    # A stored preview is served as it was produced, under the media type
+    # recorded with it. 0009 constrains that column to a short allowlist, so
+    # this cannot become a way to serve document-derived markup. Producing it
+    # required decoding the document, which happened in the worker -- never
+    # here (Section 7.11).
+    if row["preview_storage_path"] and row["preview_media_type"]:
+        return Response(
+            content=read_file(row["preview_storage_path"]),
+            media_type=row["preview_media_type"],
+            headers=_viewer_headers(),
+        )
 
     content = read_file(row["storage_path"])
     return Response(

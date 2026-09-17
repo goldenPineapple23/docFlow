@@ -46,6 +46,7 @@ from uuid import UUID, uuid4
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import po_formats
+from docflow_core import file_types, previews
 from docflow_core.db import platform_session, tenant_session
 from docflow_core.matching import match_document_lines
 from docflow_core.storage import save_file
@@ -191,6 +192,10 @@ def _reset(tenant_id: UUID) -> None:
     print("Cleared the demo tenant's existing orders.")
 
 
+def _ext(filename: str) -> str:
+    return filename[filename.rindex(".") :].lower() if "." in filename else ""
+
+
 def _render_line(sku: str, description: str, qty: str, uom: str, price: str, total: str) -> str:
     return f"{sku:<11} {description:<36} {qty:>4}   {uom:<5} {'$' + price:>10} {'$' + total:>10}"
 
@@ -271,6 +276,12 @@ def _build_order(index: int, rng: random.Random) -> dict:
         printed_total = extracted_total
 
     po_number = f"{buyer.split()[0][:3].upper()}-{4000 + index}"
+    # Most buyers' systems print the currency; a minority send a bare "$".
+    # Seeding every order as symbol-only made every single one carry a
+    # low-confidence currency and an "inferred from a symbol" check, which
+    # made the whole queue look uncertain and taught a reviewer to ignore
+    # the flag -- the precise failure D-073 warns about.
+    currency_stated = index % 10 not in (3, 7)
     header_confidence = {
         "po_number": 0.98,
         "order_date": 0.95,
@@ -280,9 +291,9 @@ def _build_order(index: int, rng: random.Random) -> dict:
         "ship_to_address": 0.95,
         "payment_terms": 0.94,
         "order_total": 0.96,
-        # The document prints "$" and never the letters USD, so the currency
-        # is inferred from a symbol and capped at 0.6 (Section 7.1).
-        "currency": 0.6,
+        # Capped at 0.6 only when the document never says which currency it
+        # is in (Section 7.1).
+        "currency": 0.97 if currency_stated else 0.6,
         "notes": 0.9,
     }
     if defect == "low_confidence":
@@ -297,7 +308,7 @@ def _build_order(index: int, rng: random.Random) -> dict:
         delivery_date=delivery.strftime("%m/%d/%Y"),
         terms=rng.choice(TERMS),
         lines="\n".join(printed_rows),
-        total_label="ORDER TOTAL:",
+        total_label="ORDER TOTAL (USD):" if currency_stated else "ORDER TOTAL:",
         order_total="$" + _money(printed_total),
         note=rng.choice(
             [
@@ -326,6 +337,7 @@ def _build_order(index: int, rng: random.Random) -> dict:
     )
 
     return {
+        "currency_inferred": not currency_stated,
         "format": fmt,
         "filename": filename,
         "content": content,
@@ -348,6 +360,22 @@ def _insert(tenant_id: UUID, order: dict, *, content_sha: str | None = None) -> 
     content = order["content"]
     storage_path = save_file(tenant_id, order["filename"], content)
     document_id = uuid4()
+
+    # A viewable rendering for the formats no browser shows (D-092). Built
+    # HERE, in a script, never in the web process -- Section 7.11 keeps
+    # parsing out of the API, and decoding a TIFF or reading a DOCX is
+    # parsing. The worker does the same thing for real intake.
+    preview_path = preview_media_type = preview_kind = None
+    detected = file_types.detect_file_type(content, _ext(order["filename"]))
+    if detected is not None and previews.needs_preview(detected.name):
+        preview = previews.build_preview(content, detected.name)
+        if preview is not None:
+            suffix = ".png" if preview.media_type == "image/png" else (
+                ".jpg" if preview.media_type == "image/jpeg" else ".txt"
+            )
+            preview_path = save_file(tenant_id, f"{order['po_number']}-preview{suffix}", preview.content)
+            preview_media_type = preview.media_type
+            preview_kind = preview.kind
     sha = content_sha or hashlib.sha256(content).hexdigest()
     overall = min(Decimal(str(v)) for v in order["header_confidence"].values())
 
@@ -357,10 +385,12 @@ def _insert(tenant_id: UUID, order: dict, *, content_sha: str | None = None) -> 
                 """
                 INSERT INTO documents
                     (id, tenant_id, original_filename, storage_path, source, status,
-                     content_sha256, injection_suspected, overall_confidence, created_at)
+                     content_sha256, injection_suspected, overall_confidence, created_at,
+                     preview_storage_path, preview_media_type, preview_kind)
                 VALUES
                     (:id, :tenant_id, :filename, :storage_path, :source, 'needs_review',
-                     :sha, false, :confidence, :created_at)
+                     :sha, false, :confidence, :created_at,
+                     :preview_path, :preview_media_type, :preview_kind)
                 """
             ),
             {
@@ -372,6 +402,9 @@ def _insert(tenant_id: UUID, order: dict, *, content_sha: str | None = None) -> 
                 "sha": sha,
                 "confidence": str(overall),
                 "created_at": order["received"],
+                "preview_path": preview_path,
+                "preview_media_type": preview_media_type,
+                "preview_kind": preview_kind,
             },
         )
         session.execute(
@@ -385,7 +418,8 @@ def _insert(tenant_id: UUID, order: dict, *, content_sha: str | None = None) -> 
                 VALUES
                     (:document_id, :tenant_id, :po_number, :order_date, :delivery_date,
                      :buyer, :email, :address, 'Net 30',
-                     :order_total, 'USD', NULL, :header_confidence, true, now(), now())
+                     :order_total, 'USD', NULL, :header_confidence, :currency_inferred,
+                     now(), now())
                 """
             ),
             {
@@ -399,6 +433,7 @@ def _insert(tenant_id: UUID, order: dict, *, content_sha: str | None = None) -> 
                 "address": order["address"],
                 "order_total": order["order_total"],
                 "header_confidence": json.dumps(order["header_confidence"]),
+                "currency_inferred": order["currency_inferred"],
             },
         )
         for item in order["lines"]:

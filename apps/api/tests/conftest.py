@@ -239,6 +239,14 @@ def review_schema_available() -> bool:
             conn.execute(
                 _text("SELECT acknowledged_review_action_id FROM document_warnings LIMIT 0")
             )
+            # 0009: the review API reads these on every document detail and
+            # viewer request, so the review tests gate on it too (D-092).
+            conn.execute(
+                _text(
+                    "SELECT preview_storage_path, preview_media_type, preview_kind "
+                    "FROM documents LIMIT 0"
+                )
+            )
         return True
     except Exception:
         return False
@@ -247,8 +255,8 @@ def review_schema_available() -> bool:
 requires_review_schema = pytest.mark.skipif(
     not review_schema_available(),
     reason=(
-        "supabase/migrations/0007_review_and_approval.sql and 0008_review_action_sequence.sql "
-        "have not both been applied to this database yet -- see SETUP.md Step 5 / "
-        "DECISIONS.md D-083 and D-084."
+        "supabase/migrations/0007, 0008 and 0009 have "
+        "not all been applied to this database yet -- see SETUP.md Step 5 / "
+        "DECISIONS.md D-083, D-084 and D-092."
     ),
 )

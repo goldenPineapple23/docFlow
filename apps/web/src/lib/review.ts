@@ -255,6 +255,11 @@ export function originalDocumentUrl(id: string): Promise<{
   previewable: boolean;
   format: string | null;
   filename: string;
+  // 'converted_image' -- the page as it was sent, re-encoded so a browser
+  // can show it. 'extracted_text' -- the text DocFlow read out of a Word
+  // file, spreadsheet or email, which is NOT the original layout. null when
+  // the original is shown as-is.
+  preview_kind: "converted_image" | "extracted_text" | null;
 }> {
   return request(`/review/documents/${id}/original`);
 }

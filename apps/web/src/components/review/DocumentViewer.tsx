@@ -29,7 +29,13 @@ import { originalDocumentUrl } from "@/lib/review";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
-type Minted = { url: string; previewable: boolean; format: string | null; filename: string };
+type Minted = {
+  url: string;
+  previewable: boolean;
+  format: string | null;
+  filename: string;
+  previewKind: "converted_image" | "extracted_text" | null;
+};
 
 export function DocumentViewer({
   documentId,
@@ -55,6 +61,7 @@ export function DocumentViewer({
             previewable: result.previewable ?? true,
             format: result.format ?? null,
             filename: result.filename ?? filename,
+            previewKind: result.preview_kind ?? null,
           });
         }
       })
@@ -114,16 +121,34 @@ export function DocumentViewer({
   }
 
   return (
-    <iframe
-      data-testid="document-viewer"
-      title={`Original document: ${minted.filename}`}
-      src={minted.url}
-      // No allow-scripts, no allow-same-origin, no allow-popups, no
-      // allow-forms. The document is a picture of a page, not a program.
-      sandbox=""
-      referrerPolicy="no-referrer"
-      className="h-full w-full rounded-xl border border-gray-200 bg-white"
-    />
+    <div className="flex h-full flex-col gap-2">
+      {/*
+        Say which of three things the reviewer is looking at. "Text DocFlow
+        read from this file" matters most: it is not the original layout, and
+        someone checking a number against it should know they are reading
+        DocFlow's rendering rather than the document itself (D-092).
+      */}
+      {minted.previewKind ? (
+        <p
+          data-testid="preview-kind"
+          className="rounded-md bg-gray-100 px-3 py-1.5 text-xs text-gray-600"
+        >
+          {minted.previewKind === "converted_image"
+            ? `Converted for viewing from ${minted.format ?? "the original"} — this is the page as it was sent.`
+            : `Text DocFlow read from ${minted.format ?? "this file"} — the wording is the document's, the layout isn't.`}
+        </p>
+      ) : null}
+      <iframe
+        data-testid="document-viewer"
+        title={`Original document: ${minted.filename}`}
+        src={minted.url}
+        // No allow-scripts, no allow-same-origin, no allow-popups, no
+        // allow-forms. The document is a picture of a page, not a program.
+        sandbox=""
+        referrerPolicy="no-referrer"
+        className="min-h-0 w-full flex-1 rounded-xl border border-gray-200 bg-white"
+      />
+    </div>
   );
 }
 
