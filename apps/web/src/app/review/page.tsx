@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ReviewApiError, listDocuments, type QueueDocument } from "@/lib/review";
 import { ConfidenceBadge } from "@/components/review/confidence";
 import { StatusBadge } from "@/components/StatusBadge";
+import { formatMoney } from "@/lib/money";
 import { AppHeader } from "@/components/AppHeader";
 
 /**
@@ -136,7 +137,7 @@ export default function ReviewQueuePage() {
             <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
               <th scope="col" className="px-4 py-2.5 font-medium">PO number</th>
               <th scope="col" className="px-4 py-2.5 font-medium">Buyer</th>
-              <th scope="col" className="px-4 py-2.5 font-medium">Total</th>
+              <th scope="col" className="px-4 py-2.5 text-right font-medium">Total</th>
               <th scope="col" className="px-4 py-2.5 font-medium">Received</th>
               <th scope="col" className="px-4 py-2.5 font-medium">Status</th>
               <th scope="col" className="px-4 py-2.5 font-medium">Confidence</th>
@@ -160,8 +161,8 @@ export default function ReviewQueuePage() {
                   </Link>
                 </td>
                 <td className="px-4 py-3 text-slate-700">{doc.buyer_name ?? "—"}</td>
-                <td className="numeric px-4 py-3 text-slate-900">
-                  {doc.order_total ?? "—"} {doc.currency ?? ""}
+                <td className="numeric px-4 py-3 text-right text-slate-900">
+                  {formatMoney(doc.order_total, doc.currency)}
                 </td>
                 <td className="px-4 py-3 text-slate-600">
                   {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : "—"}

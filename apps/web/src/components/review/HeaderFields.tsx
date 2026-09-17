@@ -2,6 +2,7 @@
 
 import type { DocumentHeader } from "@/lib/review";
 import { ConfidenceBadge, ProvenanceNote, isLowConfidence } from "./confidence";
+import { formatAmount } from "@/lib/money";
 
 /**
  * The editable header (CLAUDE.md Section 7.3 / 7.12).
@@ -16,6 +17,9 @@ import { ConfidenceBadge, ProvenanceNote, isLowConfidence } from "./confidence";
  * and Section 7.1 does not allow a float anywhere near money. `type="date"`
  * would silently reformat or reject what the document actually printed.
  */
+
+// The header fields that hold an amount.
+const MONEY_FIELDS = new Set(["order_total"]);
 
 export const HEADER_FIELDS: Array<{ name: keyof DocumentHeader & string; label: string; wide?: boolean }> = [
   { name: "po_number", label: "PO number" },
@@ -44,20 +48,21 @@ export function HeaderFields({
   return (
     <section
       aria-labelledby="header-heading"
-      // A titled card. The first walkthrough tester could not tell where the
-      // order's own details ended and the line items began, because both
-      // were unlabelled fields on one flat surface. The separation is made
-      // with a hairline border and a heading rather than a block of colour.
-      className="space-y-4 rounded-xl border border-gray-200 p-5"
+      // Each section gets its own tint. The first walkthrough tester could
+      // not tell where the order's own details ended and the line items
+      // began; a hairline border alone was not enough, so the three kinds of
+      // information are now three surfaces -- slate for the order, indigo
+      // for its lines, amber for the things needing attention.
+      className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-5"
     >
       <div className="space-y-0.5">
         <h2
           id="header-heading"
-          className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500"
+          className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600"
         >
           Order details
         </h2>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-slate-500">
           What this order says as a whole — who sent it, when, and the total.
         </p>
       </div>
@@ -90,6 +95,18 @@ export function HeaderFields({
                   <ConfidenceBadge value={confidence} />
                 </span>
               </div>
+              {/*
+                A grouped reading of the amount, BESIDE the field and never
+                inside it. The input has to hold exactly what will be sent to
+                a NUMERIC column, so it shows "1356.00"; this shows
+                "1,356.00" so the figure can be checked against the document
+                at a glance. Only rendered when grouping changes anything.
+              */}
+              {MONEY_FIELDS.has(name) && formatAmount(current) !== (current ?? "") ? (
+                <p data-testid={`header-grouped-${name}`} className="mt-1 text-xs text-gray-500">
+                  reads as {formatAmount(current)}
+                </p>
+              ) : null}
               <input
                 id={`header-${name}`}
                 name={name}
@@ -103,7 +120,7 @@ export function HeaderFields({
                   "mt-1.5 w-full rounded-md border px-2.5 py-1.5 text-sm transition-colors",
                   "focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100",
                   "disabled:bg-gray-50 disabled:text-gray-500",
-                  low ? "border-amber-300 bg-amber-50/60" : "border-gray-300",
+                  low ? "border-amber-300 bg-amber-50" : "border-slate-300 bg-white",
                   name in edits ? "border-blue-400 bg-blue-50/40" : "",
                 ].join(" ")}
               />

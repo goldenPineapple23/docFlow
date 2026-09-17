@@ -631,13 +631,19 @@ def original_document_url(
     # itself -- Section 7.11 keeps parsing out of the web process -- so all
     # it does here is notice that a viewable rendering exists.
     has_preview = bool(row["preview_storage_path"])
-    detected = (
-        None
-        if has_preview
-        else file_types.detect_file_type(
-            read_file(row["storage_path"]), _extension(row["original_filename"])
-        )
-    )
+    detected = None
+    if not has_preview:
+        try:
+            detected = file_types.detect_file_type(
+                read_file(row["storage_path"]), _extension(row["original_filename"])
+            )
+        except OSError:
+            # The stored object is gone or unreadable. That is a storage
+            # problem, not a reason to fail the whole review screen -- the
+            # extracted values are what the reviewer mainly needs, and the
+            # viewer says plainly that the original cannot be shown.
+            detected = None
+
     previewable = has_preview or (detected is not None and detected.name not in _NOT_PREVIEWABLE)
 
     token, expires_at = mint_document_token(document_id, tenant_id)
@@ -645,12 +651,39 @@ def original_document_url(
         "url": f"/review/documents/{document_id}/original/content?token={token}",
         "expires_at": expires_at,
         "previewable": previewable,
-        "format": _FORMAT_NAMES.get(detected.name) if detected else None,
+        "format": (
+            _FORMAT_NAMES.get(detected.name)
+            if detected
+            # With a stored preview the bytes are never examined here, so the
+            # format is named from the extension. That is string handling,
+            # not parsing -- nothing decodes the file (Section 7.11).
+            else _FORMAT_BY_EXTENSION.get(_extension(row["original_filename"]))
+        ),
         "filename": row["original_filename"],
         # Told honestly: a converted image is the page as it was sent;
         # extracted text is DocFlow's rendering, not the original layout.
         "preview_kind": row["preview_kind"],
     }
+
+
+# Naming a format from its extension, for the one message that needs a word
+# for it. Never used to decide how anything is handled -- Section 7.11 is
+# emphatic that the extension is not trusted for that ("magic-byte type
+# detection (never trust the extension or the Content-Type header)").
+_FORMAT_BY_EXTENSION = {
+    ".tif": "a TIFF scan",
+    ".tiff": "a TIFF scan",
+    ".docx": "a Word document",
+    ".doc": "a Word document",
+    ".xlsx": "an Excel spreadsheet",
+    ".xls": "an Excel spreadsheet",
+    ".eml": "an email",
+    ".msg": "an Outlook message",
+    ".rtf": "a rich-text document",
+    ".odt": "an OpenDocument file",
+    ".ods": "an OpenDocument spreadsheet",
+    ".heic": "an iPhone photo",
+}
 
 
 def _extension(filename: str | None) -> str:
@@ -708,7 +741,13 @@ def original_document_content(
             headers=_viewer_headers(),
         )
 
-    content = read_file(row["storage_path"])
+    try:
+        content = read_file(row["storage_path"])
+    except OSError as exc:
+        # Same reasoning as the mint route: a missing storage object is a 404
+        # for this one file, never a 500 for the review screen.
+        raise HTTPException(status_code=404) from exc
+
     return Response(
         content=content,
         media_type=_viewable_media_type(content),

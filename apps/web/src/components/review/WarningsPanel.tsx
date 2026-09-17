@@ -1,6 +1,7 @@
 "use client";
 
 import type { DocumentWarning } from "@/lib/review";
+import { formatAmount } from "@/lib/money";
 
 /**
  * Warnings, and the acknowledgement gate on approval (CLAUDE.md Section 7.3:
@@ -17,6 +18,19 @@ import type { DocumentWarning } from "@/lib/review";
  */
 
 const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, warning: 2, info: 3 };
+
+// Which keys in a warning's detail payload are amounts. Grouping is applied
+// only to these -- a line number or a confidence score with a comma in it
+// would be worse than one without.
+const MONEY_KEYS = new Set([
+  "order_total",
+  "sum_of_lines",
+  "difference",
+  "expected",
+  "line_total",
+  "unit_price",
+  "tolerance",
+]);
 
 export function WarningsPanel({
   warnings,
@@ -136,7 +150,10 @@ function WarningDetail({ detail }: { detail: Record<string, string> }) {
     <span className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
       {entries.map(([key, value]) => (
         <span key={key} className="text-xs text-gray-600">
-          {key.replace(/_/g, " ")}: <span className="numeric text-gray-900">{String(value)}</span>
+          {key.replace(/_/g, " ")}:{" "}
+          <span className="numeric text-gray-900">
+            {MONEY_KEYS.has(key) ? formatAmount(String(value)) : String(value)}
+          </span>
         </span>
       ))}
     </span>
