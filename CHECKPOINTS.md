@@ -78,6 +78,15 @@ browser renders, and the visual pass.
   the checkpoint (commit `1823147`): line items are now a table, one row per
   line, with matching state in a row beneath that opens whenever there is
   something to see.
+- **The worker does not generate document previews.** `docflow_core.previews`
+  is called only from `scripts/seed_demo_data.py`, so demo data previews and
+  real intake does not: a Word, Excel, email or TIFF document arriving by
+  upload or email shows the "can't display this one" fallback. The module,
+  the storage columns (0009) and the serving path are all built and working
+  — what is missing is the call inside `apps/worker/app/tasks/
+  parse_and_extract.py`, after parsing, writing the preview to storage and
+  setting `preview_storage_path` / `preview_media_type` / `preview_kind`.
+  Small, and it must stay in the worker (Section 7.11).
 - **Aesthetics** — the founder wants a further pass. The document viewer is
   explicitly liked and should be left alone.
 - **Phase 5 asks already raised by the founder**, correctly scheduled and not
