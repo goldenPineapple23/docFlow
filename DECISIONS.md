@@ -722,3 +722,29 @@ src/app/layout.tsx(20,50): error TS2304: Cannot find name 'LayoutProps'.
 - **Red CI that nobody has looked at is indistinguishable from no CI.** Section 10 forbids merging with CI red; that rule only does any work if someone reads the result. Three phases shipped on top of a job that had never gone green once.
 
 **Related:** Section 10, D-086, `.github/workflows/ci.yml`, `apps/web/src/app/layout.tsx`.
+
+## D-088 — Session tokens are verified by the token's own algorithm, not by which setting is populated
+
+**Context:** the founder reported that logging in had never worked — not in Phase 0, not after a password reset, and `/admin` always behaved as though the Console did not exist. Everything on the backend looked correct: the Supabase Auth account existed and was confirmed, `users.auth_user_id` was linked to it, and `platform_admins` held a matching row.
+
+**The bug:** `_decode_bearer_token` chose its verification path from configuration rather than from the token:
+
+```python
+if settings.supabase_jwt_secret:
+    try:
+        return jwt.decode(token, secret, algorithms=["HS256"], ...)
+    except jwt.PyJWTError:
+        return None          # never falls through to JWKS
+```
+
+The project's JWKS endpoint publishes a single **ES256** key — asymmetric signing is the default for new Supabase projects — while `SUPABASE_JWT_SECRET` was also present in `.env` from the legacy-secret path added in `34d0fc7`. So every real session token took the HS256 branch, failed, and returned `None`. Sign-in succeeded at Supabase, the browser held a valid session, and then the API answered **401 to every authenticated request** and **404 to every `/admin/*` request** — the latter being correct-by-design behaviour for a non-admin (Section 7.15.1), which is precisely why it read as "the Console is missing" rather than "auth is broken".
+
+**Decision:** read the token's `alg` header, then pick the key material for it. `HS256` verifies against the configured shared secret; `ES256`/`RS256` verify against the JWKS signing key. Anything else, including `none`, is refused. A server with neither path configured still raises, because that is a deployment mistake rather than a bad token.
+
+**Why selecting on `alg` is safe here:** the classic algorithm-confusion attack works by handing an asymmetric *public* key to an HMAC verifier. That is unreachable in this shape — the HS256 branch only ever uses the configured shared secret, which an attacker does not have, and the asymmetric branch only ever uses JWKS public keys, which cannot forge a signature. The accepted algorithms are an explicit allowlist, and a test asserts an `alg: none` token is refused.
+
+**Why it survived three phases of green tests:** every API test mints its own HS256 token against a test secret, because that path needs no network. The suite therefore exercised the branch that worked and never the branch a real deployment uses. The tests were not wrong; they were complete about the wrong thing. `apps/api/tests/test_token_verification.py` now covers both algorithms with a locally generated key pair, so the asymmetric path is exercised for real without reaching Supabase.
+
+**The general lesson:** a test fixture that takes a shortcut for convenience — here, symmetric signing to avoid a network call — can quietly become the only path anything ever tests. Worth asking, of any fixture, which production path it is standing in for and whether that path is covered anywhere.
+
+**Related:** Section 3, Section 7.5, Section 7.15.1, `apps/api/app/deps.py`, D-087.

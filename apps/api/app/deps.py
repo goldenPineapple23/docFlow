@@ -55,43 +55,80 @@ class AuthenticatedIdentity:
     is_platform_admin: bool
 
 
+# The only algorithms a Supabase session token is ever signed with. An
+# allowlist, so a token claiming `alg: none` -- or any other algorithm -- is
+# rejected before a key is chosen for it.
+_SYMMETRIC_ALGS = frozenset({"HS256"})
+_ASYMMETRIC_ALGS = frozenset({"ES256", "RS256"})
+
+
 def _decode_bearer_token(authorization: str | None) -> dict | None:
-    """Returns the decoded claims, or None if there's no usable/valid token."""
+    """
+    Returns the decoded claims, or None if there's no usable/valid token.
+
+    **The verification path is chosen by the token's own `alg`, not by which
+    setting happens to be filled in.** A Supabase project signs either with
+    the legacy shared secret (HS256) or with asymmetric keys published at its
+    JWKS endpoint (ES256/RS256), and a project can have a legacy secret
+    configured while issuing ES256 -- which is the default for new projects.
+    An earlier version branched on `if settings.supabase_jwt_secret` and
+    returned None when HS256 verification failed, so on such a project every
+    real session token was rejected: sign-in succeeded at Supabase and then
+    the API answered 401 to everything, and /admin/* answered 404. See
+    DECISIONS.md D-088.
+
+    Selecting the key by `alg` is safe here because the two algorithm classes
+    take keys from different places: HS256 uses the project's shared secret,
+    which an attacker does not have, and ES256/RS256 use public keys from
+    JWKS, which cannot be used to forge a signature. The classic algorithm-
+    confusion attack -- handing a public key to an HMAC verifier -- is not
+    reachable, because the HS256 branch only ever uses the configured secret.
+    """
     if not authorization or not authorization.lower().startswith("bearer "):
         return None
     token = authorization.split(" ", 1)[1]
     settings = get_settings()
 
-    if settings.supabase_jwt_secret:
+    if not settings.supabase_jwt_secret and not settings.supabase_url:
+        raise RuntimeError(
+            "Neither SUPABASE_JWT_SECRET nor SUPABASE_URL is set -- there's no way to verify a "
+            "session token. See SETUP.md Step 1."
+        )
+
+    try:
+        alg = jwt.get_unverified_header(token).get("alg")
+    except jwt.PyJWTError:
+        return None
+
+    if alg in _SYMMETRIC_ALGS and settings.supabase_jwt_secret:
         try:
             return jwt.decode(
                 token,
                 settings.supabase_jwt_secret,
-                algorithms=["HS256"],
+                algorithms=sorted(_SYMMETRIC_ALGS),
                 audience="authenticated",
             )
         except jwt.PyJWTError:
             return None
 
-    if not settings.supabase_url:
-        raise RuntimeError(
-            "Neither SUPABASE_JWT_SECRET nor SUPABASE_URL is set -- there's no way to verify a "
-            "session token. See SETUP.md Step 1."
-        )
-    try:
-        signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
-        return jwt.decode(
-            token,
-            signing_key.key,
-            algorithms=["ES256", "RS256"],
-            audience="authenticated",
-        )
-    except Exception:
-        # Covers jwt.PyJWTError as well as JWKS-fetch failures (network, bad
-        # url, unknown kid) -- all of them mean "can't verify this token",
-        # not "the server is broken", so this fails closed like the HS256
-        # path above rather than raising.
-        return None
+    if alg in _ASYMMETRIC_ALGS and settings.supabase_url:
+        try:
+            signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
+            return jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=sorted(_ASYMMETRIC_ALGS),
+                audience="authenticated",
+            )
+        except Exception:
+            # Covers jwt.PyJWTError as well as JWKS-fetch failures (network,
+            # bad url, unknown kid) -- all of them mean "can't verify this
+            # token", not "the server is broken", so this fails closed rather
+            # than raising.
+            return None
+
+    # An algorithm we do not accept, or one we have no key material for.
+    return None
 
 
 def _resolve_identity(authorization: str | None) -> AuthenticatedIdentity | None:
