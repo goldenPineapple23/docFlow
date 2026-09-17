@@ -74,9 +74,10 @@ browser renders, and the visual pass.
   elevated terminal.
 - **LibreOffice is not installed**, so legacy `.doc` degrades to a clean
   `DOC-017` and one worker test skips.
-- **The line-items section is taller than it needs to be.** Each line renders
-  as a card; a table would cut it to roughly a third and reinforce the
-  order-versus-lines distinction structurally. Drafted, not applied.
+- ~~The line-items section is taller than it needs to be.~~ **Done** after
+  the checkpoint (commit `1823147`): line items are now a table, one row per
+  line, with matching state in a row beneath that opens whenever there is
+  something to see.
 - **Aesthetics** — the founder wants a further pass. The document viewer is
   explicitly liked and should be left alone.
 - **Phase 5 asks already raised by the founder**, correctly scheduled and not
