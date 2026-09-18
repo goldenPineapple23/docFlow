@@ -28,7 +28,7 @@ from io import BytesIO
 from uuid import UUID, uuid4
 
 import anthropic
-from docflow_core import file_types
+from docflow_core import file_types, previews
 from docflow_core.buyers import identify_and_link_buyer
 from docflow_core.config import get_settings
 from docflow_core.db import tenant_session
@@ -39,7 +39,7 @@ from docflow_core.extraction import (
     wrap_document_content,
 )
 from docflow_core.matching import match_document_lines
-from docflow_core.storage import read_file
+from docflow_core.storage import read_file, save_file
 from docflow_core.validation import validate_document
 from sqlalchemy import text
 
@@ -257,6 +257,12 @@ def _inner_blocks(file_type: file_types.FileType, content: bytes) -> list[dict]:
     raise UnhandledFileTypeError(f"No Tier 1 content-block builder for {name}")
 
 
+def _envelope(parts: list[dict]) -> list[dict]:
+    if len(parts) == 1 and parts[0]["type"] == "text":
+        return build_text_content(parts[0]["text"])
+    return wrap_document_content(parts)
+
+
 def build_content_blocks(file_type: file_types.FileType, content: bytes) -> list[dict]:
     """
     Native-text PDFs and text-like formats are sent as text; images and
@@ -266,10 +272,14 @@ def build_content_blocks(file_type: file_types.FileType, content: bytes) -> list
     reach this function as themselves -- they arrive as the Tier 1 artifacts
     app/conversion.py produced from them.
     """
-    parts = _inner_blocks(file_type, content)
-    if len(parts) == 1 and parts[0]["type"] == "text":
-        return build_text_content(parts[0]["text"])
-    return wrap_document_content(parts)
+    return _envelope(_inner_blocks(file_type, content))
+
+
+def _artifact_parts(artifacts: list[PreparedArtifact]) -> list[dict]:
+    parts: list[dict] = []
+    for artifact in artifacts:
+        parts.extend(_inner_blocks(artifact.file_type, artifact.content))
+    return parts
 
 
 def build_content_blocks_for_artifacts(artifacts: list[PreparedArtifact]) -> list[dict]:
@@ -278,12 +288,75 @@ def build_content_blocks_for_artifacts(artifacts: list[PreparedArtifact]) -> lis
     artifacts it turned into (CLAUDE.md Section 7.2: document content is
     always delimited, and it is data, never instructions).
     """
-    if len(artifacts) == 1:
-        return build_content_blocks(artifacts[0].file_type, artifacts[0].content)
-    parts: list[dict] = []
-    for artifact in artifacts:
-        parts.extend(_inner_blocks(artifact.file_type, artifact.content))
-    return wrap_document_content(parts)
+    return _envelope(_artifact_parts(artifacts))
+
+
+# Stands in, in a text preview, for a page the model read visually (a scanned
+# PDF or an image attached to an email). Deliberately generic: an artifact's
+# label can carry an attachment filename, which is untrusted (Section 7.11).
+_VISUAL_PART_PLACEHOLDER = (
+    "[An attached page or image was read visually and cannot be shown as text here. "
+    "Download the original to see it.]"
+)
+
+
+def build_preview(
+    file_type: file_types.FileType, content: bytes, parts: list[dict]
+) -> previews.Preview | None:
+    """
+    A viewable rendering for a format no browser displays (DECISIONS.md D-092),
+    or None when the browser can show the original as it is.
+
+    Image-like formats (TIFF, HEIC) are re-encoded from the original. For
+    every other format the preview is the text this task extracted and sent
+    to the model -- one extraction, two uses, so the reviewer sees exactly
+    what DocFlow read, tables included, for every format the worker opens.
+    """
+    name = file_type.name
+    if not previews.needs_preview(name):
+        return None
+    if previews.is_image_like(name):
+        return previews.build_preview(content, name)
+    chunks = [part["text"] if part["type"] == "text" else _VISUAL_PART_PLACEHOLDER for part in parts]
+    return previews.text_preview("\n\n".join(chunks))
+
+
+_PREVIEW_SUFFIXES = {"image/png": ".png", "image/jpeg": ".jpg"}
+
+
+def _store_preview(
+    tenant_id: UUID, document_id: UUID, file_type: file_types.FileType, content: bytes, parts: list[dict]
+) -> None:
+    """
+    Best effort, by design: a preview is a convenience, and a document that
+    cannot be previewed still reviews fine against its extracted values --
+    the viewer says so. A failure here never touches the document's status.
+    """
+    try:
+        preview = build_preview(file_type, content, parts)
+        if preview is None:
+            return
+        suffix = _PREVIEW_SUFFIXES.get(preview.media_type, ".txt")
+        preview_path = save_file(tenant_id, f"preview{suffix}", preview.content)
+        with tenant_session(tenant_id) as session:
+            session.execute(
+                text(
+                    """
+                    UPDATE documents
+                    SET preview_storage_path = :path, preview_media_type = :media_type,
+                        preview_kind = :kind
+                    WHERE id = :id
+                    """
+                ),
+                {
+                    "id": str(document_id),
+                    "path": preview_path,
+                    "media_type": preview.media_type,
+                    "kind": preview.kind,
+                },
+            )
+    except Exception as exc:  # noqa: BLE001 -- see the docstring
+        logger.error("preview_failed document_id=%s error_type=%s", document_id, type(exc).__name__)
 
 
 def _mark_failed(tenant_id: UUID, document_id: UUID, *, raw_response: dict | None = None) -> None:
@@ -378,7 +451,8 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
     # is a clean, catalog-coded `failed`, never a crash.
     try:
         artifacts = prepare_artifacts(validation.file_type, content)
-        content_blocks = build_content_blocks_for_artifacts(artifacts)
+        parts = _artifact_parts(artifacts)
+        content_blocks = _envelope(parts)
     except ConversionError as exc:
         logger.error(
             "parse_and_extract_conversion_failed document_id=%s error_code=%s",
@@ -391,6 +465,11 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
         logger.exception("parse_and_extract_parse_error document_id=%s", did)
         _mark_failed(tid, did, raw_response={"error_code": "DOC-005", "detail": "Parsing failed."})
         return
+
+    # Before the model call, so the reviewer can see the original even if
+    # extraction fails. Stays here in the worker: building a preview is
+    # parsing (Section 7.11), and the API only serves what this wrote.
+    _store_preview(tid, did, validation.file_type, content, parts)
 
     settings = get_settings()
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)

@@ -77,6 +77,25 @@ def needs_preview(file_type: FileTypeName) -> bool:
     return file_type in _IMAGE_LIKE or file_type in _TEXT_LIKE
 
 
+def is_image_like(file_type: FileTypeName) -> bool:
+    return file_type in _IMAGE_LIKE
+
+
+def text_preview(text: str) -> Preview | None:
+    """
+    A text preview from text a caller already extracted. The worker uses this
+    with the text it sent the model, so a reviewer sees exactly what DocFlow
+    read -- tables included, and for every format the worker can open
+    (legacy Office, OpenDocument and Outlook messages among them), not only
+    the ones `_extract_text` below knows.
+    """
+    if not text or not text.strip():
+        return None
+    if len(text) > MAX_PREVIEW_CHARS:
+        text = text[:MAX_PREVIEW_CHARS] + "\n\n[…truncated for viewing]"
+    return Preview(content=text.encode("utf-8"), media_type=PLAIN_TEXT, kind="extracted_text")
+
+
 def build_preview(content: bytes, file_type: FileTypeName) -> Preview | None:
     """
     A viewable rendering, or None if one cannot be made.
@@ -126,12 +145,7 @@ def _image_preview(content: bytes) -> Preview | None:
 
 
 def _text_preview(content: bytes, file_type: FileTypeName) -> Preview | None:
-    text = _extract_text(content, file_type)
-    if not text or not text.strip():
-        return None
-    if len(text) > MAX_PREVIEW_CHARS:
-        text = text[:MAX_PREVIEW_CHARS] + "\n\n[…truncated for viewing]"
-    return Preview(content=text.encode("utf-8"), media_type=PLAIN_TEXT, kind="extracted_text")
+    return text_preview(_extract_text(content, file_type))
 
 
 def _extract_text(content: bytes, file_type: FileTypeName) -> str:
@@ -139,7 +153,15 @@ def _extract_text(content: bytes, file_type: FileTypeName) -> str:
         from docx import Document
 
         document = Document(io.BytesIO(content))
-        return "\n".join(p.text for p in document.paragraphs)
+        lines = [p.text for p in document.paragraphs]
+        # A Word PO's line items almost always live in a table, which
+        # `paragraphs` skips entirely.
+        for table in document.tables:
+            for row in table.rows:
+                cells = [cell.text.replace("\n", " ").strip() for cell in row.cells]
+                if any(cells):
+                    lines.append("\t".join(cells))
+        return "\n".join(lines)
 
     if file_type in (FileTypeName.XLSX, FileTypeName.ODS):
         from openpyxl import load_workbook
