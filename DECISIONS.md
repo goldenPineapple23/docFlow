@@ -806,3 +806,59 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Enforced structurally:** `apps/api/tests/test_parsing_boundary.py` walks the AST of everything under `apps/api/app/` and fails if any file imports Pillow, python-docx, openpyxl, a PDF library, `zipfile`, or `docflow_core.previews`. A second test proves the scan catches a planted offender, so a green result means "nothing found" rather than "nothing looked at". This rule is easy to break by accident precisely because importing a parser is always the shortest path to a working screen — it was nearly broken that way here.
 
 **Related:** Section 7.11, Section 7.12, Section 10, D-091, `packages/core/docflow_core/previews.py`.
+
+## D-093 — Real intake gets previews, and a text preview is the text the model read
+
+**Context:** D-092 built previews but only the demo seed script called the module, so a Word, Excel, email or TIFF arriving by real upload showed the "can't display" fallback. Wiring the module into the worker as-is would have shipped two further gaps, both found by running it over every format fixture: Outlook `.msg`, legacy `.doc`/`.xls` and OpenDocument `.odt`/`.ods` produced no preview at all, and Word previews read paragraphs only — so a Word PO's line-items table, which is where the lines almost always are, was missing from the preview beside the extracted lines.
+
+**Decision:** the worker builds the preview itself, after conversion and parsing and before the model call. TIFF/HEIC are still re-encoded from the original (`converted_image`). Every other format's `extracted_text` preview is the text the worker already extracted and sent to the model — one extraction, two uses. That covers every format the worker can open, includes tables, and means the reviewer sees exactly what DocFlow read. A page the model read visually (a scanned PDF or image attached to an email) appears as a fixed placeholder line, never its filename (untrusted, Section 7.11). The Word-table gap in `previews._extract_text` is also fixed, since the seed script still uses it.
+
+**Best effort by design:** a preview failure is logged by error type and never changes the document's status. It is written before the model call so a document whose extraction failed can still be looked at.
+
+**Related:** D-092, Section 7.11, `apps/worker/app/tasks/parse_and_extract.py`.
+
+## D-094 — LibreOffice's Word import filter is pinned for `.doc` conversion
+
+**Context:** the LibreOffice-gated test had never run, because LibreOffice was not installed. Installed on 2026-09-18, it failed at once: a corrupt `.doc` (a valid OLE header followed by junk) did not fail conversion. LibreOffice, unable to read it as Word, silently re-read it as plain text and produced a "successful" `.docx` of garbage bytes — which would then have gone to the model as a purchase order, spending money on noise and presenting it for review as a document.
+
+**Decision:** `convert_doc` passes `--infilter=MS Word 97`, so LibreOffice reads the file as a Word 97-2003 document or fails. Verified both ways against the installed LibreOffice: the corrupt file now exits non-zero with no output (a clean `DOC-017`), and a real `.doc` still converts. The existing test (`test_malformed_doc_fails_cleanly_whether_or_not_libreoffice_exists`) now runs and passes, and the worker suite has no skips.
+
+**Lesson:** a test that skips when a dependency is missing is not a passing test. This one was green for three phases while guarding nothing.
+
+**Related:** Section 7.11, `apps/worker/app/conversion.py`.
+
+## D-095 — The worker registers its tasks itself; first end-to-end queue run
+
+**Context:** every queue test mocked the broker, so Redis/Celery had never run for real (Memurai could not be installed from an agent session). With Memurai installed by the founder on 2026-09-18, the first real start of the worker — using the README's own command — listed **no registered tasks**. The API enqueues by name (`send_task("docflow.parse_and_extract")`) and nothing imported the task module in the worker, so every uploaded document would have been rejected by the worker as an unregistered task and sat in `pending` indefinitely: exactly the "stuck customer document nobody knows about" Section 7.9 calls a data-integrity failure.
+
+**Decision:** `Celery(..., include=["app.tasks.parse_and_extract"])`. A test checks the registration in a fresh interpreter — inside the test run other tests have already imported the module, which would hide the gap — and was confirmed to fail without the fix. The README's worker command gains `--pool=solo` (Celery's prefork pool does not run on Windows) and `-Q interactive,bulk`.
+
+**Verified end to end:** a Word PO uploaded through `POST /documents/upload` as the demo reviewer went upload → Redis → worker → extraction (`claude-sonnet-5`) → buyer, matching, duplicate check, validation → `needs_review` in 16 s, with 4 lines and its D-093 text preview (line-items table included) served by the API.
+
+**Still open:** the stuck-in-processing alert (Section 7.9) would have caught this in production only if it also watches `pending`, not just `processing`. Check when that alert is built.
+
+**Related:** Section 7.9, Section 7.11, D-093, `apps/worker/app/celery_app.py`.
+
+## D-096 — Math-check tolerances are the rounding room of the printed numbers, not a percentage (supersedes D-073's relative terms)
+
+**Context:** D-073 let a discrepancy through if it was within 0.5% of the amount. That is a lot of money on a large order: $100 on a $20,000 line or order total, $500 on $100,000 — silently, on the one check whose job is to catch a misread number. The founder approved tightening it on 2026-09-18.
+
+**Decision:** each allowance is exactly the rounding the printed numbers can legitimately contain, and nothing proportional to the size of the order.
+- **Line total** (`quantity × unit_price`): one cent (the line total is printed to the cent) **plus** `quantity × half a unit of the unit price's last printed decimal` — the most a correctly rounded printed price can contribute. 12 × "47.50" → 0.07; 1,000 × "0.1235" → 0.06; 100 × "200.00" → 0.51.
+- **Order total** (sum of lines): one cent per line. Both sides are printed on the document, so per-line rounding is the only legitimate gap; a 40-line order still gets 40 cents.
+- **Printed precision** is read from the stored value's significant digits with a floor of two places, because `unit_price` is `numeric(14,4)` and "47.50" comes back as 47.5000. A price printed with trailing zeros ("0.1200") is therefore treated as "0.12" — a slightly looser allowance, the safe direction.
+- Unchanged: materiality (`high` at ≥ $100 or ≥ 5%), null handling, and the rule that a warning never changes a value (Section 7.7).
+
+**Consequence for existing documents:** the tolerance is part of each warning's detail, so a document re-validated after this change gets fresh, unacknowledged warnings where the numbers now fail (D-074 working as intended). Nothing re-validates on its own.
+
+**Related:** D-073, D-074, Section 7.7, `packages/core/docflow_core/validation.py`.
+
+## D-097 — The review queue pages, and always shows the total
+
+**Context:** asked by the founder whether a long queue paginates. It did not: the page requested the queue without a limit, the API defaulted to 50, and there were no paging controls, so an order past the 50th was **invisible** — not on a later page, nowhere. For a product whose promise is that every order is seen by a person, that is a correctness defect, not a cosmetic one.
+
+**Decision:** `GET /review/documents` returns `total` (tenant-scoped, same filter as the rows) alongside the page. The queue shows "Showing 1–50 of N" with Previous / Next, resets to the first page when the filter changes, and steps back to the last non-empty page if approvals empty the current one. 50 per page (`QUEUE_PAGE_SIZE`).
+
+**Tests:** an API test pages through a tenant's queue two at a time and must reach every document exactly once, with the total excluding another tenant's documents; a browser test pages through 120 orders to the 120th.
+
+**Related:** Section 7.3, Phase 3, `apps/api/app/routers/review.py`, `apps/web/src/app/review/page.tsx`.

@@ -68,14 +68,20 @@ browser renders, and the visual pass.
 
 ### What is open
 
-- **Redis / Celery has still never run end to end.** Every queue test mocks
-  the broker. Memurai was chosen; the install fails from an agent session
-  (see `DECISIONS.md` and the memory notes) and needs an interactive
-  elevated terminal.
-- **LibreOffice is not installed**, so legacy `.doc` degrades to a clean
-  `DOC-017` and one worker test skips. **Installing it also unlocks
-  full-fidelity previews**: Section 7.11 already runs LibreOffice headless in
-  the isolated worker for Tier 2 formats, and the same call converts `.docx`
+- ~~Redis / Celery has never run end to end.~~ **Done** 2026-09-18
+  (D-095): Memurai installed; a Word PO uploaded through the API went
+  upload → Redis → worker → extraction → matching → validation →
+  `needs_review` in 16 s, with its preview stored. The first real run found
+  that the worker registered **no tasks** when started as documented, so
+  every document would have sat in `pending` forever. Fixed and tested.
+- ~~LibreOffice is not installed.~~ **Done** 2026-09-18 (D-094):
+  installed, the gated `.doc` test now runs (worker: 0 skips), and it found
+  that a corrupt `.doc` was "converted" into a document of garbage instead
+  of failing. Fixed by pinning LibreOffice's Word import filter.
+  **Still open from this item:** full-fidelity previews for Word/Excel
+  (convert to PDF in the worker) -- now possible, not yet built:
+  Section 7.11 already runs LibreOffice headless in the isolated
+  worker for Tier 2 formats, and the same call converts `.docx`
   and `.xlsx` to PDF, which a browser renders with the layout intact. That
   replaces today's extracted-text preview for those formats with the real
   page. `.eml` / `.msg` stay as text -- an email body has little layout, and
@@ -89,20 +95,17 @@ browser renders, and the visual pass.
   the checkpoint (commit `1823147`): line items are now a table, one row per
   line, with matching state in a row beneath that opens whenever there is
   something to see.
-- **The worker does not generate document previews.** `docflow_core.previews`
-  is called only from `scripts/seed_demo_data.py`, so demo data previews and
-  real intake does not: a Word, Excel, email or TIFF document arriving by
-  upload or email shows the "can't display this one" fallback. The module,
-  the storage columns (0009) and the serving path are all built and working
-  — what is missing is the call inside `apps/worker/app/tasks/
-  parse_and_extract.py`, after parsing, writing the preview to storage and
-  setting `preview_storage_path` / `preview_media_type` / `preview_kind`.
-  Small, and it must stay in the worker (Section 7.11).
+- ~~The worker does not generate document previews.~~ **Done** after the
+  checkpoint (D-093): the worker now writes a preview for every upload a
+  browser cannot show, and in doing so closes two gaps the module had --
+  `.msg`, `.doc`, `.xls`, `.odt` and `.ods` got no preview at all, and Word
+  previews omitted tables, i.e. the line items.
 - **Aesthetics** — the founder wants a further pass. The document viewer is
   explicitly liked and should be left alone.
 - **Phase 5 asks already raised by the founder**, correctly scheduled and not
   built: a per-tenant dashboard (documents by status, recent activity) and
-  the allowance banner (7.16.1). Export to ERP is Phase 4.
+  the allowance banner (7.16.1). Phase 4 is export to downloadable files
+  (CSV, Excel, JSON, IIF) -- not ERP writeback, which Section 3 rules out.
 
 ### The lesson of this phase, recorded because it cost the most
 
