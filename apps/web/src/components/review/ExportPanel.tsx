@@ -24,7 +24,7 @@ import {
  * customer downloads the file and imports it themselves.
  */
 
-const FORMATS: Array<{ format: ExportFormat; label: string; hint: string }> = [
+export const FORMATS: Array<{ format: ExportFormat; label: string; hint: string }> = [
   { format: "csv", label: "CSV", hint: "One row per line item, order details on every row." },
   { format: "xlsx", label: "Excel", hint: "The same layout as the CSV, as a spreadsheet." },
   { format: "json", label: "JSON", hint: "For importing into your own software." },
@@ -63,16 +63,40 @@ function formatBytes(size: number | null): string {
   return size < 1024 ? `${size} bytes` : `${(size / 1024).toFixed(1)} KB`;
 }
 
-export function ExportPanel({
-  documentId,
-  exportable,
-  onExported,
-}: {
-  documentId: string;
-  exportable: boolean;
+// The format "Approve & export" uses, remembered per browser. A convenience
+// only: it is read and written defensively, and CSV is the answer whenever
+// storage is unavailable.
+const PREFERRED_FORMAT_KEY = "docflow.preferredExportFormat";
+
+export function readPreferredFormat(): ExportFormat {
+  try {
+    const value = window.localStorage.getItem(PREFERRED_FORMAT_KEY);
+    if (FORMATS.some((f) => f.format === value)) return value as ExportFormat;
+  } catch {
+    // Storage blocked or unavailable.
+  }
+  return "csv";
+}
+
+export function writePreferredFormat(format: ExportFormat) {
+  try {
+    window.localStorage.setItem(PREFERRED_FORMAT_KEY, format);
+  } catch {
+    // Storage blocked or unavailable; the choice just isn't remembered.
+  }
+}
+
+/**
+ * The export state for one order, shared by the panel's buttons and the
+ * header's "Approve & export" so both show the same progress, errors and
+ * history.
+ */
+export function useExports(
+  documentId: string,
+  exportable: boolean,
   // The first file moves the order to "exported"; the page re-reads it.
-  onExported?: () => void;
-}) {
+  onExported?: () => void,
+) {
   const [history, setHistory] = useState<ExportRecord[] | null>(null);
   const [working, setWorking] = useState<ExportFormat | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
@@ -138,6 +162,13 @@ export function ExportPanel({
     [documentId, working, refresh, onExported],
   );
 
+  return { history, working, notice, run, download };
+}
+
+export type ExportState = ReturnType<typeof useExports>;
+
+export function ExportPanel({ state, exportable }: { state: ExportState; exportable: boolean }) {
+  const { history, working, notice, run, download } = state;
   if (!exportable && (history === null || history.length === 0)) return null;
 
   return (

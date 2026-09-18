@@ -10,9 +10,16 @@ import {
   rejectDocument,
   saveEdits,
   type DocumentDetail,
+  type ExportFormat,
 } from "@/lib/review";
 import { DocumentViewer } from "@/components/review/DocumentViewer";
-import { ExportPanel } from "@/components/review/ExportPanel";
+import {
+  ExportPanel,
+  FORMATS,
+  readPreferredFormat,
+  useExports,
+  writePreferredFormat,
+} from "@/components/review/ExportPanel";
 import { HeaderFields } from "@/components/review/HeaderFields";
 import { LineTable } from "@/components/review/LineTable";
 import { TrailPanel } from "@/components/review/TrailPanel";
@@ -55,6 +62,10 @@ export default function ReviewDocumentPage({ params }: { params: Promise<{ id: s
   const [rejectNote, setRejectNote] = useState("");
 
   const dirty = Object.keys(headerEdits).length > 0 || Object.keys(lineEdits).length > 0;
+  // The format "Approve & export" produces. Only rendered after the order
+  // has loaded in the browser, so reading storage here cannot disagree with
+  // server-rendered markup.
+  const [exportFormat, setExportFormat] = useState<ExportFormat>(() => readPreferredFormat());
 
   // Adopting a freshly-read document: one place, so the mount path and the
   // after-a-write path cannot drift about which local state gets cleared.
@@ -94,6 +105,12 @@ export default function ReviewDocumentPage({ params }: { params: Promise<{ id: s
     }
   }, [id, applyDetail]);
 
+  const exportable =
+    detail?.document.status === "approved" || detail?.document.status === "exported";
+  // The first file moves the order to "exported"; re-read it so the badge says so.
+  const onExported = useCallback(() => void load(), [load]);
+  const exportState = useExports(id, exportable, onExported);
+
   const openWarnings = useMemo(
     () => (detail?.warnings ?? []).filter((w) => w.status === "open"),
     [detail],
@@ -118,8 +135,8 @@ export default function ReviewDocumentPage({ params }: { params: Promise<{ id: s
     }
   }, [detail, dirty, busy, id, headerEdits, lineEdits, load]);
 
-  const approve = useCallback(async () => {
-    if (!detail || busy) return;
+  const approve = useCallback(async (): Promise<boolean> => {
+    if (!detail || busy) return false;
     if (dirty) {
       setBanner({
         kind: "error",
@@ -127,7 +144,7 @@ export default function ReviewDocumentPage({ params }: { params: Promise<{ id: s
         message: "This order has edits that haven't been saved, so there's nothing to approve yet.",
         action: "Save, check the values, then approve.",
       });
-      return;
+      return false;
     }
     setBusy(true);
     try {
@@ -145,12 +162,22 @@ export default function ReviewDocumentPage({ params }: { params: Promise<{ id: s
       );
       await load();
       setBanner({ kind: "success", title: "Approved", message: "This order is ready to export." });
+      return true;
     } catch (e) {
       showError(e, setBanner);
+      return false;
     } finally {
       setBusy(false);
     }
   }, [detail, busy, dirty, id, openWarnings, acknowledged, load]);
+
+  // One click for the common case: approve, then download in the format
+  // this browser last chose. Approval stays a separate, explicit action
+  // underneath (Section 7.3) -- this only saves the second click, and an
+  // approval that fails exports nothing.
+  const approveAndExport = useCallback(async () => {
+    if (await approve()) await exportState.run(exportFormat);
+  }, [approve, exportState, exportFormat]);
 
   // Keyboard shortcuts. Every one has a visible button too.
   useEffect(() => {
@@ -237,6 +264,38 @@ export default function ReviewDocumentPage({ params }: { params: Promise<{ id: s
             >
               Approve <kbd className="text-xs opacity-80">⌘↵</kbd>
             </button>
+            <span className="inline-flex items-stretch overflow-hidden rounded bg-green-800 text-sm font-medium text-white has-[button:disabled]:bg-gray-300">
+              <button
+                type="button"
+                onClick={() => void approveAndExport()}
+                disabled={busy || readOnly || !everyWarningAcknowledged || exportState.working !== null}
+                data-testid="approve-export-button"
+                className="px-3 py-1.5 disabled:text-white"
+              >
+                Approve &amp; export
+              </button>
+              <label htmlFor="approve-export-format" className="sr-only">
+                Export format
+              </label>
+              <select
+                id="approve-export-format"
+                data-testid="approve-export-format"
+                value={exportFormat}
+                onChange={(e) => {
+                  const next = e.target.value as ExportFormat;
+                  setExportFormat(next);
+                  writePreferredFormat(next);
+                }}
+                disabled={busy || readOnly}
+                className="border-l border-white/30 bg-transparent px-1.5 text-sm text-white disabled:text-white [&>option]:text-gray-900"
+              >
+                {FORMATS.map(({ format, label }) => (
+                  <option key={format} value={format}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </span>
           </div>
 
           {/*
@@ -319,15 +378,7 @@ export default function ReviewDocumentPage({ params }: { params: Promise<{ id: s
         </div>
 
         <div className="space-y-6">
-          <ExportPanel
-            documentId={id}
-            exportable={
-              detail.document.status === "approved" || detail.document.status === "exported"
-            }
-            onExported={() => {
-              if (detail.document.status === "approved") void load();
-            }}
-          />
+          <ExportPanel state={exportState} exportable={exportable} />
 
           <HeaderFields
             header={detail.header}

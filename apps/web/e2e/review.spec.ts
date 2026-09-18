@@ -402,3 +402,52 @@ test("an order still in review offers no export", async ({ page }) => {
   await expect(page.getByTestId("header-input-po_number")).toBeVisible();
   await expect(page.getByTestId("export-panel")).toHaveCount(0);
 });
+
+test("approve & export approves the order and downloads it in one click", async ({ page }) => {
+  const state: { detail: ReturnType<typeof detail>; approved?: boolean } = { detail: detail() };
+  await stubApi(page, state);
+  await stubExports(page, { status: "ready", sha256: "abc", byte_size: 700, format_label: "JSON" });
+
+  await page.goto(`/review/${DOCUMENT_ID}`);
+  await page.getByTestId("approve-export-format").selectOption("json");
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByTestId("approve-export-button").click();
+  await downloadPromise;
+
+  expect(state.approved).toBe(true);
+  await expect(page.getByTestId("export-history")).toContainText("JSON");
+
+  // The format choice is remembered for the next order in this browser.
+  await page.reload();
+  await expect(page.getByTestId("approve-export-format")).toHaveValue("json");
+});
+
+test("approve & export is blocked by unticked warnings, like approve", async ({ page }) => {
+  const state: { detail: ReturnType<typeof detail>; approved?: boolean } = {
+    detail: detail({
+      warnings: [
+        {
+          id: WARNING_ID,
+          code: "VAL-002",
+          title: "The order total doesn't match the lines",
+          message: "m",
+          action: "a",
+          severity: "high",
+          field_name: "order_total",
+          line_number: null,
+          document_line_id: null,
+          detail: {},
+          status: "open",
+          acknowledged_at: null,
+        },
+      ],
+    }),
+  };
+  await stubApi(page, state);
+  await stubExports(page, { status: "ready" });
+
+  await page.goto(`/review/${DOCUMENT_ID}`);
+  await expect(page.getByTestId("approve-export-button")).toBeDisabled();
+  expect(state.approved).toBeUndefined();
+});

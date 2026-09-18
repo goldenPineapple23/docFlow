@@ -901,3 +901,11 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Decision:** all four tenant roles can request and download exports. Exporting reads data a person has already approved and changes none of it; the only state it touches is the `exported` status, which is bookkeeping. Editing and approving stay with owner/admin/reviewer. A founder-selected tighter rule later is a one-line change in `app/routers/exports.py`.
 
 **Related:** Section 3, AUTH-002, `apps/api/app/routers/exports.py`.
+
+## D-101 — "Approve & export": one click, approval still explicit
+
+**Context:** the MVP features document lists "One-click 'Approve & Export'". After Phase 4 it was two clicks: Approve, then a format. The founder asked for the combined button on 2026-09-18.
+
+**Decision:** a second button beside Approve, with a format picker. It runs the ordinary approval (same warning gate, same acknowledgements, same `review_actions` row) and, only if that succeeds, the ordinary export. It is a shortcut over two existing actions, not a new path: approval stays an explicit user action (Section 7.3), a failed approval exports nothing, and there is still no auto-approve anywhere. The picker remembers the last format per browser (`localStorage`, read defensively; CSV when unavailable) — a per-person convenience, not a tenant setting.
+
+**Related:** Section 7.3, D-098, `apps/web/src/app/review/[id]/page.tsx`.

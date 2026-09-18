@@ -27,7 +27,7 @@ is never stored or offered (`EXP-004`).
 | `packages/core` | 282 passed |
 | `apps/api` | 159 passed, 0 skipped (17 new export tests against the real database and RLS) |
 | `apps/worker` | 72 passed, 0 skipped |
-| `apps/web` | 23 Vitest + 12 Playwright |
+| `apps/web` | 23 Vitest + 14 Playwright |
 | Lint / typecheck | clean in all four projects |
 | Live golden fixture | passed against the real Anthropic API |
 | Real browser, real stack | signed in, approved an order, downloaded CSV, Excel, JSON and IIF through API → Redis → worker → storage → signed link; status became "Exported to file" |
@@ -70,9 +70,8 @@ Migration `0010` is applied to `docflow-staging`.
   exists (Phase 5, 7.15.3), then wired to it (D-098).
 - **Orders approved before today** export with an empty catalog SKU until
   re-approved (D-099).
-- **"One-click Approve & Export"** is listed in the MVP features document.
-  Today it is two clicks: Approve, then the format. A combined button is a
-  small addition if the founder wants it.
+- ~~"One-click Approve & Export"~~ **Done** after the checkpoint (D-101): a
+  button beside Approve with a remembered format; verified on the real stack.
 - **An IIF file made before the order-date rule** (the test order
   `e2e-po.docx`, BCH-2291) remains in that order's history; finished exports
   are permanent records by design.
