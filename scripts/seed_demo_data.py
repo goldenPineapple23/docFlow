@@ -275,6 +275,7 @@ def _build_order(index: int, rng: random.Random) -> dict:
         extracted_total = printed_total + Decimal("120.00")
         printed_total = extracted_total
 
+    terms = rng.choice(TERMS)
     po_number = f"{buyer.split()[0][:3].upper()}-{4000 + index}"
     # Most buyers' systems print the currency; a minority send a bare "$".
     # Seeding every order as symbol-only made every single one carry a
@@ -306,7 +307,7 @@ def _build_order(index: int, rng: random.Random) -> dict:
         po_number=po_number,
         order_date=order_date.strftime("%B %d, %Y"),
         delivery_date=delivery.strftime("%m/%d/%Y"),
-        terms=rng.choice(TERMS),
+        terms=terms,
         lines="\n".join(printed_rows),
         total_label="ORDER TOTAL (USD):" if currency_stated else "ORDER TOTAL:",
         order_total="$" + _money(printed_total),
@@ -337,6 +338,12 @@ def _build_order(index: int, rng: random.Random) -> dict:
     )
 
     return {
+        # The document and the extracted values must agree on everything
+        # except a declared defect. An earlier version printed a random term
+        # on the document and hardcoded "Net 30" in the data, so three
+        # orders in four carried an undeclared mismatch -- which teaches a
+        # reviewer to distrust the thing they are checking against.
+        "payment_terms": terms,
         "currency_inferred": not currency_stated,
         "format": fmt,
         "filename": filename,
@@ -417,7 +424,7 @@ def _insert(tenant_id: UUID, order: dict, *, content_sha: str | None = None) -> 
                      created_at, updated_at)
                 VALUES
                     (:document_id, :tenant_id, :po_number, :order_date, :delivery_date,
-                     :buyer, :email, :address, 'Net 30',
+                     :buyer, :email, :address, :payment_terms,
                      :order_total, 'USD', NULL, :header_confidence, :currency_inferred,
                      now(), now())
                 """
@@ -434,6 +441,7 @@ def _insert(tenant_id: UUID, order: dict, *, content_sha: str | None = None) -> 
                 "order_total": order["order_total"],
                 "header_confidence": json.dumps(order["header_confidence"]),
                 "currency_inferred": order["currency_inferred"],
+                "payment_terms": order["payment_terms"],
             },
         )
         for item in order["lines"]:
