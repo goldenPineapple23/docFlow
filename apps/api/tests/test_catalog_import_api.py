@@ -189,6 +189,42 @@ def test_a_reupload_updates_adds_and_retires_but_never_deletes(client, stripe):
 
 @requires_imports_schema
 @requires_console_schema
+def test_a_reupload_without_a_column_keeps_that_field_instead_of_blanking_it(client, stripe):
+    """D-109: the founder's second file had no UPC column, and the preview
+    counted every item as 'updated' -- committing would have wiped every
+    barcode the first file set."""
+    with _Console() as console:
+        tenant_id = console.create_tenant(client).json()["tenant_id"]
+        first = _import(
+            client, console, tenant_id,
+            b"SKU,Description,UOM,UPC\nTEST-1001,Test Beans 5lb,CS,000000100017\n"
+            b"TEST-1002,Test Cups 12oz,BOX,000000100024\n",
+        )
+        assert _commit(client, console, tenant_id, first["id"]).status_code == 200
+
+        second = _import(
+            client, console, tenant_id,
+            b"Item #,Product Name,U/M\nTEST-1001,Test Beans 5lb,CS\nTEST-1002,Test Cups 12oz,EA\n",
+            name="reexport.csv",
+        )
+        assert second["mapping"]["barcode"] is None
+        assert second["diff"]["unchanged"] == 1 and second["diff"]["update"] == 1
+        assert _commit(client, console, tenant_id, second["id"]).status_code == 200
+
+        with platform_session() as session:
+            items = {
+                sku: (barcode, uom)
+                for sku, barcode, uom in session.execute(
+                    text("SELECT sku, barcode, unit_of_measure FROM items WHERE tenant_id = :t"),
+                    {"t": tenant_id},
+                ).all()
+            }
+        assert items["TEST-1001"] == ("000000100017", "CS")
+        assert items["TEST-1002"] == ("000000100024", "EA")  # the unit updated, the barcode kept
+
+
+@requires_imports_schema
+@requires_console_schema
 def test_retiring_a_sku_a_learned_rule_uses_is_flagged_before_commit(client, stripe):
     with _Console() as console:
         tenant_id = console.create_tenant(client).json()["tenant_id"]
@@ -238,6 +274,38 @@ def test_blockers_stop_the_commit_until_fixed_inline(client, stripe):
         assert fixed["can_commit"] is True
         assert _commit(client, console, tenant_id, preview["id"]).status_code == 200
         assert set(_items(tenant_id)) == {"TEST-1", "TEST-2", "TEST-3"}
+
+
+@requires_imports_schema
+@requires_console_schema
+def test_a_fixed_row_stays_in_view_editable_and_can_be_undone(client, stripe):
+    """Founder feedback: after a fix, the row stopped being a problem, so it
+    turned into plain text -- or, deep in a long file, left the table."""
+    with _Console() as console:
+        tenant_id = console.create_tenant(client).json()["tenant_id"]
+        lines = [f"TEST-{i},Test Item {i}" for i in range(1, 30)] + [",Test Mystery"]
+        preview = _import(client, console, tenant_id, ("SKU,Description\n" + "\n".join(lines)).encode())
+        assert {f["code"]: f["rows"] for f in preview["report"]}["CAT-001"] == [31]
+
+        row = f"/admin/tenants/{tenant_id}/imports/{preview['id']}/rows/31"
+        client.put(row, headers=console.headers(), json={"field": "sku", "value": "TEST-99"})
+        fixed = _preview(client, console, tenant_id, preview["id"])
+        assert fixed["can_commit"] is True
+        shown = {r["row_number"]: r for r in fixed["preview"]}
+        assert shown[31]["values"]["sku"] == "TEST-99"
+        assert shown[31]["fixed"] == {"sku": ""}  # what the file says
+
+        # Changed again before commit.
+        client.put(row, headers=console.headers(), json={"field": "sku", "value": "TEST-98"})
+        again = {r["row_number"]: r for r in _preview(client, console, tenant_id, preview["id"])["preview"]}
+        assert again[31]["values"]["sku"] == "TEST-98"
+
+        # Undo: back to exactly what the file says removes the fix.
+        client.put(row, headers=console.headers(), json={"field": "sku", "value": ""})
+        undone = _preview(client, console, tenant_id, preview["id"])
+        assert undone["overrides"] == {}
+        assert undone["can_commit"] is False
+        assert {r["row_number"]: r for r in undone["preview"]}[31]["fixed"] == {}
 
 
 @requires_imports_schema

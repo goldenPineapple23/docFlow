@@ -309,6 +309,10 @@ class Diff:
     reinstate: list[tuple[Record, str]] = field(default_factory=list)   # (record, item id)
     unchanged: list[tuple[Record, str]] = field(default_factory=list)
     retire: list[tuple[str, str]] = field(default_factory=list)         # (sku, item id)
+    # Catalog fields whose column isn't mapped in this file. An existing item
+    # keeps its value for these: a re-upload without a barcode column says
+    # nothing about barcodes, so it must not blank them (D-109).
+    absent: frozenset[str] = frozenset()
     near_duplicates: dict[int, list[Any]] = field(default_factory=dict)  # buyers: row -> candidates
     existing_buyer: dict[int, str] = field(default_factory=dict)         # buyers: row -> buyer id
 
@@ -322,7 +326,9 @@ class Diff:
         }
 
 
-def _catalog_diff(session: Session, records: list[Record]) -> tuple[Diff, list[Finding]]:
+def _catalog_diff(
+    session: Session, records: list[Record], mapping: dict[str, int | None]
+) -> tuple[Diff, list[Finding]]:
     rows = session.execute(
         text(
             "SELECT DISTINCT ON (sku) id, sku, description, unit_of_measure, barcode, external_id, "
@@ -333,7 +339,8 @@ def _catalog_diff(session: Session, records: list[Record]) -> tuple[Diff, list[F
     live = {r["sku"]: r for r in rows if r["live"]}
     retired = {r["sku"]: r for r in rows if not r["live"]}
 
-    diff = Diff()
+    diff = Diff(absent=frozenset(f for f in CATALOG_COMPARED if mapping.get(f) is None))
+    compared = [f for f in CATALOG_COMPARED if f not in diff.absent]
     seen: set[str] = set()
     for record in records:
         sku = record.values["sku"]
@@ -342,7 +349,7 @@ def _catalog_diff(session: Session, records: list[Record]) -> tuple[Diff, list[F
         seen.add(sku)
         if sku in live:
             item = live[sku]
-            changed = any((item[f] or None) != record.values[f] for f in CATALOG_COMPARED)
+            changed = any((item[f] or None) != record.values[f] for f in compared)
             (diff.update if changed else diff.unchanged).append((record, str(item["id"])))
         elif sku in retired:
             diff.reinstate.append((record, str(retired[sku]["id"])))
@@ -368,7 +375,10 @@ def _catalog_diff(session: Session, records: list[Record]) -> tuple[Diff, list[F
     return diff, findings
 
 
-def _buyers_diff(session: Session, records: list[Record]) -> tuple[Diff, list[Finding]]:
+def _buyers_diff(
+    session: Session, records: list[Record], mapping: dict[str, int | None]
+) -> tuple[Diff, list[Finding]]:
+    del mapping  # customer lists already never blank a value (D-108)
     rows = session.execute(
         text("SELECT id, name, normalized_name FROM buyers WHERE deleted_at IS NULL")
     ).mappings().all()
@@ -430,7 +440,9 @@ def evaluate(session: Session, row: dict[str, Any]) -> Evaluation:
         row["overrides"] or {},
     )
     findings = validate(kind, records, cleaned_rows)
-    diff, diff_findings = (_catalog_diff if kind == "catalog" else _buyers_diff)(session, records)
+    diff, diff_findings = (_catalog_diff if kind == "catalog" else _buyers_diff)(
+        session, records, mapping
+    )
     return Evaluation(records=records, findings=findings + diff_findings, diff=diff)
 
 
@@ -585,19 +597,34 @@ def set_mapping(session: Session, import_id: UUID, mapping: dict[str, int | None
 def set_override(
     session: Session, import_id: UUID, row_number: int, field_name: str, value: str | None
 ) -> None:
-    """An inline fix: this row's value for this field, instead of the file's."""
+    """An inline fix: this row's value for this field, instead of the file's.
+    Setting it back to exactly what the file says removes the fix (Undo)."""
     row = _require_parsed(session, import_id)
     if field_name not in {s.name for s in FIELDS[row["kind"]]}:
         raise CatalogImportError("IMP-008")
     first = row["header_row_number"] + 1
     if not first <= row_number < first + len(row["rows"]):
         raise CatalogImportError("IMP-008")
-    overrides = dict(row["overrides"] or {})
-    overrides.setdefault(str(row_number), {})[field_name] = value if value is not None else ""
+    overrides = {k: dict(v) for k, v in (row["overrides"] or {}).items()}
+    fixes = overrides.setdefault(str(row_number), {})
+    value = value if value is not None else ""
+    if value == _file_value(row, row_number, field_name):
+        fixes.pop(field_name, None)
+        if not fixes:
+            del overrides[str(row_number)]
+    else:
+        fixes[field_name] = value
     session.execute(
         text("UPDATE catalog_imports SET overrides = CAST(:o AS jsonb) WHERE id = :id"),
         {"id": str(import_id), "o": json.dumps(overrides)},
     )
+
+
+def _file_value(row: dict[str, Any], row_number: int, field_name: str) -> str:
+    """What the file itself has in this row for this field, under the current mapping."""
+    index = (row["mapping"] or {}).get(field_name)
+    cells = row["rows"][row_number - row["header_row_number"] - 1]
+    return cells[index] if index is not None and index < len(cells) else ""
 
 
 def discard_import(session: Session, import_id: UUID) -> None:
@@ -643,10 +670,15 @@ def preview(session: Session, import_id: UUID) -> dict[str, Any]:
         base.update({"report": [], "diff": None, "can_commit": False, "preview": []})
         return base
     evaluation = evaluate(session, row)
+    # Problem rows first, then rows already fixed inline (so a fix stays in
+    # view and can be changed or undone until commit), then the file's start.
+    overrides = row["overrides"] or {}
     flagged = {r for f in evaluation.findings for r in f.rows}
+    edited = {int(n) for n in overrides}
     shown = [r for r in evaluation.records if r.row_number in flagged][:PREVIEW_ROWS]
+    shown += [r for r in evaluation.records if r.row_number in edited - flagged]
     room = max(0, PREVIEW_ROWS - len(shown))
-    shown += [r for r in evaluation.records if r.row_number not in flagged][:room]
+    shown += [r for r in evaluation.records if r.row_number not in flagged | edited][:room]
     base.update(
         {
             "report": evaluation.report(),
@@ -654,7 +686,15 @@ def preview(session: Session, import_id: UUID) -> dict[str, Any]:
             "retiring": [sku for sku, _ in evaluation.diff.retire][:MAX_REPORTED_ROWS],
             "can_commit": evaluation.can_commit,
             "preview": [
-                {"row_number": r.row_number, "values": r.values}
+                {
+                    "row_number": r.row_number,
+                    "values": r.values,
+                    # {field: what the file says}, for each field fixed inline.
+                    "fixed": {
+                        f: _file_value(row, r.row_number, f)
+                        for f in overrides.get(str(r.row_number), {})
+                    },
+                }
                 for r in sorted(shown, key=lambda r: r.row_number)
             ],
         }
@@ -711,13 +751,18 @@ def commit_import(
                     "import_id": iid,
                 },
             )
+        # Only the fields this file has a column for; the rest keep their value.
+        columns = {"description": "description", "unit_of_measure": "uom",
+                   "barcode": "barcode", "external_id": "external_id"}
+        assignments = "".join(
+            f"{name} = :{param}, " for name, param in columns.items() if name not in diff.absent
+        )
         for record, item_id in diff.update + diff.reinstate:
             session.execute(
                 text(
-                    """
+                    f"""
                     UPDATE items
-                    SET description = :description, unit_of_measure = :uom, barcode = :barcode,
-                        external_id = :external_id, raw_data = CAST(:raw AS jsonb),
+                    SET {assignments}raw_data = CAST(:raw AS jsonb),
                         last_import_id = :import_id, deleted_at = NULL,
                         retired_by_import_id = NULL, updated_at = now()
                     WHERE id = :id

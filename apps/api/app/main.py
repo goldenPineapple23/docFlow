@@ -31,7 +31,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    # Must list every method a route uses -- tests/test_cors.py fails the
+    # build otherwise. PUT was missing and every catalog-import fix silently
+    # failed preflight in the browser (DECISIONS.md D-109).
+    allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
     max_age=600,
 )

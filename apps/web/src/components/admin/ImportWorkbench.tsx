@@ -17,7 +17,7 @@ import {
   type ImportSummaryRow,
   type TenantIntakeFile,
 } from "@/lib/admin";
-import { ReviewApiError, type CatalogError } from "@/lib/review";
+import { ReviewApiError, UNEXPECTED, type CatalogError } from "@/lib/review";
 import { CatalogErrorBox } from "@/components/admin/CatalogErrorBox";
 
 /**
@@ -129,7 +129,9 @@ export function ImportWorkbench({ tenantId, kind }: { tenantId: string; kind: Im
     try {
       await work();
     } catch (e) {
-      if (e instanceof ReviewApiError) setError(e.catalog);
+      // Nothing is swallowed: a failure that isn't catalog-coded (a network
+      // error thrown before any response) still gets the catalog fallback.
+      setError(e instanceof ReviewApiError ? e.catalog : UNEXPECTED);
     } finally {
       setBusy(false);
     }
@@ -152,7 +154,13 @@ export function ImportWorkbench({ tenantId, kind }: { tenantId: string; kind: Im
         <p className="mt-1 max-w-3xl text-sm text-gray-600">{copy.intro}</p>
       </div>
 
-      {error ? <CatalogErrorBox error={error} /> : null}
+      {/* Sticky: most actions happen far down the page (a row fix, the
+          commit), and a failure shown only at the top went unseen (D-109). */}
+      {error ? (
+        <div data-testid="import-error" className="sticky top-2 z-10 shadow-md">
+          <CatalogErrorBox error={error} />
+        </div>
+      ) : null}
 
       {/* 1. Start */}
       <section className="rounded-xl border border-gray-200 bg-white p-5">
@@ -438,19 +446,45 @@ function CurrentImport({
                         <td className="px-2 py-1 text-gray-500">{row.row_number}</td>
                         {preview.fields.map((field) => (
                           <td key={field.name} className="px-2 py-1">
-                            {flagged?.has(field.name) ? (
-                              <input
-                                defaultValue={row.values[field.name] ?? ""}
-                                aria-label={`${field.label}, row ${row.row_number}`}
-                                data-testid={`fix-${row.row_number}-${field.name}`}
-                                onBlur={(e) => {
-                                  if (e.target.value !== (row.values[field.name] ?? "")) {
-                                    const value = e.target.value;
-                                    onChange(() => fixImportRow(tenantId, preview.id, row.row_number, field.name, value));
-                                  }
-                                }}
-                                className="w-full rounded border border-red-300 bg-white px-1.5 py-0.5"
-                              />
+                            {flagged?.has(field.name) || row.fixed?.[field.name] !== undefined ? (
+                              <>
+                                <input
+                                  // Keyed on the value so an Undo or a re-check refreshes it.
+                                  key={row.values[field.name] ?? ""}
+                                  defaultValue={row.values[field.name] ?? ""}
+                                  disabled={busy}
+                                  aria-label={`${field.label}, row ${row.row_number}`}
+                                  data-testid={`fix-${row.row_number}-${field.name}`}
+                                  onBlur={(e) => {
+                                    if (e.target.value !== (row.values[field.name] ?? "")) {
+                                      const value = e.target.value;
+                                      onChange(() => fixImportRow(tenantId, preview.id, row.row_number, field.name, value));
+                                    }
+                                  }}
+                                  className={[
+                                    "w-full rounded border bg-white px-1.5 py-0.5",
+                                    flagged?.has(field.name) ? "border-red-300" : "border-amber-400",
+                                  ].join(" ")}
+                                />
+                                {row.fixed?.[field.name] !== undefined ? (
+                                  <span className="mt-0.5 flex items-center gap-2 text-xs text-gray-500">
+                                    <span>File had: {row.fixed[field.name] || "(blank)"}</span>
+                                    <button
+                                      type="button"
+                                      disabled={busy}
+                                      data-testid={`undo-${row.row_number}-${field.name}`}
+                                      onClick={() =>
+                                        onChange(() =>
+                                          fixImportRow(tenantId, preview.id, row.row_number, field.name, row.fixed?.[field.name] ?? ""),
+                                        )
+                                      }
+                                      className="text-blue-700 hover:underline"
+                                    >
+                                      Undo
+                                    </button>
+                                  </span>
+                                ) : null}
+                              </>
                             ) : (
                               row.values[field.name] ?? <span className="text-gray-400">—</span>
                             )}
@@ -462,8 +496,8 @@ function CurrentImport({
                 </tbody>
               </table>
               <p className="mt-1 text-xs text-gray-500">
-                Showing the rows with problems first, then the start of the file. Fix a red cell and click
-                away to re-check.
+                Showing the rows with problems first, then rows you&apos;ve fixed, then the start of the file.
+                Fix a red cell and click away to re-check. Fixes stay editable until you commit.
               </p>
             </div>
           </section>

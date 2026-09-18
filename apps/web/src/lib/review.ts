@@ -160,7 +160,7 @@ export class ReviewApiError extends Error {
   }
 }
 
-const UNEXPECTED: CatalogError = {
+export const UNEXPECTED: CatalogError = {
   code: "APP-000",
   title: "We couldn't reach DocFlow",
   message: "The request didn't get through, so nothing was changed.",

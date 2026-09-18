@@ -985,3 +985,15 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 - **Acting-as:** every Console route logs its `admin_actions` row, then runs the tenant's own import code in a tenant session; the import records `created_by` (the founder) and `acting_as_tenant_id`.
 
 **Related:** Section 7.6, 7.11, 7.15.1, 7.15.2, `supabase/migrations/0012_catalog_import.sql`.
+
+## D-109 — Import fixes blocked by CORS; a missing column no longer blanks a field
+
+**Context:** Founder testing of slice 5.2 in the browser. (1) Inline row fixes and column-mapping changes never saved, and Commit stayed disabled: both are `PUT`, and the API's CORS allowlist had only `GET, POST, PATCH`. The browser's preflight refused them before they were sent. Route tests use the TestClient, which never preflights, and the Playwright specs stub the API, so nothing caught it. The failure did show APP-000, but only at the top of a long page, out of sight of the table being edited. (2) The founder's second sample catalog had no UPC column, and the preview counted 17 of 17 existing items as "updated": committing it would have blanked every barcode the first file set.
+
+**Decisions:**
+- `PUT` is added to the CORS allowlist. `apps/api/tests/test_cors.py` now proves the allowlist equals the set of methods the routes use (from the OpenAPI schema), plus `OPTIONS`, so a new method can't be missed again and an unused one can't sneak in.
+- The import screen's error box is sticky, so a failure is visible wherever the founder is working, and any failure that isn't catalog-coded gets the APP-000 fallback rather than being dropped.
+- **A catalog field whose column is not mapped in the file is neither compared nor written** on update or reinstatement: the existing value stays. A file that has the column but an empty cell still sets that field empty, because the file said so. New items still get the unmapped field empty (D-108: no guessed `'EA'`). This matches the customer-list rule that a value is "filled in, never blanked".
+
+**Related:** D-089 (the original CORS gap), D-108, Section 7.15.2 Step 4.
+- **A row fixed inline stays in the preview and stays editable until commit** (after the problem rows, ahead of the file's start), showing what the file said and an Undo. Setting a fix back to exactly the file's value removes it, so an undone fix leaves no override behind.

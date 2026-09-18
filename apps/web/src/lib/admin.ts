@@ -197,7 +197,12 @@ export type ImportPreview = {
   diff?: { insert: number; update: number; reinstate: number; unchanged: number; retire: number } | null;
   retiring?: string[];
   can_commit?: boolean;
-  preview?: Array<{ row_number: number; values: Record<string, string | null> }>;
+  preview?: Array<{
+    row_number: number;
+    values: Record<string, string | null>;
+    /** Fields fixed inline, with what the file itself says. */
+    fixed?: Record<string, string>;
+  }>;
 };
 
 export type ImportSummaryRow = {
