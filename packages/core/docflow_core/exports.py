@@ -306,6 +306,10 @@ def _pin_zip(content: bytes) -> bytes:
             pinned = zipfile.ZipInfo(info.filename, date_time=_FIXED_ZIP_TIME)
             pinned.compress_type = zipfile.ZIP_STORED
             pinned.external_attr = 0o600 << 16
+            # zipfile stamps each entry with the OS that wrote it (0 on
+            # Windows, 3 elsewhere), which made the same workbook differ
+            # between a Windows machine and a Linux server. Pinned.
+            pinned.create_system = 0
             target.writestr(pinned, data)
     return output.getvalue()
 

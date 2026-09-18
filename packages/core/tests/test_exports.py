@@ -158,6 +158,19 @@ def test_the_bytes_match_the_pinned_digest(fmt):
     assert hashlib.sha256(content).hexdigest() == PINNED_SHA256[fmt]
 
 
+@pytest.mark.parametrize("platform", ["win32", "linux", "darwin"])
+def test_the_bytes_do_not_depend_on_the_operating_system(platform, monkeypatch):
+    """CI (Linux) once disagreed with Windows about the .xlsx digest, because
+    zipfile records the OS that wrote each entry. Same snapshot, same bytes,
+    wherever the worker runs."""
+    import sys
+
+    monkeypatch.setattr(sys, "platform", platform)
+    for fmt in exports.FORMATS:
+        content = build_export(_snapshot(), SNAPSHOT_HASH, fmt).content
+        assert hashlib.sha256(content).hexdigest() == PINNED_SHA256[fmt], fmt
+
+
 def test_the_xlsx_carries_no_timestamp_from_when_it_was_made():
     content = build_export(_snapshot(), SNAPSHOT_HASH, "xlsx").content
     archive = zipfile.ZipFile(io.BytesIO(content))
