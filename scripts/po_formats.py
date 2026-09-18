@@ -45,7 +45,7 @@ def _font() -> ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
-def _render_image(text: str, *, jitter: bool = False) -> Image.Image:
+def _render_image(text: str, *, jitter: bool = False, degraded: bool = False) -> Image.Image:
     """
     The order as a page of pixels -- a scan or a phone photo.
 
@@ -68,6 +68,15 @@ def _render_image(text: str, *, jitter: bool = False) -> Image.Image:
     if jitter:
         image = image.rotate(-0.4, expand=False, fillcolor="white")
         image = image.convert("L").point(lambda p: min(255, int(p * 1.04) + 4)).convert("RGB")
+    if degraded:
+        # A genuinely poor scan: skewed, soft, washed out. A document seeded
+        # with low confidence has to LOOK hard to read, or the screen and the
+        # numbers disagree and the reviewer learns to distrust the flag.
+        from PIL import ImageFilter
+
+        image = image.rotate(-1.1, expand=False, fillcolor="white")
+        image = image.filter(ImageFilter.GaussianBlur(radius=1.1))
+        image = image.convert("L").point(lambda p: min(255, int(p * 0.85) + 48)).convert("RGB")
     return image
 
 
@@ -153,10 +162,12 @@ def as_png(text: str, po_number: str) -> tuple[str, bytes]:
     return f"{po_number}.png", buf.getvalue()
 
 
-def as_jpg(text: str, po_number: str) -> tuple[str, bytes]:
+def as_jpg(text: str, po_number: str, degraded: bool = False) -> tuple[str, bytes]:
     """A phone photo of a paper order, slightly off-square."""
     buf = io.BytesIO()
-    _render_image(text, jitter=True).save(buf, format="JPEG", quality=72)
+    _render_image(text, jitter=True, degraded=degraded).save(
+        buf, format="JPEG", quality=55 if degraded else 72
+    )
     return f"{po_number}.jpg", buf.getvalue()
 
 
@@ -168,7 +179,15 @@ def as_tiff(text: str, po_number: str) -> tuple[str, bytes]:
 
 
 def render(
-    fmt: str, *, text: str, po_number: str, rows: list[dict], header: dict, sender: str, buyer: str
+    fmt: str,
+    *,
+    text: str,
+    po_number: str,
+    rows: list[dict],
+    header: dict,
+    sender: str,
+    buyer: str,
+    degraded: bool = False,
 ) -> tuple[str, bytes]:
     if fmt == "txt":
         return as_txt(text, po_number)
@@ -185,7 +204,7 @@ def render(
     if fmt == "png":
         return as_png(text, po_number)
     if fmt == "jpg":
-        return as_jpg(text, po_number)
+        return as_jpg(text, po_number, degraded=degraded)
     if fmt == "tiff":
         return as_tiff(text, po_number)
     raise ValueError(f"unknown format {fmt!r}")

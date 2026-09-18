@@ -298,7 +298,17 @@ def _build_order(index: int, rng: random.Random) -> dict:
         "notes": 0.9,
     }
     if defect == "low_confidence":
-        header_confidence = {k: min(v, 0.66) for k, v in header_confidence.items()}
+        # A poor scan garbles SOME fields, not every one. Capping all ten
+        # produced sixteen checks on one order and taught a reviewer to tick
+        # through them -- the failure D-073 warns about. These are the ones a
+        # soft, skewed scan actually costs you: the reference number, the
+        # total, and the handwritten-looking date.
+        header_confidence = {
+            **header_confidence,
+            "po_number": 0.64,
+            "order_total": 0.58,
+            "order_date": 0.71,
+        }
 
     document_text = PO_TEMPLATE.format(
         buyer=buyer,
@@ -335,6 +345,7 @@ def _build_order(index: int, rng: random.Random) -> dict:
         },
         sender=email,
         buyer=buyer,
+        degraded=defect == "low_confidence",
     )
 
     return {
