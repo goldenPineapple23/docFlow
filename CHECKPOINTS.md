@@ -73,7 +73,18 @@ browser renders, and the visual pass.
   (see `DECISIONS.md` and the memory notes) and needs an interactive
   elevated terminal.
 - **LibreOffice is not installed**, so legacy `.doc` degrades to a clean
-  `DOC-017` and one worker test skips.
+  `DOC-017` and one worker test skips. **Installing it also unlocks
+  full-fidelity previews**: Section 7.11 already runs LibreOffice headless in
+  the isolated worker for Tier 2 formats, and the same call converts `.docx`
+  and `.xlsx` to PDF, which a browser renders with the layout intact. That
+  replaces today's extracted-text preview for those formats with the real
+  page. `.eml` / `.msg` stay as text -- an email body has little layout, and
+  when a PO arrives by email the order is usually an attachment, which 7.11
+  already unwraps and validates on its own. Ruled out permanently: a hosted
+  conversion service (Section 7.10 and Section 10 forbid sending customer
+  documents to third parties) and browser-side renderers such as SheetJS or
+  docx-preview (that moves parsing of hostile files into the customer's
+  browser, and 7.12 forbids rendering document-derived markup).
 - ~~The line-items section is taller than it needs to be.~~ **Done** after
   the checkpoint (commit `1823147`): line items are now a table, one row per
   line, with matching state in a row beneath that opens whenever there is
