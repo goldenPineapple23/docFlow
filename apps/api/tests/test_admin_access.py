@@ -15,7 +15,7 @@ from docflow_core.config import get_settings
 from docflow_core.db import platform_session
 from sqlalchemy import text
 
-from tests.conftest import requires_database
+from tests.conftest import requires_console_schema, requires_database
 
 
 def test_admin_route_404_without_any_auth_header(client):
@@ -57,7 +57,7 @@ def test_admin_route_404_with_validly_signed_but_unknown_user_token(client, monk
         get_settings.cache_clear()
 
 
-@requires_database
+@requires_console_schema
 def test_platform_admin_can_create_tenant_and_admin_action_is_recorded(client, monkeypatch):
     """
     Full-stack version of the Phase 0 exit criterion: "the founder can
@@ -72,6 +72,11 @@ def test_platform_admin_can_create_tenant_and_admin_action_is_recorded(client, m
     secret = "test-only-secret-for-ci"
     monkeypatch.setenv("SUPABASE_JWT_SECRET", secret)
     get_settings.cache_clear()
+    # Tenant creation makes the Stripe customer (Section 7.15.2 Step 2); a
+    # test never calls Stripe for real.
+    monkeypatch.setattr(
+        "docflow_core.external_services.create_stripe_customer", lambda **_: "cus_test_fake"
+    )
 
     admin_auth_user_id = str(uuid4())
     admin_local_user_id = uuid4()

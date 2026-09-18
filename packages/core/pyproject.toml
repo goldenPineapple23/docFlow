@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-settings>=2.3",
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.1",
+    "httpx>=0.27",
     "pyjwt[crypto]>=2.8",
     "anthropic>=0.69",
     # docflow_core.email_intake enqueues parse_and_extract directly, so the
@@ -43,6 +44,10 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["docflow_core*"]
+
+# Email templates are read from disk at runtime (docflow_core.email_outbox).
+[tool.setuptools.package-data]
+docflow_core = ["email_templates/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

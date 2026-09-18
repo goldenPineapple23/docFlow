@@ -1,124 +1,140 @@
 "use client";
 
-import { useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { createTenant, listIntakes, listTiers, type IntakeSummary, type Tier } from "@/lib/admin";
+import { ReviewApiError, type CatalogError } from "@/lib/review";
+import { CatalogErrorBox } from "@/components/admin/CatalogErrorBox";
 
-// CLAUDE.md Section 7.15.2 Step 2 (Phase 0 minimal version): one form,
-// creating the tenant, its first owner user (pending invite), and its
-// intake address, all in a single backend transaction. This calls the
-// same admin_data_access.create_tenant function Phase 5's fuller setup
-// tool will extend -- there is no second, duplicate tenant-creation path.
+/**
+ * Onboarding Step 2 -- create the tenant (CLAUDE.md Section 7.15.2).
+ *
+ * One form. Submitting it creates, in a single transaction, the tenant on
+ * the current version of the chosen tier, its owner (invite pending), its
+ * intake address (not live until go-live), the Stripe customer, and moves
+ * the linked intake's files out of staging. It calls the same
+ * `create_tenant` Phase 0 introduced -- extended, not duplicated.
+ */
 export default function NewTenantPage() {
+  return (
+    <Suspense fallback={null}>
+      <NewTenantForm />
+    </Suspense>
+  );
+}
+
+function NewTenantForm() {
+  const router = useRouter();
+  const preselectedIntake = useSearchParams().get("intake");
+  const [tiers, setTiers] = useState<Tier[]>([]);
+  const [intakes, setIntakes] = useState<IntakeSummary[]>([]);
   const [name, setName] = useState("");
   const [ownerEmail, setOwnerEmail] = useState("");
-  const [primaryCurrency, setPrimaryCurrency] = useState("USD");
-  const [timezone, setTimezone] = useState("UTC");
-  const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ tenant_id: string; owner_user_id: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [currency, setCurrency] = useState("USD");
+  const [timezone, setTimezone] = useState("America/New_York");
+  const [tier, setTier] = useState("starter");
+  const [intakeId, setIntakeId] = useState<string>(preselectedIntake ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<CatalogError | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSubmitting(true);
-    setError(null);
-    setResult(null);
-
-    const res = await apiFetch("/admin/tenants/new", {
-      method: "POST",
-      body: JSON.stringify({
-        name,
-        owner_email: ownerEmail,
-        primary_currency: primaryCurrency,
-        timezone,
-      }),
-    });
-
-    setSubmitting(false);
-    if (!res.ok) {
-      setError("Couldn't create the tenant. Check the values and try again.");
-      return;
-    }
-    setResult(await res.json());
-    setName("");
-    setOwnerEmail("");
-  }
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([listTiers(), listIntakes()])
+      .then(([t, i]) => {
+        if (cancelled) return;
+        setTiers(t.tiers);
+        const open = i.intakes.filter((row) => row.linked_tenant_id === null);
+        setIntakes(open);
+        const chosen = open.find((row) => row.id === preselectedIntake);
+        if (chosen) {
+          setName((current) => current || chosen.prospect_name);
+          setOwnerEmail((current) => current || chosen.contact_email || "");
+        }
+      })
+      .catch((e) => {
+        if (!cancelled && e instanceof ReviewApiError) setError(e.catalog);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [preselectedIntake]);
 
   return (
-    <main className="mx-auto max-w-lg p-8">
-      <h1 className="text-xl font-semibold">Create a new tenant</h1>
-      <p className="mt-1 text-sm text-gray-500">
-        Onboarding Step 2. Creates the tenant, its first owner user (pending invite), and its
-        intake address in one transaction.
+    <>
+      <h1 className="text-xl font-semibold">Create a tenant</h1>
+      <p className="mt-1 text-sm text-gray-600">
+        Step 2 of onboarding. Creates the tenant, its owner (invite not sent yet), its intake
+        address (inactive until go-live) and its Stripe customer, and moves the intake&apos;s files
+        in. All or nothing.
       </p>
 
-      <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-        <div className="space-y-1">
-          <label htmlFor="name" className="block text-sm font-medium">
-            Company name
-          </label>
-          <input
-            id="name"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full rounded border px-3 py-2"
-          />
+      <form
+        className="mt-5 grid gap-4 rounded-xl border border-gray-200 bg-white p-5 sm:grid-cols-2"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setBusy(true);
+          setError(null);
+          try {
+            const result = await createTenant({
+              name,
+              owner_email: ownerEmail,
+              primary_currency: currency,
+              timezone,
+              tier,
+              intake_id: intakeId || null,
+            });
+            router.push(`/admin/tenants/${result.tenant_id}`);
+          } catch (err) {
+            if (err instanceof ReviewApiError) setError(err.catalog);
+            setBusy(false);
+          }
+        }}
+      >
+        <label className="text-sm">
+          <span className="font-medium">Company name</span>
+          <input required value={name} onChange={(e) => setName(e.target.value)} data-testid="tenant-name" className="mt-1 w-full rounded border px-3 py-2" />
+        </label>
+        <label className="text-sm">
+          <span className="font-medium">Owner email</span>
+          <input required type="email" value={ownerEmail} onChange={(e) => setOwnerEmail(e.target.value)} data-testid="tenant-owner-email" className="mt-1 w-full rounded border px-3 py-2" />
+        </label>
+        <label className="text-sm">
+          <span className="font-medium">Plan</span>
+          <select value={tier} onChange={(e) => setTier(e.target.value)} data-testid="tenant-tier" className="mt-1 w-full rounded border px-3 py-2">
+            {tiers.map((t) => (
+              <option key={t.code} value={t.code}>
+                {t.name} — ${t.monthly_price}/month, {t.document_allowance.toLocaleString()} documents
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-sm">
+          <span className="font-medium">Intake</span>
+          <select value={intakeId} onChange={(e) => setIntakeId(e.target.value)} data-testid="tenant-intake" className="mt-1 w-full rounded border px-3 py-2">
+            <option value="">None</option>
+            {intakes.map((i) => (
+              <option key={i.id} value={i.id}>
+                {i.prospect_name} ({i.file_count} files)
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-sm">
+          <span className="font-medium">Primary currency</span>
+          <input required maxLength={3} value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} className="mt-1 w-full rounded border px-3 py-2" />
+        </label>
+        <label className="text-sm">
+          <span className="font-medium">Timezone</span>
+          <input required value={timezone} onChange={(e) => setTimezone(e.target.value)} className="mt-1 w-full rounded border px-3 py-2" />
+        </label>
+        <div className="sm:col-span-2">
+          <button type="submit" disabled={busy} data-testid="tenant-create" className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+            {busy ? "Creating…" : "Create tenant"}
+          </button>
         </div>
-
-        <div className="space-y-1">
-          <label htmlFor="owner_email" className="block text-sm font-medium">
-            Owner email
-          </label>
-          <input
-            id="owner_email"
-            type="email"
-            required
-            value={ownerEmail}
-            onChange={(e) => setOwnerEmail(e.target.value)}
-            className="w-full rounded border px-3 py-2"
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <label htmlFor="currency" className="block text-sm font-medium">
-              Primary currency
-            </label>
-            <input
-              id="currency"
-              value={primaryCurrency}
-              onChange={(e) => setPrimaryCurrency(e.target.value)}
-              className="w-full rounded border px-3 py-2"
-            />
-          </div>
-          <div className="space-y-1">
-            <label htmlFor="timezone" className="block text-sm font-medium">
-              Timezone
-            </label>
-            <input
-              id="timezone"
-              value={timezone}
-              onChange={(e) => setTimezone(e.target.value)}
-              className="w-full rounded border px-3 py-2"
-            />
-          </div>
-        </div>
-
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        {result && (
-          <p className="text-sm text-green-700">
-            Created tenant {result.tenant_id} with owner user {result.owner_user_id}.
-          </p>
-        )}
-
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full rounded bg-black px-3 py-2 text-white disabled:opacity-50"
-        >
-          {submitting ? "Creating…" : "Create tenant"}
-        </button>
       </form>
-    </main>
+
+      {error ? <div className="mt-4"><CatalogErrorBox error={error} /></div> : null}
+    </>
   );
 }

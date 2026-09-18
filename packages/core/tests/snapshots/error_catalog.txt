@@ -6,6 +6,34 @@ AUTH-002 [warning/tenant] Your account can view this, not change it
   what+why: Viewer accounts can read orders and download exports, but editing and approving are left to reviewers so it's always clear who signed off on an order.
   next:     Ask an owner or admin on your account to change your role, or to approve this order.
 
+CON-001 [warning/founder] That intake doesn't exist
+  what+why: No open intake has that id -- it may have been removed.
+  next:     Go back to the intake list and pick it again.
+
+CON-002 [warning/founder] That intake already belongs to a tenant
+  what+why: Its files were moved into a tenant when that tenant was created.
+  next:     Open the linked tenant and upload there, or start a new intake.
+
+CON-003 [warning/founder] That tier isn't available
+  what+why: There is no current version of the chosen tier in the tiers table.
+  next:     Pick Starter, Growth or Scale; if one is missing, check the tiers table.
+
+CON-004 [warning/founder] This tenant has no owner to invite
+  what+why: The tenant has no active owner user, so there is nobody to send the invite to.
+  next:     Check the tenant's users; an owner is created with the tenant.
+
+CON-005 [high/founder] The owner is linked to another login
+  what+why: This owner's row already points at a different Supabase sign-in account than the one for this email address, so re-sending could hand the tenant to the wrong person.
+  next:     Check the owner's email address and the Supabase Auth user before trying again.
+
+CON-006 [high/founder] Stripe or Supabase didn't answer
+  what+why: A call to an outside service failed, so nothing was changed: a tenant is not created without its Stripe customer, and an invite is not recorded without its link.
+  next:     Check the keys in .env and the service's status page, then try again.
+
+CON-007 [warning/founder] That file isn't one DocFlow accepts
+  what+why: The staging upload uses the same file checks as customer intake, and this file didn't pass them.
+  next:     Ask the prospect for the file in a supported format (PDF, Word, Excel, CSV, image).
+
 DOC-001 [warning/tenant] We couldn't read this file
   what+why: This PDF is password-protected. DocFlow doesn't open protected files.
   next:     Ask the sender for an unprotected copy, or remove the password and upload it again.

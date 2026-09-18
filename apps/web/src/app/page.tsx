@@ -23,14 +23,27 @@ type Identity = {
  * to go (DECISIONS.md D-090). Signing in should put you in front of your
  * work, not in front of a fact about yourself.
  *
- * The founder's own account has no tenant, so it stays here and gets the
- * Console links instead.
+ * **The founder's own account goes to the Console**, for the same reason.
+ *
+ * **A password-reset link lands here** -- Supabase sends it to the site's
+ * base URL -- and used to stop here, signed in but never asked for a new
+ * password. It now goes on to the set-password page (D-105), which works for
+ * a reset exactly as for an invite.
  */
 export default function Home() {
   const router = useRouter();
   const [identity, setIdentity] = useState<Identity | "signed_out" | "loading">("loading");
 
   useEffect(() => {
+    // Read before the Supabase client consumes the link's fragment.
+    if (typeof window !== "undefined" && /type=(recovery|invite)/.test(window.location.hash)) {
+      router.replace("/auth/accept");
+      return;
+    }
+    const { data: listener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") router.replace("/auth/accept");
+    });
+
     let cancelled = false;
     supabase.auth
       .getSession()
@@ -43,6 +56,8 @@ export default function Home() {
         setIdentity(next);
         if (next !== "signed_out" && next.tenant_id) {
           router.replace("/review");
+        } else if (next !== "signed_out" && next.is_platform_admin) {
+          router.replace("/admin");
         }
       })
       .catch(() => {
@@ -50,6 +65,7 @@ export default function Home() {
       });
     return () => {
       cancelled = true;
+      listener.subscription.unsubscribe();
     };
   }, [router]);
 
@@ -84,8 +100,8 @@ export default function Home() {
             {identity.is_platform_admin && (
               <div className="space-y-1 text-sm">
                 <p>
-                  <Link href="/admin/tenants/new" className="underline">
-                    Founder Console → Create tenant
+                  <Link href="/admin" className="underline">
+                    Founder Console
                   </Link>
                 </p>
               </div>

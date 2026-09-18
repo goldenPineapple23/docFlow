@@ -1,0 +1,13 @@
+Subject: Your DocFlow account for $tenant_name is ready
+
+Hello,
+
+DocFlow has set up an account for $tenant_name. Use the link below to choose
+your password and sign in:
+
+$invite_link
+
+The link works once and expires after a while. If it has expired, reply to
+this email and we will send you a new one.
+
+-- DocFlow

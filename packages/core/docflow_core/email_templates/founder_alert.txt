@@ -1,0 +1,14 @@
+Subject: [DocFlow $severity] $title
+
+$title
+
+Severity: $severity
+Tenant:   $tenant
+Raised:   $raised_at
+Alert id: $alert_id
+
+Details (ids and counts only):
+$details
+
+Open the Console attention panel to acknowledge it:
+$console_link

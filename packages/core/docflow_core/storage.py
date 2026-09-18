@@ -53,8 +53,10 @@ def _safe_extension(original_filename: str) -> str:
 
 # The folders under a tenant's prefix. A fixed set, so a caller cannot invent
 # a path segment: `uploads` holds what arrived (and previews of it), `exports`
-# holds files DocFlow generated from an approved snapshot (Section 7.4).
-STORAGE_AREAS: frozenset[str] = frozenset({"uploads", "exports"})
+# holds files DocFlow generated from an approved snapshot (Section 7.4), and
+# `onboarding` holds a prospect's files moved out of staging when their tenant
+# is created (Section 7.15.2 Step 2).
+STORAGE_AREAS: frozenset[str] = frozenset({"uploads", "exports", "onboarding"})
 
 
 def build_storage_path(tenant_id: UUID, original_filename: str, *, area: str = "uploads") -> str:
@@ -89,3 +91,40 @@ def save_file(
 
 def read_file(storage_path: str) -> bytes:
     return _resolve(storage_path).read_bytes()
+
+
+# ── Pre-tenant staging (Section 7.15.2 Step 1) ──────────────────────────────
+#
+# A prospect's files arrive before any tenant exists, so they cannot live
+# under a tenant prefix. They live under `staging/{intake_id}/`, which no
+# tenant path can ever reach, until tenant creation copies them across.
+
+
+def build_staging_path(intake_id: UUID, original_filename: str) -> str:
+    return f"staging/{intake_id}/{uuid4().hex}{_safe_extension(original_filename)}"
+
+
+def save_staging_file(intake_id: UUID, original_filename: str, content: bytes) -> str:
+    storage_path = build_staging_path(intake_id, original_filename)
+    full_path = _resolve(storage_path)
+    full_path.parent.mkdir(parents=True, exist_ok=True)
+    full_path.write_bytes(content)
+    return storage_path
+
+
+def copy_into_tenant(storage_path: str, tenant_id: UUID, *, area: str) -> str:
+    """
+    Copy a stored file under a tenant's prefix and return the new path. A
+    copy, not a move, so tenant creation can undo it: the caller deletes the
+    copy if its transaction fails, or the original once it has committed.
+    """
+    new_path = build_storage_path(tenant_id, storage_path, area=area)
+    target = _resolve(new_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(_resolve(storage_path).read_bytes())
+    return new_path
+
+
+def delete_file(storage_path: str) -> None:
+    """Remove a stored object. Missing is fine: the goal state is 'absent'."""
+    _resolve(storage_path).unlink(missing_ok=True)

@@ -295,3 +295,39 @@ requires_exports_schema = pytest.mark.skipif(
         "-- see SETUP.md Step 5 / DECISIONS.md D-098."
     ),
 )
+
+
+def console_schema_available() -> bool:
+    """
+    True once supabase/migrations/0011_console_foundations.sql has been
+    applied (tiers, onboarding intakes, email outbox, founder alerts). Tests
+    of the Phase 5 Console skip cleanly until the founder applies it (D-102).
+    """
+    if not database_available():
+        return False
+    from docflow_core.db import get_engine
+    from sqlalchemy import text as _text
+
+    try:
+        with get_engine().connect() as conn:
+            for statement in (
+                "SELECT id, code, version, is_current, document_allowance FROM tiers LIMIT 0",
+                "SELECT id, prospect_name, linked_tenant_id FROM onboarding_intakes LIMIT 0",
+                "SELECT id, intake_id, storage_path FROM onboarding_intake_files LIMIT 0",
+                "SELECT id, template, status FROM email_outbox LIMIT 0",
+                "SELECT id, type, dedupe_key, acknowledged_at FROM founder_alerts LIMIT 0",
+                "SELECT tier_id, onboarding_intake_id FROM tenants LIMIT 0",
+            ):
+                conn.execute(_text(statement))
+        return True
+    except Exception:
+        return False
+
+
+requires_console_schema = pytest.mark.skipif(
+    not console_schema_available(),
+    reason=(
+        "supabase/migrations/0011_console_foundations.sql has not been applied to this database "
+        "yet -- see SETUP.md Step 5 / DECISIONS.md D-102."
+    ),
+)

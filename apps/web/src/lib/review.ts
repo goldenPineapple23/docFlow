@@ -167,7 +167,7 @@ const UNEXPECTED: CatalogError = {
   action: "Check your connection and try again. If it keeps happening, DocFlow has been alerted.",
 };
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await apiFetch(path, init);

@@ -909,3 +909,47 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Decision:** a second button beside Approve, with a format picker. It runs the ordinary approval (same warning gate, same acknowledgements, same `review_actions` row) and, only if that succeeds, the ordinary export. It is a shortcut over two existing actions, not a new path: approval stays an explicit user action (Section 7.3), a failed approval exports nothing, and there is still no auto-approve anywhere. The picker remembers the last format per browser (`localStorage`, read defensively; CSV when unavailable) — a per-person convenience, not a tenant setting.
 
 **Related:** Section 7.3, D-098, `apps/web/src/app/review/[id]/page.tsx`.
+
+## D-102 — Tier prices live in a versioned `tiers` table; setup fees are chosen per customer
+
+**Context:** Section 7.15.2 asks for tier names, prices, setup fees and allowances "in a versioned tiers config table (or typed config file — propose which)", with tenants keeping their version until the founder moves them.
+
+**Decision:** a table (migration 0011), one row per `(code, version)`, one `is_current` row per code, seeded with `docflow-pricing.docx` v1: Starter $299 / Growth $399 / Scale $599 per month; founding promo $199 / $249 / $349 for 90 days; allowances 300 / 1,000 / 3,000 (Section 7.16.1). A table rather than a file because a tenant must reference the exact version it signed up on (a foreign key, `tenants.tier_id`), and MRR on the dashboard is a SQL sum over it. It is one of the named global tables (no `tenant_id`); tenants may read it (prices are public, and the allowance banner needs it) and only platform admins may write.
+
+**Setup fees are not in the table.** The pricing document makes them a per-customer choice ($750 founding, $1,500 standard, $2,000–2,500 complex), so the go-live action (slice 5.3) records the amount chosen for that tenant, alongside whether the founding promo applies.
+
+**Related:** Section 7.15.2, 7.16.1, `supabase/migrations/0011_console_foundations.sql`.
+
+## D-103 — Every email goes through an outbox; with no provider it is held and shown in the Console
+
+**Context:** invites (7.15.2 Step 3), founder alerts (7.9), go-live and lifecycle emails all need to send mail. No email provider account exists yet (`.env.example` notes Postmark as the intended provider, pending a sending domain).
+
+**Decision:** `email_outbox` (0011). Every email is rendered from a template in `docflow_core/email_templates/` (Step 9: "templates in the repo, not hardcoded strings") and written as a row first. With `EMAIL_PROVIDER_API_KEY` unset the row is `held`: nothing is sent, and the founder reads it — invite links included — on the Console's Outbox page and each tenant's page. Nothing is silently dropped and nothing is sent without a record. Delivery (queued → sent) is added when a provider is configured. Templates use `$name` placeholders and must be given every field, so a template change cannot send a literal placeholder to a customer; a test renders every template.
+
+**Access:** platform admins read the outbox; a tenant session may *insert* mail for its own tenant (a worker notification) but never read it — an invite body carries a sign-in link.
+
+**Open:** a Postmark (or equivalent) account and a verified sending domain before any real customer.
+
+**Related:** Section 7.9, 7.15.2, `packages/core/docflow_core/email_outbox.py`.
+
+## D-104 — Founder alerts: one writer, one savepoint, deduplicated
+
+**Context:** Section 7.9: "One alert, one row, two channels. Every alert condition writes a founder_alerts row first; the email is sent from that row, and the Console's attention panel reads the same row."
+
+**Decision:** `founder_alerts` (0011) with `docflow_core.founder_alerts.raise_alert` as the only writer. It writes the outbox email (to `FOUNDER_ALERT_EMAIL`) and the alert row in one savepoint, and the alert names its email (`email_outbox_id`), so the two channels cannot disagree. A `dedupe_key` with a partial unique index collapses a condition that keeps firing into one open alert; after acknowledgement the next occurrence is a new alert. Alert types are an explicit table in code — each slice adds the types it starts raising, so the table is also the inventory of what is wired. Payloads carry ids, counts and codes only (Section 7.10), because they are emailed.
+
+**Access:** a tenant session may raise an alert about its own tenant (conditions are usually detected there — the worker, an allowance crossing) but can never read one; platform admins read and acknowledge.
+
+**First wiring:** `EXP-004` (an export failing its integrity check) now raises `export_integrity_failure`, closing the open item in D-098.
+
+**Related:** Section 7.9, 7.15.3, 7.16.5, D-098, `packages/core/docflow_core/founder_alerts.py`.
+
+## D-105 — Invites: DocFlow generates the Supabase link and sends it itself
+
+**Context:** Step 3 requires a "set your password" link for the tenant's owner. Supabase can send invite emails itself, but its built-in mailer only delivers to the project's own team members, so it cannot reach customers.
+
+**Decision:** the Console asks Supabase's admin API to *generate* the link (`type: invite`, or `recovery` for someone who already has a sign-in) without sending anything, links the returned Supabase user to the local owner row (`users.auth_user_id`, D-012) at once, and sends the link through the outbox (D-103). The link lands on `/auth/accept`, which reads the session from the link and asks for a password (at least 10 characters). It is not a signup page: without a valid link there is no session and nothing to do (Section 3). A re-send that finds the owner already linked to a *different* sign-in account is refused (`CON-005`) rather than risk handing the tenant to the wrong person.
+
+**Founder setup step:** Supabase only redirects to allowed URLs. `http://localhost:3000/auth/accept` (and the production equivalent later) must be added under Authentication → URL Configuration → Redirect URLs.
+
+**Related:** Section 3, 7.15.2 Step 3, D-012, `packages/core/docflow_core/external_services.py`, `apps/web/src/app/auth/accept/page.tsx`.

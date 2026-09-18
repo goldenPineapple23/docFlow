@@ -543,6 +543,73 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="tenant",
     ),
+    # ── CON-0xx · the founder Console (Section 7.15, Phase 5) ────────────────
+    # Founder-audience: terser, and allowed to name the moving parts.
+    "CON-001": ErrorCatalogEntry(
+        code="CON-001",
+        title="That intake doesn't exist",
+        message="No open intake has that id -- it may have been removed.",
+        action="Go back to the intake list and pick it again.",
+        severity="warning",
+        audience="founder",
+    ),
+    "CON-002": ErrorCatalogEntry(
+        code="CON-002",
+        title="That intake already belongs to a tenant",
+        message="Its files were moved into a tenant when that tenant was created.",
+        action="Open the linked tenant and upload there, or start a new intake.",
+        severity="warning",
+        audience="founder",
+    ),
+    "CON-003": ErrorCatalogEntry(
+        code="CON-003",
+        title="That tier isn't available",
+        message="There is no current version of the chosen tier in the tiers table.",
+        action="Pick Starter, Growth or Scale; if one is missing, check the tiers table.",
+        severity="warning",
+        audience="founder",
+    ),
+    "CON-004": ErrorCatalogEntry(
+        code="CON-004",
+        title="This tenant has no owner to invite",
+        message="The tenant has no active owner user, so there is nobody to send the invite to.",
+        action="Check the tenant's users; an owner is created with the tenant.",
+        severity="warning",
+        audience="founder",
+    ),
+    "CON-005": ErrorCatalogEntry(
+        code="CON-005",
+        title="The owner is linked to another login",
+        message=(
+            "This owner's row already points at a different Supabase sign-in account than the "
+            "one for this email address, so re-sending could hand the tenant to the wrong person."
+        ),
+        action="Check the owner's email address and the Supabase Auth user before trying again.",
+        severity="high",
+        audience="founder",
+    ),
+    "CON-006": ErrorCatalogEntry(
+        code="CON-006",
+        title="Stripe or Supabase didn't answer",
+        message=(
+            "A call to an outside service failed, so nothing was changed: a tenant is not "
+            "created without its Stripe customer, and an invite is not recorded without its link."
+        ),
+        action="Check the keys in .env and the service's status page, then try again.",
+        severity="high",
+        audience="founder",
+    ),
+    "CON-007": ErrorCatalogEntry(
+        code="CON-007",
+        title="That file isn't one DocFlow accepts",
+        message=(
+            "The staging upload uses the same file checks as customer intake, and this file "
+            "didn't pass them."
+        ),
+        action="Ask the prospect for the file in a supported format (PDF, Word, Excel, CSV, image).",
+        severity="warning",
+        audience="founder",
+    ),
     # ── EXP-0xx · export files (Section 7.4, Phase 4) ────────────────────────
     "EXP-001": ErrorCatalogEntry(
         code="EXP-001",

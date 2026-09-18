@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { notFound } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { ConsoleNav } from "@/components/admin/ConsoleNav";
 
 /**
  * Gate for every /admin/* page. The real security boundary is the backend
@@ -47,5 +48,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return null;
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      <ConsoleNav />
+      <main className="mx-auto max-w-6xl p-6">{children}</main>
+    </>
+  );
 }

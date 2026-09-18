@@ -18,7 +18,9 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   if (session?.access_token) {
     headers.set("Authorization", `Bearer ${session.access_token}`);
   }
-  if (init.body && !headers.has("Content-Type")) {
+  // FormData sets its own multipart type, with the boundary; overriding it
+  // with JSON would make every file upload unreadable to the API.
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 

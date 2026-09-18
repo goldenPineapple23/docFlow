@@ -34,6 +34,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from docflow_core.db import tenant_session
+from docflow_core.founder_alerts import raise_alert
 from docflow_core.review import snapshot_sha256
 
 logger = logging.getLogger(__name__)
@@ -180,6 +181,18 @@ def _finish_failed(tenant_id: UUID, export_id: UUID, code: str) -> ExportOutcome
             ),
             {"id": str(export_id), "code": code},
         )
+        if code == "EXP-004":
+            # Section 7.16.5: EXP-004's audience is "both; founder alert
+            # fires". Same transaction as the failed row, so the alert and
+            # the record of the failure cannot disagree (D-104).
+            raise_alert(
+                session,
+                alert_type="export_integrity_failure",
+                severity="high",
+                tenant_id=tenant_id,
+                payload={"export_id": str(export_id), "error_code": code},
+                dedupe_key=f"export_integrity_failure:{export_id}",
+            )
     return ExportOutcome(status="failed", error_code=code)
 
 
@@ -225,9 +238,8 @@ def run_export(tenant_id: UUID, export_id: UUID) -> ExportOutcome:
         built = exports.build_export(row["snapshot"], row["snapshot_hash"], row["format"])
     except exports.ExportError as exc:
         # EXP-004 is an integrity failure the founder must hear about
-        # (Section 7.16.5: audience "both"). The founder_alerts table is
-        # Phase 5 (7.15.3); until it exists this error-level line, carrying
-        # the code, is what Sentry picks up (DECISIONS.md D-098).
+        # (Section 7.16.5: audience "both"): `_finish_failed` raises the
+        # founder alert, and this error-level line is what Sentry picks up.
         log = logger.error if exc.code == "EXP-004" else logger.info
         log(
             "export_refused export_id=%s format=%s error_code=%s reason=%s",
