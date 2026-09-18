@@ -6,6 +6,7 @@ import {
   discardImport,
   fixImportRow,
   getImport,
+  getTenantOverview,
   importFromIntake,
   listImports,
   listTenantIntakeFiles,
@@ -63,6 +64,7 @@ const COPY: Record<ImportKind, { title: string; intro: string; noun: string }> =
 };
 
 export function ImportWorkbench({ tenantId, kind }: { tenantId: string; kind: ImportKind }) {
+  const [tenantName, setTenantName] = useState<string | null>(null);
   const [history, setHistory] = useState<ImportSummaryRow[]>([]);
   const [intakeFiles, setIntakeFiles] = useState<TenantIntakeFile[]>([]);
   const [current, setCurrent] = useState<ImportPreview | null>(null);
@@ -88,9 +90,10 @@ export function ImportWorkbench({ tenantId, kind }: { tenantId: string; kind: Im
   // First load: the lists, and the newest import that isn't finished yet.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listImports(tenantId, kind), listTenantIntakeFiles(tenantId)])
-      .then(async ([h, f]) => {
+    Promise.all([listImports(tenantId, kind), listTenantIntakeFiles(tenantId), getTenantOverview(tenantId)])
+      .then(async ([h, f, t]) => {
         if (cancelled) return;
+        setTenantName(t.tenant.name);
         setHistory(h.imports);
         setIntakeFiles(f.files.filter((file) => TABLE_TYPES.has(file.detected_type)));
         const open = h.imports.find((row) => row.status === "parsing" || row.status === "parsed");
@@ -150,7 +153,17 @@ export function ImportWorkbench({ tenantId, kind }: { tenantId: string; kind: Im
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold">{copy.title}</h1>
+        {/* The tenant's name, always: every tenant's import screen looks
+            alike, and working in the wrong one is the mistake to prevent. */}
+        <h1 className="text-xl font-semibold">
+          {copy.title}
+          {tenantName ? (
+            <span data-testid="import-tenant-name" className="font-normal text-gray-600">
+              {" "}
+              · {tenantName}
+            </span>
+          ) : null}
+        </h1>
         <p className="mt-1 max-w-3xl text-sm text-gray-600">{copy.intro}</p>
       </div>
 

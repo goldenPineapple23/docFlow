@@ -997,3 +997,11 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 
 **Related:** D-089 (the original CORS gap), D-108, Section 7.15.2 Step 4.
 - **A row fixed inline stays in the preview and stays editable until commit** (after the problem rows, ahead of the file's start), showing what the file said and an Undo. Setting a fix back to exactly the file's value removes it, so an undone fix leaves no override behind.
+
+## D-110 — The import screens always name the tenant
+
+**Context:** The founder thought "Earlier imports" was shared between tenants. It wasn't: the database, the API (as a platform admin) and a browser test all showed each tenant's own list. But two tenants had near-identical names and the same test files, and the Catalog / Customer list screens never said which tenant they were on.
+
+**Decision:** The import heading reads "Catalog · {tenant name}" (likewise Customer list), from the tenant overview. `apps/web/e2e/import-tenants.spec.ts` drives the founder's path between two tenants' catalogs and proves the second never shows the first's imports.
+
+**Related:** D-108, D-109, Section 7.5.
