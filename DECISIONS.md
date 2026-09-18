@@ -953,3 +953,11 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Founder setup step:** Supabase only redirects to allowed URLs. `http://localhost:3000/auth/accept` (and the production equivalent later) must be added under Authentication → URL Configuration → Redirect URLs.
 
 **Related:** Section 3, 7.15.2 Step 3, D-012, `packages/core/docflow_core/external_services.py`, `apps/web/src/app/auth/accept/page.tsx`.
+
+## D-106 — The intake page leads with the upload, not the next step
+
+**Found by the founder's walkthrough (2026-09-18):** twice, files were never uploaded. The page's file control was the browser's bare input — plain "Choose Files No file chosen" text — directly above a large dark "Create the tenant" button, so the obvious next click skipped the upload entirely. The tests passed, because they drive the input directly.
+
+**Decision:** the page is two numbered steps. Step 1 is a large drop area with a real "Choose files…" button (drag-and-drop too) and the uploaded list right under it. Step 2's "Create the tenant" button stays secondary until at least one file is uploaded, with a line saying so; creating a tenant with no files remains possible on purpose.
+
+**Related:** Section 7.15.2 Steps 1–2, `apps/web/src/app/admin/intakes/[id]/page.tsx`.
