@@ -26,6 +26,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The file libraries behind `previews` and `exports`. Optional because the API
+# installs core too, and must never parse a customer's uploaded file (Section
+# 7.11); the worker and CI install them. Same pins as apps/worker's lockfile.
+files = [
+    "openpyxl==3.1.5",
+    "pillow==12.3.0",
+    "python-docx==1.2.0",
+]
 dev = [
     "pytest>=8.2",
     "ruff>=0.5",
