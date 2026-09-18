@@ -24,7 +24,7 @@ is never stored or offered (`EXP-004`).
 
 | Suite | Result |
 |---|---|
-| `packages/core` | 279 passed |
+| `packages/core` | 282 passed |
 | `apps/api` | 159 passed, 0 skipped (17 new export tests against the real database and RLS) |
 | `apps/worker` | 72 passed, 0 skipped |
 | `apps/web` | 23 Vitest + 12 Playwright |
@@ -83,6 +83,15 @@ An order with **no order date** produced an IIF file with a blank DATE, which
 QuickBooks would reject. Every test passed, because no test fixture lacked a
 date. IIF now refuses such an order with `EXP-006` and says to add the date
 or export CSV/Excel. The Phase 3 lesson held again: drive the real thing.
+
+### Found by CI after the checkpoint commit
+
+The pinned Excel digest failed on CI's Linux runner: Python's zipfile
+stamps each entry with the OS that wrote it, so the same approved order gave
+different .xlsx bytes on Windows and Linux -- a real break of "same snapshot,
+byte-identical file" once the worker runs on a Linux server. Fixed in
+`3d413b7` (the field is pinned; a test builds every format as Windows, Linux
+and macOS against one set of digests). CI green; core 282 passed.
 
 ---
 
