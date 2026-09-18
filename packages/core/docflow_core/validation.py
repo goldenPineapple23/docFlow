@@ -66,22 +66,28 @@ from docflow_core.errors import Severity, get_error
 # reviewers learn to click past it -- and the first warning a reviewer learns
 # to ignore is the last warning that ever protects them.
 
-# `line_total ~= quantity x unit_price`. The absolute term absorbs the
-# rounding of the computed product into the 2-decimal-place `line_total`
-# column; the relative term absorbs a unit price that the document printed
-# rounded (1,000 units at a true 0.12345 printed as "0.1235"). A discrepancy
-# has to beat BOTH to be reported.
-LINE_TOTAL_TOLERANCE_ABS = Decimal("0.01")
-LINE_TOTAL_TOLERANCE_REL = Decimal("0.005")
+# `line_total ~= quantity x unit_price`. The allowance is the exact rounding
+# room the printed numbers leave, and nothing more (DECISIONS.md D-096,
+# replacing D-073's 0.5% relative term, which let $100 go unreported on a
+# $20,000 line):
+#   * the line total is printed to the cent, so it can be up to half a cent
+#     from the true product -- LINE_TOTAL_ROUNDING;
+#   * the unit price may itself have been printed rounded (1,000 units at a
+#     true 0.12345 printed as "0.1235"), and that rounding is multiplied by
+#     the quantity: quantity x half a unit of the price's last printed
+#     decimal -- see `unit_price_half_step`.
+LINE_TOTAL_ROUNDING = Decimal("0.01")
+# Money is printed to at least the cent, so a price stored as 47.5000 is
+# treated as printed "47.50", never "47.5".
+MIN_PRICE_DECIMAL_PLACES = 2
 
-# `header total ~= sum of line totals`. The absolute allowance scales with
-# the line count because per-line rounding accumulates: 40 legitimately
-# rounded lines can drift 40 cents from a total their originating system
-# computed from unrounded values, and a fixed one-cent tolerance would fire
-# on every one of those documents.
+# `header total ~= sum of line totals`. Both sides are printed on the
+# document, so the only legitimate difference is per-line rounding: a buyer's
+# system that summed unrounded line amounts can drift up to half a cent per
+# line from the printed lines. One cent per line covers that with room to
+# spare -- 40 cents on a 40-line order -- and nothing else is allowed
+# (D-096 removed D-073's 0.5% relative term).
 HEADER_TOTAL_PER_LINE_ALLOWANCE = Decimal("0.01")
-HEADER_TOTAL_TOLERANCE_REL = Decimal("0.005")
-HEADER_TOTAL_TOLERANCE_FLOOR = Decimal("0.01")
 
 # Above either of these, a money discrepancy stops being a rounding artifact
 # and becomes something a reviewer must not skim past, so the warning is
@@ -282,9 +288,20 @@ def money_severity(delta: Decimal, magnitude: Decimal) -> Severity:
     return "warning"
 
 
-def line_total_tolerance(expected: Decimal) -> Decimal:
+def unit_price_half_step(unit_price: Decimal) -> Decimal:
+    """
+    Half a unit of the last decimal place the unit price was printed with --
+    the most a correctly rounded printed price can differ from the true one.
+    "0.1235" -> 0.00005; "47.50" (stored 47.5000) -> 0.005.
+    """
+    exponent = unit_price.normalize().as_tuple().exponent
+    places = max(MIN_PRICE_DECIMAL_PLACES, -exponent if isinstance(exponent, int) else 0)
+    return Decimal(1).scaleb(-places) / 2
+
+
+def line_total_tolerance(quantity: Decimal, unit_price: Decimal) -> Decimal:
     """The allowance for one line, as a positive Decimal."""
-    return max(LINE_TOTAL_TOLERANCE_ABS, abs(expected) * LINE_TOTAL_TOLERANCE_REL)
+    return LINE_TOTAL_ROUNDING + abs(quantity) * unit_price_half_step(unit_price)
 
 
 def check_line_total(
@@ -305,20 +322,18 @@ def check_line_total(
         return None
     expected = quantity * unit_price
     delta = line_total - expected
-    if abs(delta) <= line_total_tolerance(expected):
+    if abs(delta) <= line_total_tolerance(quantity, unit_price):
         return None
     return expected, delta
 
 
-def header_total_tolerance(line_count: int, expected_sum: Decimal) -> Decimal:
+def header_total_tolerance(line_count: int) -> Decimal:
     """
-    The allowance for the whole document. Scales with the line count, because
-    per-line rounding accumulates -- this is the function that keeps a correct
-    40-line purchase order silent.
+    The allowance for the whole document: per-line rounding, accumulated.
+    This is the function that keeps a correct 40-line purchase order silent
+    without letting a real error hide inside a percentage of the total.
     """
-    accumulated = HEADER_TOTAL_PER_LINE_ALLOWANCE * max(line_count, 1)
-    relative = abs(expected_sum) * HEADER_TOTAL_TOLERANCE_REL
-    return max(accumulated, relative, HEADER_TOTAL_TOLERANCE_FLOOR)
+    return HEADER_TOTAL_PER_LINE_ALLOWANCE * max(line_count, 1)
 
 
 def check_header_total(
@@ -344,7 +359,7 @@ def check_header_total(
         return None
     expected_sum = sum((value for value in line_totals if value is not None), Decimal("0"))
     delta = order_total - expected_sum
-    if abs(delta) <= header_total_tolerance(len(line_totals), expected_sum):
+    if abs(delta) <= header_total_tolerance(len(line_totals)):
         return None
     return expected_sum, delta
 
@@ -555,7 +570,7 @@ def _header_warnings(snapshot: DocumentSnapshot) -> list[DocumentWarning]:
                     "sum_of_lines": _derived_money(expected_sum),
                     "difference": _derived_money(delta),
                     "line_count": str(len(snapshot.lines)),
-                    "tolerance": _derived_money(header_total_tolerance(len(snapshot.lines), expected_sum)),
+                    "tolerance": _derived_money(header_total_tolerance(len(snapshot.lines))),
                 },
             )
         )
@@ -661,6 +676,8 @@ def _line_warnings(line: LineSnapshot) -> list[DocumentWarning]:
     reconciliation = check_line_total(line.quantity, line.unit_price, line.line_total)
     if reconciliation is not None:
         expected, delta = reconciliation
+        # check_line_total only fires when both are present.
+        assert line.quantity is not None and line.unit_price is not None
         warnings.append(
             warning(
                 CODE_LINE_TOTAL_MISMATCH,
@@ -672,7 +689,7 @@ def _line_warnings(line: LineSnapshot) -> list[DocumentWarning]:
                     "line_total": _money(line.line_total),
                     "expected": _derived_money(expected),
                     "difference": _derived_money(delta),
-                    "tolerance": _derived_money(line_total_tolerance(expected)),
+                    "tolerance": _derived_money(line_total_tolerance(line.quantity, line.unit_price)),
                 },
             )
         )

@@ -48,6 +48,7 @@ from docflow_core.validation import (
     money_severity,
     normalize_currency,
     parse_iso_date,
+    unit_price_half_step,
 )
 
 RECEIVED_ON = date(2025, 6, 1)
@@ -113,21 +114,28 @@ def test_a_line_total_that_is_plainly_wrong_fires():
     assert delta == Decimal("-100.00")
 
 
-def test_line_tolerance_boundary_just_inside_is_silent():
-    """expected 100.00 -> tolerance max(0.01, 0.50) = 0.50."""
-    assert line_total_tolerance(Decimal("100.00")) == Decimal("0.500")
-    assert check_line_total(Decimal("10"), Decimal("10.00"), Decimal("100.50")) is None
+def test_line_tolerance_is_the_rounding_room_of_the_printed_numbers():
+    """10 x "10.00": one cent for the line total plus 10 x half a cent."""
+    assert line_total_tolerance(Decimal("10"), Decimal("10.00")) == Decimal("0.060")
+    assert check_line_total(Decimal("10"), Decimal("10.00"), Decimal("100.06")) is None
+    assert check_line_total(Decimal("10"), Decimal("10.00"), Decimal("100.07")) is not None
 
 
-def test_line_tolerance_boundary_just_outside_fires():
-    assert check_line_total(Decimal("10"), Decimal("10.00"), Decimal("100.51")) is not None
+def test_a_price_stored_at_four_places_is_read_as_printed_to_the_cent():
+    """unit_price is numeric(14,4): "47.50" comes back as 47.5000."""
+    assert unit_price_half_step(Decimal("47.5000")) == Decimal("0.005")
+    assert unit_price_half_step(Decimal("50")) == Decimal("0.005")
+    assert unit_price_half_step(Decimal("0.1235")) == Decimal("0.00005")
 
 
-def test_small_line_tolerance_is_the_absolute_floor_not_the_relative_term():
-    # expected 1.00 -> relative term is 0.005, so the 0.01 floor governs.
-    assert line_total_tolerance(Decimal("1.00")) == Decimal("0.01")
-    assert check_line_total(Decimal("1"), Decimal("1.00"), Decimal("1.01")) is None
-    assert check_line_total(Decimal("1"), Decimal("1.00"), Decimal("1.02")) is not None
+def test_a_large_line_can_no_longer_hide_a_real_error_in_a_percentage():
+    """
+    D-096: under D-073's 0.5% relative term, a $20,000 line could be $100
+    off and stay silent. Now the allowance is 1 cent + 100 x half a cent.
+    """
+    assert check_line_total(Decimal("100"), Decimal("200.00"), Decimal("20100.00")) is not None
+    assert check_line_total(Decimal("100"), Decimal("200.00"), Decimal("20000.51")) is None
+    assert check_line_total(Decimal("100"), Decimal("200.00"), Decimal("20000.52")) is not None
 
 
 def test_a_rounded_unit_price_does_not_fire_the_line_rule():
@@ -162,10 +170,18 @@ def test_a_header_total_that_does_not_reconcile_fires():
 
 
 def test_header_tolerance_boundary_just_inside_and_just_outside():
-    # One line of 100.00 -> tolerance max(0.01 * 1, 0.50, 0.01) = 0.50.
-    assert header_total_tolerance(1, Decimal("100.00")) == Decimal("0.500")
-    assert check_header_total(Decimal("100.50"), [Decimal("100.00")]) is None
-    assert check_header_total(Decimal("100.51"), [Decimal("100.00")]) is not None
+    # One line -> one cent, whatever the size of the order.
+    assert header_total_tolerance(1) == Decimal("0.01")
+    assert check_header_total(Decimal("100.01"), [Decimal("100.00")]) is None
+    assert check_header_total(Decimal("100.02"), [Decimal("100.00")]) is not None
+
+
+def test_a_large_order_total_can_no_longer_hide_a_real_error_in_a_percentage():
+    """D-096: under D-073, $100 on a $20,000 order was inside the tolerance."""
+    lines = [Decimal("10000.00"), Decimal("10000.00")]
+    assert check_header_total(Decimal("20100.00"), lines) is not None
+    assert check_header_total(Decimal("20000.03"), lines) is not None
+    assert check_header_total(Decimal("20000.02"), lines) is None
 
 
 def test_a_forty_line_order_whose_lines_each_round_legitimately_stays_silent():
@@ -182,7 +198,7 @@ def test_a_forty_line_order_whose_lines_each_round_legitimately_stays_silent():
     assert sum(lines) == Decimal("5.20")
     assert check_header_total(Decimal("5.00"), lines) is None
     # Tolerance scales with the line count -- 40 cents, not one.
-    assert header_total_tolerance(40, Decimal("5.20")) == Decimal("0.40")
+    assert header_total_tolerance(40) == Decimal("0.40")
 
 
 def test_a_forty_line_order_with_a_real_error_still_fires():
