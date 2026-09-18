@@ -31,7 +31,7 @@ celery_app = Celery(
     # Without this a worker started as `celery -A app.celery_app worker`
     # registers no tasks at all, and every enqueued document is rejected as
     # an unregistered task and sits in `pending` forever (DECISIONS.md D-095).
-    include=["app.tasks.parse_and_extract"],
+    include=["app.tasks.parse_and_extract", "app.tasks.generate_export"],
 )
 
 celery_app.conf.update(

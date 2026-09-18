@@ -7,6 +7,85 @@ phase."
 
 ---
 
+## Phase 4 — Export — COMPLETE, awaiting "go" (2026-09-18)
+
+### Exit criteria, both met
+
+| Criterion (Section 6) | Result |
+|---|---|
+| Round-trip: the exported file, parsed back, equals the approved data exactly | **Passed, all four formats** — in core against hostile values (formula text, quotes, commas, line breaks, non-English text), and end to end through the API against the real database, comparing the downloaded bytes with the stored snapshot. IIF compares every field it carries and asserts its omissions are exactly the documented set (D-099). |
+| Exporting twice produces byte-identical files | **Passed** — rendered twice in-process, pinned SHA-256 digests per format (stable across processes, Python environments and time), and two real exports of one snapshot record the same checksum. |
+
+Both checks also run **at runtime** on every export: a file that is not
+byte-identical on a second rendering, or does not parse back to the snapshot,
+is never stored or offered (`EXP-004`).
+
+### Verification at the checkpoint
+
+| Suite | Result |
+|---|---|
+| `packages/core` | 279 passed |
+| `apps/api` | 159 passed, 0 skipped (17 new export tests against the real database and RLS) |
+| `apps/worker` | 72 passed, 0 skipped |
+| `apps/web` | 23 Vitest + 12 Playwright |
+| Lint / typecheck | clean in all four projects |
+| Live golden fixture | passed against the real Anthropic API |
+| Real browser, real stack | signed in, approved an order, downloaded CSV, Excel, JSON and IIF through API → Redis → worker → storage → signed link; status became "Exported to file" |
+| Excel file in real office software | opened in LibreOffice: formula text stays text, amounts keep their exact decimals |
+
+Migration `0010` is applied to `docflow-staging`.
+
+### What was built
+
+- **`exports` table** (0010): one row per export from the click, pinned to
+  the exact approved snapshot, `pending → ready | failed` with a catalog
+  code; finished rows made immutable by a trigger. RLS from creation.
+- **`docflow_core/exports.py`** — pure: approved snapshot in, verified bytes
+  out, for CSV, Excel, JSON and QuickBooks IIF (Estimate). No database access.
+- **`docflow_core/export_jobs.py`** — records requests (API) and produces
+  files (worker). The web process never imports the file-building module
+  (enforced by the parsing-boundary test).
+- **Worker task** `docflow.generate_export`; **API** routes to request, list,
+  poll and download; downloads via purpose-bound short-lived signed links.
+- **Export panel** on the review screen: four buttons, automatic download,
+  per-order history with "Earlier approval" marking, catalog-coded errors.
+- **Catalog SKU frozen into the approval snapshot** (D-099), so an export
+  carries the tenant's own SKU as it was when the order was approved.
+- Seven `EXP-0xx` catalog entries.
+
+### What was assumed
+
+- **D-099 IIF details** — account names `Estimates` / `Sales`, that an unknown
+  customer `NAME` is created rather than refused, and that catalog SKUs match
+  QuickBooks item names. Constants in one place; unverifiable without
+  QuickBooks Desktop.
+- **D-100** — viewers may export (the catalog already promised it).
+- **One PO per file** — the founder's choice; batch export deferred.
+
+### What is open
+
+- **IIF against real QuickBooks Desktop (UAT TC-26).** The founder is finding
+  someone with QuickBooks Desktop to try an import.
+- **EXP-004 founder alert** — logged at error level until `founder_alerts`
+  exists (Phase 5, 7.15.3), then wired to it (D-098).
+- **Orders approved before today** export with an empty catalog SKU until
+  re-approved (D-099).
+- **"One-click Approve & Export"** is listed in the MVP features document.
+  Today it is two clicks: Approve, then the format. A combined button is a
+  small addition if the founder wants it.
+- **An IIF file made before the order-date rule** (the test order
+  `e2e-po.docx`, BCH-2291) remains in that order's history; finished exports
+  are permanent records by design.
+
+### Found by driving the real app, not by the tests
+
+An order with **no order date** produced an IIF file with a blank DATE, which
+QuickBooks would reject. Every test passed, because no test fixture lacked a
+date. IIF now refuses such an order with `EXP-006` and says to add the date
+or export CSV/Excel. The Phase 3 lesson held again: drive the real thing.
+
+---
+
 ## Phase 3 — Human review UI — COMPLETE (2026-09-17)
 
 ### Exit criteria, both met

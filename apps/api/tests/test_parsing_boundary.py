@@ -47,7 +47,7 @@ FORBIDDEN_MODULES = {
 }
 
 # `docflow_core` modules whose whole job is parsing.
-FORBIDDEN_CORE_MODULES = {"previews", "parsing", "conversion"}
+FORBIDDEN_CORE_MODULES = {"previews", "parsing", "conversion", "exports"}
 
 
 def _offending_imports(py_file: Path) -> list[str]:

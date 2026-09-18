@@ -543,6 +543,88 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="tenant",
     ),
+    # ── EXP-0xx · export files (Section 7.4, Phase 4) ────────────────────────
+    "EXP-001": ErrorCatalogEntry(
+        code="EXP-001",
+        title="Only approved orders can be exported",
+        message=(
+            "This order isn't approved right now -- it hasn't been checked yet, or it was changed "
+            "after approval -- and DocFlow only exports what a person has signed off."
+        ),
+        action="Review and approve the order, then export it.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "EXP-002": ErrorCatalogEntry(
+        code="EXP-002",
+        title="We don't export to that format",
+        message="DocFlow exports orders as CSV, Excel, JSON or QuickBooks Desktop (IIF) files.",
+        action="Choose one of those four formats.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "EXP-003": ErrorCatalogEntry(
+        code="EXP-003",
+        title="This download link has expired",
+        message=(
+            "Download links only work for a few minutes, so a copied or old link can't be used "
+            "to fetch an order file."
+        ),
+        action="Open the order in DocFlow and download the file again from there.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "EXP-004": ErrorCatalogEntry(
+        code="EXP-004",
+        title="Export didn't match the approved data",
+        message=(
+            "The file we generated failed our integrity check against the approved snapshot, "
+            "so we didn't give it to you."
+        ),
+        action="Try again; if it fails a second time, DocFlow has already been alerted.",
+        severity="error",
+        audience="both",
+    ),
+    "EXP-005": ErrorCatalogEntry(
+        code="EXP-005",
+        title="QuickBooks' file format can't hold a value",
+        message=(
+            "This order contains a character, line break or date that QuickBooks Desktop's IIF "
+            "format can't store exactly, so the file wouldn't match the approved order."
+        ),
+        action=(
+            "Download it as CSV or Excel instead, or correct the value in DocFlow, re-approve, "
+            "and export to QuickBooks again."
+        ),
+        severity="warning",
+        audience="tenant",
+    ),
+    "EXP-006": ErrorCatalogEntry(
+        code="EXP-006",
+        title="QuickBooks can't import this order yet",
+        message=(
+            "QuickBooks Desktop only imports an order that has a buyer name and an order date, "
+            "and whose line totals add up exactly to the order total. This one doesn't, so we "
+            "didn't make a file QuickBooks would reject."
+        ),
+        action=(
+            "Check the buyer name, order date, order total and line totals, or download the "
+            "order as CSV or Excel instead."
+        ),
+        severity="warning",
+        audience="tenant",
+    ),
+    "EXP-007": ErrorCatalogEntry(
+        code="EXP-007",
+        title="The export file couldn't be saved",
+        message=(
+            "The file was built and checked against the approved order, but saving it failed, "
+            "so there's nothing to download yet. The failure has been logged."
+        ),
+        action="Try the export again in a minute.",
+        severity="error",
+        audience="both",
+    ),
 }
 
 

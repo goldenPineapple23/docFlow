@@ -340,11 +340,16 @@ def _load_header(session: Session, document_id: UUID) -> dict[str, Any]:
 def _load_lines(session: Session, document_id: UUID) -> list[dict[str, Any]]:
     rows = session.execute(
         text(
-            "SELECT id, line_number, sku, description, unit, quantity, unit_price, "
-            "line_total, confidence, matched_item_id, match_method, match_score, "
-            "matched_uom, uom_mismatch, field_provenance "
-            "FROM document_lines WHERE document_id = :document_id AND deleted_at IS NULL "
-            "ORDER BY line_number"
+            "SELECT l.id, l.line_number, l.sku, l.description, l.unit, l.quantity, "
+            "l.unit_price, l.line_total, l.confidence, l.matched_item_id, l.match_method, "
+            "l.match_score, l.matched_uom, l.uom_mismatch, l.field_provenance, "
+            # The tenant's own SKU for the matched catalog item. Deliberately not
+            # filtered on the item's deleted_at: a SKU retired after the match
+            # is still the SKU the reviewer approved (DECISIONS.md D-099).
+            "i.sku AS catalog_sku "
+            "FROM document_lines l LEFT JOIN items i ON i.id = l.matched_item_id "
+            "WHERE l.document_id = :document_id AND l.deleted_at IS NULL "
+            "ORDER BY l.line_number"
         ),
         {"document_id": str(document_id)},
     ).mappings().all()
@@ -650,6 +655,10 @@ def build_snapshot(session: Session, document_id: UUID) -> dict[str, Any]:
                 **{name: _as_text(line.get(name)) for name in sorted(EDITABLE_LINE_FIELDS)},
                 "matched_item_id": _as_text(line.get("matched_item_id")),
                 "matched_uom": _as_text(line.get("matched_uom")),
+                # Frozen here so an export shows the SKU that was matched when
+                # the order was approved, whatever the catalog says later
+                # (Section 7.3: exports never read the live tables; D-099).
+                "catalog_sku": _as_text(line.get("catalog_sku")),
             }
             for line in lines
         ],

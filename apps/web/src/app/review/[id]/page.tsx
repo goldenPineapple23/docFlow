@@ -12,6 +12,7 @@ import {
   type DocumentDetail,
 } from "@/lib/review";
 import { DocumentViewer } from "@/components/review/DocumentViewer";
+import { ExportPanel } from "@/components/review/ExportPanel";
 import { HeaderFields } from "@/components/review/HeaderFields";
 import { LineTable } from "@/components/review/LineTable";
 import { TrailPanel } from "@/components/review/TrailPanel";
@@ -318,6 +319,16 @@ export default function ReviewDocumentPage({ params }: { params: Promise<{ id: s
         </div>
 
         <div className="space-y-6">
+          <ExportPanel
+            documentId={id}
+            exportable={
+              detail.document.status === "approved" || detail.document.status === "exported"
+            }
+            onExported={() => {
+              if (detail.document.status === "approved") void load();
+            }}
+          />
+
           <HeaderFields
             header={detail.header}
             edits={headerEdits}

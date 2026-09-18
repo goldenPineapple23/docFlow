@@ -1,0 +1,280 @@
+"""
+The `exports` records (CLAUDE.md Section 7.4, Phase 4; migration 0010).
+
+Two halves, deliberately in one module so they cannot drift apart:
+
+  * **Requesting** an export (`request_export`, `list_exports`,
+    `get_export`) -- called by the API. Records who asked, which approved
+    snapshot, which format. Builds nothing.
+  * **Producing** it (`run_export`) -- called only by the worker task. Loads
+    that exact snapshot, builds and verifies the file with
+    `docflow_core.exports`, stores it under `tenants/{tenant_id}/exports/`,
+    and finishes the row.
+
+The split is Section 7.11's: building and re-reading an .xlsx loads
+openpyxl, and the web process never does (`apps/api/tests/
+test_parsing_boundary.py` forbids importing `docflow_core.exports` there).
+`run_export` imports it lazily, so importing this module stays cheap and
+safe for the API.
+
+Every query runs in a tenant-scoped session (Section 7.5); none takes a
+tenant id from anything a client sent. Logs carry ids, formats and catalog
+codes only -- never an order value (Section 7.10).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+from dataclasses import dataclass
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from docflow_core.db import tenant_session
+from docflow_core.review import snapshot_sha256
+
+logger = logging.getLogger(__name__)
+
+EXPORT_FORMATS: tuple[str, ...] = ("csv", "xlsx", "json", "iif")
+
+# Plain-English names for the review screen and the download filename.
+FORMAT_LABELS: dict[str, str] = {
+    "csv": "CSV",
+    "xlsx": "Excel",
+    "json": "JSON",
+    "iif": "QuickBooks Desktop (IIF)",
+}
+
+EXPORTABLE_STATUSES: tuple[str, ...] = ("approved", "exported")
+
+
+class ExportRequestError(Exception):
+    """A request that cannot become an export. Carries a catalog code."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class ExportOutcome:
+    status: str  # 'ready' | 'failed' | 'skipped'
+    error_code: str | None = None
+
+
+# ── Requesting (API) ────────────────────────────────────────────────────────
+
+
+def request_export(
+    session: Session,
+    tenant_id: UUID,
+    document_id: UUID,
+    fmt: str,
+    *,
+    user_id: UUID,
+    acting_as_tenant_id: UUID | None = None,
+) -> UUID:
+    """
+    Record an export of the document's CURRENT approved snapshot and return
+    its id. The file itself is made by `run_export` in the worker.
+
+    Pinning `snapshot_id` here is what keeps a re-approval between this call
+    and the worker from changing what the file contains (0010).
+    """
+    if fmt not in EXPORT_FORMATS:
+        raise ExportRequestError("EXP-002")
+
+    row = session.execute(
+        text(
+            """
+            SELECT d.status, s.id AS snapshot_id, s.snapshot_sha256
+            FROM documents d
+            LEFT JOIN document_snapshots s
+                   ON s.document_id = d.id
+                  AND s.superseded_at IS NULL AND s.deleted_at IS NULL
+            WHERE d.id = :document_id AND d.deleted_at IS NULL
+            """
+        ),
+        {"document_id": str(document_id)},
+    ).mappings().first()
+    if row is None:
+        raise LookupError(document_id)
+    if row["status"] not in EXPORTABLE_STATUSES or row["snapshot_id"] is None:
+        raise ExportRequestError("EXP-001")
+
+    return session.execute(
+        text(
+            """
+            INSERT INTO exports
+                (tenant_id, document_id, snapshot_id, format, status, snapshot_hash,
+                 generated_by, acting_as_tenant_id)
+            VALUES
+                (:tenant_id, :document_id, :snapshot_id, :format, 'pending', :snapshot_hash,
+                 :generated_by, :acting_as_tenant_id)
+            RETURNING id
+            """
+        ),
+        {
+            "tenant_id": str(tenant_id),
+            "document_id": str(document_id),
+            "snapshot_id": str(row["snapshot_id"]),
+            "format": fmt,
+            "snapshot_hash": row["snapshot_sha256"],
+            "generated_by": str(user_id),
+            "acting_as_tenant_id": str(acting_as_tenant_id) if acting_as_tenant_id else None,
+        },
+    ).scalar_one()
+
+
+_EXPORT_COLUMNS = """
+    e.id, e.document_id, e.format, e.status, e.error_code, e.sha256, e.byte_size,
+    e.snapshot_hash, e.requested_at, e.generated_at, e.acting_as_tenant_id,
+    u.email AS generated_by_email,
+    (e.snapshot_id = cur.id) AS is_current_snapshot
+"""
+_EXPORT_FROM = """
+    FROM exports e
+    JOIN users u ON u.id = e.generated_by
+    LEFT JOIN document_snapshots cur
+           ON cur.document_id = e.document_id
+          AND cur.superseded_at IS NULL AND cur.deleted_at IS NULL
+"""
+
+
+def list_exports(session: Session, document_id: UUID) -> list[dict[str, Any]]:
+    """The document's export history, newest first."""
+    rows = session.execute(
+        text(
+            f"SELECT {_EXPORT_COLUMNS} {_EXPORT_FROM} "
+            "WHERE e.document_id = :document_id AND e.deleted_at IS NULL "
+            "ORDER BY e.requested_at DESC, e.id"
+        ),
+        {"document_id": str(document_id)},
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+def get_export(session: Session, export_id: UUID) -> dict[str, Any] | None:
+    row = session.execute(
+        text(
+            f"SELECT {_EXPORT_COLUMNS}, e.storage_path {_EXPORT_FROM} "
+            "WHERE e.id = :export_id AND e.deleted_at IS NULL"
+        ),
+        {"export_id": str(export_id)},
+    ).mappings().first()
+    return dict(row) if row else None
+
+
+# ── Producing (worker) ──────────────────────────────────────────────────────
+
+
+def _finish_failed(tenant_id: UUID, export_id: UUID, code: str) -> ExportOutcome:
+    with tenant_session(tenant_id) as session:
+        session.execute(
+            text(
+                "UPDATE exports SET status = 'failed', error_code = :code, generated_at = now() "
+                "WHERE id = :id AND status = 'pending'"
+            ),
+            {"id": str(export_id), "code": code},
+        )
+    return ExportOutcome(status="failed", error_code=code)
+
+
+def run_export(tenant_id: UUID, export_id: UUID) -> ExportOutcome:
+    """
+    Build, verify, store and record one export. Safe to run twice for the
+    same id (the queue acknowledges late, so a crash can redeliver): a row
+    that is no longer `pending` is left exactly as it is.
+    """
+    from docflow_core import exports
+    from docflow_core.storage import save_file
+
+    with tenant_session(tenant_id) as session:
+        row = session.execute(
+            text(
+                """
+                SELECT e.status, e.format, e.document_id, e.snapshot_hash,
+                       s.snapshot, s.snapshot_sha256
+                FROM exports e
+                JOIN document_snapshots s ON s.id = e.snapshot_id
+                WHERE e.id = :id AND e.deleted_at IS NULL
+                """
+            ),
+            {"id": str(export_id)},
+        ).mappings().first()
+    if row is None:
+        logger.error("export_missing export_id=%s", export_id)
+        return ExportOutcome(status="skipped")
+    if row["status"] != "pending":
+        return ExportOutcome(status="skipped")
+
+    # Recomputed from the content about to be exported, not just compared
+    # column to column: the snapshot is immutable (0007), so a mismatch means
+    # something outside the application altered it. Refuse rather than export.
+    if (
+        snapshot_sha256(row["snapshot"]) != row["snapshot_hash"]
+        or row["snapshot_sha256"] != row["snapshot_hash"]
+    ):
+        logger.error("export_snapshot_hash_mismatch export_id=%s", export_id)
+        return _finish_failed(tenant_id, export_id, "EXP-004")
+
+    try:
+        built = exports.build_export(row["snapshot"], row["snapshot_hash"], row["format"])
+    except exports.ExportError as exc:
+        # EXP-004 is an integrity failure the founder must hear about
+        # (Section 7.16.5: audience "both"). The founder_alerts table is
+        # Phase 5 (7.15.3); until it exists this error-level line, carrying
+        # the code, is what Sentry picks up (DECISIONS.md D-098).
+        log = logger.error if exc.code == "EXP-004" else logger.info
+        log(
+            "export_refused export_id=%s format=%s error_code=%s reason=%s",
+            export_id,
+            row["format"],
+            exc.code,
+            exc.detail,
+        )
+        return _finish_failed(tenant_id, export_id, exc.code)
+
+    try:
+        storage_path = save_file(tenant_id, f"export.{built.extension}", built.content, area="exports")
+    except OSError as exc:
+        logger.error(
+            "export_storage_failed export_id=%s error_type=%s", export_id, type(exc).__name__
+        )
+        return _finish_failed(tenant_id, export_id, "EXP-007")
+
+    with tenant_session(tenant_id) as session:
+        session.execute(
+            text(
+                """
+                UPDATE exports
+                SET status = 'ready', storage_path = :storage_path, sha256 = :sha256,
+                    byte_size = :byte_size, generated_at = now()
+                WHERE id = :id AND status = 'pending'
+                """
+            ),
+            {
+                "id": str(export_id),
+                "storage_path": storage_path,
+                "sha256": hashlib.sha256(built.content).hexdigest(),
+                "byte_size": len(built.content),
+            },
+        )
+        # `exported` means "a file of THIS approval has been produced". Only
+        # when the document is still approved on the same snapshot: a
+        # document reopened since the click stays in needs_review.
+        session.execute(
+            text(
+                """
+                UPDATE documents SET status = 'exported'
+                WHERE id = :document_id AND status = 'approved'
+                  AND approved_snapshot_hash = :snapshot_hash
+                """
+            ),
+            {"document_id": str(row["document_id"]), "snapshot_hash": row["snapshot_hash"]},
+        )
+    logger.info("export_ready export_id=%s format=%s", export_id, row["format"])
+    return ExportOutcome(status="ready")

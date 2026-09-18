@@ -51,13 +51,21 @@ def _safe_extension(original_filename: str) -> str:
     return ext
 
 
-def build_storage_path(tenant_id: UUID, original_filename: str) -> str:
+# The folders under a tenant's prefix. A fixed set, so a caller cannot invent
+# a path segment: `uploads` holds what arrived (and previews of it), `exports`
+# holds files DocFlow generated from an approved snapshot (Section 7.4).
+STORAGE_AREAS: frozenset[str] = frozenset({"uploads", "exports"})
+
+
+def build_storage_path(tenant_id: UUID, original_filename: str, *, area: str = "uploads") -> str:
     """
     Generates a server-side storage path under the mandatory tenant prefix.
     Never derived from user input beyond a sanitized extension.
     """
+    if area not in STORAGE_AREAS:
+        raise UnsafeStoragePathError(f"Unknown storage area: {area!r}")
     ext = _safe_extension(original_filename)
-    return f"tenants/{tenant_id}/uploads/{uuid4().hex}{ext}"
+    return f"tenants/{tenant_id}/{area}/{uuid4().hex}{ext}"
 
 
 def _resolve(storage_path: str) -> Path:
@@ -68,9 +76,11 @@ def _resolve(storage_path: str) -> Path:
     return resolved
 
 
-def save_file(tenant_id: UUID, original_filename: str, content: bytes) -> str:
+def save_file(
+    tenant_id: UUID, original_filename: str, content: bytes, *, area: str = "uploads"
+) -> str:
     """Writes `content` under a fresh server-generated path and returns that path."""
-    storage_path = build_storage_path(tenant_id, original_filename)
+    storage_path = build_storage_path(tenant_id, original_filename, area=area)
     full_path = _resolve(storage_path)
     full_path.parent.mkdir(parents=True, exist_ok=True)
     full_path.write_bytes(content)

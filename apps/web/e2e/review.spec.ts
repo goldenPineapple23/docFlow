@@ -297,3 +297,108 @@ test("the queue pages through every order instead of stopping at the first 50", 
   await expect(range).toHaveText("Showing 1–50 of 120");
   expect(requestedOffsets).toEqual(expect.arrayContaining([0, 50, 100]));
 });
+
+// ── Export (Phase 4) ────────────────────────────────────────────────────────
+
+function exportRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+    document_id: DOCUMENT_ID,
+    format: "csv",
+    format_label: "CSV",
+    status: "pending",
+    error: null,
+    sha256: null,
+    byte_size: null,
+    snapshot_hash: "h",
+    is_current_snapshot: true,
+    requested_at: "2026-09-18T10:00:00Z",
+    generated_at: null,
+    generated_by: "reviewer@example.test",
+    by_docflow_support: false,
+    ...overrides,
+  };
+}
+
+async function stubExports(page: Page, finished: Record<string, unknown>) {
+  const history: Array<Record<string, unknown>> = [];
+  await page.route("**/review/documents/*/exports", async (route) => {
+    if (route.request().method() === "POST") {
+      const created = exportRecord({
+        format: route.request().postDataJSON().format,
+        format_label: finished.format_label,
+      });
+      history.unshift({ ...created, ...finished });
+      await route.fulfill({ status: 202, json: { export: created } });
+      return;
+    }
+    await route.fulfill({ json: { exports: history } });
+  });
+  await page.route("**/review/exports/*", async (route) => {
+    const body: Record<string, unknown> = { export: exportRecord(finished) };
+    if (finished.status === "ready") {
+      body.download = { url: "/review/exports/x/download?token=t", expires_at: 0 };
+    }
+    await route.fulfill({ json: body });
+  });
+  await page.route("**/review/exports/*/download*", (route) =>
+    route.fulfill({
+      body: "po_number\r\nACME-2291\r\n",
+      headers: {
+        "content-type": "text/csv; charset=utf-8",
+        "content-disposition": 'attachment; filename="PO-ACME-2291.csv"',
+      },
+    }),
+  );
+}
+
+test("an approved order downloads as a file and appears in the export history", async ({ page }) => {
+  const state = { detail: detail() };
+  state.detail.document.status = "approved";
+  await stubApi(page, state);
+  await stubExports(page, { status: "ready", sha256: "abc", byte_size: 812, format_label: "CSV" });
+
+  await page.goto(`/review/${DOCUMENT_ID}`);
+  await expect(page.getByTestId("export-panel")).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByTestId("export-csv").click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("PO-ACME-2291.csv");
+
+  await expect(page.getByTestId("export-history")).toContainText("CSV");
+  await expect(page.getByTestId("export-history")).toContainText("Download");
+});
+
+test("an export QuickBooks would reject says why, from the catalog", async ({ page }) => {
+  const state = { detail: detail() };
+  state.detail.document.status = "approved";
+  await stubApi(page, state);
+  await stubExports(page, {
+    status: "failed",
+    format_label: "QuickBooks Desktop (IIF)",
+    error: {
+      code: "EXP-006",
+      title: "QuickBooks can't import this order yet",
+      message: "QuickBooks Desktop only imports an order when its line totals add up.",
+      action: "Check the totals, or download the order as CSV or Excel instead.",
+    },
+  });
+
+  await page.goto(`/review/${DOCUMENT_ID}`);
+  await page.getByTestId("export-iif").click();
+
+  const error = page.getByTestId("export-error");
+  await expect(error).toContainText("QuickBooks can't import this order yet");
+  await expect(error).toContainText("download the order as CSV or Excel instead");
+});
+
+test("an order still in review offers no export", async ({ page }) => {
+  const state = { detail: detail() };
+  await stubApi(page, state);
+  await stubExports(page, { status: "ready" });
+
+  await page.goto(`/review/${DOCUMENT_ID}`);
+  await expect(page.getByTestId("header-input-po_number")).toBeVisible();
+  await expect(page.getByTestId("export-panel")).toHaveCount(0);
+});

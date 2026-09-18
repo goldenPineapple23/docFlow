@@ -70,8 +70,16 @@ def _signing_key() -> bytes:
     return secret.encode("utf-8")
 
 
-def _payload(document_id: UUID, tenant_id: UUID, expires_at: int) -> str:
-    return f"{document_id}:{tenant_id}:{expires_at}"
+def _payload(object_id: UUID, tenant_id: UUID, expires_at: int, purpose: str = "document") -> str:
+    """
+    What the signature covers. An export link carries its purpose too, so a
+    viewer token can never be replayed as an export download or the other
+    way round, whatever the ids. The original-document payload is unchanged,
+    so links minted before exports existed still verify.
+    """
+    if purpose == "document":
+        return f"{object_id}:{tenant_id}:{expires_at}"
+    return f"{purpose}:{object_id}:{tenant_id}:{expires_at}"
 
 
 def _sign(payload: str) -> str:
@@ -116,6 +124,10 @@ def verify_document_token(token: str, document_id: UUID) -> SignedDocumentToken:
     minted at all without the secret. The caller then opens an ordinary
     tenant-scoped session with it, so RLS still decides what can be read.
     """
+    return _verify(token, document_id, "document")
+
+
+def _verify(token: str, object_id: UUID, purpose: str) -> SignedDocumentToken:
     tenant_part, _, rest = token.partition(".")
     expires_part, _, signature = rest.partition(".")
     if not signature or not expires_part:
@@ -126,12 +138,35 @@ def verify_document_token(token: str, document_id: UUID) -> SignedDocumentToken:
     except ValueError as exc:
         raise InvalidSignedUrl("malformed token") from exc
 
-    expected = _sign(_payload(document_id, tenant_id, expires_at))
+    expected = _sign(_payload(object_id, tenant_id, expires_at, purpose))
     if not hmac.compare_digest(expected, signature):
         raise InvalidSignedUrl("bad signature")
     if expires_at < int(time.time()):
         raise InvalidSignedUrl("expired")
 
     return SignedDocumentToken(
-        document_id=document_id, tenant_id=tenant_id, expires_at=expires_at
+        document_id=object_id, tenant_id=tenant_id, expires_at=expires_at
     )
+
+
+# ── Export downloads (Section 7.4, Phase 4) ─────────────────────────────────
+#
+# Same construction, different purpose. A download is a plain browser GET
+# (a link the user clicks, or `location.href`), so like the viewer it cannot
+# carry an Authorization header and the token has to stand on its own. The
+# `document_id` field of the returned token holds the EXPORT id here.
+
+
+def mint_export_token(
+    export_id: UUID, tenant_id: UUID, *, ttl_seconds: int = DEFAULT_TTL_SECONDS
+) -> tuple[str, int]:
+    """A token for one tenant's one export file. Minting is not authorization:
+    callers must already have established this tenant may read this export."""
+    expires_at = int(time.time()) + ttl_seconds
+    payload = _payload(export_id, tenant_id, expires_at, "export")
+    return f"{tenant_id}.{expires_at}.{_sign(payload)}", expires_at
+
+
+def verify_export_token(token: str, export_id: UUID) -> SignedDocumentToken:
+    """The tenant an export token was minted for, or `InvalidSignedUrl`."""
+    return _verify(token, export_id, "export")

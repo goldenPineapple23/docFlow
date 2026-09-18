@@ -260,3 +260,38 @@ requires_review_schema = pytest.mark.skipif(
         "DECISIONS.md D-083, D-084 and D-092."
     ),
 )
+
+
+def exports_schema_available() -> bool:
+    """
+    True once supabase/migrations/0010_exports.sql has been applied. Same
+    manual-application constraint as every migration before it (D-013/D-017),
+    so the export tests skip cleanly until the founder applies it (D-098).
+    """
+    if not review_schema_available():
+        return False
+    from docflow_core.db import get_engine
+    from sqlalchemy import text as _text
+
+    try:
+        with get_engine().connect() as conn:
+            conn.execute(
+                _text(
+                    "SELECT id, tenant_id, document_id, snapshot_id, format, status, storage_path, "
+                    "sha256, byte_size, snapshot_hash, error_code, generated_by, "
+                    "acting_as_tenant_id, requested_at, generated_at, deleted_at "
+                    "FROM exports LIMIT 0"
+                )
+            )
+        return True
+    except Exception:
+        return False
+
+
+requires_exports_schema = pytest.mark.skipif(
+    not exports_schema_available(),
+    reason=(
+        "supabase/migrations/0010_exports.sql has not been applied to this database yet "
+        "-- see SETUP.md Step 5 / DECISIONS.md D-098."
+    ),
+)

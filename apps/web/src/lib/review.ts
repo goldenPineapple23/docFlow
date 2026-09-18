@@ -1,4 +1,4 @@
-import { apiFetch } from "./api";
+import { API_BASE_URL, apiFetch } from "./api";
 
 /**
  * The review API, typed (CLAUDE.md Section 7.3, Phase 3 slice 3).
@@ -273,4 +273,56 @@ export function originalDocumentUrl(id: string): Promise<{
   preview_kind: "converted_image" | "extracted_text" | null;
 }> {
   return request(`/review/documents/${id}/original`);
+}
+
+// ── Exports (CLAUDE.md Section 7.4, Phase 4) ────────────────────────────────
+
+export type ExportFormat = "csv" | "xlsx" | "json" | "iif";
+
+export type ExportRecord = {
+  id: string;
+  document_id: string;
+  format: ExportFormat;
+  format_label: string;
+  status: "pending" | "ready" | "failed";
+  // A catalog entry when the file could not be made. Rendered as given.
+  error: CatalogError | null;
+  sha256: string | null;
+  byte_size: number | null;
+  snapshot_hash: string;
+  // False once the order has been re-approved: this file is of an earlier
+  // approval.
+  is_current_snapshot: boolean;
+  requested_at: string | null;
+  generated_at: string | null;
+  generated_by: string;
+  by_docflow_support: boolean;
+};
+
+export function createExport(documentId: string, format: ExportFormat): Promise<{ export: ExportRecord }> {
+  return request(`/review/documents/${documentId}/exports`, {
+    method: "POST",
+    body: JSON.stringify({ format }),
+  });
+}
+
+export function listExports(documentId: string): Promise<{ exports: ExportRecord[] }> {
+  return request(`/review/documents/${documentId}/exports`);
+}
+
+/**
+ * One export, and -- once it is ready -- an absolute download URL that works
+ * for a few minutes. Fetched fresh for every download rather than kept, so a
+ * link is never older than the click that uses it.
+ */
+export async function getExport(
+  exportId: string,
+): Promise<{ export: ExportRecord; download?: { url: string; expires_at: number } }> {
+  const result = await request<{ export: ExportRecord; download?: { url: string; expires_at: number } }>(
+    `/review/exports/${exportId}`,
+  );
+  if (result.download) {
+    result.download = { ...result.download, url: `${API_BASE_URL}${result.download.url}` };
+  }
+  return result;
 }

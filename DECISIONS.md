@@ -862,3 +862,42 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Tests:** an API test pages through a tenant's queue two at a time and must reach every document exactly once, with the total excluding another tenant's documents; a browser test pages through 120 orders to the 120th.
 
 **Related:** Section 7.3, Phase 3, `apps/api/app/routers/review.py`, `apps/web/src/app/review/page.tsx`.
+
+## D-098 — Exports are built in the worker, recorded from the click, and verified before anyone can download them
+
+**Context:** Section 7.4 requires an `exports` row per export (format, storage path, SHA-256, generated-by/at, snapshot hash), a round-trip test for all four formats, byte-identical output for the same snapshot, and short-lived signed download URLs. Section 7.3: exports come from the approved snapshot, never the live tables.
+
+**Decisions:**
+- **Built in the worker, not the API.** Rendering and re-reading an .xlsx loads openpyxl, and `test_parsing_boundary.py` keeps it out of the web process (Section 7.11). The architecture document already lists "export generation" as a background job. `docflow_core.exports` (pure: snapshot in, bytes out) is added to the boundary test's forbidden list; the API uses `docflow_core.export_jobs`, which only records.
+- **A row exists from the click** (migration 0010): `pending` → `ready` / `failed`, with `error_code` a catalog code. The row pins `snapshot_id`, so an order re-approved between the click and the worker still gets a file of the approval that was clicked; the export history marks such files "Earlier approval".
+- **Verified at runtime, not only in CI.** `build_export` renders twice (bytes must match) and parses the file back (must equal the snapshot). Either failing is `EXP-004` and no file is stored. The worker also recomputes the snapshot's hash from its content before exporting it.
+- **Finished rows are immutable** — a database trigger refuses any change to a `ready` or `failed` row except soft deletion. An audit record that can be edited proves nothing.
+- **`exported` status** is set on the first successful file, and only if the document is still approved on the same snapshot.
+- **Download links** reuse the viewer's signed-token construction with a purpose tag in the signature, so a viewer link and an export link are never interchangeable. The file is served `Content-Disposition: attachment`, `nosniff`, `no-store`, with a filename built from the PO number reduced to `[A-Za-z0-9._-]` (Section 7.11: filenames are untrusted).
+- **Founder alert for EXP-004** (Section 7.16.5 says audience "both, founder alert fires"): the `founder_alerts` table is Phase 5 (7.15.3). Until then EXP-004 is logged at error level with the export id and code, for Sentry. **Open for Phase 5:** wire it to `founder_alerts`.
+
+**Related:** Section 7.3, 7.4, 7.11, 7.16.5, D-092, `supabase/migrations/0010_exports.sql`.
+
+## D-099 — What each export format contains
+
+**The founder's choices (2026-09-18):** IIF becomes a QuickBooks **Estimate**; files carry **both SKUs, catalog first**; **one PO per file** (batch export deferred until customers ask).
+
+- **Columns** are the extraction schema's field names, identical across CSV, Excel and JSON: the ten header fields, then `line_number, catalog_sku, sku, description, quantity, unit, unit_price, line_total`. `catalog_sku` is the tenant's own SKU for the matched item; `sku` is what the buyer printed.
+- **The catalog SKU is frozen into the approval snapshot** (`build_snapshot` now joins `items`). Reading it from the live catalog at export time would break Section 7.3, and a SKU renamed or retired after approval would silently change an old export. Snapshots approved before this change have no `catalog_sku`; they export with the column empty until re-approved.
+- **CSV:** UTF-8 with BOM (Excel otherwise mangles non-English text), CRLF, header fields on every line row (Section 3). Values starting `= + - @`, tab, CR or `'` get a leading apostrophe (OWASP CSV-injection guidance) — every value here came from a stranger's document. Plain numbers such as `-5.00` are left alone. The reader strips exactly one leading apostrophe, so the round trip is exact.
+- **Excel:** same layout; **every cell is a text cell** — never a formula (openpyxl treats `=…` as one otherwise) and never a number, because an Excel number cell is a binary float (Section 7.1). Zip entries are stored uncompressed with a fixed timestamp, and document properties are pinned, so the bytes are identical on any day and on any platform (deflate output varies with the zlib build). Verified to open correctly in LibreOffice.
+- **JSON:** nested `{format: "docflow.order", version: 1, document_id, snapshot_hash, header, lines}`, keys sorted, every value a string except `line_number`.
+- **IIF (QuickBooks Desktop Estimate):** TRNS/SPL/ENDTRNS, tab-separated, CRLF, **Windows-1252** (what QuickBooks reads). Lines are negative amounts and quantities, per QuickBooks' convention, with signs flipped as text so `47.50` stays `47.50`. **IIF leaves out** `buyer_contact_email`, `currency`, `notes` (IIF cannot hold a line break, and notes usually have several), and per line `sku`, `unit` and `line_number`. The round-trip test compares everything else and asserts the omitted set is exactly this one. **IIF refuses, with a reason,** an order QuickBooks would reject — lines not adding up exactly to the total, no buyer name, or no order date (`EXP-006`; the date rule was found by driving the real app — an order with no date produced an IIF with a blank DATE) — and a value it cannot hold exactly: a tab or line break in a field, an address over five lines, a character outside Windows-1252 (`EXP-005`). CSV and Excel still work for those orders.
+- **Pinned digests:** a test pins the SHA-256 of each format for a fixed snapshot, so any change to what customers download is a visible, deliberate diff.
+
+**Open — verify against a real QuickBooks Desktop file (UAT TC-26):** the account names (`Estimates`, and `Sales` for lines), that an unknown `NAME` creates a customer rather than failing, and that `INVITEM` matches the tenant's QuickBooks item names (it is the catalog SKU). None can be tested without QuickBooks Desktop; they are constants in one place in `exports.py`.
+
+**Related:** Section 3, 7.1, 7.3, 7.4, `packages/core/docflow_core/exports.py`.
+
+## D-100 — Every member of a tenant can export, viewers included
+
+**Context:** the architecture document's permissions matrix lists "export" without saying which roles have it; the error catalog's AUTH-002 already tells viewers they "can read orders and download exports".
+
+**Decision:** all four tenant roles can request and download exports. Exporting reads data a person has already approved and changes none of it; the only state it touches is the `exported` status, which is bookkeeping. Editing and approving stay with owner/admin/reviewer. A founder-selected tighter rule later is a one-line change in `app/routers/exports.py`.
+
+**Related:** Section 3, AUTH-002, `apps/api/app/routers/exports.py`.

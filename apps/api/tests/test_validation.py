@@ -46,7 +46,11 @@ from docflow_core.validation import (
 )
 from sqlalchemy import text
 
-from tests.conftest import requires_validation_schema, review_schema_available
+from tests.conftest import (
+    exports_schema_available,
+    requires_validation_schema,
+    review_schema_available,
+)
 
 
 class _TestValidationTenant:
@@ -271,6 +275,9 @@ class _TestValidationTenant:
     def __exit__(self, *exc):
         tid = str(self.tenant_id)
         with platform_session() as session:
+            # 0010's exports reference snapshots, so they go first.
+            if exports_schema_available():
+                session.execute(text("DELETE FROM exports WHERE tenant_id = :tid"), {"tid": tid})
             # 0007's tables, when it has been applied. Snapshots reference
             # review_actions and warnings reference them too, so both go
             # before review_actions itself.
