@@ -34,8 +34,9 @@ cd apps/web && npm install && npm run dev
 cd apps/api && python -m venv .venv && .venv\Scripts\activate && pip install -r requirements.txt
 uvicorn app.main:app --reload
 
-# Worker
-cd apps/worker && celery -A app.celery_app worker --loglevel=info
+# Worker (needs Redis running -- Memurai on Windows, see DECISIONS.md D-095)
+# --pool=solo is required on Windows: Celery's default prefork pool does not run there.
+cd apps/worker && celery -A app.celery_app worker --loglevel=info --pool=solo -Q interactive,bulk
 ```
 
 (Exact commands will be filled in as each piece is scaffolded — this section is being written as we go, not after the fact.)

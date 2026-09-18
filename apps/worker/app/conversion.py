@@ -349,13 +349,20 @@ def find_libreoffice() -> str | None:
     return None
 
 
-def convert_with_libreoffice(content: bytes, source_suffix: str, target: str) -> bytes:
+def convert_with_libreoffice(
+    content: bytes, source_suffix: str, target: str, *, input_filter: str | None = None
+) -> bytes:
     """
     Runs one LibreOffice headless conversion in a throwaway directory with a
     throwaway user profile, a hard wall-clock limit, no stdin, and a
     server-side-generated filename (the untrusted original name never
     reaches the command line). Anything other than a clean, produced output
     file is a catalog-coded ConversionError.
+
+    `input_filter` pins how LibreOffice reads the file. Without it, a file
+    its Word importer cannot open is silently re-read as plain text and
+    "converts" successfully into a document of garbage bytes, which would
+    then go to the model as a purchase order (DECISIONS.md D-094).
     """
     binary = find_libreoffice()
     if binary is None:
@@ -382,6 +389,7 @@ def convert_with_libreoffice(content: bytes, source_suffix: str, target: str) ->
             "--nodefault",
             "--nofirststartwizard",
             f"-env:UserInstallation=file:///{profile.as_posix().lstrip('/')}",
+            *([f"--infilter={input_filter}"] if input_filter else []),
             "--convert-to",
             target,
             "--outdir",
@@ -415,8 +423,17 @@ def convert_with_libreoffice(content: bytes, source_suffix: str, target: str) ->
         return produced[0].read_bytes()
 
 
+# LibreOffice's import filter for Word 97-2003 binary documents.
+_LEGACY_WORD_FILTER = "MS Word 97"
+
+
 def convert_doc(content: bytes) -> list[tuple[bytes, str]]:
-    return [(convert_with_libreoffice(content, ".doc", "docx"), "converted.docx")]
+    return [
+        (
+            convert_with_libreoffice(content, ".doc", "docx", input_filter=_LEGACY_WORD_FILTER),
+            "converted.docx",
+        )
+    ]
 
 
 # ── Outlook .msg and raw .eml unwrapping ───────────────────────────────────
