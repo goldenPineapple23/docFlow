@@ -195,9 +195,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export function listDocuments(status?: string): Promise<{ documents: QueueDocument[] }> {
-  const query = status ? `?status=${encodeURIComponent(status)}` : "";
-  return request(`/review/documents${query}`);
+/** Rows per queue page. The API caps a page at 200. */
+export const QUEUE_PAGE_SIZE = 50;
+
+export interface QueuePage {
+  documents: QueueDocument[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export function listDocuments(status?: string, offset = 0): Promise<QueuePage> {
+  const params = new URLSearchParams({ limit: String(QUEUE_PAGE_SIZE), offset: String(offset) });
+  if (status) params.set("status", status);
+  return request(`/review/documents?${params.toString()}`);
 }
 
 export function getDocument(id: string): Promise<DocumentDetail> {

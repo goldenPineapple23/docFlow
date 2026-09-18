@@ -114,6 +114,33 @@ def test_the_queue_shows_this_tenants_documents_only(client):
         ids = {row["id"] for row in response.json()["documents"]}
         assert str(mine) in ids
         assert str(theirs) not in ids
+        # The count is tenant-scoped too: B's document is not in A's total.
+        assert response.json()["total"] == 1
+
+
+@requires_review_schema
+def test_paging_through_the_queue_reaches_every_document_exactly_once(client):
+    """
+    D-097: the queue used to return the first 50 and stop, with no way to see
+    the rest. Paging with the returned total must reach every document.
+    """
+    with _ReviewTenant("Acme Test Distributor -- paging") as tenant:
+        created = {str(tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)) for _ in range(5)}
+
+        seen: list[str] = []
+        offset = 0
+        while True:
+            body = client.get(
+                f"/review/documents?limit=2&offset={offset}", headers=tenant.headers()
+            ).json()
+            assert body["total"] == 5
+            seen.extend(row["id"] for row in body["documents"])
+            offset += 2
+            if offset >= body["total"]:
+                break
+
+        assert len(seen) == 5
+        assert set(seen) == created
 
 
 @requires_review_schema

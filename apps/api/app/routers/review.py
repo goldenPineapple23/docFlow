@@ -188,8 +188,27 @@ def list_documents(
             ),
             {"status": status, "limit": limit, "offset": offset},
         ).mappings().all()
+        # The total is what lets the queue page instead of silently showing
+        # only the first `limit` orders (DECISIONS.md D-097). Same filter as
+        # above, kept in step by the test that pages through a full queue.
+        total = session.execute(
+            text(
+                """
+                SELECT count(*) FROM documents d
+                WHERE d.deleted_at IS NULL
+                  AND d.status <> 'quarantined'
+                  AND (CAST(:status AS text) IS NULL OR d.status = :status)
+                """
+            ),
+            {"status": status},
+        ).scalar_one()
 
-    return {"documents": [_queue_row(row) for row in rows], "limit": limit, "offset": offset}
+    return {
+        "documents": [_queue_row(row) for row in rows],
+        "limit": limit,
+        "offset": offset,
+        "total": total,
+    }
 
 
 def _queue_row(row) -> dict[str, Any]:

@@ -254,3 +254,46 @@ test("a read-only reviewer cannot edit or approve", async ({ page }) => {
   await expect(page.getByTestId("header-input-po_number")).toBeDisabled();
   await expect(page.getByTestId("approve-button")).toBeDisabled();
 });
+
+test("the queue pages through every order instead of stopping at the first 50", async ({ page }) => {
+  // D-097: the queue used to show the first 50 orders and nothing past them.
+  const total = 120;
+  const requestedOffsets: number[] = [];
+  await page.route(/\/review\/documents\?/, async (route) => {
+    const url = new URL(route.request().url());
+    const limit = Number(url.searchParams.get("limit"));
+    const offset = Number(url.searchParams.get("offset"));
+    requestedOffsets.push(offset);
+    const count = Math.max(0, Math.min(limit, total - offset));
+    const documents = Array.from({ length: count }, (_, i) => ({
+      ...detail().document,
+      id: `00000000-0000-0000-0000-${String(offset + i).padStart(12, "0")}`,
+      po_number: `TEST-${offset + i + 1}`,
+      buyer_name: "Acme Test Buyer",
+      order_total: "10.00",
+      currency: "USD",
+      open_warnings: 0,
+      review_started: false,
+    }));
+    await route.fulfill({ json: { documents, total, limit, offset } });
+  });
+
+  await page.goto("/review");
+
+  const range = page.getByTestId("queue-range");
+  await expect(range).toHaveText("Showing 1–50 of 120");
+  await expect(page.getByRole("button", { name: "← Previous" })).toBeDisabled();
+
+  await page.getByRole("button", { name: "Next →" }).click();
+  await expect(range).toHaveText("Showing 51–100 of 120");
+
+  await page.getByRole("button", { name: "Next →" }).click();
+  await expect(range).toHaveText("Showing 101–120 of 120");
+  await expect(page.getByText("TEST-120", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Next →" })).toBeDisabled();
+
+  // Changing the filter starts again from the first page.
+  await page.getByRole("button", { name: "All", exact: true }).click();
+  await expect(range).toHaveText("Showing 1–50 of 120");
+  expect(requestedOffsets).toEqual(expect.arrayContaining([0, 50, 100]));
+});

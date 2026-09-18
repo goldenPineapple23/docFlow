@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ReviewApiError, listDocuments, type QueueDocument } from "@/lib/review";
+import { QUEUE_PAGE_SIZE, ReviewApiError, listDocuments, type QueueDocument } from "@/lib/review";
 import { ConfidenceBadge } from "@/components/review/confidence";
 import { PILL, StatusBadge } from "@/components/StatusBadge";
 import { AppHeader } from "@/components/AppHeader";
@@ -14,6 +14,9 @@ import { AppHeader } from "@/components/AppHeader";
  * waiting on. The flags that change how a reviewer should approach a
  * document — held-for-review signals, a possible duplicate, a possible
  * change order, a suspected injection — are on the row, not behind a click.
+ *
+ * Paged, with the total always on screen (DECISIONS.md D-097). It used to
+ * show the first 50 and stop, so an order past the 50th was invisible.
  */
 
 /**
@@ -50,18 +53,30 @@ const FILTERS: Array<{ value: string; label: string; blurb: string }> = [
 
 export default function ReviewQueuePage() {
   const [status, setStatus] = useState("needs_review");
-  // The loaded filter travels WITH the rows, so "are we showing stale data
-  // for a filter the user just changed" is derived rather than a second
-  // piece of state reset synchronously inside the effect.
-  const [loaded, setLoaded] = useState<{ status: string; documents: QueueDocument[] } | null>(null);
+  const [offset, setOffset] = useState(0);
+  // The loaded filter and page travel WITH the rows, so "are we showing
+  // stale data for a filter or page the user just changed" is derived rather
+  // than a second piece of state reset synchronously inside the effect.
+  const [loaded, setLoaded] = useState<{
+    status: string;
+    offset: number;
+    documents: QueueDocument[];
+    total: number;
+  } | null>(null);
   const [error, setError] = useState<ReviewApiError | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    listDocuments(status || undefined)
-      .then(({ documents }) => {
+    listDocuments(status || undefined, offset)
+      .then(({ documents, total }) => {
         if (cancelled) return;
-        setLoaded({ status, documents });
+        // Orders approved since this page was chosen can leave it empty;
+        // step back to the last page that has any rather than show nothing.
+        if (documents.length === 0 && offset > 0 && total > 0) {
+          setOffset(Math.floor((total - 1) / QUEUE_PAGE_SIZE) * QUEUE_PAGE_SIZE);
+          return;
+        }
+        setLoaded({ status, offset, documents, total });
         setError(null);
       })
       .catch((e: ReviewApiError) => {
@@ -70,10 +85,11 @@ export default function ReviewQueuePage() {
     return () => {
       cancelled = true;
     };
-  }, [status]);
+  }, [status, offset]);
 
-  const stale = loaded === null || loaded.status !== status;
+  const stale = loaded === null || loaded.status !== status || loaded.offset !== offset;
   const documents = stale ? null : loaded.documents;
+  const total = stale ? 0 : loaded.total;
 
   return (
     <>
@@ -91,7 +107,10 @@ export default function ReviewQueuePage() {
           <button
             key={filter.value}
             type="button"
-            onClick={() => setStatus(filter.value)}
+            onClick={() => {
+              setStatus(filter.value);
+              setOffset(0);
+            }}
             aria-pressed={status === filter.value}
             title={filter.blurb}
             className={[
@@ -200,6 +219,34 @@ export default function ReviewQueuePage() {
           </tbody>
         </table>
         </div>
+      ) : null}
+
+      {documents !== null && total > 0 ? (
+        <nav aria-label="Pages" className="mt-4 flex items-center justify-between text-sm text-slate-600">
+          <span data-testid="queue-range">
+            Showing {offset + 1}–{offset + documents.length} of {total}
+          </span>
+          {total > QUEUE_PAGE_SIZE ? (
+            <span className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setOffset(Math.max(0, offset - QUEUE_PAGE_SIZE))}
+                disabled={offset === 0}
+                className="rounded-full bg-slate-100 px-3.5 py-1.5 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                ← Previous
+              </button>
+              <button
+                type="button"
+                onClick={() => setOffset(offset + QUEUE_PAGE_SIZE)}
+                disabled={offset + QUEUE_PAGE_SIZE >= total}
+                className="rounded-full bg-slate-100 px-3.5 py-1.5 font-medium text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next →
+              </button>
+            </span>
+          ) : null}
+        </nav>
       ) : null}
       </main>
     </>
