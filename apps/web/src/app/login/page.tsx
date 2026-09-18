@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { PasswordInput } from "@/components/PasswordInput";
 
 // There is no /signup route anywhere in this app (CLAUDE.md Section 3: "No
 // public signup"). This page only signs in an account that a tenant owner
@@ -57,13 +58,12 @@ export default function LoginPage() {
           <label htmlFor="password" className="block text-sm font-medium">
             Password
           </label>
-          <input
+          <PasswordInput
             id="password"
-            type="password"
             required
+            autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded border px-3 py-2"
           />
         </div>
 

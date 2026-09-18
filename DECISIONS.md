@@ -961,3 +961,9 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Decision:** the page is two numbered steps. Step 1 is a large drop area with a real "Choose files…" button (drag-and-drop too) and the uploaded list right under it. Step 2's "Create the tenant" button stays secondary until at least one file is uploaded, with a line saying so; creating a tenant with no files remains possible on purpose.
 
 **Related:** Section 7.15.2 Steps 1–2, `apps/web/src/app/admin/intakes/[id]/page.tsx`.
+
+## D-107 — Every password field can be shown
+
+**Asked for by the founder (2026-09-18)** after mistyping the confirmation on the set-password page: with both fields hidden there is no way to see which one is wrong. One shared `PasswordInput` with a Show / Hide switch, hidden by default, used by every password field (sign-in and both set-password fields). The switch is a real button with an accessible label and never submits the form (unit-tested).
+
+**Related:** `apps/web/src/components/PasswordInput.tsx`.

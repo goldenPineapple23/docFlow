@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { PasswordInput } from "@/components/PasswordInput";
 
 /**
  * Where an invite link lands (CLAUDE.md Section 7.15.2 Step 3; D-105).
@@ -105,26 +106,22 @@ export default function AcceptInvitePage() {
       >
         <label className="block text-sm">
           <span className="font-medium">New password</span>
-          <input
-            type="password"
+          <PasswordInput
             autoComplete="new-password"
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             data-testid="accept-password"
-            className="mt-1 w-full rounded border px-3 py-2"
           />
         </label>
         <label className="block text-sm">
           <span className="font-medium">Type it again</span>
-          <input
-            type="password"
+          <PasswordInput
             autoComplete="new-password"
             required
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             data-testid="accept-confirm"
-            className="mt-1 w-full rounded border px-3 py-2"
           />
         </label>
         {problem ? <p role="alert" className="text-sm text-red-700">{problem}</p> : null}
