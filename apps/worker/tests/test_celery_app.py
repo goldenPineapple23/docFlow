@@ -31,6 +31,7 @@ def test_a_worker_started_from_this_app_registers_the_extraction_task():
         "celery_app.loader.import_default_modules()\n"
         "assert 'docflow.parse_and_extract' in celery_app.tasks\n"
         "assert 'docflow.generate_export' in celery_app.tasks\n"
+        "assert 'docflow.parse_import' in celery_app.tasks\n"
     )
     worker_root = Path(__file__).resolve().parents[1]
     result = subprocess.run([sys.executable, "-c", probe], cwd=worker_root, capture_output=True)

@@ -89,6 +89,26 @@ export default function TenantPage({ params }: { params: Promise<{ id: string }>
         <Field label="Created">{new Date(tenant.created_at).toLocaleString()}</Field>
       </dl>
 
+      <section data-testid="onboarding-steps" className="mt-5 rounded-xl border border-gray-200 bg-white p-5">
+        <h2 className="text-sm font-semibold">Set up</h2>
+        <ul className="mt-2 space-y-1 text-sm">
+          <li>
+            <Link href={`/admin/tenants/${id}/catalog`} className="font-medium text-blue-700 hover:underline">
+              4. Catalog →
+            </Link>{" "}
+            <span className="text-gray-600">
+              {tenant.onboarding_status === "tenant_created" ? "not loaded yet" : "loaded"}
+            </span>
+          </li>
+          <li>
+            <Link href={`/admin/tenants/${id}/buyers`} className="font-medium text-blue-700 hover:underline">
+              5. Customer list →
+            </Link>{" "}
+            <span className="text-gray-600">optional</span>
+          </li>
+        </ul>
+      </section>
+
       <section className="mt-5 rounded-xl border border-gray-200 bg-white p-5">
         <h2 className="text-sm font-semibold">Invite the owner</h2>
         <p className="mt-1 text-sm text-gray-600">

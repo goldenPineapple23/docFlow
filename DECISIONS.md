@@ -967,3 +967,21 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Asked for by the founder (2026-09-18)** after mistyping the confirmation on the set-password page: with both fields hidden there is no way to see which one is wrong. One shared `PasswordInput` with a Show / Hide switch, hidden by default, used by every password field (sign-in and both set-password fields). The switch is a real button with an accessible label and never submits the form (unit-tested).
 
 **Related:** `apps/web/src/components/PasswordInput.tsx`.
+
+## D-108 — Catalog and customer-list import: parsed in the worker, committed as a diff
+
+**Context:** Section 7.15.2 Steps 4-5: one shared upload -> preview -> column mapping (remembered per tenant) -> validation report -> commit flow, for the catalog and (optionally) the customer list; blockers fixed inline or by re-upload; every commit a `catalog_imports` row that the items it touched reference; re-uploads are diffs with retirement, never deletion; a retiring SKU used by an active learned rule flagged first.
+
+**Decisions:**
+- **The file is opened only in the worker** (`docflow_core.catalog_parsing`, forbidden in the API by the boundary test). It becomes a text table stored on the import row (`columns`, `rows`, `header_row_number`), capped at 50,000 rows × 100 columns. Everything after that — mapping, validation, fixes, diff, commit — is plain data work in `docflow_core.catalog_import`, which the API may use. Spreadsheet numbers are rendered through Decimal, so SKU `1002` stays `"1002"`.
+- **One evaluation, used twice.** The preview and the commit call the same `evaluate`; the commit re-runs it against the catalog as it is at that moment and refuses while any blocker remains (IMP-005). Commits for one tenant are serialized on the tenant row.
+- **Row numbers match the spreadsheet.** A title above the header and blank rows in the middle don't shift them.
+- **Report codes** (founder audience): blockers CAT-001 blank SKU, CAT-002 duplicate SKU, CAT-005 too long, BUY-001 blank name, BUY-002 duplicate name, BUY-004 duplicate account number, BUY-005 too long; warnings CAT-003 one description / several SKUs, CAT-006 blank description, CAT-007 retiring a SKU a learned rule uses, BUY-003 near-duplicate of an existing customer, BUY-006 odd email; information CAT-004 / BUY-007 values cleaned of edge spaces and invisible characters. Failures IMP-001..008.
+- **Inline fixes** are per-row, per-field overrides stored on the import; the file itself is never altered.
+- **Catalog diff:** insert new SKUs; update changed ones; reinstate a retired SKU that reappears (the *same* item row, so learned rules pointing at it come back to life); retire live SKUs missing from the file (`deleted_at` + `retired_by_import_id`). An unmapped unit of measure is stored empty — the `items` column's `'EA'` default would be a guess the file never made.
+- **Customer lists** never retire anyone (buyers are also created from POs). An existing customer (same normalized name) gets the list's account number and email filled in, never blanked. A new name close to an existing one is created and flagged in `buyer_merge_candidates` — never merged (Section 7.6).
+- **The mapping is remembered by header text**, not column position, so a re-export with reordered columns still maps.
+- **First catalog commit** moves `onboarding_status` from `tenant_created` to `catalog_loaded` (forward only) with a lifecycle event.
+- **Acting-as:** every Console route logs its `admin_actions` row, then runs the tenant's own import code in a tenant session; the import records `created_by` (the founder) and `acting_as_tenant_id`.
+
+**Related:** Section 7.6, 7.11, 7.15.1, 7.15.2, `supabase/migrations/0012_catalog_import.sql`.

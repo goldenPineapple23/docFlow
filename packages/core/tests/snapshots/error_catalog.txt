@@ -6,6 +6,62 @@ AUTH-002 [warning/tenant] Your account can view this, not change it
   what+why: Viewer accounts can read orders and download exports, but editing and approving are left to reviewers so it's always clear who signed off on an order.
   next:     Ask an owner or admin on your account to change your role, or to approve this order.
 
+BUY-001 [warning/founder] Rows with no customer name
+  what+why: These rows have no name, so there is no customer to create.
+  next:     Add the name, or remove the row.
+
+BUY-002 [warning/founder] The same customer appears more than once
+  what+why: These rows have the same name (ignoring case, spacing and punctuation), so DocFlow can't tell which is right.
+  next:     Keep one row per customer.
+
+BUY-003 [warning/founder] Looks like a customer that already exists
+  what+why: These names are close to an existing customer's. They will be created and flagged for you to merge -- never merged automatically.
+  next:     Review the merge suggestions after committing.
+
+BUY-004 [warning/founder] The same account number is used twice
+  what+why: Two rows share an account number, so one of them is probably wrong.
+  next:     Fix the account numbers so each customer has its own.
+
+BUY-005 [warning/founder] A value is too long
+  what+why: These rows have a value longer than DocFlow stores for that field.
+  next:     Shorten it, or check the column is mapped to the right field.
+
+BUY-006 [warning/founder] Email addresses that don't look valid
+  what+why: These values don't look like email addresses. They will be imported as written.
+  next:     Correct them if they are typos.
+
+BUY-007 [warning/founder] Names had stray spaces or hidden characters
+  what+why: Spaces at the ends of these names, or invisible characters inside them, were removed.
+  next:     Nothing to do -- listed so the change is visible.
+
+CAT-001 [warning/founder] Rows with no SKU
+  what+why: These rows have no SKU, so there is nothing to match purchase orders against.
+  next:     Add the SKU, or remove the row from the file.
+
+CAT-002 [warning/founder] The same SKU appears more than once
+  what+why: Each SKU can be in the catalog once; these rows share one, so DocFlow can't tell which is right.
+  next:     Keep one row per SKU -- fix or remove the others.
+
+CAT-003 [warning/founder] One description, several SKUs
+  what+why: These rows describe the item the same way but have different SKUs. Allowed, but matching may confuse them.
+  next:     Check they really are different items; if so, nothing to do.
+
+CAT-004 [warning/founder] SKUs had stray spaces or hidden characters
+  what+why: Spaces at the ends of these SKUs, or invisible characters inside them, were removed so they match what buyers type.
+  next:     Nothing to do -- listed so the change is visible.
+
+CAT-005 [warning/founder] A value is too long
+  what+why: These rows have a value longer than DocFlow stores for that field.
+  next:     Shorten the value, or check the column is mapped to the right field.
+
+CAT-006 [warning/founder] Rows with no description
+  what+why: These items have a SKU but no description, which makes matching buyers' wording harder.
+  next:     Add descriptions if the prospect has them; otherwise these can be imported as they are.
+
+CAT-007 [warning/founder] Retiring SKUs that learned rules use
+  what+why: These SKUs are not in the new file, so they will be retired -- but a learned rule still maps buyers' wording to them.
+  next:     Check the SKUs are really discontinued; if not, add them back to the file before committing.
+
 CON-001 [warning/founder] That intake doesn't exist
   what+why: No open intake has that id -- it may have been removed.
   next:     Go back to the intake list and pick it again.
@@ -137,6 +193,38 @@ EXP-006 [warning/tenant] QuickBooks can't import this order yet
 EXP-007 [error/both] The export file couldn't be saved
   what+why: The file was built and checked against the approved order, but saving it failed, so there's nothing to download yet. The failure has been logged.
   next:     Try the export again in a minute.
+
+IMP-001 [warning/founder] A catalog has to be a spreadsheet
+  what+why: This file passed the intake checks, but it is not a table: catalogs and customer lists are read from CSV or Excel files only.
+  next:     Ask the prospect for the list as CSV or Excel (.xlsx, .xls).
+
+IMP-002 [warning/founder] This file has no rows to import
+  what+why: DocFlow found a header row and nothing under it, or no content at all.
+  next:     Check it is the right file, and that the list is on the first sheet.
+
+IMP-003 [warning/founder] This file is too big to import
+  what+why: It has more rows or columns than one import handles (50,000 rows, 100 columns).
+  next:     Split the list into smaller files and import them one after another.
+
+IMP-004 [warning/founder] We couldn't read this spreadsheet
+  what+why: The file's contents couldn't be opened as a table -- it may be damaged, or saved in an unusual way.
+  next:     Open it in Excel, save a fresh copy as .xlsx or .csv, and upload that.
+
+IMP-005 [warning/founder] Some rows still need fixing
+  what+why: At least one row has a problem that blocks the import, such as a blank or duplicate SKU, so nothing was committed.
+  next:     Fix the rows marked in red -- here, or in the file and upload it again -- then commit.
+
+IMP-006 [warning/founder] This import can't be changed any more
+  what+why: It was already committed or discarded, or is still being read.
+  next:     Start a new import from the file to make further changes.
+
+IMP-007 [warning/founder] Map the required columns first
+  what+why: Every import needs certain columns -- a SKU and a description for a catalog, a name for a customer list -- and at least one isn't mapped yet.
+  next:     Choose which of the file's columns holds each required field.
+
+IMP-008 [warning/founder] That mapping or fix doesn't fit this file
+  what+why: It points at a column or row this file doesn't have, uses one column twice, or names a field this import doesn't take.
+  next:     Reload the import and choose again.
 
 INT-001 [warning/tenant] No attachment to process
   what+why: This email didn't include an attachment DocFlow recognizes as a document, so nothing was processed.

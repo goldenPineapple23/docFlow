@@ -5,9 +5,10 @@ platform_admins row. This is the ONLY router allowed to import
 docflow_core.admin_data_access (enforced by
 apps/api/tests/test_admin_import_boundary.py).
 
-Slice 5.1: tiers, intake staging (Step 1), tenant creation with tier and
+Slices 5.1-5.2: tiers, intake staging (Step 1), tenant creation with tier and
 intake (Step 2), the invite (Step 3), the attention panel's alerts, and the
-email outbox. Every call writes its `admin_actions` row inside
+email outbox; catalog and customer-list import (Steps 4-5). Every call writes
+its `admin_actions` row inside
 admin_data_access; nothing here queries the database itself.
 
 Failures are catalog entries (CON-0xx, founder audience), like every other
@@ -16,15 +17,21 @@ user-facing failure (Section 7.16.5).
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Literal
 from uuid import UUID
 
-from docflow_core import admin_data_access, file_types
+from docflow_core import admin_data_access, catalog_import, file_types
 from docflow_core.admin_data_access import ConsoleError
+from docflow_core.catalog_import import CatalogImportError
+from docflow_core.db import tenant_session
+from docflow_core.errors import get_error
 from docflow_core.external_services import ExternalServiceError
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from docflow_core.storage import read_file, save_file
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, EmailStr, Field
 
+from app.celery_client import celery_client
 from app.deps import AuthenticatedIdentity, require_platform_admin
 from app.errors import catalog_error
 
@@ -243,3 +250,269 @@ def outbox(
         platform_admin_user_id=_admin_id(identity), tenant_id=tenant_id
     )
     return {"emails": [_jsonable(r) for r in rows]}
+
+
+# ── Catalog and customer-list import (Steps 4-5; D-108) ─────────────────────
+#
+# Every route here logs its admin_actions row first, then runs the tenant's
+# own import code in a tenant-scoped session with acting_as_tenant_id set
+# (Section 7.15.1: acting-as, not impersonation). The file is never read in
+# this process: upload stores it and enqueues the worker, which parses it.
+
+
+def _import_error(exc: CatalogImportError) -> HTTPException:
+    status = 422 if exc.code in ("IMP-001", "IMP-007", "IMP-008") else 409
+    return catalog_error(exc.code, status_code=status)
+
+
+def _console_act(identity: AuthenticatedIdentity, tenant_id: UUID, action: str, **kw: Any) -> UUID:
+    admin_id = _admin_id(identity)
+    if not admin_data_access.record_console_action(
+        platform_admin_user_id=admin_id, action=action, tenant_id=tenant_id, **kw
+    ):
+        raise HTTPException(status_code=404)
+    return admin_id
+
+
+def _start_import(
+    tenant_id: UUID,
+    admin_id: UUID,
+    *,
+    kind: str,
+    source: str,
+    original_filename: str,
+    storage_path: str,
+    content: bytes,
+    file_type: str,
+    intake_file_id: UUID | None = None,
+) -> str:
+    with tenant_session(tenant_id) as session:
+        import_id = catalog_import.create_import(
+            session,
+            tenant_id,
+            kind=kind,
+            source=source,
+            original_filename=original_filename,
+            storage_path=storage_path,
+            file_sha256=hashlib.sha256(content).hexdigest(),
+            file_type=file_type,
+            created_by=admin_id,
+            intake_file_id=intake_file_id,
+            acting_as_tenant_id=tenant_id,
+        )
+    celery_client.send_task(
+        "docflow.parse_import", args=[str(tenant_id), str(import_id)], queue="interactive"
+    )
+    return str(import_id)
+
+
+@router.get("/tenants/{tenant_id}/intake-files")
+def tenant_intake_files(
+    tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    rows = admin_data_access.list_tenant_intake_files(
+        platform_admin_user_id=_admin_id(identity), tenant_id=tenant_id
+    )
+    # The storage path never reaches a client (Section 7.4).
+    return {"files": [_jsonable({k: v for k, v in r.items() if k != "storage_path"}) for r in rows]}
+
+
+@router.get("/tenants/{tenant_id}/imports")
+def list_imports(
+    tenant_id: UUID,
+    kind: Literal["catalog", "buyers"],
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    _console_act(identity, tenant_id, "read", target_type=f"{kind}_imports")
+    with tenant_session(tenant_id) as session:
+        rows = catalog_import.list_imports(session, kind)
+    return {"imports": [_jsonable(r) for r in rows]}
+
+
+@router.post("/tenants/{tenant_id}/imports", status_code=202)
+async def upload_import(
+    tenant_id: UUID,
+    kind: Literal["catalog", "buyers"] = Form(...),
+    file: UploadFile = File(...),
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    content = await file.read(_MAX_UPLOAD_BYTES + 1)
+    filename = file.filename or "upload"
+    validation = file_types.validate_upload(content, filename)
+    if not validation.ok or validation.file_type is None:
+        raise catalog_error(
+            "CON-007", status_code=422, extra={"file_error_code": validation.error_code}
+        )
+    file_type = validation.file_type.name.value
+    if file_type not in catalog_import.TABLE_FORMATS:
+        raise catalog_error("IMP-001", status_code=422)
+    admin_id = _console_act(identity, tenant_id, f"{kind}_import_upload", target_type="catalog_import")
+    storage_path = save_file(tenant_id, filename, content)
+    import_id = _start_import(
+        tenant_id,
+        admin_id,
+        kind=kind,
+        source="upload",
+        original_filename=filename,
+        storage_path=storage_path,
+        content=content,
+        file_type=file_type,
+    )
+    return {"import_id": import_id}
+
+
+class ImportFromIntakeRequest(BaseModel):
+    kind: Literal["catalog", "buyers"]
+    intake_file_id: UUID
+
+
+@router.post("/tenants/{tenant_id}/imports/from-intake", status_code=202)
+def import_from_intake(
+    tenant_id: UUID,
+    body: ImportFromIntakeRequest,
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    files = admin_data_access.list_tenant_intake_files(
+        platform_admin_user_id=_admin_id(identity), tenant_id=tenant_id
+    )
+    chosen = next((f for f in files if str(f["id"]) == str(body.intake_file_id)), None)
+    if chosen is None:
+        raise catalog_error("CON-001", status_code=404)
+    if chosen["detected_type"] not in catalog_import.TABLE_FORMATS:
+        raise catalog_error("IMP-001", status_code=422)
+    admin_id = _console_act(
+        identity,
+        tenant_id,
+        f"{body.kind}_import_from_intake",
+        target_type="onboarding_intake_file",
+        target_id=body.intake_file_id,
+    )
+    content = read_file(chosen["storage_path"])
+    import_id = _start_import(
+        tenant_id,
+        admin_id,
+        kind=body.kind,
+        source="intake_file",
+        original_filename=chosen["original_filename"],
+        storage_path=chosen["storage_path"],
+        content=content,
+        file_type=chosen["detected_type"],
+        intake_file_id=body.intake_file_id,
+    )
+    return {"import_id": import_id}
+
+
+@router.get("/tenants/{tenant_id}/imports/{import_id}")
+def import_preview(
+    tenant_id: UUID, import_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    _console_act(identity, tenant_id, "read", target_type="catalog_import", target_id=import_id)
+    with tenant_session(tenant_id) as session:
+        try:
+            result = catalog_import.preview(session, import_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404) from exc
+        except CatalogImportError as exc:
+            raise _import_error(exc) from exc
+    # The screen renders catalog wording as given, never its own (7.16.5).
+    if result.get("error_code"):
+        result["error"] = _catalog_entry(result["error_code"])
+    for finding in result.get("report") or []:
+        finding.update(_catalog_entry(finding["code"]))
+    return {"import": _jsonable(result)}
+
+
+def _catalog_entry(code: str) -> dict[str, str]:
+    entry = get_error(code)
+    return {"code": entry.code, "title": entry.title, "message": entry.message, "action": entry.action}
+
+
+class MappingRequest(BaseModel):
+    mapping: dict[str, int | None]
+
+
+@router.put("/tenants/{tenant_id}/imports/{import_id}/mapping")
+def set_import_mapping(
+    tenant_id: UUID,
+    import_id: UUID,
+    body: MappingRequest,
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    _console_act(
+        identity, tenant_id, "import_mapping_set", target_type="catalog_import", target_id=import_id
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            catalog_import.set_mapping(session, import_id, body.mapping)
+        except LookupError as exc:
+            raise HTTPException(status_code=404) from exc
+        except CatalogImportError as exc:
+            raise _import_error(exc) from exc
+    return {"ok": True}
+
+
+class RowFixRequest(BaseModel):
+    field: str
+    value: str | None = Field(default=None, max_length=2000)
+
+
+@router.put("/tenants/{tenant_id}/imports/{import_id}/rows/{row_number}")
+def fix_import_row(
+    tenant_id: UUID,
+    import_id: UUID,
+    row_number: int,
+    body: RowFixRequest,
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    _console_act(
+        identity,
+        tenant_id,
+        "import_row_fix",
+        target_type="catalog_import",
+        target_id=import_id,
+        payload={"row": row_number, "field": body.field},
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            catalog_import.set_override(session, import_id, row_number, body.field, body.value)
+        except LookupError as exc:
+            raise HTTPException(status_code=404) from exc
+        except CatalogImportError as exc:
+            raise _import_error(exc) from exc
+    return {"ok": True}
+
+
+@router.post("/tenants/{tenant_id}/imports/{import_id}/commit")
+def commit_import(
+    tenant_id: UUID, import_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    admin_id = _console_act(
+        identity, tenant_id, "import_commit", target_type="catalog_import", target_id=import_id
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            summary = catalog_import.commit_import(
+                session, tenant_id, import_id, user_id=admin_id, acting_as_tenant_id=tenant_id
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404) from exc
+        except CatalogImportError as exc:
+            raise _import_error(exc) from exc
+    return {"summary": summary}
+
+
+@router.post("/tenants/{tenant_id}/imports/{import_id}/discard")
+def discard_import(
+    tenant_id: UUID, import_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    _console_act(
+        identity, tenant_id, "import_discard", target_type="catalog_import", target_id=import_id
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            catalog_import.discard_import(session, import_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404) from exc
+        except CatalogImportError as exc:
+            raise _import_error(exc) from exc
+    return {"ok": True}

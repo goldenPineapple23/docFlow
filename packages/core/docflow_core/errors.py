@@ -610,6 +610,231 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="founder",
     ),
+    # ── IMP / CAT / BUY · catalog and customer-list import (Phase 5, 5.2) ───
+    "IMP-001": ErrorCatalogEntry(
+        code="IMP-001",
+        title="A catalog has to be a spreadsheet",
+        message=(
+            "This file passed the intake checks, but it is not a table: catalogs and "
+            "customer lists are read from CSV or Excel files only."
+        ),
+        action="Ask the prospect for the list as CSV or Excel (.xlsx, .xls).",
+        severity="warning",
+        audience="founder",
+    ),
+    "IMP-002": ErrorCatalogEntry(
+        code="IMP-002",
+        title="This file has no rows to import",
+        message="DocFlow found a header row and nothing under it, or no content at all.",
+        action="Check it is the right file, and that the list is on the first sheet.",
+        severity="warning",
+        audience="founder",
+    ),
+    "IMP-003": ErrorCatalogEntry(
+        code="IMP-003",
+        title="This file is too big to import",
+        message="It has more rows or columns than one import handles (50,000 rows, 100 columns).",
+        action="Split the list into smaller files and import them one after another.",
+        severity="warning",
+        audience="founder",
+    ),
+    "IMP-004": ErrorCatalogEntry(
+        code="IMP-004",
+        title="We couldn't read this spreadsheet",
+        message=(
+            "The file's contents couldn't be opened as a table -- it may be damaged, or "
+            "saved in an unusual way."
+        ),
+        action="Open it in Excel, save a fresh copy as .xlsx or .csv, and upload that.",
+        severity="warning",
+        audience="founder",
+    ),
+    "IMP-005": ErrorCatalogEntry(
+        code="IMP-005",
+        title="Some rows still need fixing",
+        message=(
+            "At least one row has a problem that blocks the import, such as a blank or "
+            "duplicate SKU, so nothing was committed."
+        ),
+        action=(
+            "Fix the rows marked in red -- here, or in the file and upload it again -- then"
+            " commit."
+        ),
+        severity="warning",
+        audience="founder",
+    ),
+    "IMP-006": ErrorCatalogEntry(
+        code="IMP-006",
+        title="This import can't be changed any more",
+        message="It was already committed or discarded, or is still being read.",
+        action="Start a new import from the file to make further changes.",
+        severity="warning",
+        audience="founder",
+    ),
+    "IMP-007": ErrorCatalogEntry(
+        code="IMP-007",
+        title="Map the required columns first",
+        message=(
+            "Every import needs certain columns -- a SKU and a description for a catalog, a"
+            " name for a customer list -- and at least one isn't mapped yet."
+        ),
+        action="Choose which of the file's columns holds each required field.",
+        severity="warning",
+        audience="founder",
+    ),
+    "IMP-008": ErrorCatalogEntry(
+        code="IMP-008",
+        title="That mapping or fix doesn't fit this file",
+        message=(
+            "It points at a column or row this file doesn't have, uses one column twice, or"
+            " names a field this import doesn't take."
+        ),
+        action="Reload the import and choose again.",
+        severity="warning",
+        audience="founder",
+    ),
+    "CAT-001": ErrorCatalogEntry(
+        code="CAT-001",
+        title="Rows with no SKU",
+        message="These rows have no SKU, so there is nothing to match purchase orders against.",
+        action="Add the SKU, or remove the row from the file.",
+        severity="warning",
+        audience="founder",
+    ),
+    "CAT-002": ErrorCatalogEntry(
+        code="CAT-002",
+        title="The same SKU appears more than once",
+        message=(
+            "Each SKU can be in the catalog once; these rows share one, so DocFlow can't "
+            "tell which is right."
+        ),
+        action="Keep one row per SKU -- fix or remove the others.",
+        severity="warning",
+        audience="founder",
+    ),
+    "CAT-003": ErrorCatalogEntry(
+        code="CAT-003",
+        title="One description, several SKUs",
+        message=(
+            "These rows describe the item the same way but have different SKUs. Allowed, "
+            "but matching may confuse them."
+        ),
+        action="Check they really are different items; if so, nothing to do.",
+        severity="warning",
+        audience="founder",
+    ),
+    "CAT-004": ErrorCatalogEntry(
+        code="CAT-004",
+        title="SKUs had stray spaces or hidden characters",
+        message=(
+            "Spaces at the ends of these SKUs, or invisible characters inside them, were "
+            "removed so they match what buyers type."
+        ),
+        action="Nothing to do -- listed so the change is visible.",
+        severity="warning",
+        audience="founder",
+    ),
+    "CAT-005": ErrorCatalogEntry(
+        code="CAT-005",
+        title="A value is too long",
+        message="These rows have a value longer than DocFlow stores for that field.",
+        action="Shorten the value, or check the column is mapped to the right field.",
+        severity="warning",
+        audience="founder",
+    ),
+    "CAT-006": ErrorCatalogEntry(
+        code="CAT-006",
+        title="Rows with no description",
+        message=(
+            "These items have a SKU but no description, which makes matching buyers' "
+            "wording harder."
+        ),
+        action=(
+            "Add descriptions if the prospect has them; otherwise these can be imported as "
+            "they are."
+        ),
+        severity="warning",
+        audience="founder",
+    ),
+    "CAT-007": ErrorCatalogEntry(
+        code="CAT-007",
+        title="Retiring SKUs that learned rules use",
+        message=(
+            "These SKUs are not in the new file, so they will be retired -- but a learned "
+            "rule still maps buyers' wording to them."
+        ),
+        action=(
+            "Check the SKUs are really discontinued; if not, add them back to the file "
+            "before committing."
+        ),
+        severity="warning",
+        audience="founder",
+    ),
+    "BUY-001": ErrorCatalogEntry(
+        code="BUY-001",
+        title="Rows with no customer name",
+        message="These rows have no name, so there is no customer to create.",
+        action="Add the name, or remove the row.",
+        severity="warning",
+        audience="founder",
+    ),
+    "BUY-002": ErrorCatalogEntry(
+        code="BUY-002",
+        title="The same customer appears more than once",
+        message=(
+            "These rows have the same name (ignoring case, spacing and punctuation), so "
+            "DocFlow can't tell which is right."
+        ),
+        action="Keep one row per customer.",
+        severity="warning",
+        audience="founder",
+    ),
+    "BUY-003": ErrorCatalogEntry(
+        code="BUY-003",
+        title="Looks like a customer that already exists",
+        message=(
+            "These names are close to an existing customer's. They will be created and "
+            "flagged for you to merge -- never merged automatically."
+        ),
+        action="Review the merge suggestions after committing.",
+        severity="warning",
+        audience="founder",
+    ),
+    "BUY-004": ErrorCatalogEntry(
+        code="BUY-004",
+        title="The same account number is used twice",
+        message="Two rows share an account number, so one of them is probably wrong.",
+        action="Fix the account numbers so each customer has its own.",
+        severity="warning",
+        audience="founder",
+    ),
+    "BUY-005": ErrorCatalogEntry(
+        code="BUY-005",
+        title="A value is too long",
+        message="These rows have a value longer than DocFlow stores for that field.",
+        action="Shorten it, or check the column is mapped to the right field.",
+        severity="warning",
+        audience="founder",
+    ),
+    "BUY-006": ErrorCatalogEntry(
+        code="BUY-006",
+        title="Email addresses that don't look valid",
+        message="These values don't look like email addresses. They will be imported as written.",
+        action="Correct them if they are typos.",
+        severity="warning",
+        audience="founder",
+    ),
+    "BUY-007": ErrorCatalogEntry(
+        code="BUY-007",
+        title="Names had stray spaces or hidden characters",
+        message=(
+            "Spaces at the ends of these names, or invisible characters inside them, were "
+            "removed."
+        ),
+        action="Nothing to do -- listed so the change is visible.",
+        severity="warning",
+        audience="founder",
+    ),
     # ── EXP-0xx · export files (Section 7.4, Phase 4) ────────────────────────
     "EXP-001": ErrorCatalogEntry(
         code="EXP-001",

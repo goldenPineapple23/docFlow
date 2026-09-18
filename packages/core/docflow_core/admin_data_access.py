@@ -693,3 +693,66 @@ def list_outbox(
             {"tenant_id": str(tenant_id) if tenant_id else None, "limit": limit},
         ).mappings().all()
         return [dict(r) for r in rows]
+
+
+# ── Acting inside a tenant (Section 7.15.1) ─────────────────────────────────
+
+
+def record_console_action(
+    *,
+    platform_admin_user_id: UUID,
+    action: str,
+    tenant_id: UUID,
+    target_type: str,
+    target_id: UUID | None = None,
+    payload: dict[str, Any] | None = None,
+) -> bool:
+    """
+    The `admin_actions` row for a Console action that then runs through the
+    tenant's own code path with `acting_as_tenant_id` (Section 7.15.1:
+    "Acting-as, not impersonation"). Written BEFORE the work, like every
+    other Console call. Returns False if the tenant doesn't exist, so the
+    route can 404 without doing anything.
+    """
+    with platform_session() as session:
+        exists = session.execute(
+            text("SELECT 1 FROM tenants WHERE id = :id"), {"id": str(tenant_id)}
+        ).first()
+        if exists is None:
+            return False
+        _record_admin_action(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            action=action,
+            target_tenant_id=tenant_id,
+            target_type=target_type,
+            target_id=target_id,
+            payload=payload,
+        )
+    return True
+
+
+def list_tenant_intake_files(*, platform_admin_user_id: UUID, tenant_id: UUID) -> list[dict[str, Any]]:
+    """The files moved into this tenant from its intake (Step 2), newest first."""
+    with platform_session() as session:
+        _record_admin_action(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            action="read",
+            target_tenant_id=tenant_id,
+            target_type="tenant_intake_files",
+        )
+        rows = session.execute(
+            text(
+                """
+                SELECT f.id, f.original_filename, f.detected_type, f.byte_size, f.sha256,
+                       f.storage_path, f.created_at
+                FROM onboarding_intake_files f
+                JOIN onboarding_intakes i ON i.id = f.intake_id
+                WHERE i.linked_tenant_id = :tid AND f.deleted_at IS NULL AND i.deleted_at IS NULL
+                ORDER BY f.created_at DESC
+                """
+            ),
+            {"tid": str(tenant_id)},
+        ).mappings().all()
+        return [dict(r) for r in rows]

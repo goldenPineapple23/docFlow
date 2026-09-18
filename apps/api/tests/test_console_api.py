@@ -126,6 +126,15 @@ class _Console:
 
     def __exit__(self, *exc):
         with platform_session() as session:
+            # 0012's import tables, when present: imports point at intake
+            # files, and items/buyers point at imports, so they go first.
+            if session.execute(text("SELECT to_regclass('catalog_imports')")).scalar():
+                for tid in self.tenants:
+                    for table in (
+                        "buyer_merge_candidates", "learned_rules", "items", "buyers",
+                        "import_mapping_templates", "catalog_imports",
+                    ):
+                        session.execute(text(f"DELETE FROM {table} WHERE tenant_id = :t"), {"t": tid})
             for tid in self.tenants:
                 for table in (
                     "founder_alerts", "email_outbox", "tenant_lifecycle_events", "intake_addresses"
