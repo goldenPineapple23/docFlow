@@ -228,7 +228,8 @@ def mark_test_batch_complete(session: Session, tenant_id: UUID, *, actor_user_id
 
 @dataclass(frozen=True)
 class GoLivePlan:
-    """What go-live will bill, read from the tenant and its tier -- never typed in."""
+    """What go-live will bill: the deal recorded on the tenant (D-117) and its
+    tier -- never typed in at go-live."""
 
     tenant_name: str
     customer_id: str | None
@@ -239,6 +240,11 @@ class GoLivePlan:
     promo_days: int | None
     document_allowance: int
     invite_sent: bool
+    setup_fee_amount: Decimal
+    setup_fee_billing: str  # 'stripe' | 'invoiced_manually'
+    setup_fee_note: str | None
+    setup_fee_preset_name: str | None
+    founding_price: bool
 
     @property
     def promo_months(self) -> int | None:
@@ -252,9 +258,13 @@ def plan_go_live(session: Session, tenant_id: UUID) -> GoLivePlan:
         text(
             """
             SELECT t.name, t.onboarding_status, t.stripe_customer_id, t.invite_sent_at,
+                   t.setup_fee_amount, t.setup_fee_billing, t.setup_fee_note, t.founding_price,
+                   sp.name AS setup_fee_preset_name,
                    tr.id AS tier_id, tr.name AS tier_name, tr.monthly_price,
                    tr.promo_monthly_price, tr.promo_days, tr.document_allowance
-            FROM tenants t LEFT JOIN tiers tr ON tr.id = t.tier_id
+            FROM tenants t
+            LEFT JOIN tiers tr ON tr.id = t.tier_id
+            LEFT JOIN setup_fee_presets sp ON sp.id = t.setup_fee_preset_id
             WHERE t.id = :id
             """
         ),
@@ -268,6 +278,9 @@ def plan_go_live(session: Session, tenant_id: UUID) -> GoLivePlan:
         raise OnboardingError("ONB-005")
     if row["tier_id"] is None:
         raise OnboardingError("ONB-009")
+    if row["setup_fee_amount"] is None or row["setup_fee_billing"] is None:
+        raise OnboardingError("ONB-010")
+    promo = row["promo_monthly_price"]
     return GoLivePlan(
         tenant_name=row["name"],
         customer_id=row["stripe_customer_id"],
@@ -280,15 +293,19 @@ def plan_go_live(session: Session, tenant_id: UUID) -> GoLivePlan:
         promo_days=row["promo_days"],
         document_allowance=row["document_allowance"],
         invite_sent=row["invite_sent_at"] is not None,
+        setup_fee_amount=Decimal(row["setup_fee_amount"]),
+        setup_fee_billing=row["setup_fee_billing"],
+        setup_fee_note=row["setup_fee_note"],
+        setup_fee_preset_name=row["setup_fee_preset_name"],
+        # Only a tier with a promo has a founding price to give.
+        founding_price=bool(row["founding_price"]) and promo is not None,
     )
 
 
 @dataclass(frozen=True)
 class GoLiveBilling:
-    setup_fee_amount: Decimal
-    setup_fee_billing: str  # 'stripe' | 'invoiced_manually'
-    setup_fee_note: str | None
-    founding_price: bool
+    """What Stripe returned. The fee and founding price are the plan's."""
+
     subscription_id: str | None
     subscription_status: str | None
     current_period_end: int | None
@@ -324,10 +341,6 @@ def complete_go_live(
                 stripe_subscription_id = :sub_id,
                 stripe_subscription_status = :sub_status,
                 stripe_current_period_end = :period_end,
-                setup_fee_amount = :fee,
-                setup_fee_billing = :fee_billing,
-                setup_fee_note = :fee_note,
-                founding_price = :founding,
                 updated_at = now()
             WHERE id = :id
             """
@@ -337,10 +350,6 @@ def complete_go_live(
             "sub_id": billing.subscription_id,
             "sub_status": billing.subscription_status,
             "period_end": period_end,
-            "fee": str(billing.setup_fee_amount),
-            "fee_billing": billing.setup_fee_billing,
-            "fee_note": billing.setup_fee_note,
-            "founding": billing.founding_price,
         },
     )
 
@@ -382,9 +391,9 @@ def complete_go_live(
         payload={
             "acting_as_tenant_id": str(tenant_id),
             "tier_id": str(plan.tier_id),
-            "setup_fee_amount": str(billing.setup_fee_amount),
-            "setup_fee_billing": billing.setup_fee_billing,
-            "founding_price": billing.founding_price,
+            "setup_fee_amount": str(plan.setup_fee_amount),
+            "setup_fee_billing": plan.setup_fee_billing,
+            "founding_price": plan.founding_price,
             "stripe_subscription_id": billing.subscription_id,
             "go_live_email_outbox_id": str(outbox_id) if outbox_id else None,
             "first_week_checkin_job_id": str(job_id),

@@ -110,7 +110,7 @@ export function TestBatchPanel({
 
   return (
     <section data-testid="test-batch" className="mt-5 rounded-xl border border-gray-200 bg-white p-5">
-      <h2 className="text-sm font-semibold">6–8. Test batch</h2>
+      <h2 className="text-sm font-semibold">Test batch</h2>
       <p className="mt-1 max-w-3xl text-sm text-gray-600">
         Upload the prospect&apos;s 5–10 sample orders, run them through the normal pipeline, and
         review each one as DocFlow support. They stay in the customer&apos;s history, labelled as

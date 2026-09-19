@@ -12,10 +12,11 @@ What this proves:
     first, at interactive priority.
   * Step 8 -- the batch can't be marked complete until every document is
     approved.
-  * Step 9 -- go-live bills from the tier (never typed-in prices), turns the
-    intake address on, queues the go-live email, schedules the first-week
-    check-in, and marks the tenant live; a Stripe failure leaves it not live;
-    it can't run twice; the setup fee must be a real amount.
+  * Step 9 -- go-live bills the deal recorded at Create tenant (D-117) from
+    the tiers and presets tables (never typed-in prices), turns the intake
+    address on, queues the go-live email, schedules the first-week check-in,
+    and marks the tenant live; a Stripe failure leaves it not live; it can't
+    run twice; without a recorded deal it refuses.
   * Every step moves onboarding_status forward only, with a lifecycle event,
     and every Console call writes admin_actions.
 
@@ -68,6 +69,21 @@ requires_go_live_schema = pytest.mark.skipif(
 )
 
 
+def _deal_terms_schema_available() -> bool:
+    try:
+        with platform_session() as session:
+            session.execute(text("SELECT setup_fee_preset_id FROM tenants LIMIT 0"))
+        return True
+    except Exception:
+        return False
+
+
+requires_deal_terms_schema = pytest.mark.skipif(
+    not _deal_terms_schema_available(),
+    reason="supabase/migrations/0014_deal_terms.sql has not been applied yet -- see D-117.",
+)
+
+
 @pytest.fixture
 def queue(monkeypatch):
     """Every send_task from the Console and the upload path, captured."""
@@ -104,8 +120,8 @@ def billing(monkeypatch):
     return _Billing
 
 
-def _tenant_with_catalog(client, console) -> str:
-    tenant_id = console.create_tenant(client).json()["tenant_id"]
+def _tenant_with_catalog(client, console, **overrides) -> str:
+    tenant_id = console.create_tenant(client, **overrides).json()["tenant_id"]
     preview = _import(client, console, tenant_id, CATALOG_V1)
     assert _commit(client, console, tenant_id, preview["id"]).status_code == 200
     return tenant_id
@@ -254,9 +270,16 @@ def test_run_sends_the_batch_through_the_normal_pipeline_and_completion_waits_fo
 
 # ── Step 9 ──────────────────────────────────────────────────────────────────
 
+FOUNDING_DEAL = {
+    "tier": "starter",
+    "setup_fee_preset": "founding",
+    "setup_fee_billing": "stripe",
+    "founding_price": True,
+}
 
-def _ready_to_go_live(client, console) -> str:
-    tenant_id = _tenant_with_catalog(client, console)
+
+def _ready_to_go_live(client, console, deal: dict | None = FOUNDING_DEAL) -> str:
+    tenant_id = _tenant_with_catalog(client, console, **({"deal": deal} if deal else {}))
     _upload(client, console, tenant_id, ("po-1.txt", PO_TEXT))
     client.post(f"/admin/tenants/{tenant_id}/test-batch/run", headers=console.headers())
     _approve_all_test_documents(tenant_id, console.user_id)
@@ -266,9 +289,10 @@ def _ready_to_go_live(client, console) -> str:
     return tenant_id
 
 
+@requires_deal_terms_schema
 @requires_go_live_schema
 @requires_console_schema
-def test_go_live_bills_from_the_tier_and_turns_everything_on(
+def test_go_live_bills_the_recorded_deal_and_turns_everything_on(
     client, stripe, supabase_links, queue, billing
 ):
     with _Console() as console:
@@ -278,18 +302,19 @@ def test_go_live_bills_from_the_tier_and_turns_everything_on(
             plan = client.get(f"/admin/tenants/{tenant_id}/go-live", headers=console.headers()).json()
             assert plan["monthly_price"] == "299.00" and plan["promo_monthly_price"] == "199.00"
             assert plan["promo_months"] == 3
-
-            response = client.post(
-                f"/admin/tenants/{tenant_id}/go-live",
-                headers=console.headers(),
-                json={"setup_fee_amount": "750.00", "setup_fee_billing": "stripe", "founding_price": True},
+            # The deal from Create tenant, from the presets table -- nothing typed at go-live.
+            assert (plan["setup_fee_amount"], plan["setup_fee_billing"], plan["founding_price"]) == (
+                "750.00", "stripe", True,
             )
+            assert plan["setup_fee_preset_name"] == "Founding customer"
+
+            response = client.post(f"/admin/tenants/{tenant_id}/go-live", headers=console.headers())
             assert response.status_code == 200, response.text
 
             (call,) = billing.calls
             assert call["monthly_price"] == Decimal("299.00")  # from the tiers table
             assert call["promo_monthly_price"] == Decimal("199.00") and call["promo_months"] == 3
-            assert call["setup_fee"] == Decimal("750.00")
+            assert call["setup_fee"] == Decimal("750.00")  # from setup_fee_presets
 
             tenant = console.overview(client, tenant_id)
             assert tenant["onboarding_status"] == "live"
@@ -311,40 +336,39 @@ def test_go_live_bills_from_the_tier_and_turns_everything_on(
                 ).one()
                 event = session.execute(
                     text(
-                        "SELECT constants_in_effect FROM tenant_lifecycle_events "
+                        "SELECT constants_in_effect, payload FROM tenant_lifecycle_events "
                         "WHERE tenant_id = :t AND event_type = 'onboarding_live'"
                     ),
                     {"t": tenant_id},
-                ).scalar_one()
+                ).one()
             assert tuple(job) == ("first_week_checkin", "pending", True)
-            assert event["FIRST_WEEK_CHECKIN_DAYS"] == 7
+            assert event.constants_in_effect["FIRST_WEEK_CHECKIN_DAYS"] == 7
+            assert event.payload["setup_fee_amount"] == "750.00"
 
-            twice = client.post(
-                f"/admin/tenants/{tenant_id}/go-live",
-                headers=console.headers(),
-                json={"setup_fee_amount": "750.00", "setup_fee_billing": "stripe"},
-            )
+            twice = client.post(f"/admin/tenants/{tenant_id}/go-live", headers=console.headers())
             assert twice.status_code == 409 and twice.json()["detail"]["code"] == "ONB-006"
             assert len(billing.calls) == 1
         finally:
             _cleanup_jobs_and_alerts(tenant_id)
 
 
+@requires_deal_terms_schema
 @requires_go_live_schema
 @requires_console_schema
 def test_a_setup_fee_invoiced_by_hand_is_not_sent_to_stripe(client, stripe, supabase_links, queue, billing):
     with _Console() as console:
-        tenant_id = _ready_to_go_live(client, console)
+        tenant_id = _ready_to_go_live(
+            client,
+            console,
+            {
+                "tier": "starter",
+                "setup_fee_preset": "standard",
+                "setup_fee_billing": "invoiced_manually",
+                "setup_fee_note": "Test invoice 1001",
+            },
+        )
         try:
-            response = client.post(
-                f"/admin/tenants/{tenant_id}/go-live",
-                headers=console.headers(),
-                json={
-                    "setup_fee_amount": "1500",
-                    "setup_fee_billing": "invoiced_manually",
-                    "setup_fee_note": "Test invoice 1001",
-                },
-            )
+            response = client.post(f"/admin/tenants/{tenant_id}/go-live", headers=console.headers())
             assert response.status_code == 200, response.text
             assert billing.calls[0]["setup_fee"] is None
             assert billing.calls[0]["promo_monthly_price"] is None  # founding not ticked
@@ -355,17 +379,48 @@ def test_a_setup_fee_invoiced_by_hand_is_not_sent_to_stripe(client, stripe, supa
             _cleanup_jobs_and_alerts(tenant_id)
 
 
+@requires_deal_terms_schema
+@requires_go_live_schema
+@requires_console_schema
+def test_a_waived_fee_puts_nothing_on_the_invoice(client, stripe, supabase_links, queue, billing):
+    with _Console() as console:
+        tenant_id = _ready_to_go_live(
+            client,
+            console,
+            {"tier": "growth", "setup_fee_preset": "waived", "setup_fee_note": "Test pilot waiver"},
+        )
+        try:
+            assert client.post(
+                f"/admin/tenants/{tenant_id}/go-live", headers=console.headers()
+            ).status_code == 200
+            (call,) = billing.calls
+            assert call["setup_fee"] is None  # no $0 line on the customer's invoice
+            assert call["monthly_price"] == Decimal("399.00")
+            assert console.overview(client, tenant_id)["setup_fee_amount"] == "0.00"
+        finally:
+            _cleanup_jobs_and_alerts(tenant_id)
+
+
+@requires_deal_terms_schema
+@requires_go_live_schema
+@requires_console_schema
+def test_go_live_without_deal_terms_is_refused(client, stripe, supabase_links, queue, billing):
+    with _Console() as console:
+        tenant_id = _ready_to_go_live(client, console, deal=None)
+        response = client.post(f"/admin/tenants/{tenant_id}/go-live", headers=console.headers())
+        assert response.status_code == 409 and response.json()["detail"]["code"] == "ONB-010"
+        assert billing.calls == []
+        assert console.overview(client, tenant_id)["onboarding_status"] == "test_batch_complete"
+
+
+@requires_deal_terms_schema
 @requires_go_live_schema
 @requires_console_schema
 def test_a_stripe_failure_leaves_the_tenant_not_live(client, stripe, supabase_links, queue, billing):
     with _Console() as console:
         tenant_id = _ready_to_go_live(client, console)
         billing.fail = True
-        response = client.post(
-            f"/admin/tenants/{tenant_id}/go-live",
-            headers=console.headers(),
-            json={"setup_fee_amount": "750", "setup_fee_billing": "stripe"},
-        )
+        response = client.post(f"/admin/tenants/{tenant_id}/go-live", headers=console.headers())
         assert response.status_code == 502
         assert response.json()["detail"]["code"] == "ONB-008"
         tenant = console.overview(client, tenant_id)
@@ -375,31 +430,13 @@ def test_a_stripe_failure_leaves_the_tenant_not_live(client, stripe, supabase_li
         assert _scalar("SELECT count(*) FROM scheduled_jobs WHERE tenant_id = :t", t=tenant_id) == 0
 
 
-@pytest.mark.parametrize("fee", [None, "", "abc", "-5", "10.005", "NaN"])
-@requires_go_live_schema
-@requires_console_schema
-def test_the_setup_fee_must_be_a_real_amount(client, stripe, queue, billing, fee):
-    with _Console() as console:
-        tenant_id = console.create_tenant(client).json()["tenant_id"]
-        body = {"setup_fee_billing": "stripe"}
-        if fee is not None:
-            body["setup_fee_amount"] = fee
-        response = client.post(f"/admin/tenants/{tenant_id}/go-live", headers=console.headers(), json=body)
-        assert response.status_code == 422
-        assert response.json()["detail"]["code"] == "ONB-007"
-        assert billing.calls == []
-
-
+@requires_deal_terms_schema
 @requires_go_live_schema
 @requires_console_schema
 def test_go_live_before_the_test_batch_is_complete_is_refused(client, stripe, queue, billing):
     with _Console() as console:
-        tenant_id = _tenant_with_catalog(client, console)
-        response = client.post(
-            f"/admin/tenants/{tenant_id}/go-live",
-            headers=console.headers(),
-            json={"setup_fee_amount": "750", "setup_fee_billing": "stripe"},
-        )
+        tenant_id = _tenant_with_catalog(client, console, deal=FOUNDING_DEAL)
+        response = client.post(f"/admin/tenants/{tenant_id}/go-live", headers=console.headers())
         assert response.status_code == 409 and response.json()["detail"]["code"] == "ONB-005"
         assert billing.calls == []
 

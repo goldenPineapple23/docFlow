@@ -296,7 +296,7 @@ export type ExportRecord = {
   is_current_snapshot: boolean;
   requested_at: string | null;
   generated_at: string | null;
-  generated_by: string;
+  generated_by: string | null;
   by_docflow_support: boolean;
 };
 

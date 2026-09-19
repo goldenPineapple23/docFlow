@@ -41,7 +41,7 @@ export default function IntakesPage() {
     <>
       <h1 className="text-xl font-semibold">Intakes</h1>
       <p className="mt-1 text-sm text-gray-600">
-        Step 1 of onboarding. Record a prospect, then upload the files they emailed you. Files
+        Record a prospect, then upload the files they emailed you. Files
         stay in staging until you create the tenant.
       </p>
 

@@ -21,6 +21,31 @@ export type Tier = {
   document_allowance: number;
 };
 
+/** A setup-fee option from docflow-pricing.docx, from the presets table (D-117). */
+export type SetupFeePreset = {
+  id: string;
+  code: "founding" | "standard" | "complex" | "waived" | "custom";
+  version: number;
+  name: string;
+  description: string;
+  default_amount: string | null;
+  min_amount: string;
+  max_amount: string | null;
+  note_required: boolean;
+};
+
+export type SetupFeeBilling = "stripe" | "invoiced_manually";
+
+/** The deal agreed before onboarding: recorded at Create tenant, editable until go-live (D-117). */
+export type DealTerms = {
+  tier: Tier["code"];
+  setup_fee_preset: SetupFeePreset["code"];
+  setup_fee_amount: string | null;
+  setup_fee_billing: SetupFeeBilling;
+  setup_fee_note: string | null;
+  founding_price: boolean;
+};
+
 export type IntakeSummary = {
   id: string;
   prospect_name: string;
@@ -61,12 +86,17 @@ export type TenantOverview = {
   tier_name: string | null;
   tier_version: number | null;
   tier_monthly_price: string | null;
+  tier_promo_monthly_price: string | null;
+  tier_promo_days: number | null;
   tier_document_allowance: number | null;
   owner: { id: string; email: string; has_login: boolean; invite_sent_at: string | null } | null;
   intake_address: string | null;
   test_batch_completed_at: string | null;
   setup_fee_amount: string | null;
-  setup_fee_billing: "stripe" | "invoiced_manually" | null;
+  setup_fee_billing: SetupFeeBilling | null;
+  setup_fee_note: string | null;
+  setup_fee_preset: SetupFeePreset["code"] | null;
+  setup_fee_preset_name: string | null;
   founding_price: boolean;
 };
 
@@ -104,6 +134,7 @@ export type OutboxEmail = {
 };
 
 export const listTiers = () => request<{ tiers: Tier[] }>("/admin/tiers");
+export const listSetupFeePresets = () => request<{ presets: SetupFeePreset[] }>("/admin/setup-fee-presets");
 export const listIntakes = () => request<{ intakes: IntakeSummary[] }>("/admin/intakes");
 export const getIntake = (id: string) => request<{ intake: Intake }>(`/admin/intakes/${id}`);
 
@@ -149,12 +180,19 @@ export function createTenant(body: {
   timezone: string;
   tier: string;
   intake_id: string | null;
+  deal: DealTerms;
 }) {
   return request<{ tenant_id: string; owner_user_id: string }>("/admin/tenants/new", {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
+
+export const updateDealTerms = (tenantId: string, body: DealTerms) =>
+  request<{ deal: Record<string, unknown> }>(`/admin/tenants/${tenantId}/deal-terms`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
 
 export const listTenants = () => request<TenantRow[]>("/admin/tenants");
 export const getTenantOverview = (id: string) =>
@@ -357,21 +395,16 @@ export type GoLivePlan = {
   document_allowance: number;
   invite_sent: boolean;
   invoice_days_until_due: number;
+  setup_fee_amount: string;
+  setup_fee_billing: SetupFeeBilling;
+  setup_fee_note: string | null;
+  setup_fee_preset_name: string | null;
+  founding_price: boolean;
 };
 
 export const getGoLivePlan = (tenantId: string) =>
   request<GoLivePlan>(`/admin/tenants/${tenantId}/go-live`);
 
-export const goLive = (
-  tenantId: string,
-  body: {
-    setup_fee_amount: string;
-    setup_fee_billing: "stripe" | "invoiced_manually";
-    setup_fee_note: string | null;
-    founding_price: boolean;
-  },
-) =>
-  request<{ onboarding_status: string }>(`/admin/tenants/${tenantId}/go-live`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+/** Nothing about price is sent: go-live bills the deal recorded on the tenant (D-117). */
+export const goLive = (tenantId: string) =>
+  request<{ onboarding_status: string }>(`/admin/tenants/${tenantId}/go-live`, { method: "POST" });

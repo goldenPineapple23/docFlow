@@ -18,11 +18,17 @@ user-facing failure (Section 7.16.5).
 from __future__ import annotations
 
 import hashlib
-from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 from uuid import UUID
 
-from docflow_core import admin_data_access, catalog_import, external_services, file_types, onboarding
+from docflow_core import (
+    admin_data_access,
+    catalog_import,
+    deal_terms,
+    external_services,
+    file_types,
+    onboarding,
+)
 from docflow_core.admin_data_access import ConsoleError
 from docflow_core.catalog_import import CatalogImportError
 from docflow_core.config import get_settings
@@ -52,9 +58,13 @@ def _admin_id(identity: AuthenticatedIdentity) -> UUID:
     return identity.local_user_id
 
 
+# Deal-terms refusals are about what was typed, not the tenant's state.
+_UNPROCESSABLE = {"ONB-007", "ONB-012", "ONB-013", "ONB-014"}
+
+
 def _console_error(exc: ConsoleError) -> HTTPException:
-    status = 404 if exc.code == "CON-001" else 409
-    return catalog_error(exc.code, status_code=status)
+    status = 404 if exc.code == "CON-001" else 422 if exc.code in _UNPROCESSABLE else 409
+    return catalog_error(exc.code, status_code=status, extra=exc.detail or None)
 
 
 def _jsonable(row: dict[str, Any]) -> dict[str, Any]:
@@ -83,6 +93,12 @@ def _jsonable(row: dict[str, Any]) -> dict[str, Any]:
 def tiers(identity: AuthenticatedIdentity = Depends(require_platform_admin)) -> dict:
     rows = admin_data_access.list_current_tiers(platform_admin_user_id=_admin_id(identity))
     return {"tiers": [_jsonable(r) for r in rows]}
+
+
+@router.get("/setup-fee-presets")
+def setup_fee_presets(identity: AuthenticatedIdentity = Depends(require_platform_admin)) -> dict:
+    rows = admin_data_access.list_setup_fee_presets(platform_admin_user_id=_admin_id(identity))
+    return {"presets": [_jsonable(r) for r in rows]}
 
 
 # ── Intake staging (Step 1) ─────────────────────────────────────────────────
@@ -159,6 +175,30 @@ async def upload_intake_file(
 # ── Tenants (Steps 2 and 3) ─────────────────────────────────────────────────
 
 
+class DealTermsBody(BaseModel):
+    """The deal agreed before onboarding (D-117). Amounts come from the
+    tiers and setup_fee_presets tables; a typed fee must sit inside its
+    preset's range."""
+
+    tier: Literal["starter", "growth", "scale"]
+    setup_fee_preset: Literal["founding", "standard", "complex", "waived", "custom"]
+    # Money as a string (Section 7.1). Blank = the preset's own amount.
+    setup_fee_amount: str | None = Field(default=None, max_length=12)
+    setup_fee_billing: Literal["stripe", "invoiced_manually"] = "stripe"
+    setup_fee_note: str | None = Field(default=None, max_length=500)
+    founding_price: bool = False
+
+    def terms(self) -> deal_terms.DealTerms:
+        return deal_terms.DealTerms(
+            tier_code=self.tier,
+            setup_fee_preset=self.setup_fee_preset,
+            setup_fee_amount=self.setup_fee_amount,
+            setup_fee_billing=self.setup_fee_billing,
+            setup_fee_note=self.setup_fee_note,
+            founding_price=self.founding_price,
+        )
+
+
 class CreateTenantRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     primary_currency: str = Field(default="USD", min_length=3, max_length=3)
@@ -166,6 +206,9 @@ class CreateTenantRequest(BaseModel):
     owner_email: EmailStr
     tier: Literal["starter", "growth", "scale"] = "starter"
     intake_id: UUID | None = None
+    # Optional so a tenant can be created before the price is settled; go-live
+    # refuses until it is (ONB-010). The Console form always sends it.
+    deal: DealTermsBody | None = None
 
 
 @router.post("/tenants/new")
@@ -182,6 +225,7 @@ def create_tenant(
             owner_email=body.owner_email,
             tier_code=body.tier,
             intake_id=body.intake_id,
+            deal=body.deal.terms() if body.deal else None,
         )
     except ConsoleError as exc:
         raise _console_error(exc) from exc
@@ -215,6 +259,22 @@ def tenant_overview(
     if row is None:
         raise HTTPException(status_code=404)
     return {"tenant": _jsonable(row)}
+
+
+@router.put("/tenants/{tenant_id}/deal-terms")
+def update_deal_terms(
+    tenant_id: UUID,
+    body: DealTermsBody,
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    """The Overview's Deal terms: editable until go-live, locked after (D-117)."""
+    try:
+        deal = admin_data_access.update_deal_terms(
+            platform_admin_user_id=_admin_id(identity), tenant_id=tenant_id, deal=body.terms()
+        )
+    except ConsoleError as exc:
+        raise _console_error(exc) from exc
+    return {"deal": deal}
 
 
 @router.post("/tenants/{tenant_id}/invite")
@@ -662,32 +722,12 @@ def complete_test_batch(
     return {"onboarding_status": "test_batch_complete"}
 
 
-class GoLiveRequest(BaseModel):
-    # Money as a string (Section 7.1); parsed to Decimal below.
-    setup_fee_amount: str | None = Field(default=None, max_length=12)
-    setup_fee_billing: Literal["stripe", "invoiced_manually"]
-    setup_fee_note: str | None = Field(default=None, max_length=500)
-    founding_price: bool = False
-
-
-def _setup_fee(raw: str | None) -> Decimal:
-    if raw is None or not raw.strip():
-        raise catalog_error("ONB-007", status_code=422)
-    try:
-        amount = Decimal(raw.strip().replace(",", ""))
-    except InvalidOperation:
-        raise catalog_error("ONB-007", status_code=422) from None
-    if not amount.is_finite() or amount < 0 or amount != amount.quantize(Decimal("0.01")):
-        raise catalog_error("ONB-007", status_code=422)
-    return amount.quantize(Decimal("0.01"))
-
-
 @router.get("/tenants/{tenant_id}/go-live")
 def go_live_plan(
     tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
 ) -> dict:
-    """What go-live will do and bill, for the form -- all from the tenant and
-    its tier, never typed in (Section 7.15.2)."""
+    """What go-live will do and bill, for the summary -- all from the deal
+    recorded on the tenant and its tier, never typed in (D-117)."""
     _console_act(identity, tenant_id, "read", target_type="go_live_plan")
     with tenant_session(tenant_id) as session:
         try:
@@ -703,13 +743,17 @@ def go_live_plan(
         "document_allowance": plan.document_allowance,
         "invite_sent": plan.invite_sent,
         "invoice_days_until_due": INVOICE_DAYS_UNTIL_DUE,
+        "setup_fee_amount": str(plan.setup_fee_amount),
+        "setup_fee_billing": plan.setup_fee_billing,
+        "setup_fee_note": plan.setup_fee_note,
+        "setup_fee_preset_name": plan.setup_fee_preset_name,
+        "founding_price": plan.founding_price,
     }
 
 
 @router.post("/tenants/{tenant_id}/go-live")
 def go_live(
     tenant_id: UUID,
-    body: GoLiveRequest,
     identity: AuthenticatedIdentity = Depends(require_platform_admin),
 ) -> dict:
     """
@@ -721,26 +765,18 @@ def go_live(
          first-week check-in scheduled, onboarding_status 'live'.
     A failure in 1 or 2 leaves the tenant not live, and trying again repeats
     nothing that already happened (ONB-008).
+
+    Nothing about price is sent: go-live bills the deal recorded on the
+    tenant (D-117), refusing with ONB-010 if there isn't one.
     """
-    fee = _setup_fee(body.setup_fee_amount)
-    admin_id = _console_act(
-        identity,
-        tenant_id,
-        "go_live",
-        target_type="tenant",
-        target_id=tenant_id,
-        payload={
-            "setup_fee_amount": str(fee),
-            "setup_fee_billing": body.setup_fee_billing,
-            "founding_price": body.founding_price,
-        },
-    )
+    admin_id = _console_act(identity, tenant_id, "go_live", target_type="tenant", target_id=tenant_id)
     with tenant_session(tenant_id) as session:
         try:
             plan = onboarding.plan_go_live(session, tenant_id)
         except onboarding.OnboardingError as exc:
             raise _onboarding_error(exc) from exc
-    founding = body.founding_price and plan.promo_monthly_price is not None
+    founding = plan.founding_price
+    fee = plan.setup_fee_amount
     if plan.customer_id is None:
         raise catalog_error("ONB-008", status_code=502, extra={"reason": "no Stripe customer"})
 
@@ -753,7 +789,7 @@ def go_live(
             monthly_price=plan.monthly_price,
             promo_monthly_price=plan.promo_monthly_price if founding else None,
             promo_months=plan.promo_months if founding else None,
-            setup_fee=fee if body.setup_fee_billing == "stripe" else None,
+            setup_fee=fee if plan.setup_fee_billing == "stripe" and fee > 0 else None,
             days_until_due=INVOICE_DAYS_UNTIL_DUE,
         )
     except ExternalServiceError as exc:
@@ -775,10 +811,6 @@ def go_live(
                 actor_user_id=admin_id,
                 plan=plan,
                 billing=onboarding.GoLiveBilling(
-                    setup_fee_amount=fee,
-                    setup_fee_billing=body.setup_fee_billing,
-                    setup_fee_note=(body.setup_fee_note or "").strip() or None,
-                    founding_price=founding,
                     subscription_id=subscription.subscription_id,
                     subscription_status=subscription.status,
                     current_period_end=subscription.current_period_end,

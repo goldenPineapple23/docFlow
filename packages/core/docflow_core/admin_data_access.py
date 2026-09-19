@@ -32,6 +32,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import text
 
+from docflow_core import deal_terms
 from docflow_core.db import platform_session
 
 logger = logging.getLogger(__name__)
@@ -42,9 +43,10 @@ class ConsoleError(Exception):
     catalog code (CON-0xx): Section 7.16.5 puts every user-facing failure in
     the one catalog, founder-facing ones included."""
 
-    def __init__(self, code: str):
+    def __init__(self, code: str, detail: dict[str, Any] | None = None):
         super().__init__(code)
         self.code = code
+        self.detail = detail or {}
 
 
 def _record_admin_action(
@@ -118,11 +120,16 @@ def get_tenant_overview(*, platform_admin_user_id: UUID, tenant_id: UUID) -> dic
                        t.went_live_at, t.invite_sent_at, t.intake_address_active,
                        t.stripe_customer_id, t.stripe_subscription_status, t.created_at,
                        t.onboarding_intake_id, t.test_batch_completed_at,
-                       t.setup_fee_amount, t.setup_fee_billing, t.founding_price,
+                       t.setup_fee_amount, t.setup_fee_billing, t.setup_fee_note, t.founding_price,
                        tr.code AS tier_code, tr.name AS tier_name, tr.version AS tier_version,
                        tr.monthly_price AS tier_monthly_price,
-                       tr.document_allowance AS tier_document_allowance
-                FROM tenants t LEFT JOIN tiers tr ON tr.id = t.tier_id
+                       tr.promo_monthly_price AS tier_promo_monthly_price,
+                       tr.promo_days AS tier_promo_days,
+                       tr.document_allowance AS tier_document_allowance,
+                       sp.code AS setup_fee_preset, sp.name AS setup_fee_preset_name
+                FROM tenants t
+                LEFT JOIN tiers tr ON tr.id = t.tier_id
+                LEFT JOIN setup_fee_presets sp ON sp.id = t.setup_fee_preset_id
                 WHERE t.id = :id
                 """
             ),
@@ -180,6 +187,18 @@ def list_current_tiers(*, platform_admin_user_id: UUID) -> list[dict[str, Any]]:
             )
         ).mappings().all()
         return [dict(r) for r in rows]
+
+
+def list_setup_fee_presets(*, platform_admin_user_id: UUID) -> list[dict[str, Any]]:
+    """The current setup-fee presets (D-117), for the deal-terms form."""
+    with platform_session() as session:
+        _record_admin_action(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            action="read",
+            target_type="setup_fee_presets",
+        )
+        return deal_terms.list_current_presets(session)
 
 
 # ── Intake staging (Section 7.15.2 Step 1) ──────────────────────────────────
@@ -352,6 +371,7 @@ def create_tenant(
     owner_email: str,
     tier_code: str = "starter",
     intake_id: UUID | None = None,
+    deal: deal_terms.DealTerms | None = None,
     create_stripe_customer: bool = True,
 ) -> dict[str, Any]:
     """
@@ -372,6 +392,11 @@ def create_tenant(
     One function, extended from Phase 0 rather than duplicated (Section 10).
     `create_stripe_customer=False` is for tests and for a machine without a
     Stripe key.
+
+    `deal` (D-117) records the price agreed before onboarding -- tier,
+    founding price, setup fee -- so go-live never asks. Its tier wins over
+    `tier_code`. Without it the tenant has no setup fee yet, and go-live
+    refuses (ONB-010) until the Overview's Deal terms are saved.
     """
     from docflow_core.config import get_settings
     from docflow_core.storage import copy_into_tenant, delete_file
@@ -386,10 +411,19 @@ def create_tenant(
 
     try:
         with platform_session() as session:
-            tier = session.execute(
-                text("SELECT id FROM tiers WHERE code = :code AND is_current"),
-                {"code": tier_code},
-            ).mappings().first()
+            resolved = None
+            if deal is not None:
+                try:
+                    resolved = deal_terms.resolve(session, deal)
+                except deal_terms.DealTermsError as exc:
+                    raise ConsoleError(exc.code, exc.detail) from exc
+                tier_code = resolved.tier_code
+                tier = {"id": resolved.tier_id}
+            else:
+                tier = session.execute(
+                    text("SELECT id FROM tiers WHERE code = :code AND is_current"),
+                    {"code": tier_code},
+                ).mappings().first()
             if tier is None:
                 raise ConsoleError("CON-003")
 
@@ -413,6 +447,21 @@ def create_tenant(
                     "intake_id": str(intake_id) if intake_id else None,
                 },
             )
+            if resolved is not None:
+                session.execute(
+                    text(
+                        """
+                        UPDATE tenants SET
+                            setup_fee_preset_id = :setup_fee_preset_id,
+                            setup_fee_amount = :setup_fee_amount,
+                            setup_fee_billing = :setup_fee_billing,
+                            setup_fee_note = :setup_fee_note,
+                            founding_price = :founding_price
+                        WHERE id = :id
+                        """
+                    ),
+                    {**resolved.columns(), "id": str(tenant_id)},
+                )
             session.execute(
                 text(
                     """
@@ -492,6 +541,7 @@ def create_tenant(
                     "payload": {
                         "tier": tier_code,
                         "intake_id": str(intake_id) if intake_id else None,
+                        "deal": resolved.summary() if resolved else None,
                     },
                 },
             )
@@ -508,6 +558,7 @@ def create_tenant(
                     "tier": tier_code,
                     "intake_id": str(intake_id) if intake_id else None,
                     "files_moved": moved_files,
+                    "deal": resolved.summary() if resolved else None,
                 },
             )
 
@@ -538,6 +589,88 @@ def create_tenant(
         delete_file(path)
 
     return {"tenant_id": tenant_id, "owner_user_id": owner_user_id}
+
+
+def update_deal_terms(
+    *, platform_admin_user_id: UUID, tenant_id: UUID, deal: deal_terms.DealTerms
+) -> dict[str, Any]:
+    """
+    The Overview's "Deal terms" (D-117): change the agreed tier, founding
+    price or setup fee any time before go-live. Refused once live (ONB-011)
+    -- a live customer's plan is a tier change, with billing. Writes
+    `admin_actions` and a `tenant_lifecycle_events` row holding the before
+    and after, so a price that moved after the first conversation shows.
+    """
+    with platform_session() as session:
+        row = session.execute(
+            text(
+                "SELECT onboarding_status, tier_id, setup_fee_preset_id, setup_fee_amount, "
+                "setup_fee_billing, founding_price FROM tenants WHERE id = :id FOR UPDATE"
+            ),
+            {"id": str(tenant_id)},
+        ).mappings().first()
+        if row is None:
+            raise ConsoleError("CON-001")
+        if row["onboarding_status"] == "live":
+            raise ConsoleError("ONB-011")
+        try:
+            resolved = deal_terms.resolve(
+                session,
+                deal,
+                current_tier_id=row["tier_id"],
+                current_preset_id=row["setup_fee_preset_id"],
+            )
+        except deal_terms.DealTermsError as exc:
+            raise ConsoleError(exc.code, exc.detail) from exc
+        before = {
+            "tier_id": str(row["tier_id"]) if row["tier_id"] else None,
+            "setup_fee_preset_id": str(row["setup_fee_preset_id"]) if row["setup_fee_preset_id"] else None,
+            "setup_fee_amount": str(row["setup_fee_amount"]) if row["setup_fee_amount"] is not None else None,
+            "setup_fee_billing": row["setup_fee_billing"],
+            "founding_price": row["founding_price"],
+        }
+        session.execute(
+            text(
+                """
+                UPDATE tenants SET
+                    tier_id = :tier_id,
+                    setup_fee_preset_id = :setup_fee_preset_id,
+                    setup_fee_amount = :setup_fee_amount,
+                    setup_fee_billing = :setup_fee_billing,
+                    setup_fee_note = :setup_fee_note,
+                    founding_price = :founding_price,
+                    updated_at = now()
+                WHERE id = :id
+                """
+            ),
+            {**resolved.columns(), "id": str(tenant_id)},
+        )
+        payload = {"before": before, "after": resolved.summary()}
+        session.execute(
+            text(
+                """
+                INSERT INTO tenant_lifecycle_events
+                    (id, tenant_id, event_type, actor_user_id, payload, created_at)
+                VALUES (:id, :tenant_id, 'deal_terms_changed', :actor, :payload, now())
+                """
+            ),
+            {
+                "id": str(uuid4()),
+                "tenant_id": str(tenant_id),
+                "actor": str(platform_admin_user_id),
+                "payload": payload,
+            },
+        )
+        _record_admin_action(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            action="deal_terms_update",
+            target_tenant_id=tenant_id,
+            target_type="tenant",
+            target_id=tenant_id,
+            payload=payload,
+        )
+        return resolved.summary()
 
 
 # ── Invite (Section 7.15.2 Step 3) ──────────────────────────────────────────

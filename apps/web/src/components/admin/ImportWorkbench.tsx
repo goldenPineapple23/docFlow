@@ -52,13 +52,13 @@ const COPY: Record<ImportKind, { title: string; intro: string; noun: string }> =
   catalog: {
     title: "Catalog",
     intro:
-      "Step 4 of onboarding. Every purchase-order line is matched against this list, so it has to be clean before anything else.",
+      "Every purchase-order line is matched against this list, so it has to be clean before anything else.",
     noun: "items",
   },
   buyers: {
     title: "Customer list",
     intro:
-      "Step 5 of onboarding, and optional: customers are also created automatically from their first purchase order. Near-duplicate names are flagged for you to merge, never merged automatically.",
+      "Optional: customers are also created automatically from their first purchase order. Near-duplicate names are flagged for you to merge, never merged automatically.",
     noun: "customers",
   },
 };

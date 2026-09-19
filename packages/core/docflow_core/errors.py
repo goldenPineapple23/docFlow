@@ -912,12 +912,13 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
     ),
     "ONB-007": ErrorCatalogEntry(
         code="ONB-007",
-        title="The setup fee needs an amount",
+        title="The setup fee isn't a usable amount",
         message=(
-            "Go-live records the setup fee on the tenant and, when billed through Stripe, adds it "
-            "to the first invoice. No amount was given."
+            "The deal records the setup fee on the tenant, and go-live bills it. The amount was "
+            "missing, wasn't a plain number with at most two decimal places, was negative, or "
+            "the billing choice wasn't one DocFlow offers."
         ),
-        action="Enter the setup fee (0 if you are waiving it) and try again.",
+        action="Enter the fee as a number like 1500 or 1500.00, choose how it's billed, and save again.",
         severity="warning",
         audience="founder",
     ),
@@ -938,6 +939,65 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         title="This tenant has no tier",
         message="Billing and the monthly allowance both come from the tenant's tier, and none is set.",
         action="Set the tier on the tenant, then go live.",
+        severity="warning",
+        audience="founder",
+    ),
+    # ── ONB-010..014 · deal terms (D-117) ───────────────────────────────────
+    "ONB-010": ErrorCatalogEntry(
+        code="ONB-010",
+        title="Set the deal terms first",
+        message=(
+            "Go-live bills the plan and setup fee recorded on the tenant, and this tenant has no "
+            "setup fee recorded yet, so nothing was billed or turned on."
+        ),
+        action="Open Deal terms on this page, choose the setup fee you agreed, save, then go live.",
+        severity="warning",
+        audience="founder",
+    ),
+    "ONB-011": ErrorCatalogEntry(
+        code="ONB-011",
+        title="The deal can't change after go-live",
+        message=(
+            "This tenant is live, so its plan and setup fee are already with Stripe. Editing the "
+            "original deal here would make DocFlow's record disagree with what was billed."
+        ),
+        action=(
+            "Nothing was changed. Moving a live customer to another plan is a tier change, "
+            "which comes with billing."
+        ),
+        severity="info",
+        audience="founder",
+    ),
+    "ONB-012": ErrorCatalogEntry(
+        code="ONB-012",
+        title="That fee is outside the preset's range",
+        message=(
+            "Each setup fee preset has the amount (or range) from the pricing document, and the "
+            "amount entered falls outside it."
+        ),
+        action="Enter an amount inside the range shown, or choose Custom and say why in the note.",
+        severity="warning",
+        audience="founder",
+    ),
+    "ONB-013": ErrorCatalogEntry(
+        code="ONB-013",
+        title="Say why in the note",
+        message=(
+            "A waived or custom setup fee is a departure from the price list, so DocFlow keeps a "
+            "reason with it. The note was empty."
+        ),
+        action="Add a short note, e.g. \"waived for the pilot\", and save again.",
+        severity="warning",
+        audience="founder",
+    ),
+    "ONB-014": ErrorCatalogEntry(
+        code="ONB-014",
+        title="That setup fee option isn't available",
+        message="There is no current version of the chosen setup fee preset in the presets table.",
+        action=(
+            "Choose Founding, Standard, Complex, Waived or Custom; if one is missing, check "
+            "setup_fee_presets."
+        ),
         severity="warning",
         audience="founder",
     ),

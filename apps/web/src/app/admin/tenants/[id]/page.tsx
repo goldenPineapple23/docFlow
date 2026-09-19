@@ -5,6 +5,7 @@ import Link from "next/link";
 import { getTenantOverview, listOutbox, sendInvite, type OutboxEmail, type TenantOverview } from "@/lib/admin";
 import { ReviewApiError, type CatalogError } from "@/lib/review";
 import { CatalogErrorBox } from "@/components/admin/CatalogErrorBox";
+import { DealTermsCard } from "@/components/admin/DealTermsCard";
 import { GoLivePanel } from "@/components/admin/GoLivePanel";
 import { TestBatchPanel } from "@/components/admin/TestBatchPanel";
 import { OutboxList } from "@/components/admin/OutboxList";
@@ -91,12 +92,14 @@ export default function TenantPage({ params }: { params: Promise<{ id: string }>
         <Field label="Created">{new Date(tenant.created_at).toLocaleString()}</Field>
       </dl>
 
+      <DealTermsCard tenant={tenant} onChanged={refresh} />
+
       <section data-testid="onboarding-steps" className="mt-5 rounded-xl border border-gray-200 bg-white p-5">
         <h2 className="text-sm font-semibold">Set up</h2>
         <ul className="mt-2 space-y-1 text-sm">
           <li>
             <Link href={`/admin/tenants/${id}/catalog`} className="font-medium text-blue-700 hover:underline">
-              4. Catalog →
+              Catalog →
             </Link>{" "}
             <span className="text-gray-600">
               {tenant.onboarding_status === "tenant_created" ? "not loaded yet" : "loaded"}
@@ -104,7 +107,7 @@ export default function TenantPage({ params }: { params: Promise<{ id: string }>
           </li>
           <li>
             <Link href={`/admin/tenants/${id}/buyers`} className="font-medium text-blue-700 hover:underline">
-              5. Customer list →
+              Customer list →
             </Link>{" "}
             <span className="text-gray-600">optional</span>
           </li>
@@ -117,8 +120,9 @@ export default function TenantPage({ params }: { params: Promise<{ id: string }>
       <section className="mt-5 rounded-xl border border-gray-200 bg-white p-5">
         <h2 className="text-sm font-semibold">Invite the owner</h2>
         <p className="mt-1 text-sm text-gray-600">
-          Step 3. Sends {tenant.owner?.email ?? "the owner"} a link to set a password. You can send
-          it now or at go-live, and send it again if it expires.
+          Emails {tenant.owner?.email ?? "the owner"} a link to set a password and sign in. Go live
+          sends it automatically if it hasn&apos;t gone yet, so use this only to give them access
+          sooner, or to send a fresh link if the first one expired.
           {tenant.invite_sent_at ? ` Last sent ${new Date(tenant.invite_sent_at).toLocaleString()}.` : ""}
         </p>
         <button

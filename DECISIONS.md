@@ -1083,3 +1083,27 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 - In the Console, the review screen's back link is "← Tenant" (the onboarding page), and the "Approved" message links there too.
 
 **Related:** Section 7.3, 7.12, 7.15.2 Step 8; D-111, D-115.
+
+## D-117 — The deal is agreed before onboarding and recorded at Create tenant; go-live only bills it
+
+**Context:** Slice 5.3's go-live form asked for the setup fee as a typed amount and the founding price as a checkbox, at Step 9. The founder (19 Sept 2026) pointed out that price is settled in the sales conversation, and discussing it on screen during the onboarding demo is awkward. `docflow-pricing.docx` (v1, Sept 2026) gives the setup fees: Founding customer $750, Standard $1,500, Complex $2,000–$2,500. Tier prices and the 90-day founding price were already in `tiers` (0011) and match the document.
+
+**Decisions (founder-approved):**
+- **Setup fees are a versioned global table, `setup_fee_presets`** (migration 0014), like `tiers` (D-102): Founding $750, Standard $1,500, Complex $2,000 by default and any amount from $2,000 to $2,500, **Waived** ($0) and **Custom** (any amount). Waived and Custom are not in the pricing document. The founder asked for them, and both require a written reason. The tenant records the preset version it was sold on (`tenants.setup_fee_preset_id`), and no price lives in code.
+- **The deal is recorded at Create tenant (Step 2):** plan, founding price, setup fee preset/amount, and how the fee is billed (Stripe invoice or invoiced by hand, D-113). Ticking "Founding customer" also picks the $750 founding fee, and the founder can pick another fee afterwards. The server checks every amount against its preset's range (ONB-012) and requires the note for Waived/Custom (ONB-013).
+- **Editable until go-live, locked after.** The tenant page's Deal terms card edits it. Every save writes a `deal_terms_changed` lifecycle event with before and after, plus an `admin_actions` row. Saving with the same tier or preset keeps the tenant's existing version, so editing a note never moves a tenant to a newer price (Section 7.15.2). After go-live the card is read-only (ONB-011); moving a live customer is a tier change (slice 5.9).
+- **Go-live takes no price input.** It shows a one-line summary, then the same two-click confirm, and bills exactly the recorded deal. A tenant with no deal recorded is refused (ONB-010). A $0 fee never produces a $0 line on the customer's invoice. Billing still happens at go-live, as Section 7.15.2 Step 9 says; only the *choosing* moved earlier.
+- The API still accepts Create tenant without a deal, so a tenant can exist before the price is settled. The Console form always sends one.
+- Existing tenant: Acme Test Prospect went live under 5.3's form and keeps its recorded fee ($750, Stripe, founding). Its `setup_fee_preset_id` stays NULL, and the card shows the amount without a preset name.
+
+**Related:** Section 7.15.2 Steps 2 and 9, Section 10 ("type any revenue or price figure into code"); D-102, D-113.
+
+## D-118 — An export the founder makes from the Console no longer vanishes
+
+**Context:** On the founder's walk-through of D-117 (19 Sept 2026), "Approve & export → CSV" on a test-batch order in the Console gave an error. The worker had built both files correctly (`ready`). The API then crashed reading the export back (`exports.py` `assert row is not None`). The export query inner-joined `users` for the requester's email. An acting-as export (D-111) is requested by the founder's platform-admin user, who has no tenant, so tenant RLS hides that `users` row and the join dropped the export. The same query drives the status poll, the download link and the export history, so all three failed for Console exports. No test covered an export made through the acting-as mount.
+
+**Decision:** `LEFT JOIN users`. The export comes back with `generated_by` null and `by_docflow_support` true, and the screen already shows that as "DocFlow support", matching the review trail (Section 7.15.1). Tenant RLS on `users` is unchanged: a tenant still can't see the founder's account. New test `test_an_export_made_from_the_console_is_returned_listed_and_downloadable` fails on the old query and passes on the new one.
+
+**Also:** The invite text on the tenant page no longer says "Step 3." The page doesn't number steps 1–3, so the label made no sense there. It now says that go-live sends the invite automatically if it hasn't gone yet.
+
+**Related:** Section 7.4, 7.15.1; D-111.
