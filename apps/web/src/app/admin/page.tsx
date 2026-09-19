@@ -2,17 +2,34 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { acknowledgeAlert, listAlerts, type FounderAlert } from "@/lib/admin";
+import {
+  acknowledgeAlert,
+  getDashboard,
+  listAlerts,
+  listTenants,
+  type Dashboard,
+  type FounderAlert,
+  type TenantRow,
+} from "@/lib/admin";
 import { ReviewApiError, type CatalogError } from "@/lib/review";
 import { CatalogErrorBox } from "@/components/admin/CatalogErrorBox";
+import { HealthStrip } from "@/components/admin/HealthStrip";
+import { KpiCards } from "@/components/admin/KpiCards";
+import { TenantTable } from "@/components/admin/TenantTable";
 
 /**
- * The Console home: the attention panel (CLAUDE.md Section 7.15.3).
+ * The Console home (CLAUDE.md Section 7.15.3), in the four regions the
+ * section names, top to bottom:
  *
- * Every alert here is a `founder_alerts` row -- the same row the alert email
- * was sent from (Section 7.9: "one alert, one row, two channels"). Most
- * severe first. The health strip, tenant list and KPI cards join this page
- * in slice 5.5.
+ *   1. Attention panel — every unacknowledged `founder_alerts` row, the same
+ *      row its email was sent from (7.9: one event, two channels).
+ *   2. Health strip — cheap live signals, with links out to Sentry, Supabase
+ *      and Stripe rather than rebuilt versions of them.
+ *   3. Tenant list — every tenant, with usage, backlog, confidence and cost.
+ *   4. KPI cards — the success metrics, from the nightly rollup.
+ *
+ * Its job is to answer "is everything healthy, who needs attention, and how
+ * is the business doing" in under ten seconds.
  */
 
 const SEVERITY_STYLE: Record<FounderAlert["severity"], string> = {
@@ -24,21 +41,25 @@ const SEVERITY_STYLE: Record<FounderAlert["severity"], string> = {
 
 export default function ConsoleHome() {
   const [alerts, setAlerts] = useState<FounderAlert[] | null>(null);
+  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [tenants, setTenants] = useState<TenantRow[] | null>(null);
   const [error, setError] = useState<CatalogError | null>(null);
 
-  const refresh = useCallback(async () => {
-    try {
-      setAlerts((await listAlerts()).alerts);
-    } catch (e) {
-      if (e instanceof ReviewApiError) setError(e.catalog);
-    }
+  const load = useCallback(async () => {
+    const [a, d, t] = await Promise.all([listAlerts(), getDashboard(), listTenants()]);
+    setAlerts(a.alerts);
+    setDashboard(d);
+    setTenants(t);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    listAlerts()
-      .then(({ alerts: rows }) => {
-        if (!cancelled) setAlerts(rows);
+    Promise.all([listAlerts(), getDashboard(), listTenants()])
+      .then(([a, d, t]) => {
+        if (cancelled) return;
+        setAlerts(a.alerts);
+        setDashboard(d);
+        setTenants(t);
       })
       .catch((e) => {
         if (!cancelled && e instanceof ReviewApiError) setError(e.catalog);
@@ -95,7 +116,7 @@ export default function ConsoleHome() {
                 type="button"
                 onClick={async () => {
                   await acknowledgeAlert(alert.id);
-                  await refresh();
+                  await load();
                 }}
                 className="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
               >
@@ -105,6 +126,22 @@ export default function ConsoleHome() {
           ))}
         </ul>
       ) : null}
+
+      {dashboard ? <HealthStrip data={dashboard} onRecomputed={() => void load()} /> : null}
+
+      {tenants ? (
+        <section className="mt-6">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold">Tenants</h2>
+            <Link href="/admin/tenants/new" className="text-sm text-blue-700 hover:underline">
+              New tenant →
+            </Link>
+          </div>
+          <TenantTable tenants={tenants} />
+        </section>
+      ) : null}
+
+      {dashboard ? <KpiCards data={dashboard} /> : null}
     </>
   );
 }

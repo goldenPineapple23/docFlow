@@ -20,6 +20,7 @@ right place from the start.
 from __future__ import annotations
 
 from celery import Celery
+from celery.schedules import crontab
 from docflow_core.config import get_settings
 
 settings = get_settings()
@@ -35,6 +36,7 @@ celery_app = Celery(
         "app.tasks.parse_and_extract",
         "app.tasks.generate_export",
         "app.tasks.parse_import",
+        "app.tasks.daily_rollup",
         "app.tasks.scheduled_jobs",
     ],
 )
@@ -42,6 +44,10 @@ celery_app = Celery(
 # How often `celery beat` asks for due scheduled jobs (D-113). Beat only
 # sends the reminder; the jobs themselves are rows in `scheduled_jobs`.
 SCHEDULED_JOBS_SWEEP_SECONDS = 300
+# The nightly rollup (Section 7.15.3). 03:15 UTC: after midnight in every US
+# timezone DocFlow serves, and well clear of the working day it summarises.
+DAILY_ROLLUP_HOUR_UTC = 3
+DAILY_ROLLUP_MINUTE_UTC = 15
 
 celery_app.conf.update(
     task_default_queue="interactive",
@@ -55,6 +61,11 @@ celery_app.conf.update(
         "run-scheduled-jobs": {
             "task": "docflow.run_scheduled_jobs",
             "schedule": SCHEDULED_JOBS_SWEEP_SECONDS,
+            "options": {"queue": "bulk"},
+        },
+        "run-daily-rollup": {
+            "task": "docflow.run_daily_rollup",
+            "schedule": crontab(hour=DAILY_ROLLUP_HOUR_UTC, minute=DAILY_ROLLUP_MINUTE_UTC),
             "options": {"queue": "bulk"},
         },
     },

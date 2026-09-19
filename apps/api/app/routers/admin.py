@@ -30,12 +30,13 @@ from docflow_core import (
     field_schema,
     file_types,
     learned_rules,
+    metrics,
     onboarding,
 )
 from docflow_core.admin_data_access import ConsoleError
 from docflow_core.catalog_import import CatalogImportError
 from docflow_core.config import get_settings
-from docflow_core.constants import INVOICE_DAYS_UNTIL_DUE
+from docflow_core.constants import INVOICE_DAYS_UNTIL_DUE, ROLLUP_STALE_HOURS
 from docflow_core.db import tenant_session
 from docflow_core.errors import get_error
 from docflow_core.external_services import ExternalServiceError
@@ -1024,3 +1025,82 @@ def put_field_schema(
             else 0
         )
     return {"schema": schema.as_dict(), "rechecked_documents": rechecked}
+
+
+# ── Dashboard (Section 7.15.3; slice 5.5, D-121) ────────────────────────────
+
+
+def _queue_depths() -> dict[str, int | None]:
+    """Queue depth by priority, straight from the broker. A broker that is
+    down is a number we don't have, not a page that fails."""
+    try:
+        import redis
+
+        client = redis.Redis.from_url(get_settings().redis_url, socket_timeout=1)
+        return {name: int(client.llen(name)) for name in ("interactive", "bulk")}
+    except Exception:  # noqa: BLE001 -- the strip degrades, the page does not
+        return {"interactive": None, "bulk": None}
+
+
+def _worker_heartbeat() -> str | None:
+    """The last time a worker answered. None means "no worker answered in a
+    second", which is what the strip shows."""
+    try:
+        replies = celery_client.control.ping(timeout=1)
+    except Exception:  # noqa: BLE001 -- same reason as above
+        return None
+    return ", ".join(sorted(name for reply in replies or [] for name in reply)) or None
+
+
+@router.get("/dashboard")
+def dashboard(
+    days: int = 30, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    """
+    The Console home (7.15.3): health strip, KPI cards from the nightly
+    rollup, and when that rollup last ran. One admin_actions row.
+    """
+    data = admin_data_access.dashboard(platform_admin_user_id=_admin_id(identity), days=days)
+    return {
+        **_jsonable(data),
+        "queues": _queue_depths(),
+        "worker": _worker_heartbeat(),
+        "rollup_stale_hours": ROLLUP_STALE_HOURS,
+        "rollup_is_stale": metrics.is_stale(data["rollup"], hours=ROLLUP_STALE_HOURS),
+    }
+
+
+@router.get("/tenants/{tenant_id}/metrics")
+def tenant_metrics(
+    tenant_id: UUID, days: int = 30, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    return _jsonable(
+        admin_data_access.tenant_metrics(
+            platform_admin_user_id=_admin_id(identity), tenant_id=tenant_id, days=days
+        )
+    )
+
+
+class RecomputeRequest(BaseModel):
+    # How many days back to recompute. The dashboard's button sends 2; a
+    # backfill after a quiet night can ask for more.
+    days: int = Field(default=2, ge=1, le=120)
+
+
+@router.post("/rollup/recompute", status_code=202)
+def recompute_rollup(
+    body: RecomputeRequest, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    """The "recompute" the section asks for. Queued, not run in the request:
+    it is the same job the nightly beat runs."""
+    admin_id = _admin_id(identity)
+    admin_data_access.record_platform_action(
+        platform_admin_user_id=admin_id,
+        action="rollup_recompute",
+        target_type="rollup",
+        payload={"days": body.days},
+    )
+    celery_client.send_task(
+        "docflow.run_daily_rollup", args=[body.days, "manual"], queue="interactive"
+    )
+    return {"queued": True, "days": body.days}

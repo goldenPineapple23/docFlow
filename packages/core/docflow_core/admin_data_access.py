@@ -177,8 +177,212 @@ def list_tenants(*, platform_admin_user_id: UUID, filters: dict[str, Any] | None
             target_type="tenant_list",
             payload=filters or {},
         )
-        rows = session.execute(text("SELECT * FROM tenants ORDER BY created_at DESC")).mappings().all()
+        rows = session.execute(
+            text(
+                """
+                WITH month_usage AS (
+                    SELECT d.tenant_id, count(*) AS used, max(d.created_at) AS last_document_at,
+                           coalesce(sum(d.est_cost_usd), 0) AS ai_cost_month
+                    FROM documents d JOIN tenants t ON t.id = d.tenant_id
+                    WHERE NOT d.is_test_batch AND d.deleted_at IS NULL
+                      AND d.status NOT IN ('failed', 'quarantined')
+                      AND (d.created_at AT TIME ZONE coalesce(nullif(t.timezone, ''), 'UTC'))
+                          >= date_trunc('month', now() AT TIME ZONE coalesce(nullif(t.timezone, ''), 'UTC'))
+                    GROUP BY d.tenant_id
+                ), review_queue AS (
+                    SELECT tenant_id, count(*) AS needs_review,
+                           extract(epoch FROM (now() - min(created_at))) / 86400 AS oldest_days
+                    FROM documents
+                    WHERE status = 'needs_review' AND deleted_at IS NULL AND NOT is_test_batch
+                    GROUP BY tenant_id
+                ), confidence AS (
+                    SELECT tenant_id,
+                           sum(confidence_sum) FILTER (
+                               WHERE day > (now() AT TIME ZONE 'UTC')::date - 30
+                           ) AS sum_30,
+                           sum(confidence_count) FILTER (
+                               WHERE day > (now() AT TIME ZONE 'UTC')::date - 30
+                           ) AS count_30,
+                           sum(confidence_sum) FILTER (
+                               WHERE day > (now() AT TIME ZONE 'UTC')::date - 7
+                           ) AS sum_7,
+                           sum(confidence_count) FILTER (
+                               WHERE day > (now() AT TIME ZONE 'UTC')::date - 7
+                           ) AS count_7
+                    FROM tenant_daily_metrics
+                    WHERE day > (now() AT TIME ZONE 'UTC')::date - 30
+                    GROUP BY tenant_id
+                )
+                SELECT t.*, tr.code AS tier_code, tr.name AS tier_name,
+                       tr.monthly_price AS tier_monthly_price,
+                       tr.document_allowance AS tier_document_allowance,
+                       coalesce(u.used, 0) AS documents_this_month,
+                       u.last_document_at,
+                       coalesce(u.ai_cost_month, 0) AS ai_cost_this_month,
+                       coalesce(q.needs_review, 0) AS needs_review,
+                       q.oldest_days AS needs_review_oldest_days,
+                       CASE WHEN c.count_30 > 0 THEN round(c.sum_30 / c.count_30, 4) END
+                           AS mean_confidence_30,
+                       CASE WHEN c.count_7 > 0 THEN round(c.sum_7 / c.count_7, 4) END
+                           AS mean_confidence_7
+                FROM tenants t
+                LEFT JOIN tiers tr ON tr.id = t.tier_id
+                LEFT JOIN month_usage u ON u.tenant_id = t.id
+                LEFT JOIN review_queue q ON q.tenant_id = t.id
+                LEFT JOIN confidence c ON c.tenant_id = t.id
+                WHERE t.deleted_at IS NULL
+                ORDER BY t.created_at DESC
+                """
+            )
+        ).mappings().all()
         return [dict(r) for r in rows]
+
+
+# ── Dashboard (Section 7.15.3; D-121) ───────────────────────────────────────
+
+
+def dashboard(*, platform_admin_user_id: UUID, days: int = 30) -> dict[str, Any]:
+    """
+    The Console home in one request: the health strip's live numbers, the KPI
+    cards from the nightly rollup, and when that rollup last ran.
+
+    One `admin_actions` row for the whole page, not one per number
+    (Section 7.15.1's granularity rule). Every KPI comes from
+    `tenant_daily_metrics`; nothing here scans documents (Section 7.15.3,
+    "Rollup, not live scans"). The health strip is the exception by design --
+    each of its numbers is one indexed query about right now, not a period.
+    """
+    from docflow_core import metrics
+
+    with platform_session() as session:
+        _record_admin_action(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            action="read",
+            target_type="dashboard",
+            payload={"days": days},
+        )
+        health = dict(
+            session.execute(
+                text(
+                    """
+                    SELECT
+                        (SELECT count(*) FROM documents
+                          WHERE status = 'pending' AND deleted_at IS NULL) AS pending,
+                        (SELECT count(*) FROM documents
+                          WHERE status = 'processing' AND deleted_at IS NULL) AS processing,
+                        (SELECT extract(epoch FROM (now() - min(created_at))) / 60
+                           FROM documents
+                          WHERE status IN ('pending', 'processing') AND deleted_at IS NULL
+                        ) AS oldest_waiting_minutes,
+                        (SELECT count(*) FROM documents
+                          WHERE created_at >= date_trunc('day', now()) AND deleted_at IS NULL
+                            AND NOT is_test_batch) AS documents_today,
+                        (SELECT count(*) FROM documents
+                          WHERE status = 'needs_review' AND deleted_at IS NULL
+                            AND NOT is_test_batch) AS needs_review,
+                        (SELECT count(*) FROM extraction_runs
+                          WHERE created_at >= now() - interval '1 hour') AS model_calls_hour,
+                        (SELECT count(*) FROM extraction_runs
+                          WHERE created_at >= now() - interval '1 hour'
+                            AND NOT succeeded) AS model_failures_hour,
+                        (SELECT coalesce(sum(est_cost_usd), 0) FROM documents
+                          WHERE created_at >= date_trunc('day', now())
+                            AND NOT is_test_batch) AS spend_today,
+                        (SELECT coalesce(sum(est_cost_usd), 0) FROM documents
+                          WHERE created_at >= date_trunc('day', now()) - interval '1 day'
+                            AND created_at < date_trunc('day', now())
+                            AND NOT is_test_batch) AS spend_yesterday,
+                        (SELECT max(processed_at) FROM documents) AS last_document_processed_at
+                    """
+                )
+            ).mappings().one()
+        )
+
+        rows = session.execute(
+            text(
+                """
+                SELECT * FROM tenant_daily_metrics
+                WHERE day > (now() AT TIME ZONE 'UTC')::date - :days
+                """
+            ),
+            {"days": days},
+        ).mappings().all()
+        previous = session.execute(
+            text(
+                """
+                SELECT * FROM tenant_daily_metrics
+                WHERE day > (now() AT TIME ZONE 'UTC')::date - (:days * 2)
+                  AND day <= (now() AT TIME ZONE 'UTC')::date - :days
+                """
+            ),
+            {"days": days},
+        ).mappings().all()
+
+        money = session.execute(
+            text(
+                """
+                SELECT
+                    (SELECT coalesce(sum(tr.monthly_price), 0)
+                       FROM tenants t JOIN tiers tr ON tr.id = t.tier_id
+                      WHERE t.status = 'active' AND t.deleted_at IS NULL
+                        AND t.stripe_subscription_status IN ('active', 'trialing')) AS mrr,
+                    (SELECT count(*) FROM tenants
+                      WHERE went_live_at IS NOT NULL AND deleted_at IS NULL) AS live_tenants,
+                    (SELECT count(*) FROM tenants
+                      WHERE went_live_at <= now() - interval '60 days'
+                        AND deleted_at IS NULL) AS live_60,
+                    (SELECT count(*) FROM tenants
+                      WHERE went_live_at <= now() - interval '60 days'
+                        AND status = 'active' AND deleted_at IS NULL) AS retained_60,
+                    (SELECT count(*) FROM tenants
+                      WHERE went_live_at <= now() - interval '90 days'
+                        AND deleted_at IS NULL) AS live_90,
+                    (SELECT count(*) FROM tenants
+                      WHERE went_live_at <= now() - interval '90 days'
+                        AND status = 'active' AND deleted_at IS NULL) AS retained_90,
+                    (SELECT coalesce(sum(est_cost_usd), 0) FROM tenant_daily_metrics
+                      WHERE day >= date_trunc('month', (now() AT TIME ZONE 'UTC')::date)
+                    ) AS ai_cost_this_month
+                """
+            )
+        ).mappings().one()
+        run = metrics.last_run(session)
+
+    current = metrics.summarise([dict(r) for r in rows])
+    before = metrics.summarise([dict(r) for r in previous])
+    return {
+        "health": health,
+        "kpis": current,
+        "previous": before,
+        "money": dict(money),
+        "rollup": run,
+        "days": days,
+    }
+
+
+def tenant_metrics(*, platform_admin_user_id: UUID, tenant_id: UUID, days: int = 30) -> dict[str, Any]:
+    """The same KPI shape for one tenant (the tenant page's Overview)."""
+    from docflow_core import metrics
+
+    with platform_session() as session:
+        _record_admin_action(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            action="read",
+            target_tenant_id=tenant_id,
+            target_type="tenant_metrics",
+            target_id=tenant_id,
+            payload={"days": days},
+        )
+        rows = session.execute(
+            text(
+                "SELECT * FROM tenant_daily_metrics WHERE tenant_id = :t "
+                "AND day > (now() AT TIME ZONE 'UTC')::date - :days"
+            ),
+            {"t": str(tenant_id), "days": days},
+        ).mappings().all()
+    return {"days": days, "kpis": metrics.summarise([dict(r) for r in rows])}
 
 
 # ── Tiers (Section 7.15.2) ──────────────────────────────────────────────────
@@ -873,6 +1077,26 @@ def record_console_action(
             payload=payload,
         )
     return True
+
+
+def record_platform_action(
+    *,
+    platform_admin_user_id: UUID,
+    action: str,
+    target_type: str,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    """An `admin_actions` row for a Console action that is about the platform
+    rather than one tenant -- recomputing the rollup, for instance. Same rule
+    as every other Console write: the row goes in before the work."""
+    with platform_session() as session:
+        _record_admin_action(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            action=action,
+            target_type=target_type,
+            payload=payload,
+        )
 
 
 def list_tenant_intake_files(*, platform_admin_user_id: UUID, tenant_id: UUID) -> list[dict[str, Any]]:

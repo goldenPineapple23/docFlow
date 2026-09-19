@@ -109,6 +109,18 @@ export type TenantRow = {
   onboarding_status: string;
   created_at: string;
   went_live_at: string | null;
+  stripe_subscription_status: string | null;
+  tier_code: string | null;
+  tier_name: string | null;
+  tier_monthly_price: string | null;
+  tier_document_allowance: number | null;
+  documents_this_month: number;
+  last_document_at: string | null;
+  ai_cost_this_month: string;
+  needs_review: number;
+  needs_review_oldest_days: string | null;
+  mean_confidence_30: string | null;
+  mean_confidence_7: string | null;
 };
 
 export type FounderAlert = {
@@ -520,3 +532,83 @@ export const saveFieldSchema = (
     `/admin/tenants/${tenantId}/field-schema`,
     { method: "PUT", body: JSON.stringify(body) },
   );
+
+
+// ── Dashboard (slice 5.5; D-121) ───────────────────────────────────────────
+
+/** Every KPI the nightly rollup can answer. Money and shares are strings. */
+export type Kpis = {
+  documents_received: number;
+  documents_failed: number;
+  documents_approved: number;
+  documents_exported: number;
+  zero_edit_approvals: number;
+  edited_actions: number;
+  line_items: number;
+  matched_lines: number;
+  learned_rule_lines: number;
+  review_within_target: number;
+  review_sessions: number;
+  review_sessions_excluded: number;
+  est_cost_usd: string;
+  mean_confidence: string | null;
+  review_within_target_share: string | null;
+  zero_edit_share: string | null;
+  mapping_reuse_share: string | null;
+  corrections_per_100_lines: string | null;
+  median_hours_to_approval: string | null;
+  mean_cost_per_document: string | null;
+  p95_cost_per_document: string | null;
+};
+
+export type Dashboard = {
+  days: number;
+  kpis: Kpis;
+  previous: Kpis;
+  health: {
+    pending: number;
+    processing: number;
+    oldest_waiting_minutes: string | null;
+    documents_today: number;
+    needs_review: number;
+    model_calls_hour: number;
+    model_failures_hour: number;
+    spend_today: string;
+    spend_yesterday: string;
+    last_document_processed_at: string | null;
+  };
+  money: {
+    mrr: string;
+    live_tenants: number;
+    live_60: number;
+    retained_60: number;
+    live_90: number;
+    retained_90: number;
+    ai_cost_this_month: string;
+  };
+  rollup: {
+    id: string;
+    started_at: string;
+    finished_at: string | null;
+    trigger: string;
+    tenants: number;
+    rows_written: number;
+    ok: boolean | null;
+    error: string | null;
+  } | null;
+  rollup_stale_hours: number;
+  rollup_is_stale: boolean;
+  queues: { interactive: number | null; bulk: number | null };
+  worker: string | null;
+};
+
+export const getDashboard = (days = 30) => request<Dashboard>(`/admin/dashboard?days=${days}`);
+
+export const getTenantMetrics = (tenantId: string, days = 30) =>
+  request<{ days: number; kpis: Kpis }>(`/admin/tenants/${tenantId}/metrics?days=${days}`);
+
+export const recomputeRollup = (days = 2) =>
+  request<{ queued: boolean; days: number }>("/admin/rollup/recompute", {
+    method: "POST",
+    body: JSON.stringify({ days }),
+  });

@@ -120,7 +120,7 @@ def get_session_factory() -> sessionmaker[Session]:
 
 def _reset_rls_settings(session: Session) -> None:
     """
-    Reset all three app.* RLS settings to their unset (NULL) state at the
+    Reset every app.* RLS setting to its unset (NULL) state at the
     start of every transaction, before setting whichever one this
     transaction actually needs.
 
@@ -144,6 +144,7 @@ def _reset_rls_settings(session: Session) -> None:
     session.execute(text("RESET app.is_platform_admin"))
     session.execute(text("RESET app.intake_token"))
     session.execute(text("RESET app.scheduler"))
+    session.execute(text("RESET app.rollup"))
 
 
 @contextmanager
@@ -244,6 +245,31 @@ def identity_lookup_session(auth_user_id: str) -> Iterator[Session]:
             text("SELECT set_config('app.auth_user_id', :auth_user_id, true)"),
             {"auth_user_id": auth_user_id},
         )
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@contextmanager
+def rollup_session() -> Iterator[Session]:
+    """
+    Used only by the nightly metrics rollup (`docflow_core.metrics`) to list
+    the tenants it must roll up and to record the run in `rollup_runs`
+    (migration 0017's `rollup_read` / `rollup_access` policies). It can read
+    the `tenants` table and write `rollup_runs`, and nothing else -- every
+    number is computed inside that tenant's own tenant_session(). Like the
+    scheduler and the token lookups, this is not the Section 7.15.1 admin
+    bypass: it cannot read a document, a line or a customer.
+    """
+    session_factory = get_session_factory()
+    session = session_factory()
+    try:
+        _reset_rls_settings(session)
+        session.execute(text("SET LOCAL app.rollup = 'true'"))
         yield session
         session.commit()
     except Exception:

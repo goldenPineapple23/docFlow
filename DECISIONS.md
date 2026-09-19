@@ -1156,3 +1156,21 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Deferred, deliberately:** custom fields. When a prospect needs one, the design is: the field joins the tenant's schema with a type, flows into the extraction request (new prompt hash + schema version → live golden-set run before shipping), is stored on the header or line, and appears as an extra column in all four export formats.
 
 **Related:** Section 7.1, 7.7, 7.13, 7.15.2; D-102, D-115, D-119.
+
+## D-121 — The founder dashboard, from a nightly rollup (slice 5.5)
+
+**Context:** Section 7.15.3 specifies the Console home in four regions and is explicit that the KPIs must not be computed by scanning documents on page load. Until now `/admin` was the attention panel alone.
+
+**Decisions:**
+- **`tenant_daily_metrics`** (migration 0017): one row per tenant per day, bucketed in the **tenant's own timezone** — the same boundary the monthly allowance uses (7.16.1), so the two can never disagree about which month an order fell in. `is_test_batch` documents are in no number (7.15.2 Step 8). The row holds counts and sums, plus two arrays of plain numbers (hours to approval, cost per document) so the dashboard's median and p95 are real rather than averages of daily averages. No customer data, by construction.
+- **`rollup_runs`** records every run. The dashboard shows the last one, and `is_stale` (> `ROLLUP_STALE_HOURS`, 36) both warns on screen and raises the `rollup_stale` alert the section asks for.
+- **The rollup gets its own narrow session**, `rollup_session` (`app.rollup`), not the Section 7.15.1 admin bypass. It may SELECT `tenants`, write `rollup_runs`, and raise exactly one alert type about itself; every number is computed inside that tenant's own `tenant_session` under the ordinary RLS policies. It cannot read a document across tenants. `_reset_rls_settings` clears the new setting like every other.
+- **Nightly at 03:15 UTC**, two days at a time (yesterday has to be re-closed in every timezone, today topped up). Re-running a day overwrites it, so a missed night is caught up by the next one and the dashboard's "Recompute" button is the same job, queued to `interactive`.
+- **Health strip is live, by design.** Each number is one indexed query about right now — queue depth from the broker, worker ping, oldest waiting document, model error rate for the last hour, spend today vs yesterday. It links out to Sentry, Supabase and Stripe rather than rebuilding them (Section 10).
+- **Tenant list** carries the section's columns (usage vs allowance, backlog and its age, 30-day confidence with a 7-day drift arrow, AI cost this month, last order, subscription badge) and is one component shared by the home page and the Tenants page.
+- **KPI definitions are pinned by tests**, not just by code: shares are part/whole over the window (never an average of daily shares), the median is over every document's own hours, p95 is nearest-rank, and an empty window answers "—" rather than 0.
+- The required test from the section exists: `test_every_kpi_equals_an_independent_query` checks every card against hand-written SQL over the documents themselves.
+
+**Found by driving it, not by tests:** the tenant-listing query used `:tenant_id IS NULL` with a NULL parameter, which Postgres refuses as an ambiguous type; the whole rollup failed on the first real run. It now casts. The same shape was in `read_days`. A test that always passes a tenant id would never have caught it (the D-095 lesson again).
+
+**Related:** Section 7.9, 7.15.1, 7.15.3, 7.16.1, Section 10; D-095, D-104, D-113.
