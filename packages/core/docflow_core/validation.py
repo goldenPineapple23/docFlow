@@ -122,6 +122,29 @@ DELIVERY_DATE_MAX_FUTURE_DAYS = 1095  # a blanket order scheduled 3 years out
 REQUIRED_HEADER_FIELDS: tuple[str, ...] = ("po_number", "buyer_name", "order_total", "currency")
 REQUIRED_LINE_FIELDS: tuple[str, ...] = ("quantity", "line_total")
 
+
+@dataclass(frozen=True)
+class FieldRules:
+    """Which fields this tenant is checked on (D-120).
+
+    The defaults are the constants above -- what every tenant got before
+    per-tenant schemas existed, and what a tenant without a saved schema
+    still gets. `docflow_core.field_schema` builds these from the tenant's
+    current version; validation never reads that table itself, so this
+    module stays pure and testable without one.
+
+    A hidden field is not checked at all: no missing-required finding, no
+    low-confidence finding. It is still extracted and stored.
+    """
+
+    required_header: tuple[str, ...] = REQUIRED_HEADER_FIELDS
+    required_line: tuple[str, ...] = REQUIRED_LINE_FIELDS
+    hidden_header: tuple[str, ...] = ()
+    hidden_line: tuple[str, ...] = ()
+
+
+DEFAULT_FIELD_RULES = FieldRules()
+
 # A line has to say *what* is being ordered, but a buyer may say it with a
 # part number, a description, or both. Missing both is the warning.
 LINE_IDENTITY_FIELD = "sku_or_description"
@@ -483,11 +506,11 @@ class DocumentSnapshot:
 # ── The whole-document evaluation (pure) ────────────────────────────────────
 
 
-def _header_warnings(snapshot: DocumentSnapshot) -> list[DocumentWarning]:
+def _header_warnings(snapshot: DocumentSnapshot, rules: FieldRules) -> list[DocumentWarning]:
     header = snapshot.header
     warnings: list[DocumentWarning] = []
 
-    for name in REQUIRED_HEADER_FIELDS:
+    for name in rules.required_header:
         if _is_blank(header.get(name)):
             # Section 7.1: "one wrong PO number matters more than nine right
             # ones" -- a document with no PO number cannot be reconciled
@@ -504,7 +527,7 @@ def _header_warnings(snapshot: DocumentSnapshot) -> list[DocumentWarning]:
                 )
             )
 
-    if check_currency(header.get("currency")):
+    if "currency" not in rules.hidden_header and check_currency(header.get("currency")):
         warnings.append(
             DocumentWarning(
                 code=CODE_INVALID_CURRENCY,
@@ -517,7 +540,7 @@ def _header_warnings(snapshot: DocumentSnapshot) -> list[DocumentWarning]:
     # Section 7.1: "Currency inferred from a symbol rather than stated gets
     # its confidence capped ... and a warning." The cap is applied at the
     # extraction boundary; this is the warning half of that sentence.
-    if snapshot.currency_inferred:
+    if snapshot.currency_inferred and "currency" not in rules.hidden_header:
         warnings.append(
             DocumentWarning(
                 code=CODE_CURRENCY_INFERRED,
@@ -586,7 +609,11 @@ def _header_warnings(snapshot: DocumentSnapshot) -> list[DocumentWarning]:
         # most of the checks on a typical order, and a list that is mostly
         # noise trains reviewers to tick without reading (D-115). Required
         # fields, and any field with a value, are still flagged.
-        if name not in REQUIRED_HEADER_FIELDS and _is_blank(header.get(name)):
+        if name in rules.hidden_header:
+            # This tenant never sees the field, so a finding about it is
+            # noise on a screen that has no box to fix it in (D-120).
+            continue
+        if name not in rules.required_header and _is_blank(header.get(name)):
             continue
         if confidence is not None and confidence < CONFIDENCE_THRESHOLD:
             warnings.append(
@@ -643,7 +670,7 @@ def _document_warnings(snapshot: DocumentSnapshot) -> list[DocumentWarning]:
     return warnings
 
 
-def _line_warnings(line: LineSnapshot) -> list[DocumentWarning]:
+def _line_warnings(line: LineSnapshot, rules: FieldRules) -> list[DocumentWarning]:
     warnings: list[DocumentWarning] = []
 
     def warning(code: str, *, severity: Severity | None = None, detail: dict, field_name: str | None = None):
@@ -665,7 +692,7 @@ def _line_warnings(line: LineSnapshot) -> list[DocumentWarning]:
             )
         )
 
-    for name in REQUIRED_LINE_FIELDS:
+    for name in rules.required_line:
         if getattr(line, name) is None:
             warnings.append(
                 warning(
@@ -737,7 +764,9 @@ def _line_warnings(line: LineSnapshot) -> list[DocumentWarning]:
     return warnings
 
 
-def evaluate_document(snapshot: DocumentSnapshot) -> list[DocumentWarning]:
+def evaluate_document(
+    snapshot: DocumentSnapshot, rules: FieldRules = DEFAULT_FIELD_RULES
+) -> list[DocumentWarning]:
     """
     Every Section 7.7 rule over one document, with no database access and no
     side effects. Deterministic order: document-level, then header, then lines
@@ -745,9 +774,9 @@ def evaluate_document(snapshot: DocumentSnapshot) -> list[DocumentWarning]:
     list, which is what makes `sync_warnings` idempotent.
     """
     warnings = _document_warnings(snapshot)
-    warnings.extend(_header_warnings(snapshot))
+    warnings.extend(_header_warnings(snapshot, rules))
     for line in sorted(snapshot.lines, key=lambda item: item.line_number):
-        warnings.extend(_line_warnings(line))
+        warnings.extend(_line_warnings(line, rules))
     return warnings
 
 
@@ -947,18 +976,30 @@ def sync_warnings(
     return summary
 
 
-def validate_document(session: Session, tenant_id: UUID, document_id: UUID) -> ValidationSummary:
+def validate_document(
+    session: Session, tenant_id: UUID, document_id: UUID, rules: FieldRules | None = None
+) -> ValidationSummary:
     """
     The Section 7.7 pass over one document: load, evaluate, reconcile.
     `session` must already be tenant-scoped.
 
     Idempotent, and safe to re-run after a re-extraction or a human edit --
     see `sync_warnings` for what re-running does and does not touch.
+
+    `rules` defaults to the tenant's current field schema (D-120); pass an
+    explicit `FieldRules` to check a document against the version it was read
+    under instead.
     """
     snapshot = load_snapshot(session, document_id)
     if snapshot is None:
         return ValidationSummary()
-    return sync_warnings(session, tenant_id, document_id, evaluate_document(snapshot))
+    if rules is None:
+        # Imported here, not at module scope: field_schema builds its
+        # defaults from this module's constants.
+        from docflow_core.field_schema import current as _current_schema
+
+        rules = _current_schema(session, tenant_id).rules()
+    return sync_warnings(session, tenant_id, document_id, evaluate_document(snapshot, rules))
 
 
 def open_warnings(session: Session, document_id: UUID) -> list[dict[str, Any]]:

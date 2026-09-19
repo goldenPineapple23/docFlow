@@ -133,7 +133,33 @@ export type DocumentDetail = {
   trail: TrailEntry[];
   version: string;
   can_edit: boolean;
+  /** What this tenant treats as required, optional or hidden (D-120). */
+  field_schema: FieldSchemaView;
 };
+
+export type FieldState = "required" | "optional" | "hidden";
+
+export type FieldSchemaView = {
+  version: number;
+  fields: Array<{
+    name: string;
+    label: string;
+    level: "header" | "line";
+    state: FieldState;
+    default: FieldState;
+    locked: boolean;
+  }>;
+};
+
+/** A lookup of one level's states, for the review screen. */
+export function fieldStates(
+  schema: FieldSchemaView | undefined,
+  level: "header" | "line",
+): Record<string, FieldState> {
+  const out: Record<string, FieldState> = {};
+  for (const f of schema?.fields ?? []) if (f.level === level) out[f.name] = f.state;
+  return out;
+}
 
 export type CatalogItem = {
   id: string;

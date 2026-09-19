@@ -125,6 +125,12 @@ export default function TenantPage({ params }: { params: Promise<{ id: string }>
             </Link>{" "}
             <span className="text-gray-600">{tenant.learned_rules}</span>
           </li>
+          <li>
+            <Link href={`/admin/tenants/${id}/fields`} className="font-medium text-blue-700 hover:underline">
+              Field settings →
+            </Link>{" "}
+            <span className="text-gray-600">what this customer is checked on</span>
+          </li>
         </ul>
       </section>
 

@@ -14,6 +14,7 @@ from io import BytesIO
 import docx
 import openpyxl
 import pytest
+from docflow_core.field_schema import DEFAULT_SCHEMA, _resolve
 from docflow_core.file_types import FileType, FileTypeName
 
 from app.tasks.parse_and_extract import (
@@ -115,6 +116,10 @@ class _FakeSession:
     def execute(self, statement, params=None):
         sql = str(statement)
         self.statements.append((sql, params or {}))
+        if "tenant_field_schemas" in sql:
+            # No saved field schema: the tenant is on DocFlow's defaults,
+            # which is what every tenant had before D-120.
+            return _FakeResult(None)
         if sql.strip().upper().startswith("SELECT"):
             return _FakeResult(self._row)
         return _FakeResult(None)
@@ -175,13 +180,23 @@ def test_provenance_of_a_document_with_nothing_extracted_is_empty_not_wrong():
     assert _extracted_provenance({"sku": None, "description": None}, _PROVENANCE_LINE_FIELDS) == {}
 
 
-def test_overall_confidence_is_minimum_not_average():
-    confidence = {"po_number": 0.98, "order_date": 0.4, "buyer_name": 0.9}
-    assert _overall_confidence(confidence) == Decimal("0.4")
+def test_overall_confidence_is_the_minimum_of_required_fields_not_an_average():
+    """CLAUDE.md Section 7.1, as the tenant's field schema defines required
+    (D-120): an optional field read badly -- or absent -- does not decide how
+    much of the order a reviewer should distrust."""
+    confidence = {"po_number": 0.98, "buyer_name": 0.9, "order_total": 0.95, "currency": 0.93}
+    assert _overall_confidence(confidence, DEFAULT_SCHEMA) == Decimal("0.9")
+
+    with_a_bad_optional = {**confidence, "order_date": 0.4, "payment_terms": 0.0}
+    assert _overall_confidence(with_a_bad_optional, DEFAULT_SCHEMA) == Decimal("0.9")
+
+    # Required for this tenant: now it counts.
+    stricter = _resolve(2, {"header": {"order_date": "required"}})
+    assert _overall_confidence(with_a_bad_optional, stricter) == Decimal("0.4")
 
 
 def test_overall_confidence_handles_empty():
-    assert _overall_confidence({}) == Decimal("0")
+    assert _overall_confidence({}, DEFAULT_SCHEMA) == Decimal("0")
 
 
 # ── matching is wired in, and cannot cost the document its extraction ───────

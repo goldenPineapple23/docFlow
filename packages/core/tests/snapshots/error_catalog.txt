@@ -202,6 +202,14 @@ EXP-007 [error/both] The export file couldn't be saved
   what+why: The file was built and checked against the approved order, but saving it failed, so there's nothing to download yet. The failure has been logged.
   next:     Try the export again in a minute.
 
+FLD-001 [warning/founder] That isn't a field DocFlow reads
+  what+why: The list of fields sent to save included a name DocFlow doesn't extract, or a setting other than required, optional or hidden. Nothing was saved.
+  next:     Reload the field settings page and save again.
+
+FLD-002 [warning/founder] This field can't be turned off
+  what+why: PO number and quantity stay required for every tenant: an order with no PO number can't be traced back to what the buyer sent, and a line with no quantity isn't an order line.
+  next:     Leave that field required and save the rest.
+
 IMP-001 [warning/founder] A catalog has to be a spreadsheet
   what+why: This file passed the intake checks, but it is not a table: catalogs and customer lists are read from CSV or Excel files only.
   next:     Ask the prospect for the list as CSV or Excel (.xlsx, .xls).

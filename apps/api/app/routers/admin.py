@@ -27,6 +27,7 @@ from docflow_core import (
     catalog_import,
     deal_terms,
     external_services,
+    field_schema,
     file_types,
     learned_rules,
     onboarding,
@@ -961,3 +962,65 @@ def delete_rule(
     tenant_id: UUID, rule_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
 ) -> dict:
     return _rule_change(identity, tenant_id, rule_id, "delete")
+
+
+# ── Per-tenant field schema (slice 5.4 part 2; D-120) ───────────────────────
+
+
+class FieldSchemaRequest(BaseModel):
+    # {"header": {"payment_terms": "hidden"}, "line": {"unit": "hidden"}}
+    #
+    # Plain strings, not Literals: an unknown field or state is answered with
+    # the catalog's FLD-001, not FastAPI's generic validation body (7.16.5) --
+    # the same reason ExportBody takes a plain format string.
+    fields: dict[str, dict[str, str]]
+    note: str | None = Field(default=None, max_length=500)
+    # Re-check orders still waiting for review against the new version, so a
+    # change the founder makes during onboarding shows on the test batch
+    # immediately instead of only on the next order.
+    apply_to_open_documents: bool = True
+
+
+@router.get("/tenants/{tenant_id}/field-schema")
+def get_field_schema(
+    tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    _console_act(identity, tenant_id, "read", target_type="field_schema")
+    with tenant_session(tenant_id) as session:
+        schema = field_schema.current(session, tenant_id)
+        past = field_schema.history(session, tenant_id)
+    return {"schema": schema.as_dict(), "history": [_jsonable(row) for row in past]}
+
+
+@router.put("/tenants/{tenant_id}/field-schema")
+def put_field_schema(
+    tenant_id: UUID,
+    body: FieldSchemaRequest,
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    """A new version, never an edit of the one in use (Section 7.13)."""
+    admin_id = _console_act(
+        identity,
+        tenant_id,
+        "field_schema_save",
+        target_type="field_schema",
+        payload={"fields": body.fields},
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            schema = field_schema.save(
+                session,
+                tenant_id,
+                body.fields,
+                actor_user_id=admin_id,
+                acting_as_tenant_id=tenant_id,
+                note=body.note,
+            )
+        except field_schema.FieldSchemaError as exc:
+            raise catalog_error(exc.code, status_code=422, extra=exc.detail or None) from exc
+        rechecked = (
+            field_schema.recheck_open_documents(session, tenant_id, schema)
+            if body.apply_to_open_documents
+            else 0
+        )
+    return {"schema": schema.as_dict(), "rechecked_documents": rechecked}

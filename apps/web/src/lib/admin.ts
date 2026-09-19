@@ -482,3 +482,41 @@ export const changeRule = (tenantId: string, ruleId: string, action: "disable" |
   request<{ change: { before: string; after: string } }>(`/admin/tenants/${tenantId}/rules/${ruleId}/${action}`, {
     method: "POST",
   });
+
+// ── Per-tenant field schema (slice 5.4 part 2; D-120) ──────────────────────
+
+export type FieldSetting = {
+  name: string;
+  label: string;
+  level: "header" | "line";
+  state: "required" | "optional" | "hidden";
+  default: "required" | "optional" | "hidden";
+  locked: boolean;
+};
+
+export type FieldSchemaVersion = {
+  version: number;
+  fields: Record<string, Record<string, string>>;
+  note: string | null;
+  created_at: string;
+  created_by_email: string | null;
+  acting_as_tenant_id: string | null;
+};
+
+export const getFieldSchema = (tenantId: string) =>
+  request<{ schema: { version: number; fields: FieldSetting[] }; history: FieldSchemaVersion[] }>(
+    `/admin/tenants/${tenantId}/field-schema`,
+  );
+
+export const saveFieldSchema = (
+  tenantId: string,
+  body: {
+    fields: { header?: Record<string, string>; line?: Record<string, string> };
+    note: string | null;
+    apply_to_open_documents: boolean;
+  },
+) =>
+  request<{ schema: { version: number; fields: FieldSetting[] }; rechecked_documents: number }>(
+    `/admin/tenants/${tenantId}/field-schema`,
+    { method: "PUT", body: JSON.stringify(body) },
+  );

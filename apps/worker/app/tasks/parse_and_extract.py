@@ -28,7 +28,7 @@ from io import BytesIO
 from uuid import UUID, uuid4
 
 import anthropic
-from docflow_core import file_types, previews
+from docflow_core import field_schema, file_types, previews
 from docflow_core.buyers import identify_and_link_buyer
 from docflow_core.config import get_settings
 from docflow_core.db import tenant_session
@@ -38,6 +38,7 @@ from docflow_core.extraction import (
     extract_document,
     wrap_document_content,
 )
+from docflow_core.field_schema import FieldSchema
 from docflow_core.matching import match_document_lines
 from docflow_core.storage import read_file, save_file
 from docflow_core.validation import validate_document
@@ -398,15 +399,13 @@ def _extracted_provenance(values: dict, fields: tuple[str, ...]) -> dict:
     return {name: "extracted" for name in fields if values.get(name) is not None}
 
 
-def _overall_confidence(header_confidence: dict) -> Decimal:
+def _overall_confidence(header_confidence: dict, schema: FieldSchema) -> Decimal:
     """
     CLAUDE.md Section 7.1: "Overall document confidence is the minimum of
-    required-field confidences, not an average." All header fields are
-    treated as the required set for this slice (no per-tenant schema yet --
-    Section 7.13's per-tenant field config is a later phase).
+    required-field confidences, not an average." Required means required for
+    THIS tenant (D-120): the fields its current field schema marks required.
     """
-    numeric_values = [v for v in header_confidence.values() if isinstance(v, (int, float))]
-    return Decimal(str(min(numeric_values))) if numeric_values else Decimal("0")
+    return schema.overall_confidence(header_confidence)
 
 
 @celery_app.task(name="docflow.parse_and_extract")
@@ -504,7 +503,13 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
         return
 
     header = result.header
-    overall_confidence = _overall_confidence(result.header_confidence)
+    # The tenant's field schema decides which fields count towards the
+    # document's confidence and which are checked (D-120). Read once here and
+    # recorded on the document, so a later change never makes this
+    # document's numbers unexplainable (Section 7.13: versioned).
+    with tenant_session(tid) as session:
+        schema = field_schema.current(session, tid)
+    overall_confidence = _overall_confidence(result.header_confidence, schema)
 
     with tenant_session(tid) as session:
         session.execute(
@@ -516,7 +521,7 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                     output_tokens = :output_tokens, est_cost_usd = :est_cost_usd,
                     injection_suspected = :injection_suspected,
                     overall_confidence = :overall_confidence, raw_json = :raw_json,
-                    processed_at = now()
+                    field_schema_version = :field_schema_version, processed_at = now()
                 WHERE id = :id
                 """
             ),
@@ -525,6 +530,7 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                 "model_id": result.model_id,
                 "prompt_hash": result.prompt_hash,
                 "schema_version": result.schema_version,
+                "field_schema_version": schema.version or None,
                 "input_tokens": result.input_tokens,
                 "output_tokens": result.output_tokens,
                 "est_cost_usd": str(result.est_cost_usd) if result.est_cost_usd is not None else None,
@@ -673,7 +679,9 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
     # just written. It changes no value -- it only writes `document_warnings`.
     try:
         with tenant_session(tid) as session:
-            validation = validate_document(session, tid, did)
+            # The same schema the confidence above was computed with, so one
+            # document is never half-checked under two versions.
+            validation = validate_document(session, tid, did, schema.rules())
         # Counts only -- never a field name's value, a total or a date
         # (Section 7.10).
         logger.info(

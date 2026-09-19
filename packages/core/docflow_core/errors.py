@@ -1039,6 +1039,30 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="founder",
     ),
+    # ── FLD-0xx · per-tenant field schema (Section 7.13, D-120) ─────────────
+    "FLD-001": ErrorCatalogEntry(
+        code="FLD-001",
+        title="That isn't a field DocFlow reads",
+        message=(
+            "The list of fields sent to save included a name DocFlow doesn't extract, or a "
+            "setting other than required, optional or hidden. Nothing was saved."
+        ),
+        action="Reload the field settings page and save again.",
+        severity="warning",
+        audience="founder",
+    ),
+    "FLD-002": ErrorCatalogEntry(
+        code="FLD-002",
+        title="This field can't be turned off",
+        message=(
+            "PO number and quantity stay required for every tenant: an order with no PO number "
+            "can't be traced back to what the buyer sent, and a line with no quantity isn't an "
+            "order line."
+        ),
+        action="Leave that field required and save the rest.",
+        severity="warning",
+        audience="founder",
+    ),
     # ── EXP-0xx · export files (Section 7.4, Phase 4) ────────────────────────
     "EXP-001": ErrorCatalogEntry(
         code="EXP-001",

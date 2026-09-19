@@ -6,6 +6,7 @@ import {
   ReviewApiError,
   approveDocument,
   createMapping,
+  fieldStates,
   getDocument,
   rejectDocument,
   saveEdits,
@@ -405,6 +406,7 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
           <HeaderFields
             header={detail.header}
             edits={headerEdits}
+            states={fieldStates(detail.field_schema, "header")}
             disabled={readOnly}
             onChange={(field, value) => setHeaderEdits((prev) => ({ ...prev, [field]: value }))}
           />

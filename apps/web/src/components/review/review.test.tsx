@@ -91,6 +91,34 @@ describe("header fields (Sections 7.1, 7.12)", () => {
     expect(screen.getByTestId("header-input-order_total")).toHaveValue("570.00");
   });
 
+  it("hides a field this tenant never sees, and marks what it requires (D-120)", () => {
+    render(
+      <HeaderFields
+        header={header}
+        edits={{}}
+        disabled={false}
+        onChange={() => {}}
+        states={{
+          po_number: "required",
+          buyer_name: "required",
+          order_total: "required",
+          currency: "required",
+          order_date: "required",
+          payment_terms: "hidden",
+          notes: "optional",
+        }}
+      />,
+    );
+    // Hidden: no box at all. The value is still stored server-side.
+    expect(screen.queryByTestId("header-input-payment_terms")).toBeNull();
+    // Order date is required for this tenant, though DocFlow's default is
+    // optional: five fields carry the * rather than the usual four.
+    expect(screen.getAllByLabelText("required")).toHaveLength(5);
+    expect(screen.getByTestId("header-input-order_date")).toBeInTheDocument();
+    // An optional field is still shown, just unmarked.
+    expect(screen.getByTestId("header-input-notes")).toBeInTheDocument();
+  });
+
   it("never uses a number input for any field", () => {
     // type="number" hands the value to the browser's float parser, which is
     // exactly what Section 7.1 forbids for money -- and a date input would

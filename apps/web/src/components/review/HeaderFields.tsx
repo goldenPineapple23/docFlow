@@ -42,12 +42,18 @@ export function HeaderFields({
   edits,
   disabled,
   onChange,
+  states,
 }: {
   header: DocumentHeader;
   edits: Record<string, string | null>;
   disabled: boolean;
   onChange: (field: string, value: string) => void;
+  /** This tenant's per-field settings (D-120). Absent = DocFlow's defaults. */
+  states?: Record<string, "required" | "optional" | "hidden">;
 }) {
+  // A hidden field is still extracted and stored; this tenant just never
+  // looks at it, so it is not on the screen and raises no checks.
+  const shown = HEADER_FIELDS.filter((f) => (states?.[f.name] ?? "optional") !== "hidden");
   return (
     <section
       aria-labelledby="header-heading"
@@ -83,7 +89,8 @@ export function HeaderFields({
       ) : null}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {HEADER_FIELDS.map(({ name, label, wide, required }) => {
+        {shown.map(({ name, label, wide, required: builtIn }) => {
+          const required = states ? states[name] === "required" : builtIn;
           const stored = header[name];
           const current = name in edits ? edits[name] : (stored as string | null);
           // An optional field the document doesn't have is simply empty, not

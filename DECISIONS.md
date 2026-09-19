@@ -1138,3 +1138,21 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Migration 0015** (founder to apply): `buyers.merged_into_buyer_id` / `merged_at` (with checks that a merged buyer is deleted and not merged into itself) and the `buyer_merges` table with RLS.
 
 **Related:** Section 7.6, 7.13, 7.15.1, 10; D-055, D-065, D-111, D-118.
+
+## D-120 — Operator screens, part 2: per-tenant field settings (required / optional / hidden)
+
+**Context:** Section 7.13 requires a per-tenant field schema, versioned, configured by the founder. It has two halves: marking the base fields required/optional/hidden, and adding custom fields (`resin_grade`, `job_number`). The founder chose (19 Sept 2026) to build the first half now and hold custom fields: the first changes only what DocFlow checks and shows, while the second changes the extraction request itself, needs a live golden-set run, and should be shaped by a real customer requirement rather than a guess. It also closes D-115's open item — an order showing 0% confidence because an optional field the document never had scored zero.
+
+**Decisions:**
+- **`tenant_field_schemas`** (migration 0016), versioned like tiers and presets. Each save is a new version; `is_current` moves. Only what differs from the built-in default is stored, so a field DocFlow adds later starts at its own default for every tenant. `documents.field_schema_version` records the version a document was read under, so an old order's checks stay explainable after a change (7.13: "Every extraction logs the schema version it ran against").
+- **What the three states mean.** `required`: checked for (VAL-006), counts towards the document's confidence, marked `*` in review. `optional`: read and shown; absent raises nothing, and an empty one raises no low-confidence check (D-115). `hidden`: never shown to that tenant, no checks, no effect on confidence — **but still extracted and stored**. Hiding changes what DocFlow shows and checks, never what the model is asked for, so no prompt or schema hash changes and no golden-set run is needed to hide a field; un-hiding later shows the data that was there all along.
+- **Overall confidence is now the minimum over the tenant's required header fields** (Section 7.1, as written). Before, every header field counted, which is what produced 0% on the founder's test batch.
+- **Two fields are locked required for every tenant:** PO number (an order that can't be traced back to what the buyer sent) and line quantity (not an order line without one). The guard is enforced when saving *and* when resolving a stored row, so no old row can switch one off. The "a line must name a SKU or a description" rule is not configurable at all and is not listed as a field: it is a rule about the pair, not a stored field.
+- **Validation takes a `FieldRules` object** (defaults = the previous constants), so the rules stay pure and testable without a database; only `validate_document` reads the tenant's current version. A tenant with no saved version behaves exactly as before D-120, which is covered by a test.
+- **Saving offers to re-check open orders.** Orders in `needs_review` are re-scored and re-validated against the new version, so a change during onboarding shows on the test batch at once. Approved orders are never touched — their snapshot is immutable (7.3) and they keep the numbers they were approved with. No extracted or edited value is ever changed; only the confidence summary and `document_warnings`.
+- **Console screen** at `/admin/tenants/{id}/fields`, with a version history and the reason for each change; the review screen marks and hides from the version that read the document. Customers do not edit this.
+- New codes: FLD-001 (unknown field or state), FLD-002 (locked field).
+
+**Deferred, deliberately:** custom fields. When a prospect needs one, the design is: the field joins the tenant's schema with a type, flows into the extraction request (new prompt hash + schema version → live golden-set run before shipping), is stored on the header or line, and appears as an extra column in all four export formats.
+
+**Related:** Section 7.1, 7.7, 7.13, 7.15.2; D-102, D-115, D-119.

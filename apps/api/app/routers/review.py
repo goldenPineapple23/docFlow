@@ -31,7 +31,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from docflow_core import file_types
+from docflow_core import field_schema, file_types
 from docflow_core.config import get_settings
 from docflow_core.db import tenant_session
 from docflow_core.errors import get_error
@@ -263,7 +263,8 @@ def get_document(
                 "overall_confidence, injection_suspected, is_test_batch, "
                 "is_possible_duplicate, duplicate_of_document_id, "
                 "is_possible_change_order, change_order_of_document_id, "
-                "approved_at, approved_by, approved_snapshot_hash, review_started_at "
+                "approved_at, approved_by, approved_snapshot_hash, review_started_at, "
+                "field_schema_version "
                 "FROM documents WHERE id = :id AND deleted_at IS NULL"
             ),
             {"id": str(document_id)},
@@ -312,6 +313,9 @@ def get_document(
 
         trail = review_trail(session, document_id)
         version = document_version(session, document_id)
+        # The version this document was read under, not today's (D-120): the
+        # screen shows what was asked of this order when it arrived.
+        schema = field_schema.at_version(session, tenant_id, document["field_schema_version"])
 
     return {
         "document": {
@@ -337,6 +341,9 @@ def get_document(
         "trail": [_trail_payload(row) for row in trail],
         "version": version,
         "can_edit": actor.can_review,
+        # Which fields this tenant treats as required, and which it never
+        # sees (D-120). The review screen marks and hides from this.
+        "field_schema": schema.as_dict(),
     }
 
 
