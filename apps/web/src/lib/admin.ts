@@ -98,6 +98,8 @@ export type TenantOverview = {
   setup_fee_preset: SetupFeePreset["code"] | null;
   setup_fee_preset_name: string | null;
   founding_price: boolean;
+  open_merge_candidates: number;
+  learned_rules: number;
 };
 
 export type TenantRow = {
@@ -408,3 +410,75 @@ export const getGoLivePlan = (tenantId: string) =>
 /** Nothing about price is sent: go-live bills the deal recorded on the tenant (D-117). */
 export const goLive = (tenantId: string) =>
   request<{ onboarding_status: string }>(`/admin/tenants/${tenantId}/go-live`, { method: "POST" });
+
+// ── Operator screens: buyer merge and learned rules (slice 5.4; D-119) ──────
+
+export type MergeSide = {
+  id: string;
+  name: string;
+  contact_email: string | null;
+  external_account_number: string | null;
+  created_at: string;
+  documents: number;
+  rules: number;
+};
+
+export type MergeCandidate = {
+  id: string;
+  similarity_score: string;
+  created_at: string;
+  detected_from_document_id: string | null;
+  /** The older (existing) customer first, then the newly created one. */
+  buyers: [MergeSide, MergeSide];
+};
+
+export type MergeHistoryRow = {
+  id: string;
+  created_at: string;
+  kept_name: string;
+  merged_name: string;
+  documents_moved: number;
+  rules_moved: number;
+  fields_filled: string[];
+  merged_by_email: string | null;
+  by_docflow_support: boolean;
+};
+
+export const getBuyerMerges = (tenantId: string) =>
+  request<{ candidates: MergeCandidate[]; history: MergeHistoryRow[] }>(`/admin/tenants/${tenantId}/buyer-merges`);
+
+export const mergeBuyers = (tenantId: string, candidateId: string, keepBuyerId: string) =>
+  request<{ merge_id: string; documents_moved: number; rules_moved: number; fields_filled: string[] }>(
+    `/admin/tenants/${tenantId}/buyer-merges/${candidateId}/merge`,
+    { method: "POST", body: JSON.stringify({ keep_buyer_id: keepBuyerId }) },
+  );
+
+export const dismissBuyerMerge = (tenantId: string, candidateId: string) =>
+  request<{ ok: boolean }>(`/admin/tenants/${tenantId}/buyer-merges/${candidateId}/dismiss`, { method: "POST" });
+
+export type LearnedRule = {
+  id: string;
+  rule_type: "sku_mapping" | "buyer_alias" | "uom_alias" | "field_hint";
+  match_key: string;
+  match_value: Record<string, unknown>;
+  status: "active" | "disabled";
+  times_applied: number;
+  created_at: string;
+  updated_at: string;
+  buyer_id: string | null;
+  buyer_name: string | null;
+  confirmed_by_email: string | null;
+  by_docflow_support: boolean;
+  source_document_id: string | null;
+  source_po_number: string | null;
+  item_sku: string | null;
+  item_description: string | null;
+  item_retired: boolean;
+};
+
+export const getRules = (tenantId: string) => request<{ rules: LearnedRule[] }>(`/admin/tenants/${tenantId}/rules`);
+
+export const changeRule = (tenantId: string, ruleId: string, action: "disable" | "enable" | "delete") =>
+  request<{ change: { before: string; after: string } }>(`/admin/tenants/${tenantId}/rules/${ruleId}/${action}`, {
+    method: "POST",
+  });

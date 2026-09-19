@@ -846,6 +846,44 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="founder",
     ),
+    # ── BUY-008..009 · merging buyers (Section 7.6, D-119) ─────────────────
+    "BUY-008": ErrorCatalogEntry(
+        code="BUY-008",
+        title="This pair can't be merged any more",
+        message=(
+            "Since this list was loaded, the pair was already merged or dismissed, or one of "
+            "the two customers was merged into someone else. Nothing was changed."
+        ),
+        action="Reload the list to see what is still open.",
+        severity="info",
+        audience="founder",
+    ),
+    "BUY-009": ErrorCatalogEntry(
+        code="BUY-009",
+        title="Both customers have a rule for this wording",
+        message=(
+            "Each of these customers already has a learned rule for the same product wording or "
+            "unit. Merging would have to throw one away, and which one is right is your call, so "
+            "nothing was merged."
+        ),
+        action=(
+            "Open Learned rules for this tenant, delete the rule that is wrong, then merge again."
+        ),
+        severity="warning",
+        audience="founder",
+    ),
+    # ── RUL-0xx · learned rules (Section 7.13, D-119) ────────────────────────
+    "RUL-001": ErrorCatalogEntry(
+        code="RUL-001",
+        title="Proposed rules can't be switched on here",
+        message=(
+            "This rule is only a proposal. Proposals are not part of DocFlow yet, and no rule "
+            "becomes active without a person confirming it in a review."
+        ),
+        action="Nothing to do. Confirm the match in a review if you want the rule.",
+        severity="info",
+        audience="founder",
+    ),
     # ── ONB-0xx · test batch and go-live (Section 7.15.2 Steps 6-9, 5.3) ────
     "ONB-001": ErrorCatalogEntry(
         code="ONB-001",

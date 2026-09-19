@@ -23,10 +23,12 @@ from uuid import UUID
 
 from docflow_core import (
     admin_data_access,
+    buyer_merge,
     catalog_import,
     deal_terms,
     external_services,
     file_types,
+    learned_rules,
     onboarding,
 )
 from docflow_core.admin_data_access import ConsoleError
@@ -820,3 +822,142 @@ def go_live(
         except onboarding.OnboardingError as exc:
             raise _onboarding_error(exc) from exc
     return {"onboarding_status": "live"}
+
+
+# ── Operator screens: buyer merge and learned rules (slice 5.4; D-119) ──────
+# Both run in the tenant's own session as the founder, acting-as (Section
+# 7.15.1): one admin_actions row per request, and every row they write
+# records the founder's user id and acting_as_tenant_id.
+
+
+class MergeRequest(BaseModel):
+    keep_buyer_id: UUID
+
+
+def _merge_error(exc: buyer_merge.MergeError) -> HTTPException:
+    return catalog_error(exc.code, status_code=409, extra=exc.detail or None)
+
+
+@router.get("/tenants/{tenant_id}/buyer-merges")
+def get_buyer_merges(
+    tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    """Near-duplicate customers waiting for a decision, and recent merges."""
+    _console_act(identity, tenant_id, "read", target_type="buyer_merges")
+    with tenant_session(tenant_id) as session:
+        candidates = buyer_merge.list_open_candidates(session)
+        history = buyer_merge.list_merges(session)
+    return {
+        "candidates": [_jsonable(c) for c in candidates],
+        "history": [
+            {**_jsonable(h), "by_docflow_support": h["acting_as_tenant_id"] is not None} for h in history
+        ],
+    }
+
+
+@router.post("/tenants/{tenant_id}/buyer-merges/{candidate_id}/merge")
+def merge_buyers(
+    tenant_id: UUID,
+    candidate_id: UUID,
+    body: MergeRequest,
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    admin_id = _console_act(
+        identity,
+        tenant_id,
+        "buyer_merge",
+        target_type="buyer_merge_candidate",
+        target_id=candidate_id,
+        payload={"keep_buyer_id": str(body.keep_buyer_id)},
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            result = buyer_merge.merge_candidate(
+                session,
+                tenant_id,
+                candidate_id,
+                keep_buyer_id=body.keep_buyer_id,
+                actor_user_id=admin_id,
+                acting_as_tenant_id=tenant_id,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404) from exc
+        except buyer_merge.MergeError as exc:
+            raise _merge_error(exc) from exc
+    return {
+        "merge_id": str(result.merge_id),
+        "documents_moved": result.documents_moved,
+        "rules_moved": result.rules_moved,
+        "fields_filled": result.fields_filled,
+    }
+
+
+@router.post("/tenants/{tenant_id}/buyer-merges/{candidate_id}/dismiss")
+def dismiss_buyer_merge(
+    tenant_id: UUID, candidate_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    admin_id = _console_act(
+        identity,
+        tenant_id,
+        "buyer_merge_dismiss",
+        target_type="buyer_merge_candidate",
+        target_id=candidate_id,
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            buyer_merge.dismiss_candidate(session, candidate_id, actor_user_id=admin_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404) from exc
+        except buyer_merge.MergeError as exc:
+            raise _merge_error(exc) from exc
+    return {"ok": True}
+
+
+@router.get("/tenants/{tenant_id}/rules")
+def get_rules(tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)) -> dict:
+    _console_act(identity, tenant_id, "read", target_type="learned_rules")
+    with tenant_session(tenant_id) as session:
+        rows = learned_rules.list_rules(session)
+    return {
+        "rules": [
+            {**_jsonable(r), "by_docflow_support": r["acting_as_tenant_id"] is not None} for r in rows
+        ]
+    }
+
+
+def _rule_change(identity: AuthenticatedIdentity, tenant_id: UUID, rule_id: UUID, action: str) -> dict:
+    _console_act(
+        identity, tenant_id, f"learned_rule_{action}", target_type="learned_rule", target_id=rule_id
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            if action == "delete":
+                change = learned_rules.delete_rule(session, rule_id)
+            else:
+                change = learned_rules.set_status(session, rule_id, enabled=action == "enable")
+        except LookupError as exc:
+            raise HTTPException(status_code=404) from exc
+        except learned_rules.RuleError as exc:
+            raise catalog_error(exc.code, status_code=409) from exc
+    return {"change": change}
+
+
+@router.post("/tenants/{tenant_id}/rules/{rule_id}/disable")
+def disable_rule(
+    tenant_id: UUID, rule_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    return _rule_change(identity, tenant_id, rule_id, "disable")
+
+
+@router.post("/tenants/{tenant_id}/rules/{rule_id}/enable")
+def enable_rule(
+    tenant_id: UUID, rule_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    return _rule_change(identity, tenant_id, rule_id, "enable")
+
+
+@router.post("/tenants/{tenant_id}/rules/{rule_id}/delete")
+def delete_rule(
+    tenant_id: UUID, rule_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    return _rule_change(identity, tenant_id, rule_id, "delete")

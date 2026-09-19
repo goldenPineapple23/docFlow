@@ -1107,3 +1107,34 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Also:** The invite text on the tenant page no longer says "Step 3." The page doesn't number steps 1–3, so the label made no sense there. It now says that go-live sends the invite automatically if it hasn't gone yet.
 
 **Related:** Section 7.4, 7.15.1; D-111.
+
+## D-119 — Operator screens, part 1: buyer merge and learned-rule management (slice 5.4)
+
+**Context:** Section 6 Phase 5 lists "the existing operator screens: buyer merge, learned-rule management, per-tenant field schema, per-tenant example-prompting flag". Near-duplicate buyers have been *flagged* since Phase 2 (`buyer_merge_candidates`, D-055), but nothing let anyone act on a flag. Learned rules (`sku_mapping`, `uom_alias`) have been created from reviews since Phase 3, but there was no way to see them all or switch one off. The founder gave go for 5.4 on 19 Sept 2026, "if everything checks out".
+
+**Decisions:**
+- **Merge is per flagged pair, chosen by a person.** The screen lists open candidates, most similar first, with both customers' email, account number, order count and rule count. The founder picks which one to keep (default: the older one), sees what will move, and confirms. There is still no code path that merges without a human choosing a flagged pair (Section 10).
+- **One transaction** (`docflow_core.buyer_merge.merge_candidate`):
+  - Document headers are re-pointed. Approved snapshots are not touched (7.3); they keep the name the order was approved with.
+  - Buyer-scoped learned rules move to the kept customer.
+  - The kept customer gains the other's email or account number **only where it has none**.
+  - The merged customer is soft-deleted, with `merged_into_buyer_id`.
+  - A **`buyer_alias` rule** is created (7.13: "a founder merge becomes a rule"). Buyer identification now checks it after email and exact name, so the next order under the merged-away name links to the kept customer (`matched_on = "buyer_alias"`, rule recorded in `field_provenance.buyer_id`, `times_applied` counted) instead of re-creating the duplicate.
+  - Other open candidates naming the merged customer are re-pointed or closed.
+  - A new append-only **`buyer_merges`** row logs IDs only: documents and rules moved, fields filled, who, and acting-as.
+  - Every write carries the founder's own user ID and `acting_as_tenant_id` (7.15.1), plus one `admin_actions` row per request.
+- **A merge that would lose a human's rule stops.** If both customers have a rule for the same wording, nothing changes (BUY-009). The founder deletes the wrong rule first. A pair already resolved, or a keeper outside the pair, gets BUY-008. "Not the same customer" dismisses the pair and leaves both customers as they are.
+- **Learned rules screen:** every live rule shows its type in plain words, which customer it applies to (or all), the wording it matches, what it means (SKU and description, with a "SKU retired" flag if the catalog retired it), times used, who confirmed it ("DocFlow support" for the founder, via the D-118 LEFT JOIN), and a link to the source order.
+  - **Switch off / on** changes `status`: it stops or restarts firing on the next document. Nothing already on a document changes, and no rule overrides a human edit.
+  - **Delete** is a soft delete (7.10) after a confirm.
+  - A `proposed` rule can't be switched on here (RUL-001). Proposals are the unbuilt 7.13 hook.
+  - The screen never creates a rule.
+- **Tenant page:** the "Set up" box is now "Catalog, customers and rules", with links and counts ("2 to decide", rule count).
+- **Not in this part:**
+  - *Per-tenant field schema* changes what the extraction model is asked for, which Section 7.1/7.13 require a live golden-set run for. It gets its own design check-in with the founder before building.
+  - *Example-prompting flag* moves to slice 5.10 with the feature it switches (the column has existed since 0001). A switch with nothing behind it would mislead.
+  - *Disabling a rule from the tenant's review screen* (7.13) belongs with the tenant surface slice.
+
+**Migration 0015** (founder to apply): `buyers.merged_into_buyer_id` / `merged_at` (with checks that a merged buyer is deleted and not merged into itself) and the `buyer_merges` table with RLS.
+
+**Related:** Section 7.6, 7.13, 7.15.1, 10; D-055, D-065, D-111, D-118.

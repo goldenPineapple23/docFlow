@@ -11,7 +11,9 @@ The rule this module implements, in full:
 So there are exactly three outcomes for a document, and no fourth:
 
   1. The extracted buyer identifies an existing buyer -> the document's
-     header is linked to it. Nothing is created.
+     header is linked to it. Nothing is created. "Identifies" means its
+     contact email, its name, or a `buyer_alias` rule a founder merge left
+     behind (D-119) -- so a merged-away name links to the kept buyer.
   2. The extracted buyer is new -> a `buyers` row is created, linked, and
      every existing buyer whose name is a near-duplicate is *flagged* in
      `buyer_merge_candidates`. Both rows stay independent and fully usable;
@@ -162,10 +164,14 @@ class MergeCandidate:
 class BuyerIdentification:
     buyer_id: UUID | None
     created: bool
-    # "contact_email" | "normalized_name" | None -- how the existing buyer was
-    # recognized, recorded so a reviewer can be shown why this link exists.
+    # "contact_email" | "normalized_name" | "buyer_alias" | None -- how the
+    # existing buyer was recognized, recorded so a reviewer can be shown why
+    # this link exists.
     matched_on: str | None = None
     merge_candidates: list[MergeCandidate] = field(default_factory=list)
+    # The `buyer_alias` rule that made the link, when one did (Section 7.13:
+    # every rule that fires is recorded as provenance).
+    rule_id: UUID | None = None
 
 
 def _normalize_email(email: str | None) -> str:
@@ -203,6 +209,29 @@ def find_buyer_by_normalized_name(session: Session, tenant_id: UUID, normalized_
         {"tenant_id": str(tenant_id), "normalized_name": normalized_name},
     ).mappings().first()
     return UUID(str(row["id"])) if row else None
+
+
+def find_buyer_by_alias(session: Session, normalized_name: str) -> tuple[UUID, UUID] | None:
+    """
+    A live buyer that a human merge said this name belongs to: the active
+    `buyer_alias` rule with this match key (D-119). Returns (buyer_id,
+    rule_id). Only ever created by a founder's merge -- never learned on its
+    own (Section 7.13).
+    """
+    row = session.execute(
+        text(
+            """
+            SELECT r.id AS rule_id, r.buyer_id
+            FROM learned_rules r
+            JOIN buyers b ON b.id = r.buyer_id AND b.deleted_at IS NULL
+            WHERE r.rule_type = 'buyer_alias' AND r.match_key = :key
+              AND r.status = 'active' AND r.deleted_at IS NULL
+            ORDER BY r.created_at DESC LIMIT 1
+            """
+        ),
+        {"key": normalized_name},
+    ).mappings().first()
+    return (UUID(str(row["buyer_id"])), UUID(str(row["rule_id"]))) if row else None
 
 
 def _existing_buyer_names(session: Session, tenant_id: UUID, exclude_id: UUID) -> list[tuple[UUID, str]]:
@@ -354,6 +383,20 @@ def identify_or_create_buyer(
             )
         return BuyerIdentification(buyer_id=matched, created=False, matched_on="normalized_name")
 
+    alias = find_buyer_by_alias(session, normalized_name)
+    if alias is not None:
+        aliased_buyer, rule_id = alias
+        session.execute(
+            text(
+                "UPDATE learned_rules SET times_applied = times_applied + 1, updated_at = now() "
+                "WHERE id = :id"
+            ),
+            {"id": str(rule_id)},
+        )
+        return BuyerIdentification(
+            buyer_id=aliased_buyer, created=False, matched_on="buyer_alias", rule_id=rule_id
+        )
+
     # A non-empty normalized_name implies a non-empty raw name; `or ""` is
     # here for the type checker, not because the branch is reachable.
     buyer_id, created = _create_buyer(
@@ -397,6 +440,22 @@ def identify_and_link_buyer(
     if result.buyer_id is None:
         return result
 
+    if result.rule_id is not None:
+        # The link came from a learned rule: say so on the field, so the
+        # reviewer can see why this buyer is there (Section 7.13).
+        session.execute(
+            text(
+                "UPDATE document_headers SET buyer_id = :buyer_id, "
+                "field_provenance = field_provenance || jsonb_build_object('buyer_id', CAST(:prov AS text)), "
+                "updated_at = now() WHERE document_id = :document_id"
+            ),
+            {
+                "buyer_id": str(result.buyer_id),
+                "document_id": str(document_id),
+                "prov": f"learned_rule:{result.rule_id}",
+            },
+        )
+        return result
     session.execute(
         text(
             "UPDATE document_headers SET buyer_id = :buyer_id, updated_at = now() "

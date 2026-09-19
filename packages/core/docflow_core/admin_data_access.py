@@ -126,7 +126,16 @@ def get_tenant_overview(*, platform_admin_user_id: UUID, tenant_id: UUID) -> dic
                        tr.promo_monthly_price AS tier_promo_monthly_price,
                        tr.promo_days AS tier_promo_days,
                        tr.document_allowance AS tier_document_allowance,
-                       sp.code AS setup_fee_preset, sp.name AS setup_fee_preset_name
+                       sp.code AS setup_fee_preset, sp.name AS setup_fee_preset_name,
+                       (SELECT count(*) FROM buyer_merge_candidates c
+                          JOIN buyers n ON n.id = c.buyer_id AND n.deleted_at IS NULL
+                          JOIN buyers e ON e.id = c.existing_buyer_id AND e.deleted_at IS NULL
+                         WHERE c.tenant_id = t.id AND c.status = 'open' AND c.deleted_at IS NULL
+                       ) AS open_merge_candidates,
+                       (SELECT count(*) FROM learned_rules r
+                         WHERE r.tenant_id = t.id AND r.deleted_at IS NULL
+                           AND r.status IN ('active', 'disabled')
+                       ) AS learned_rules
                 FROM tenants t
                 LEFT JOIN tiers tr ON tr.id = t.tier_id
                 LEFT JOIN setup_fee_presets sp ON sp.id = t.setup_fee_preset_id

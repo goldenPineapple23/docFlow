@@ -95,7 +95,7 @@ export default function TenantPage({ params }: { params: Promise<{ id: string }>
       <DealTermsCard tenant={tenant} onChanged={refresh} />
 
       <section data-testid="onboarding-steps" className="mt-5 rounded-xl border border-gray-200 bg-white p-5">
-        <h2 className="text-sm font-semibold">Set up</h2>
+        <h2 className="text-sm font-semibold">Catalog, customers and rules</h2>
         <ul className="mt-2 space-y-1 text-sm">
           <li>
             <Link href={`/admin/tenants/${id}/catalog`} className="font-medium text-blue-700 hover:underline">
@@ -110,6 +110,20 @@ export default function TenantPage({ params }: { params: Promise<{ id: string }>
               Customer list →
             </Link>{" "}
             <span className="text-gray-600">optional</span>
+          </li>
+          <li>
+            <Link href={`/admin/tenants/${id}/merges`} className="font-medium text-blue-700 hover:underline">
+              Possible duplicate customers →
+            </Link>{" "}
+            <span data-testid="merge-count" className={tenant.open_merge_candidates ? "text-amber-800" : "text-gray-600"}>
+              {tenant.open_merge_candidates ? `${tenant.open_merge_candidates} to decide` : "none waiting"}
+            </span>
+          </li>
+          <li>
+            <Link href={`/admin/tenants/${id}/rules`} className="font-medium text-blue-700 hover:underline">
+              Learned rules →
+            </Link>{" "}
+            <span className="text-gray-600">{tenant.learned_rules}</span>
           </li>
         </ul>
       </section>

@@ -34,6 +34,14 @@ BUY-007 [warning/founder] Names had stray spaces or hidden characters
   what+why: Spaces at the ends of these names, or invisible characters inside them, were removed.
   next:     Nothing to do -- listed so the change is visible.
 
+BUY-008 [info/founder] This pair can't be merged any more
+  what+why: Since this list was loaded, the pair was already merged or dismissed, or one of the two customers was merged into someone else. Nothing was changed.
+  next:     Reload the list to see what is still open.
+
+BUY-009 [warning/founder] Both customers have a rule for this wording
+  what+why: Each of these customers already has a learned rule for the same product wording or unit. Merging would have to throw one away, and which one is right is your call, so nothing was merged.
+  next:     Open Learned rules for this tenant, delete the rule that is wrong, then merge again.
+
 CAT-001 [warning/founder] Rows with no SKU
   what+why: These rows have no SKU, so there is nothing to match purchase orders against.
   next:     Add the SKU, or remove the row from the file.
@@ -321,6 +329,10 @@ REV-004 [warning/tenant] This order isn't ready to approve
 REV-005 [warning/tenant] Someone else changed this order first
   what+why: This order changed while you had it open, so saving now would quietly overwrite what the other person did.
   next:     Reload the order, check what changed, then make your edit again.
+
+RUL-001 [info/founder] Proposed rules can't be switched on here
+  what+why: This rule is only a proposal. Proposals are not part of DocFlow yet, and no rule becomes active without a person confirming it in a review.
+  next:     Nothing to do. Confirm the match in a review if you want the rule.
 
 VAL-001 [warning/tenant] Line total doesn't match quantity times price
   what+why: On this line, the printed total isn't the quantity multiplied by the unit price. DocFlow changed nothing -- all three numbers are exactly as the document printed them.
