@@ -11,7 +11,7 @@ authenticated identity (Section 7.5 / Section 10).
 from __future__ import annotations
 
 import hashlib
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from docflow_core import file_types
 from docflow_core.db import tenant_session
@@ -41,11 +41,25 @@ async def upload_document(
     identity: AuthenticatedIdentity = Depends(get_current_identity),
 ) -> dict:
     _require_tenant(identity)
-    tenant_id = identity.tenant_id
-
     content = await file.read()
-    original_filename = file.filename or "upload"
+    return ingest_upload(identity.tenant_id, file.filename or "upload", content)
 
+
+def ingest_upload(
+    tenant_id: UUID,
+    original_filename: str,
+    content: bytes,
+    *,
+    is_test_batch: bool = False,
+) -> dict:
+    """
+    The one upload path (Section 10: no second upload handler for the
+    Console). Validates, stores, records, and -- for a normal upload --
+    enqueues. A test-batch file (Section 7.15.2 Step 6) is stored as
+    'staged' and NOT enqueued: it waits for the founder's "Run extraction"
+    (Step 7, D-112). `tenant_id` comes from the caller's authenticated
+    context -- the tenant's own session, or the Console's audited route.
+    """
     validation = file_types.validate_upload(content, original_filename)
     if not validation.ok:
         with tenant_session(tenant_id) as session:
@@ -78,6 +92,7 @@ async def upload_document(
         )
 
     content_sha256 = hashlib.sha256(content).hexdigest()
+    status = "staged" if is_test_batch else "pending"
 
     with tenant_session(tenant_id) as session:
         # CLAUDE.md Section 7.8: the same content for the same tenant "is
@@ -95,11 +110,11 @@ async def upload_document(
                 """
                 INSERT INTO documents
                     (id, tenant_id, original_filename, storage_path,
-                     source, status, content_sha256, is_possible_duplicate,
+                     source, status, content_sha256, is_test_batch, is_possible_duplicate,
                      duplicate_of_document_id, created_at)
                 VALUES
                     (:id, :tenant_id, :original_filename, :storage_path,
-                     'upload', 'pending', :content_sha256, :is_possible_duplicate,
+                     'upload', :status, :content_sha256, :is_test_batch, :is_possible_duplicate,
                      :duplicate_of_document_id, now())
                 """
             ),
@@ -108,22 +123,25 @@ async def upload_document(
                 "tenant_id": str(tenant_id),
                 "original_filename": original_filename,
                 "storage_path": storage_path,
+                "status": status,
                 "content_sha256": content_sha256,
+                "is_test_batch": is_test_batch,
                 "is_possible_duplicate": existing is not None,
                 "duplicate_of_document_id": str(existing) if existing else None,
             },
         )
 
-    # Enqueued after the transaction commits, so the task never races a
-    # document row that isn't visible yet. Interactive priority (Section
-    # 5.1): a single upload a user is waiting on, never the bulk queue.
-    celery_client.send_task(
-        "docflow.parse_and_extract",
-        args=[str(tenant_id), str(document_id)],
-        queue="interactive",
-    )
+    if not is_test_batch:
+        # Enqueued after the transaction commits, so the task never races a
+        # document row that isn't visible yet. Interactive priority (Section
+        # 5.1): a single upload a user is waiting on, never the bulk queue.
+        celery_client.send_task(
+            "docflow.parse_and_extract",
+            args=[str(tenant_id), str(document_id)],
+            queue="interactive",
+        )
 
-    response = {"document_id": str(document_id), "status": "pending"}
+    response = {"document_id": str(document_id), "status": status}
     if existing is not None:
         response["possible_duplicate_of"] = str(existing)
     return response

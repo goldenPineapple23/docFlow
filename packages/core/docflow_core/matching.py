@@ -743,6 +743,7 @@ def _upsert_sku_mapping_rule(
     match_value: dict,
     confirmed_by: UUID | None,
     source_document_id: UUID | None,
+    acting_as_tenant_id: UUID | None = None,
 ) -> UUID:
     """
     Insert or refresh the one active `sku_mapping` rule for
@@ -769,14 +770,15 @@ def _upsert_sku_mapping_rule(
             f"""
             INSERT INTO learned_rules
                 (id, tenant_id, buyer_id, rule_type, match_key, match_value, status,
-                 confirmed_by, source_document_id, created_at, updated_at)
+                 confirmed_by, acting_as_tenant_id, source_document_id, created_at, updated_at)
             VALUES
                 (:id, :tenant_id, :buyer_id, 'sku_mapping', :match_key, :match_value, 'active',
-                 :confirmed_by, :source_document_id, now(), now())
+                 :confirmed_by, :acting_as_tenant_id, :source_document_id, now(), now())
             ON CONFLICT {conflict} DO UPDATE
                 SET match_value = excluded.match_value,
                     status = 'active',
                     confirmed_by = excluded.confirmed_by,
+                    acting_as_tenant_id = excluded.acting_as_tenant_id,
                     source_document_id = excluded.source_document_id,
                     updated_at = now()
             RETURNING id
@@ -789,6 +791,9 @@ def _upsert_sku_mapping_rule(
             "match_key": match_key,
             "match_value": match_value,
             "confirmed_by": str(confirmed_by) if confirmed_by else None,
+            # Section 7.15.1: a rule the founder confirmed in the Console
+            # shows as DocFlow support in the tenant's own view.
+            "acting_as_tenant_id": str(acting_as_tenant_id) if acting_as_tenant_id else None,
             "source_document_id": str(source_document_id) if source_document_id else None,
         },
     ).mappings().first()
@@ -806,6 +811,7 @@ def confirm_sku_mapping(
     confirmed_by: UUID | None,
     tenant_wide: bool = False,
     review_action_id: UUID | None = None,
+    acting_as_tenant_id: UUID | None = None,
 ) -> UUID | None:
     """
     The Section 7.6 learning step: a reviewer said "this line means that
@@ -898,4 +904,5 @@ def confirm_sku_mapping(
         },
         confirmed_by=confirmed_by,
         source_document_id=row["document_id"],
+        acting_as_tenant_id=acting_as_tenant_id,
     )

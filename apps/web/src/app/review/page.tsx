@@ -5,7 +5,8 @@ import Link from "next/link";
 import { QUEUE_PAGE_SIZE, ReviewApiError, listDocuments, type QueueDocument } from "@/lib/review";
 import { ConfidenceBadge } from "@/components/review/confidence";
 import { PILL, StatusBadge } from "@/components/StatusBadge";
-import { AppHeader } from "@/components/AppHeader";
+import { ReviewChrome } from "@/components/review/ReviewChrome";
+import { useReviewScope } from "@/lib/reviewScope";
 
 /**
  * The review queue (CLAUDE.md Section 7.3, Phase 3).
@@ -52,6 +53,7 @@ const FILTERS: Array<{ value: string; label: string; blurb: string }> = [
 ];
 
 export default function ReviewQueuePage() {
+  const scope = useReviewScope();
   const [status, setStatus] = useState("needs_review");
   const [offset, setOffset] = useState(0);
   // The loaded filter and page travel WITH the rows, so "are we showing
@@ -93,7 +95,7 @@ export default function ReviewQueuePage() {
 
   return (
     <>
-      <AppHeader />
+      <ReviewChrome />
       <main className="mx-auto max-w-6xl p-6">
       <h1 className="text-xl font-semibold">Purchase orders</h1>
       <p className="mt-1 max-w-3xl text-sm text-gray-600">
@@ -172,7 +174,7 @@ export default function ReviewQueuePage() {
               >
                 <td className="px-4 py-3">
                   <Link
-                    href={`/review/${doc.id}`}
+                    href={scope.href(`/${doc.id}`)}
                     className="font-medium text-blue-700 hover:underline"
                   >
                     {doc.po_number ?? doc.original_filename}

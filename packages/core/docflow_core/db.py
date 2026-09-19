@@ -143,6 +143,7 @@ def _reset_rls_settings(session: Session) -> None:
     session.execute(text("RESET app.auth_user_id"))
     session.execute(text("RESET app.is_platform_admin"))
     session.execute(text("RESET app.intake_token"))
+    session.execute(text("RESET app.scheduler"))
 
 
 @contextmanager
@@ -243,6 +244,29 @@ def identity_lookup_session(auth_user_id: str) -> Iterator[Session]:
             text("SELECT set_config('app.auth_user_id', :auth_user_id, true)"),
             {"auth_user_id": auth_user_id},
         )
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@contextmanager
+def scheduler_session() -> Iterator[Session]:
+    """
+    Used only by `docflow_core.scheduled_jobs` to find and claim due rows in
+    `scheduled_jobs` across tenants (migration 0013's `scheduler_access`
+    policy). It sees that one table and nothing else -- every job then runs
+    in a tenant_session() for its own tenant. Like the token and identity
+    lookups, this is not the Section 7.15.1 admin bypass.
+    """
+    session_factory = get_session_factory()
+    session = session_factory()
+    try:
+        _reset_rls_settings(session)
+        session.execute(text("SET LOCAL app.scheduler = 'true'"))
         yield session
         session.commit()
     except Exception:

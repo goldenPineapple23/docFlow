@@ -429,6 +429,10 @@ def _is_blank(value: Any) -> bool:
     return isinstance(value, str) and not value.strip()
 
 
+def _is_blank(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
 def _confidence_of(raw: Any) -> Decimal | None:
     """Confidence arrives as a float from the model's JSON and as a NUMERIC
     from the database. Both become a Decimal here; anything else is treated as
@@ -577,6 +581,13 @@ def _header_warnings(snapshot: DocumentSnapshot) -> list[DocumentWarning]:
 
     for name, raw in sorted(snapshot.header_confidence.items()):
         confidence = _confidence_of(raw)
+        # An optional field the document simply doesn't have is shown empty,
+        # not flagged: "not confident" on a blank buyer email or ship-to was
+        # most of the checks on a typical order, and a list that is mostly
+        # noise trains reviewers to tick without reading (D-115). Required
+        # fields, and any field with a value, are still flagged.
+        if name not in REQUIRED_HEADER_FIELDS and _is_blank(header.get(name)):
+            continue
         if confidence is not None and confidence < CONFIDENCE_THRESHOLD:
             warnings.append(
                 DocumentWarning(

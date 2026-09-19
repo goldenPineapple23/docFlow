@@ -1,0 +1,11 @@
+Subject: Your email to $tenant_name was not processed
+
+Hello,
+
+You sent an email to $tenant_name's order address. That address is still
+being set up, so your message was received but not processed, and nobody at
+$tenant_name has seen it through DocFlow.
+
+Please send your order to your usual contact at $tenant_name for now.
+
+-- DocFlow (automatic reply; this mailbox is not monitored)

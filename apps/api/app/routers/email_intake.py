@@ -37,10 +37,9 @@ async def receive_inbound_email(token: str, request: Request) -> dict:
         # Generic 404 whether the token never existed or exists but isn't
         # active -- CLAUDE.md Section 7.15.1's "unreachable, not just
         # hidden" principle, applied here to intake tokens (DECISIONS.md).
-        # Full go-live gating (a freshly-created tenant's address
-        # auto-replying "not yet active" until Phase 5's go-live action)
-        # doesn't exist yet, so `status == 'active'` is the only accepting
-        # state for this slice.
+        # A token that is active but belongs to a tenant not yet live is
+        # accepted here and turned away inside process_inbound_email, with
+        # the "not yet active" auto-reply (D-114).
         raise HTTPException(status_code=404)
     tenant_id, _status = resolved
 

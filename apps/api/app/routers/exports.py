@@ -44,8 +44,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from app.actor import Actor, current_actor
 from app.celery_client import celery_client
-from app.deps import AuthenticatedIdentity, get_current_identity, require_tenant_member
 from app.errors import catalog_error
 
 router = APIRouter(prefix="/review", tags=["exports"])
@@ -66,11 +66,6 @@ class ExportBody(BaseModel):
     # catalog's EXP-002, not FastAPI's generic validation body (7.16.5).
     format: str
 
-
-def _user_id(identity: AuthenticatedIdentity) -> UUID:
-    if identity.local_user_id is None:
-        raise HTTPException(status_code=403, detail="This account cannot act on documents.")
-    return identity.local_user_id
 
 
 def _export_json(row: dict[str, Any]) -> dict[str, Any]:
@@ -103,13 +98,16 @@ def _export_json(row: dict[str, Any]) -> dict[str, Any]:
 def create_export(
     document_id: UUID,
     body: ExportBody,
-    identity: AuthenticatedIdentity = Depends(get_current_identity),
+    actor: Actor = Depends(current_actor),
 ) -> dict:
-    tenant_id = require_tenant_member(identity)
-    user_id = _user_id(identity)
+    tenant_id = actor.tenant_id
+    user_id = actor.require_user_id()
     with tenant_session(tenant_id) as session:
         try:
-            export_id = request_export(session, tenant_id, document_id, body.format, user_id=user_id)
+            export_id = request_export(
+                session, tenant_id, document_id, body.format,
+                user_id=user_id, acting_as_tenant_id=actor.acting_as_tenant_id,
+            )
         except LookupError as exc:
             raise HTTPException(status_code=404) from exc
         except ExportRequestError as exc:
@@ -132,9 +130,9 @@ def create_export(
 @router.get("/documents/{document_id}/exports")
 def document_exports(
     document_id: UUID,
-    identity: AuthenticatedIdentity = Depends(get_current_identity),
+    actor: Actor = Depends(current_actor),
 ) -> dict:
-    tenant_id = require_tenant_member(identity)
+    tenant_id = actor.tenant_id
     with tenant_session(tenant_id) as session:
         exists = session.execute(
             text("SELECT 1 FROM documents WHERE id = :id AND deleted_at IS NULL"),
@@ -149,13 +147,13 @@ def document_exports(
 @router.get("/exports/{export_id}")
 def export_status(
     export_id: UUID,
-    identity: AuthenticatedIdentity = Depends(get_current_identity),
+    actor: Actor = Depends(current_actor),
 ) -> dict:
     """
     One export. Once it is ready, also a download URL that works for a few
     minutes -- minted only after RLS has let this tenant read the row.
     """
-    tenant_id = require_tenant_member(identity)
+    tenant_id = actor.tenant_id
     with tenant_session(tenant_id) as session:
         row = get_export(session, export_id)
     if row is None:

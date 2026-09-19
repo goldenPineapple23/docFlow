@@ -39,16 +39,12 @@ from sqlalchemy.orm import Session
 
 from docflow_core import file_types
 from docflow_core.config import get_settings
+
+# Named constants (Section 7.15.4) are defined once, in docflow_core.constants.
+from docflow_core.constants import MAX_ATTACHMENTS_PER_EMAIL, UNKNOWN_SENDER_HOURLY_LIMIT
 from docflow_core.db import tenant_session, token_lookup_session
 from docflow_core.duplicates import find_content_duplicate_at_ingest
 from docflow_core.storage import save_file
-
-# ── Named constants (CLAUDE.md Section 7.15.4) ─────────────────────────────
-# These become tenant-configurable / a constants table only once Phase 5's
-# Console exists to expose them; for this slice they are the module-level
-# constants CLAUDE.md names, defined once here rather than scattered inline.
-MAX_ATTACHMENTS_PER_EMAIL = 10
-UNKNOWN_SENDER_HOURLY_LIMIT = 20
 
 # A lightweight Celery producer, separate from apps/api/app/celery_client.py
 # and apps/worker/app/celery_app.py's instances but pointed at the same
@@ -408,6 +404,32 @@ def _insert_intake_rejection(
     )
 
 
+def _reply_not_active(session: Session, tenant_id: UUID, tenant_name: str, sender: str | None) -> None:
+    """The not-yet-active auto-reply, at most once a day per sender, so a
+    mail loop or a busy buyer never turns this address into a spam cannon."""
+    if not sender:
+        return
+    from docflow_core import email_outbox
+
+    earlier = session.execute(
+        text(
+            "SELECT count(*) FROM intake_rejections WHERE error_code = 'INT-005' "
+            "AND lower(sender_email) = lower(:sender) AND created_at > now() - interval '1 day'"
+        ),
+        {"sender": sender},
+    ).scalar_one()
+    if earlier > 1:  # the rejection just written is one of them
+        return
+    email_outbox.enqueue(
+        session,
+        tenant_id=tenant_id,
+        to_address=sender,
+        template="intake_not_active",
+        params={"tenant_name": tenant_name},
+        related_type="intake_rejection",
+    )
+
+
 def _insert_quarantined_document(
     session: Session,
     tenant_id: UUID,
@@ -549,6 +571,24 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
                 return ProcessResult(
                     outcome="duplicate", raw_email_id=UUID(str(duplicate["id"])), attachments=[]
                 )
+
+        # Section 7.15.2 Step 2: the intake address "exists from this moment but
+        # is not live: until go-live (Step 9) it auto-replies 'this address is
+        # not yet active' and processes nothing" (D-114). Logged, never read.
+        tenant = session.execute(
+            text("SELECT name, intake_address_active FROM tenants WHERE id = :id"),
+            {"id": str(tenant_id)},
+        ).mappings().first()
+        if tenant is not None and not tenant["intake_address_active"]:
+            _insert_intake_rejection(
+                session, tenant_id, parsed, original_filename=None, detected_type=None, error_code="INT-005"
+            )
+            raw_email_id = _insert_raw_email(
+                session, tenant_id, parsed, auth, sender_domain,
+                outcome="rejected", attachment_count=len(parsed.attachments),
+            )
+            _reply_not_active(session, tenant_id, tenant["name"], parsed.sender_email)
+            return ProcessResult(outcome="rejected", raw_email_id=raw_email_id, attachments=[])
 
         num_attachments = len(parsed.attachments)
 

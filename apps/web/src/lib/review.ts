@@ -1,4 +1,5 @@
 import { API_BASE_URL, apiFetch } from "./api";
+import { reviewApiBase } from "./reviewScope";
 
 /**
  * The review API, typed (CLAUDE.md Section 7.3, Phase 3 slice 3).
@@ -208,11 +209,11 @@ export interface QueuePage {
 export function listDocuments(status?: string, offset = 0): Promise<QueuePage> {
   const params = new URLSearchParams({ limit: String(QUEUE_PAGE_SIZE), offset: String(offset) });
   if (status) params.set("status", status);
-  return request(`/review/documents?${params.toString()}`);
+  return request(`${reviewApiBase()}/documents?${params.toString()}`);
 }
 
 export function getDocument(id: string): Promise<DocumentDetail> {
-  return request(`/review/documents/${id}`);
+  return request(`${reviewApiBase()}/documents/${id}`);
 }
 
 export function saveEdits(
@@ -223,28 +224,28 @@ export function saveEdits(
     expected_version: string;
   },
 ): Promise<{ review_action_id: string | null; version: string }> {
-  return request(`/review/documents/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+  return request(`${reviewApiBase()}/documents/${id}`, { method: "PATCH", body: JSON.stringify(body) });
 }
 
 export function approveDocument(
   id: string,
   acknowledgements: Array<{ warning_id: string; code: string; text: string; note: string | null }>,
 ): Promise<{ review_action_id: string; status: string }> {
-  return request(`/review/documents/${id}/approve`, {
+  return request(`${reviewApiBase()}/documents/${id}/approve`, {
     method: "POST",
     body: JSON.stringify({ acknowledgements }),
   });
 }
 
 export function rejectDocument(id: string, note: string): Promise<{ status: string }> {
-  return request(`/review/documents/${id}/reject`, {
+  return request(`${reviewApiBase()}/documents/${id}/reject`, {
     method: "POST",
     body: JSON.stringify({ note }),
   });
 }
 
 export function searchItems(q: string): Promise<{ items: CatalogItem[] }> {
-  return request(`/review/items?q=${encodeURIComponent(q)}`);
+  return request(`${reviewApiBase()}/items?q=${encodeURIComponent(q)}`);
 }
 
 export function createMapping(
@@ -252,7 +253,7 @@ export function createMapping(
   lineId: string,
   itemId: string,
 ): Promise<{ learned_rule_id: string | null }> {
-  return request(`/review/documents/${documentId}/mapping`, {
+  return request(`${reviewApiBase()}/documents/${documentId}/mapping`, {
     method: "POST",
     body: JSON.stringify({ line_id: lineId, item_id: itemId }),
   });
@@ -272,7 +273,7 @@ export function originalDocumentUrl(id: string): Promise<{
   // the original is shown as-is.
   preview_kind: "converted_image" | "extracted_text" | null;
 }> {
-  return request(`/review/documents/${id}/original`);
+  return request(`${reviewApiBase()}/documents/${id}/original`);
 }
 
 // ── Exports (CLAUDE.md Section 7.4, Phase 4) ────────────────────────────────
@@ -300,14 +301,14 @@ export type ExportRecord = {
 };
 
 export function createExport(documentId: string, format: ExportFormat): Promise<{ export: ExportRecord }> {
-  return request(`/review/documents/${documentId}/exports`, {
+  return request(`${reviewApiBase()}/documents/${documentId}/exports`, {
     method: "POST",
     body: JSON.stringify({ format }),
   });
 }
 
 export function listExports(documentId: string): Promise<{ exports: ExportRecord[] }> {
-  return request(`/review/documents/${documentId}/exports`);
+  return request(`${reviewApiBase()}/documents/${documentId}/exports`);
 }
 
 /**
@@ -319,7 +320,7 @@ export async function getExport(
   exportId: string,
 ): Promise<{ export: ExportRecord; download?: { url: string; expires_at: number } }> {
   const result = await request<{ export: ExportRecord; download?: { url: string; expires_at: number } }>(
-    `/review/exports/${exportId}`,
+    `${reviewApiBase()}/exports/${exportId}`,
   );
   if (result.download) {
     result.download = { ...result.download, url: `${API_BASE_URL}${result.download.url}` };

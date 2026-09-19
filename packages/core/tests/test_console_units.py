@@ -28,6 +28,21 @@ TEMPLATE_PARAMS = {
         "details": "d",
         "console_link": "c",
     },
+    "go_live": {
+        "tenant_name": "Acme Test Distributor",
+        "intake_address": "orders-x@intake.example.test",
+        "app_url": "https://app.example.test",
+        "tier_name": "Starter",
+        "document_allowance": "300",
+    },
+    "intake_not_active": {"tenant_name": "Acme Test Distributor"},
+    "first_week_checkin": {
+        "tenant_name": "Acme Test Distributor",
+        "documents_received": 12,
+        "documents_approved": 10,
+        "zero_edit_approvals": 7,
+        "awaiting_review": 2,
+    },
 }
 
 

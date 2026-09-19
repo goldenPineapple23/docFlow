@@ -242,6 +242,46 @@ INT-004 [high/both] Held: sender couldn't be verified
   what+why: This email failed the sending domain's own authentication check, so DocFlow held it instead of processing it automatically.
   next:     DocFlow will review this before releasing it -- no action is needed from you right now.
 
+INT-005 [info/both] This address isn't active yet
+  what+why: DocFlow is still being set up for this account, so orders sent to this address are not read yet. This email was logged, not processed.
+  next:     Please send the order to your usual contact at the company for now.
+
+ONB-001 [warning/founder] Load the catalog first
+  what+why: The test batch is matched against this tenant's catalog, and no catalog has been committed yet, so the results wouldn't show how DocFlow will really perform.
+  next:     Commit the catalog on the Catalog page, then upload the test batch.
+
+ONB-002 [info/founder] The test batch is already finished
+  what+why: This tenant's test batch was marked complete, so nothing more is added to it or run as part of it.
+  next:     Nothing to do for onboarding. Anything the customer sends from now on goes through their normal intake.
+
+ONB-003 [info/founder] Nothing is waiting to run
+  what+why: Every test-batch document has already been sent for extraction.
+  next:     Upload more sample orders first if you want to run more.
+
+ONB-004 [warning/founder] Some test orders aren't approved yet
+  what+why: The test batch is complete only when every document in it has been reviewed and approved, and at least one hasn't been.
+  next:     Open the remaining test orders from the list on this page and review them.
+
+ONB-005 [warning/founder] Not ready to go live yet
+  what+why: Going live needs a completed test batch, so the customer's first real orders are read with a checked catalog and reviewed settings.
+  next:     Finish the test batch on this page, then go live.
+
+ONB-006 [info/founder] This tenant is already live
+  what+why: Go-live has already run for this tenant, so nothing was changed or billed again.
+  next:     Nothing to do.
+
+ONB-007 [warning/founder] The setup fee needs an amount
+  what+why: Go-live records the setup fee on the tenant and, when billed through Stripe, adds it to the first invoice. No amount was given.
+  next:     Enter the setup fee (0 if you are waiving it) and try again.
+
+ONB-008 [high/founder] Stripe didn't finish setting up billing
+  what+why: Go-live stopped before the tenant was put live, so their intake address is still off and no go-live email was sent. Any step Stripe already completed is reused, never repeated, when you try again.
+  next:     Try go-live again. If it fails again, check this customer in the Stripe dashboard.
+
+ONB-009 [warning/founder] This tenant has no tier
+  what+why: Billing and the monthly allowance both come from the tenant's tier, and none is set.
+  next:     Set the tier on the tenant, then go live.
+
 REV-001 [warning/tenant] Some warnings still need a look
   what+why: This order has warnings nobody has acknowledged yet. DocFlow doesn't approve an order while something on it is still unexplained.
   next:     Open each warning, fix the value or confirm it's right, then approve.

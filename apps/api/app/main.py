@@ -1,5 +1,5 @@
 from docflow_core.config import get_settings
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import admin, auth, documents, email_intake, exports, review
@@ -45,6 +45,18 @@ app.include_router(documents.router)
 app.include_router(email_intake.router)
 app.include_router(review.router)
 app.include_router(exports.router)
+
+# The same review and export routes, a second time, for the founder acting in
+# one tenant from the Console (Section 7.15.1; D-111). Same code, different
+# actor: the gate 404s anyone who is not a platform admin, audits the
+# request, and hands `current_actor` the founder-as-support Actor. There is
+# no second review implementation to drift (Section 10).
+for _router in (review.router, exports.router):
+    app.include_router(
+        _router,
+        prefix="/admin/tenants/{acting_tenant_id}/act",
+        dependencies=[Depends(admin.acting_as_gate)],
+    )
 
 
 @app.get("/healthz")

@@ -14,6 +14,7 @@
 export const PILL = "inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium";
 
 const STATUS: Record<string, { label: string; className: string }> = {
+  staged: { label: "Uploaded, not run yet", className: "bg-slate-100 text-slate-700" },
   pending: { label: "Waiting to be read", className: "bg-slate-100 text-slate-700" },
   processing: { label: "Being read", className: "bg-sky-100 text-sky-800" },
   needs_review: { label: "Needs review", className: "bg-amber-100 text-amber-800" },

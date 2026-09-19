@@ -1,0 +1,16 @@
+Subject: Your first week with DocFlow
+
+Hello,
+
+$tenant_name has been live on DocFlow for a week. In that time:
+
+  Orders received:            $documents_received
+  Approved:                   $documents_approved
+  Approved with no changes:   $zero_edit_approvals
+  Still waiting for review:   $awaiting_review
+
+If anything was read wrong, correcting it in Review teaches DocFlow for next
+time. Reply to this email if you have any questions or would like a quick
+call.
+
+-- DocFlow

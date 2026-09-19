@@ -39,8 +39,9 @@ class _FakeCeleryClient:
 class _TestIntakeTenant:
     """Creates a throwaway tenant + active intake address, cleans up everything on exit."""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, *, live: bool = True):
         self.name = name
+        self.live = live
         self.tenant_id = uuid4()
         self.token = uuid4().hex
         self.address = f"{self.token}@mail.docflow.test"
@@ -49,11 +50,14 @@ class _TestIntakeTenant:
         with platform_session() as session:
             session.execute(
                 text(
+                    # A live intake address: mail to a tenant that hasn't gone
+                    # live is logged and not read (D-114), tested separately.
                     "INSERT INTO tenants "
-                    "(id, name, status, onboarding_status, created_at, updated_at, status_changed_at) "
-                    "VALUES (:id, :name, 'active', 'tenant_created', now(), now(), now())"
+                    "(id, name, status, onboarding_status, intake_address_active, "
+                    "created_at, updated_at, status_changed_at) "
+                    "VALUES (:id, :name, 'active', 'tenant_created', :live, now(), now(), now())"
                 ),
-                {"id": str(self.tenant_id), "name": self.name},
+                {"id": str(self.tenant_id), "name": self.name, "live": self.live},
             )
             session.execute(
                 text(
@@ -376,3 +380,33 @@ def test_tier2_attachment_is_accepted_and_a_tier3_one_is_rejected_by_code(client
 def test_unresolvable_token_returns_404_without_leaking_existence(client):
     response = client.post(f"/intake/email/{uuid4().hex}", json=_pm_payload("nobody@example.test"))
     assert response.status_code == 404
+
+
+@requires_email_intake_schema
+def test_mail_to_a_tenant_not_yet_live_is_logged_not_read_and_answered_once_a_day(client, monkeypatch):
+    """Section 7.15.2 Step 2: until go-live the address "auto-replies 'this
+    address is not yet active' and processes nothing" (D-114)."""
+    fake_celery = _FakeCeleryClient()
+    monkeypatch.setattr("docflow_core.email_intake.celery_client", fake_celery)
+    with _TestIntakeTenant("Acme Test Distributor", live=False) as tenant:
+        for _ in range(2):
+            payload = _pm_payload(
+                "early-buyer@example.test",
+                attachments=[_pm_attachment("po.txt", b"PO Number: TEST-0001\n")],
+            )
+            response = client.post(f"/intake/email/{tenant.token}", json=payload)
+            assert response.status_code == 200
+            assert response.json()["outcome"] == "rejected"
+
+        assert tenant.documents() == []
+        assert fake_celery.sent == []
+        assert [r["error_code"] for r in tenant.intake_rejections()] == ["INT-005", "INT-005"]
+        with platform_session() as session:
+            replies = session.execute(
+                text(
+                    "SELECT to_address FROM email_outbox "
+                    "WHERE tenant_id = :t AND template = 'intake_not_active'"
+                ),
+                {"t": str(tenant.tenant_id)},
+            ).scalars().all()
+        assert replies == ["early-buyer@example.test"]  # once, not once per email

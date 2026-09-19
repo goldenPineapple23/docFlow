@@ -22,8 +22,9 @@ export function ConsoleNav() {
 
   return (
     <header className="sticky top-0 z-20 bg-slate-900 text-slate-100">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3">
-        <nav className="flex items-center gap-5 text-sm">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-x-4 gap-y-2 px-5 py-3">
+        {/* Wraps on a narrow screen rather than pushing Sign out off the page. */}
+        <nav className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-1 text-sm">
           <span className="font-semibold tracking-tight">
             DocFlow <span className="font-normal text-slate-400">Console</span>
           </span>
@@ -48,7 +49,7 @@ export function ConsoleNav() {
             await supabase.auth.signOut();
             router.push("/login");
           }}
-          className="rounded-md border border-slate-600 px-2.5 py-1 text-sm text-slate-200 hover:bg-slate-800"
+          className="shrink-0 rounded-md border border-slate-600 px-2.5 py-1 text-sm text-slate-200 hover:bg-slate-800"
         >
           Sign out
         </button>

@@ -391,6 +391,22 @@ def test_confidence_exactly_at_the_threshold_is_not_flagged():
     assert [w for w in evaluate_document(snapshot) if w.code == CODE_LOW_CONFIDENCE] == []
 
 
+def test_an_empty_optional_field_is_not_flagged_but_everything_else_still_is():
+    """D-115: "not confident" on a blank ship-to or buyer email was noise. A
+    required field, or an optional one that HAS a value, is still flagged."""
+    snapshot = _snapshot(
+        header={"notes": None, "ship_to_address": "  ", "currency": None, "payment_terms": "Net 30"},
+        header_confidence={
+            "notes": 0.3,  # empty, optional -> not flagged
+            "ship_to_address": 0.3,  # blank text, optional -> not flagged
+            "currency": 0.3,  # empty but required -> still flagged
+            "payment_terms": 0.3,  # optional but it has a value -> still flagged
+        },
+    )
+    flagged = {w.field_name for w in evaluate_document(snapshot) if w.code == CODE_LOW_CONFIDENCE}
+    assert flagged == {"currency", "payment_terms"}
+
+
 def test_a_confidence_map_with_no_numbers_in_it_never_crashes():
     snapshot = _snapshot(header_confidence={"po_number": None, "currency": "n/a"})
     assert [w for w in evaluate_document(snapshot) if w.code == CODE_LOW_CONFIDENCE] == []

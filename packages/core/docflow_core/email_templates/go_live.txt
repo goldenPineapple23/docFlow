@@ -1,0 +1,24 @@
+Subject: DocFlow is live for $tenant_name
+
+Hello,
+
+DocFlow is now live for $tenant_name. From today, purchase orders sent to
+your DocFlow address are read automatically and wait for your review:
+
+    $intake_address
+
+Getting started:
+
+  1. Sign in: $app_url
+  2. Forward the address above to the buyers who send you orders, or set up
+     a forwarding rule from your current order inbox.
+  3. Open Review, check each order, and approve it. Nothing is exported
+     until a person approves it.
+  4. Download the approved order as CSV, Excel, JSON or QuickBooks (IIF).
+
+Your plan: $tier_name, including $document_allowance documents a month.
+Your first invoice comes from Stripe by email.
+
+We will check in with you after your first week.
+
+-- DocFlow

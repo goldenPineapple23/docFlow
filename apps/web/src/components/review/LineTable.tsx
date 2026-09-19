@@ -77,8 +77,11 @@ export function LineTable({
           DocFlow didn&apos;t find any line items on this order. Check the original before approving.
         </p>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-sky-200 bg-white shadow-sm">
-          <table className="w-full table-fixed border-collapse">
+        // A floor on the table's width, and sideways scrolling below it: the
+        // columns are percentages, so without one they squeeze down until
+        // numbers and inputs are unreadable on a narrow screen.
+        <div className="overflow-x-auto rounded-lg border border-sky-200 bg-white shadow-sm">
+          <table className="w-full min-w-[40rem] table-fixed border-collapse">
             <caption className="sr-only">Line items on this order</caption>
             <thead>
               <tr className="bg-sky-100/70 text-left text-[11px] uppercase tracking-[0.05em] text-sky-900/70">
@@ -131,10 +134,15 @@ function LineRow({
   onChange: (lineId: string, field: string, value: string) => void;
   onConfirmMapping: (lineId: string, itemId: string) => Promise<void>;
 }) {
-  const [open, setOpen] = useState(false);
   const low = isLowConfidence(line.confidence);
   // Anything a reviewer would want to look at before approving this line.
   const needsAttention = low || line.uom_mismatch || !line.matched_item_id;
+  // The details row starts open when there is something to see, and the
+  // arrow always opens and closes it. It used to be forced open for those
+  // lines, so the arrow only flipped direction and seemed broken.
+  const [open, setOpen] = useState(needsAttention);
+  // For a line already matched: the catalog search, shown on "Change".
+  const [changing, setChanging] = useState(false);
 
   return (
     <>
@@ -186,6 +194,7 @@ function LineRow({
             onClick={() => setOpen((o) => !o)}
             aria-expanded={open}
             aria-label={`Catalog match and checks for line ${line.line_number}`}
+            title={open ? "Hide this line's catalog match and checks" : "Show this line's catalog match and checks"}
             className={[
               "rounded px-1 text-xs leading-5",
               needsAttention
@@ -202,11 +211,10 @@ function LineRow({
         Matching state and per-line checks sit in a row of their own. They are
         detail a reviewer wants occasionally; inline, they made every order
         several screens tall. The row opens automatically when there IS
-        something to see, so nothing hides behind a click -- the chevron is
-        only a way to collapse it again, or to open a line that is already
-        fine in order to change its match.
+        something to see, so nothing hides behind a click -- the chevron
+        collapses it, or opens a line that is already fine to change its match.
       */}
-      {open || needsAttention ? (
+      {open ? (
         <tr className={low ? "bg-amber-50/70" : "bg-white"}>
           <td />
           <td colSpan={COLUMNS.length + 1} className="px-2 pb-3 pt-0">
@@ -222,11 +230,11 @@ function LineRow({
               ) : (
                 <span className="text-xs text-gray-600">No catalog match.</span>
               )}
-              {!disabled && line.matched_item_id && !open ? (
+              {!disabled && line.matched_item_id && !changing ? (
                 <button
                   type="button"
                   className="text-xs text-blue-700 underline"
-                  onClick={() => setOpen(true)}
+                  onClick={() => setChanging(true)}
                 >
                   Change
                 </button>
@@ -247,7 +255,7 @@ function LineRow({
             <MatchPicker
               line={line}
               disabled={disabled}
-              expanded={open || !line.matched_item_id}
+              expanded={changing || !line.matched_item_id}
               onConfirmMapping={onConfirmMapping}
             />
           </td>

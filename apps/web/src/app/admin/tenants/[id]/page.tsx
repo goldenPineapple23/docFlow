@@ -5,6 +5,8 @@ import Link from "next/link";
 import { getTenantOverview, listOutbox, sendInvite, type OutboxEmail, type TenantOverview } from "@/lib/admin";
 import { ReviewApiError, type CatalogError } from "@/lib/review";
 import { CatalogErrorBox } from "@/components/admin/CatalogErrorBox";
+import { GoLivePanel } from "@/components/admin/GoLivePanel";
+import { TestBatchPanel } from "@/components/admin/TestBatchPanel";
 import { OutboxList } from "@/components/admin/OutboxList";
 
 /**
@@ -108,6 +110,9 @@ export default function TenantPage({ params }: { params: Promise<{ id: string }>
           </li>
         </ul>
       </section>
+
+      <TestBatchPanel tenantId={id} onboardingStatus={tenant.onboarding_status} onChanged={refresh} />
+      <GoLivePanel tenant={tenant} onChanged={refresh} />
 
       <section className="mt-5 rounded-xl border border-gray-200 bg-white p-5">
         <h2 className="text-sm font-semibold">Invite the owner</h2>

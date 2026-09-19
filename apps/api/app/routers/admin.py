@@ -18,22 +18,27 @@ user-facing failure (Section 7.16.5).
 from __future__ import annotations
 
 import hashlib
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 from uuid import UUID
 
-from docflow_core import admin_data_access, catalog_import, file_types
+from docflow_core import admin_data_access, catalog_import, external_services, file_types, onboarding
 from docflow_core.admin_data_access import ConsoleError
 from docflow_core.catalog_import import CatalogImportError
+from docflow_core.config import get_settings
+from docflow_core.constants import INVOICE_DAYS_UNTIL_DUE
 from docflow_core.db import tenant_session
 from docflow_core.errors import get_error
 from docflow_core.external_services import ExternalServiceError
 from docflow_core.storage import read_file, save_file
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, EmailStr, Field
 
+from app.actor import Actor
 from app.celery_client import celery_client
 from app.deps import AuthenticatedIdentity, require_platform_admin
 from app.errors import catalog_error
+from app.routers.documents import ingest_upload
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -272,6 +277,54 @@ def _console_act(identity: AuthenticatedIdentity, tenant_id: UUID, action: str, 
     ):
         raise HTTPException(status_code=404)
     return admin_id
+
+
+# ── Acting-as: the tenant's own review and export routes (D-111) ────────────
+
+
+# Path parameters that name the thing acted on, in the order preferred for
+# the audit row's target_id.
+_ACTING_TARGETS = (("document_id", "document"), ("export_id", "export"))
+
+
+def acting_as_gate(
+    request: Request,
+    acting_tenant_id: UUID,
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> None:
+    """
+    The Console's way into a tenant's review and export routes (Section
+    7.15.1, "Acting-as, not impersonation"). main.py mounts those routers a
+    second time under /admin/tenants/{acting_tenant_id}/act with this as a
+    router dependency, so it runs before the route's own `current_actor`.
+
+    404 to anyone who is not a platform admin (require_platform_admin), and
+    for a tenant that doesn't exist. One `admin_actions` row per request,
+    written before the work, naming the route template -- never a value from
+    a document. Then the route runs in the tenant's own session as the
+    founder, with acting_as_tenant_id on everything it writes.
+    """
+    route = request.scope.get("route")
+    target_type, target_id = "tenant", None
+    for param, kind in _ACTING_TARGETS:
+        if param in request.path_params:
+            try:
+                target_id = UUID(str(request.path_params[param]))
+            except ValueError:
+                raise HTTPException(status_code=404) from None
+            target_type = kind
+            break
+    admin_id = _console_act(
+        identity,
+        acting_tenant_id,
+        "acting_as_read" if request.method == "GET" else "acting_as_write",
+        target_type=target_type,
+        target_id=target_id,
+        payload={"method": request.method, "route": getattr(route, "path_format", None)},
+    )
+    request.state.acting_actor = Actor(
+        tenant_id=acting_tenant_id, user_id=admin_id, role=None, acting_as_tenant_id=acting_tenant_id
+    )
 
 
 def _start_import(
@@ -516,3 +569,222 @@ def discard_import(
         except CatalogImportError as exc:
             raise _import_error(exc) from exc
     return {"ok": True}
+
+
+# ── Test batch and go-live (Steps 6-9; D-112, D-113) ────────────────────────
+
+
+def _onboarding_error(exc: onboarding.OnboardingError) -> HTTPException:
+    return catalog_error(exc.code, status_code=409, extra=exc.detail or None)
+
+
+@router.get("/tenants/{tenant_id}/test-batch")
+def get_test_batch(
+    tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    """Steps 6-8 on the tenant page: every test document, its status and cost."""
+    _console_act(identity, tenant_id, "read", target_type="test_batch")
+    with tenant_session(tenant_id) as session:
+        documents = onboarding.list_test_batch_documents(session)
+    return {"documents": [_jsonable(d) for d in documents]}
+
+
+@router.post("/tenants/{tenant_id}/test-batch")
+async def upload_test_batch(
+    tenant_id: UUID,
+    files: list[UploadFile] = File(...),
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    """
+    Step 6: "Multi-file upload of the 5-10 sample POs through the same upload
+    endpoint as production, with is_test_batch = true." The same
+    `ingest_upload` a tenant's own upload runs -- all 7.11 checks included --
+    with each file stored as 'staged' until Step 7. One file failing its
+    checks does not stop the others; each gets its own result.
+    """
+    admin_id = _console_act(
+        identity, tenant_id, "test_batch_upload", target_type="test_batch", payload={"files": len(files)}
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            onboarding.check_test_batch_open(session, tenant_id)
+        except onboarding.OnboardingError as exc:
+            raise _onboarding_error(exc) from exc
+
+    results: list[dict[str, Any]] = []
+    for upload in files:
+        content = await upload.read(_MAX_UPLOAD_BYTES + 1)
+        filename = upload.filename or "upload"
+        try:
+            result = ingest_upload(tenant_id, filename, content, is_test_batch=True)
+            results.append({"filename": filename, **result})
+        except HTTPException as exc:
+            results.append({"filename": filename, "error": exc.detail})
+
+    stored = [r["document_id"] for r in results if "document_id" in r]
+    if stored:
+        with tenant_session(tenant_id) as session:
+            onboarding.record_test_batch_upload(session, tenant_id, stored, actor_user_id=admin_id)
+    return {"results": results}
+
+
+@router.post("/tenants/{tenant_id}/test-batch/run")
+def run_test_batch(
+    tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    """Step 7: the staged documents go through the normal pipeline at
+    interactive priority. Enqueued after commit, oldest first."""
+    admin_id = _console_act(identity, tenant_id, "test_batch_run", target_type="test_batch")
+    with tenant_session(tenant_id) as session:
+        try:
+            document_ids = onboarding.start_test_batch_run(session, tenant_id, actor_user_id=admin_id)
+        except onboarding.OnboardingError as exc:
+            raise _onboarding_error(exc) from exc
+    for document_id in document_ids:
+        celery_client.send_task(
+            "docflow.parse_and_extract", args=[str(tenant_id), str(document_id)], queue="interactive"
+        )
+    return {"started": len(document_ids)}
+
+
+@router.post("/tenants/{tenant_id}/test-batch/complete")
+def complete_test_batch(
+    tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    """Step 8: "When every test-batch document is approved, ... 'Mark test
+    batch complete'", which unlocks go-live."""
+    admin_id = _console_act(identity, tenant_id, "test_batch_complete", target_type="test_batch")
+    with tenant_session(tenant_id) as session:
+        try:
+            onboarding.mark_test_batch_complete(session, tenant_id, actor_user_id=admin_id)
+        except onboarding.OnboardingError as exc:
+            raise _onboarding_error(exc) from exc
+    return {"onboarding_status": "test_batch_complete"}
+
+
+class GoLiveRequest(BaseModel):
+    # Money as a string (Section 7.1); parsed to Decimal below.
+    setup_fee_amount: str | None = Field(default=None, max_length=12)
+    setup_fee_billing: Literal["stripe", "invoiced_manually"]
+    setup_fee_note: str | None = Field(default=None, max_length=500)
+    founding_price: bool = False
+
+
+def _setup_fee(raw: str | None) -> Decimal:
+    if raw is None or not raw.strip():
+        raise catalog_error("ONB-007", status_code=422)
+    try:
+        amount = Decimal(raw.strip().replace(",", ""))
+    except InvalidOperation:
+        raise catalog_error("ONB-007", status_code=422) from None
+    if not amount.is_finite() or amount < 0 or amount != amount.quantize(Decimal("0.01")):
+        raise catalog_error("ONB-007", status_code=422)
+    return amount.quantize(Decimal("0.01"))
+
+
+@router.get("/tenants/{tenant_id}/go-live")
+def go_live_plan(
+    tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    """What go-live will do and bill, for the form -- all from the tenant and
+    its tier, never typed in (Section 7.15.2)."""
+    _console_act(identity, tenant_id, "read", target_type="go_live_plan")
+    with tenant_session(tenant_id) as session:
+        try:
+            plan = onboarding.plan_go_live(session, tenant_id)
+        except onboarding.OnboardingError as exc:
+            raise _onboarding_error(exc) from exc
+    promo = plan.promo_monthly_price
+    return {
+        "tier_name": plan.tier_name,
+        "monthly_price": str(plan.monthly_price),
+        "promo_monthly_price": str(promo) if promo is not None else None,
+        "promo_months": plan.promo_months,
+        "document_allowance": plan.document_allowance,
+        "invite_sent": plan.invite_sent,
+        "invoice_days_until_due": INVOICE_DAYS_UNTIL_DUE,
+    }
+
+
+@router.post("/tenants/{tenant_id}/go-live")
+def go_live(
+    tenant_id: UUID,
+    body: GoLiveRequest,
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    """
+    Step 9, in an order that is safe to retry at any point:
+      1. Stripe: subscription (+ setup fee, + founding coupon). Retry-safe by
+         construction (external_services.start_subscription).
+      2. The invite, if it hasn't gone -- re-sendable anyway (Step 3).
+      3. One database transaction: intake live, go-live email queued,
+         first-week check-in scheduled, onboarding_status 'live'.
+    A failure in 1 or 2 leaves the tenant not live, and trying again repeats
+    nothing that already happened (ONB-008).
+    """
+    fee = _setup_fee(body.setup_fee_amount)
+    admin_id = _console_act(
+        identity,
+        tenant_id,
+        "go_live",
+        target_type="tenant",
+        target_id=tenant_id,
+        payload={
+            "setup_fee_amount": str(fee),
+            "setup_fee_billing": body.setup_fee_billing,
+            "founding_price": body.founding_price,
+        },
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            plan = onboarding.plan_go_live(session, tenant_id)
+        except onboarding.OnboardingError as exc:
+            raise _onboarding_error(exc) from exc
+    founding = body.founding_price and plan.promo_monthly_price is not None
+    if plan.customer_id is None:
+        raise catalog_error("ONB-008", status_code=502, extra={"reason": "no Stripe customer"})
+
+    try:
+        subscription = external_services.start_subscription(
+            tenant_id=tenant_id,
+            customer_id=plan.customer_id,
+            tier_id=plan.tier_id,
+            tier_name=plan.tier_name,
+            monthly_price=plan.monthly_price,
+            promo_monthly_price=plan.promo_monthly_price if founding else None,
+            promo_months=plan.promo_months if founding else None,
+            setup_fee=fee if body.setup_fee_billing == "stripe" else None,
+            days_until_due=INVOICE_DAYS_UNTIL_DUE,
+        )
+    except ExternalServiceError as exc:
+        raise catalog_error("ONB-008", status_code=502) from exc
+
+    if not plan.invite_sent:
+        try:
+            admin_data_access.send_invite(platform_admin_user_id=admin_id, tenant_id=tenant_id)
+        except ConsoleError as exc:
+            raise _console_error(exc) from exc
+        except ExternalServiceError as exc:
+            raise catalog_error("CON-006", status_code=502) from exc
+
+    with tenant_session(tenant_id) as session:
+        try:
+            onboarding.complete_go_live(
+                session,
+                tenant_id,
+                actor_user_id=admin_id,
+                plan=plan,
+                billing=onboarding.GoLiveBilling(
+                    setup_fee_amount=fee,
+                    setup_fee_billing=body.setup_fee_billing,
+                    setup_fee_note=(body.setup_fee_note or "").strip() or None,
+                    founding_price=founding,
+                    subscription_id=subscription.subscription_id,
+                    subscription_status=subscription.status,
+                    current_period_end=subscription.current_period_end,
+                ),
+                app_url=get_settings().app_base_url,
+            )
+        except onboarding.OnboardingError as exc:
+            raise _onboarding_error(exc) from exc
+    return {"onboarding_status": "live"}

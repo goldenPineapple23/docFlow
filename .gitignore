@@ -43,3 +43,6 @@ build/
 
 # Logs
 *.log
+
+# Celery beat bookkeeping (README: the scheduler)
+celerybeat-schedule*

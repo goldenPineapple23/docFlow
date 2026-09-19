@@ -58,7 +58,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from app.deps import AuthenticatedIdentity, get_current_identity, require_reviewer, require_tenant_member
+from app.actor import Actor, current_actor
 from app.errors import catalog_error
 
 router = APIRouter(prefix="/review", tags=["review"])
@@ -151,7 +151,7 @@ class MappingBody(BaseModel):
 
 @router.get("/documents")
 def list_documents(
-    identity: AuthenticatedIdentity = Depends(get_current_identity),
+    actor: Actor = Depends(current_actor),
     status: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -160,7 +160,7 @@ def list_documents(
     The review queue: oldest first, because the oldest unreviewed document is
     the one a buyer is waiting on.
     """
-    tenant_id = require_tenant_member(identity)
+    tenant_id = actor.tenant_id
     if status is not None and status not in QUEUE_STATUSES:
         raise HTTPException(status_code=422, detail="Unknown status filter.")
 
@@ -180,7 +180,7 @@ def list_documents(
                 LEFT JOIN document_headers h
                        ON h.document_id = d.id AND h.deleted_at IS NULL
                 WHERE d.deleted_at IS NULL
-                  AND d.status <> 'quarantined'
+                  AND d.status NOT IN ('quarantined', 'staged')
                   AND (CAST(:status AS text) IS NULL OR d.status = :status)
                 ORDER BY d.created_at ASC, d.id ASC
                 LIMIT :limit OFFSET :offset
@@ -196,7 +196,7 @@ def list_documents(
                 """
                 SELECT count(*) FROM documents d
                 WHERE d.deleted_at IS NULL
-                  AND d.status <> 'quarantined'
+                  AND d.status NOT IN ('quarantined', 'staged')
                   AND (CAST(:status AS text) IS NULL OR d.status = :status)
                 """
             ),
@@ -244,7 +244,7 @@ def _money(value) -> str | None:
 @router.get("/documents/{document_id}")
 def get_document(
     document_id: UUID,
-    identity: AuthenticatedIdentity = Depends(get_current_identity),
+    actor: Actor = Depends(current_actor),
 ) -> dict:
     """
     Everything the review screen renders, in one request.
@@ -254,7 +254,7 @@ def get_document(
     and never resets, so a reviewer reopening a document does not restart the
     clock.
     """
-    tenant_id = require_tenant_member(identity)
+    tenant_id = actor.tenant_id
 
     with tenant_session(tenant_id) as session:
         document = session.execute(
@@ -276,7 +276,7 @@ def get_document(
 
         # A viewer opening a document should not start the review clock on
         # behalf of a reviewer who has not looked at it yet.
-        if identity.role in ("owner", "admin", "reviewer"):
+        if actor.can_review:
             start_review(session, document_id)
 
         header = session.execute(
@@ -336,7 +336,7 @@ def get_document(
         "warnings": [_warning_payload(w) for w in warnings],
         "trail": [_trail_payload(row) for row in trail],
         "version": version,
-        "can_edit": identity.role in ("owner", "admin", "reviewer"),
+        "can_edit": actor.can_review,
     }
 
 
@@ -431,9 +431,9 @@ def _trail_payload(row) -> dict[str, Any]:
 def edit_document(
     document_id: UUID,
     body: EditBody,
-    identity: AuthenticatedIdentity = Depends(get_current_identity),
+    actor: Actor = Depends(current_actor),
 ) -> dict:
-    tenant_id = require_reviewer(identity)
+    tenant_id = actor.require_reviewer()
     request = EditRequest(
         header=body.header,
         lines={edit.line_id: edit.fields for edit in body.lines},
@@ -445,7 +445,8 @@ def edit_document(
                 session,
                 tenant_id,
                 document_id,
-                user_id=_user_id(identity),
+                user_id=actor.require_user_id(),
+                acting_as_tenant_id=actor.acting_as_tenant_id,
                 request=request,
                 expected_version=body.expected_version,
             )
@@ -460,9 +461,9 @@ def edit_document(
 def approve(
     document_id: UUID,
     body: ApproveBody,
-    identity: AuthenticatedIdentity = Depends(get_current_identity),
+    actor: Actor = Depends(current_actor),
 ) -> dict:
-    tenant_id = require_reviewer(identity)
+    tenant_id = actor.require_reviewer()
     acknowledgements = [
         WarningAcknowledgement(
             warning_id=a.warning_id, code=a.code, text=a.text, note=a.note
@@ -476,7 +477,8 @@ def approve(
                 session,
                 tenant_id,
                 document_id,
-                user_id=_user_id(identity),
+                user_id=actor.require_user_id(),
+                acting_as_tenant_id=actor.acting_as_tenant_id,
                 acknowledgements=acknowledgements,
             )
         except ReviewError as exc:
@@ -489,16 +491,17 @@ def approve(
 def reject(
     document_id: UUID,
     body: RejectBody,
-    identity: AuthenticatedIdentity = Depends(get_current_identity),
+    actor: Actor = Depends(current_actor),
 ) -> dict:
-    tenant_id = require_reviewer(identity)
+    tenant_id = actor.require_reviewer()
     with tenant_session(tenant_id) as session:
         try:
             action_id = reject_document(
                 session,
                 tenant_id,
                 document_id,
-                user_id=_user_id(identity),
+                user_id=actor.require_user_id(),
+                acting_as_tenant_id=actor.acting_as_tenant_id,
                 note=body.note,
             )
         except ReviewError as exc:
@@ -510,11 +513,11 @@ def reject(
 @router.get("/documents/{document_id}/warnings/open")
 def open_document_warnings(
     document_id: UUID,
-    identity: AuthenticatedIdentity = Depends(get_current_identity),
+    actor: Actor = Depends(current_actor),
 ) -> dict:
     """What approval would currently refuse on. The UI asks before offering
     the approve button, so a reviewer sees the list rather than a rejection."""
-    tenant_id = require_tenant_member(identity)
+    tenant_id = actor.tenant_id
     with tenant_session(tenant_id) as session:
         warnings = unacknowledged_warnings(session, document_id)
     return {
@@ -537,7 +540,7 @@ def open_document_warnings(
 
 @router.get("/items")
 def search_items(
-    identity: AuthenticatedIdentity = Depends(get_current_identity),
+    actor: Actor = Depends(current_actor),
     q: str = Query(min_length=1, max_length=120),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> dict:
@@ -547,7 +550,7 @@ def search_items(
     `q` is a bind parameter, never interpolated, and it only ever reaches an
     ILIKE against this tenant's own catalog.
     """
-    tenant_id = require_tenant_member(identity)
+    tenant_id = actor.tenant_id
     with tenant_session(tenant_id) as session:
         rows = session.execute(
             text(
@@ -585,7 +588,7 @@ def search_items(
 def create_mapping(
     document_id: UUID,
     body: MappingBody,
-    identity: AuthenticatedIdentity = Depends(get_current_identity),
+    actor: Actor = Depends(current_actor),
 ) -> dict:
     """
     "This line means that catalog item" -- the Section 7.6 learning step.
@@ -594,7 +597,7 @@ def create_mapping(
     has exactly one way of coming into existence (Section 10: "no rule
     activates without a human confirmation").
     """
-    tenant_id = require_reviewer(identity)
+    tenant_id = actor.require_reviewer()
     with tenant_session(tenant_id) as session:
         owns_line = session.execute(
             text(
@@ -611,8 +614,9 @@ def create_mapping(
             tenant_id,
             document_line_id=body.line_id,
             item_id=body.item_id,
-            confirmed_by=_user_id(identity),
+            confirmed_by=actor.require_user_id(),
             tenant_wide=body.tenant_wide,
+            acting_as_tenant_id=actor.acting_as_tenant_id,
         )
 
     return {"learned_rule_id": str(rule_id) if rule_id else None}
@@ -624,7 +628,7 @@ def create_mapping(
 @router.get("/documents/{document_id}/original")
 def original_document_url(
     document_id: UUID,
-    identity: AuthenticatedIdentity = Depends(get_current_identity),
+    actor: Actor = Depends(current_actor),
 ) -> dict:
     """
     Mint a short-lived URL for the viewer.
@@ -633,7 +637,7 @@ def original_document_url(
     the serving route resolves the path itself (Section 7.4: "storage paths
     are never user-controlled or user-visible").
     """
-    tenant_id = require_tenant_member(identity)
+    tenant_id = actor.tenant_id
     with tenant_session(tenant_id) as session:
         row = session.execute(
             text(
@@ -852,10 +856,3 @@ def _viewable_media_type(content: bytes) -> str:
         return "application/octet-stream"
     return _VIEWABLE_MEDIA_TYPES.get(detected.name, "application/octet-stream")
 
-
-def _user_id(identity: AuthenticatedIdentity) -> UUID:
-    if identity.local_user_id is None:
-        # Section 7.3: no review action is ever anonymous. An authenticated
-        # identity with no local user row cannot act on a document.
-        raise HTTPException(status_code=403, detail="This account cannot act on documents.")
-    return identity.local_user_id

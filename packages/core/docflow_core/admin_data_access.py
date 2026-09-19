@@ -117,7 +117,8 @@ def get_tenant_overview(*, platform_admin_user_id: UUID, tenant_id: UUID) -> dic
                 SELECT t.id, t.name, t.primary_currency, t.timezone, t.status, t.onboarding_status,
                        t.went_live_at, t.invite_sent_at, t.intake_address_active,
                        t.stripe_customer_id, t.stripe_subscription_status, t.created_at,
-                       t.onboarding_intake_id,
+                       t.onboarding_intake_id, t.test_batch_completed_at,
+                       t.setup_fee_amount, t.setup_fee_billing, t.founding_price,
                        tr.code AS tier_code, tr.name AS tier_name, tr.version AS tier_version,
                        tr.monthly_price AS tier_monthly_price,
                        tr.document_allowance AS tier_document_allowance

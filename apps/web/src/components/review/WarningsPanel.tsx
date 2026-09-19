@@ -1,6 +1,45 @@
 "use client";
 
 import type { DocumentWarning } from "@/lib/review";
+import { HEADER_FIELDS } from "./HeaderFields";
+
+// Field names as the reviewer sees them on screen, so a check says
+// "Currency", not `currency` (the first founder test couldn't tell which of
+// eight empty boxes a check meant).
+const LINE_FIELD_LABELS: Record<string, string> = {
+  sku: "SKU",
+  description: "Description",
+  quantity: "Qty",
+  unit: "Unit",
+  unit_price: "Unit price",
+  line_total: "Line total",
+};
+
+function fieldLabel(warning: DocumentWarning): string | null {
+  if (!warning.field_name) return null;
+  if (warning.line_number !== null) return LINE_FIELD_LABELS[warning.field_name] ?? null;
+  return HEADER_FIELDS.find((f) => f.name === warning.field_name)?.label ?? null;
+}
+
+/** Scroll to the box a check is about and put the cursor in it. */
+function goTo(warning: DocumentWarning) {
+  const target =
+    warning.line_number !== null
+      ? document.querySelector<HTMLElement>(
+          warning.field_name
+            ? `[data-testid="line-${warning.line_number}-${warning.field_name}"]`
+            : `[data-testid="line-${warning.line_number}"]`,
+        )
+      : warning.field_name
+        ? document.getElementById(`header-${warning.field_name}`)
+        : null;
+  if (!target) return;
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  target.focus({ preventScroll: true });
+}
+
+// Keys already said in the check's heading.
+const DETAIL_SHOWN_ELSEWHERE = new Set(["field", "scope"]);
 
 /**
  * Warnings, and the acknowledgement gate on approval (CLAUDE.md Section 7.3:
@@ -95,8 +134,13 @@ export function WarningsPanel({
               />
               <label htmlFor={`ack-${warning.id}`} className="flex-1 cursor-pointer">
                 <span className="block font-medium text-gray-900">
+                  {warning.line_number !== null ? `Line ${warning.line_number} · ` : ""}
+                  {fieldLabel(warning) ? (
+                    <span data-testid={`warning-field-${warning.id}`} className="text-amber-900">
+                      {fieldLabel(warning)}:{" "}
+                    </span>
+                  ) : null}
                   {warning.title ?? warning.code}
-                  {warning.line_number !== null ? ` · line ${warning.line_number}` : ""}
                 </span>
                 {warning.message ? (
                   <span className="mt-0.5 block text-sm text-gray-700">{warning.message}</span>
@@ -109,6 +153,15 @@ export function WarningsPanel({
                   {warning.code} · tick to confirm you&apos;ve checked this against the original.
                 </span>
               </label>
+              {warning.field_name || warning.line_number !== null ? (
+                <button
+                  type="button"
+                  onClick={() => goTo(warning)}
+                  className="shrink-0 text-xs font-medium text-blue-700 hover:underline"
+                >
+                  Show {fieldLabel(warning) ? `“${fieldLabel(warning)}”` : "it"} →
+                </button>
+              ) : null}
             </div>
           </li>
         ))}
@@ -129,7 +182,9 @@ export function WarningsPanel({
  * text, never parsed into a Number on the way to the screen.
  */
 function WarningDetail({ detail }: { detail: Record<string, string> }) {
-  const entries = Object.entries(detail ?? {}).filter(([, v]) => v !== null && v !== "");
+  const entries = Object.entries(detail ?? {}).filter(
+    ([k, v]) => v !== null && v !== "" && !DETAIL_SHOWN_ELSEWHERE.has(k),
+  );
   if (entries.length === 0) return null;
 
   return (

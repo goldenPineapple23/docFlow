@@ -35,6 +35,8 @@ from docflow_core.config import get_settings
 # starts raising it, so this table is also the inventory of what is wired.
 ALERT_TYPES: dict[str, str] = {
     "export_integrity_failure": "An export failed its integrity check",
+    "first_week_checkin": "First-week check-in due",
+    "scheduled_job_failed": "A scheduled job failed after retries",
 }
 
 SEVERITIES = ("info", "warning", "high", "critical")

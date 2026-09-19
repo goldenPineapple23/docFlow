@@ -312,6 +312,17 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="high",
         audience="both",
     ),
+    "INT-005": ErrorCatalogEntry(
+        code="INT-005",
+        title="This address isn't active yet",
+        message=(
+            "DocFlow is still being set up for this account, so orders sent to this address "
+            "are not read yet. This email was logged, not processed."
+        ),
+        action="Please send the order to your usual contact at the company for now.",
+        severity="info",
+        audience="both",
+    ),
     # ── Phase 2 (validation slice): CLAUDE.md Section 7.7 / 7.8 ─────────────
     # Review warnings, not failures -- nothing below stops a document, changes
     # a value, or blocks processing. They are in this catalog because Section
@@ -832,6 +843,101 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
             "removed."
         ),
         action="Nothing to do -- listed so the change is visible.",
+        severity="warning",
+        audience="founder",
+    ),
+    # ── ONB-0xx · test batch and go-live (Section 7.15.2 Steps 6-9, 5.3) ────
+    "ONB-001": ErrorCatalogEntry(
+        code="ONB-001",
+        title="Load the catalog first",
+        message=(
+            "The test batch is matched against this tenant's catalog, and no catalog has been "
+            "committed yet, so the results wouldn't show how DocFlow will really perform."
+        ),
+        action="Commit the catalog on the Catalog page, then upload the test batch.",
+        severity="warning",
+        audience="founder",
+    ),
+    "ONB-002": ErrorCatalogEntry(
+        code="ONB-002",
+        title="The test batch is already finished",
+        message=(
+            "This tenant's test batch was marked complete, so nothing more is added to it or run "
+            "as part of it."
+        ),
+        action=(
+            "Nothing to do for onboarding. Anything the customer sends from now on goes through "
+            "their normal intake."
+        ),
+        severity="info",
+        audience="founder",
+    ),
+    "ONB-003": ErrorCatalogEntry(
+        code="ONB-003",
+        title="Nothing is waiting to run",
+        message="Every test-batch document has already been sent for extraction.",
+        action="Upload more sample orders first if you want to run more.",
+        severity="info",
+        audience="founder",
+    ),
+    "ONB-004": ErrorCatalogEntry(
+        code="ONB-004",
+        title="Some test orders aren't approved yet",
+        message=(
+            "The test batch is complete only when every document in it has been reviewed and "
+            "approved, and at least one hasn't been."
+        ),
+        action="Open the remaining test orders from the list on this page and review them.",
+        severity="warning",
+        audience="founder",
+    ),
+    "ONB-005": ErrorCatalogEntry(
+        code="ONB-005",
+        title="Not ready to go live yet",
+        message=(
+            "Going live needs a completed test batch, so the customer's first real orders are "
+            "read with a checked catalog and reviewed settings."
+        ),
+        action="Finish the test batch on this page, then go live.",
+        severity="warning",
+        audience="founder",
+    ),
+    "ONB-006": ErrorCatalogEntry(
+        code="ONB-006",
+        title="This tenant is already live",
+        message="Go-live has already run for this tenant, so nothing was changed or billed again.",
+        action="Nothing to do.",
+        severity="info",
+        audience="founder",
+    ),
+    "ONB-007": ErrorCatalogEntry(
+        code="ONB-007",
+        title="The setup fee needs an amount",
+        message=(
+            "Go-live records the setup fee on the tenant and, when billed through Stripe, adds it "
+            "to the first invoice. No amount was given."
+        ),
+        action="Enter the setup fee (0 if you are waiving it) and try again.",
+        severity="warning",
+        audience="founder",
+    ),
+    "ONB-008": ErrorCatalogEntry(
+        code="ONB-008",
+        title="Stripe didn't finish setting up billing",
+        message=(
+            "Go-live stopped before the tenant was put live, so their intake address is still "
+            "off and no go-live email was sent. Any step Stripe already completed is reused, "
+            "never repeated, when you try again."
+        ),
+        action="Try go-live again. If it fails again, check this customer in the Stripe dashboard.",
+        severity="high",
+        audience="founder",
+    ),
+    "ONB-009": ErrorCatalogEntry(
+        code="ONB-009",
+        title="This tenant has no tier",
+        message="Billing and the monthly allowance both come from the tenant's tier, and none is set.",
+        action="Set the tier on the tenant, then go live.",
         severity="warning",
         audience="founder",
     ),

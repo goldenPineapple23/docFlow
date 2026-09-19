@@ -416,11 +416,18 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
 
     with tenant_session(tid) as session:
         row = session.execute(
-            text("SELECT storage_path, original_filename FROM documents WHERE id = :id"),
+            text("SELECT storage_path, original_filename, status FROM documents WHERE id = :id"),
             {"id": str(did)},
         ).mappings().first()
         if row is None:
             logger.error("parse_and_extract_missing_document document_id=%s", did)
+            return
+        if row.get("status") == "staged":
+            # A test-batch file waits for the founder's "Run extraction"
+            # (Section 7.15.2 Step 7, D-112), which moves it to 'pending'
+            # first. Anything that enqueues it earlier is a bug; it must not
+            # reach the model.
+            logger.error("parse_and_extract_staged_document document_id=%s", did)
             return
         session.execute(
             text("UPDATE documents SET status = 'processing' WHERE id = :id"), {"id": str(did)}

@@ -1005,3 +1005,81 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Decision:** The import heading reads "Catalog · {tenant name}" (likewise Customer list), from the tenant overview. `apps/web/e2e/import-tenants.spec.ts` drives the founder's path between two tenants' catalogs and proves the second never shows the first's imports.
 
 **Related:** D-108, D-109, Section 7.5.
+
+## D-111 — Acting-as: the tenant's own review and export routes, mounted a second time behind an admin gate
+
+**Context:** Section 7.15.2 Step 8 has the founder review each test-batch order "in the normal review UI, acting-as per 7.15.1". Section 10 forbids a second review component or code path for the Console; Section 7.15.1 requires the founder to act as themselves, with `acting_as_tenant_id` on every row, through audited, 404-to-everyone-else routes, and `adminDataAccess` to stay inside /admin handlers.
+
+**Decisions:**
+- **One `Actor` dependency** (`app/actor.py`) replaces the raw identity in the review and export routes: tenant, user, role, and `acting_as_tenant_id`. A tenant user's Actor comes from their own session, unchanged.
+- **The same routers are mounted twice.** `main.py` also includes them under `/admin/tenants/{acting_tenant_id}/act`, with `admin.acting_as_gate` as a router dependency. The gate 404s anyone who isn't a platform admin and a tenant that doesn't exist, writes one `admin_actions` row per request (`acting_as_read` / `acting_as_write`, route template and target id only, never document data), then hands the route a founder-as-support Actor. The route runs in the tenant's own session, so RLS still confines it to that tenant.
+- **It fails closed:** on the Console mount, `current_actor` accepts only the gate's Actor for the tenant named in the path, and 404s otherwise, so a mount that ever lost its gate can't fall through to anyone's session.
+- **Writes carry both ids:** review actions, exports and learned rules record the founder's own `user_id` and `acting_as_tenant_id` (`learned_rules.acting_as_tenant_id` is new in 0013). The tenant's trail already labels these "DocFlow support".
+- **The web app reuses the pages:** `/admin/tenants/{id}/review[/{documentId}]` render the very same queue and review screen. `src/lib/reviewScope.ts` derives the API prefix and link base from the page's address. The Console banner replaces the tenant header there. The server gate, not the client, decides access.
+
+**Related:** Section 7.15.1, 7.15.2 Step 8, 10; `apps/api/tests/test_acting_as.py`.
+
+## D-112 — The test batch is uploaded "staged" and runs only when the founder says so
+
+**Context:** Steps 6 and 7 are separate: upload the 5–10 samples, then "Run extraction".
+
+**Decisions:**
+- **One upload path.** The tenant upload endpoint's body became `ingest_upload(...)`; the Console's multi-file test-batch route calls it with `is_test_batch=True`. Every 7.11 check applies, and a failing file is reported without stopping the others.
+- **A new document status, `staged`** (migration 0013): stored and validated, never sent to the model, hidden from the review queue. It's a distinct status rather than `pending`, so the stuck-processing alert (D-095) never mistakes a deliberately waiting file for a stuck one. The worker also refuses a `staged` document outright.
+- **"Run extraction"** moves every staged test document to `pending` under a row lock and enqueues them oldest first at interactive priority, after commit.
+- **Order of steps:** no test batch before a catalog is committed (ONB-001). The batch takes more files and runs until it's marked complete (ONB-002 after). "Complete" needs every test document approved or exported (ONB-004); a rejected one doesn't count, because the step says "every test-batch document is approved".
+- `onboarding_status` moves forward only (`docflow_core.onboarding.advance`), and every move writes a lifecycle event.
+
+**Related:** Section 7.15.2 Steps 6–8, 7.11; D-095.
+
+## D-113 — Go-live: a Stripe subscription invoiced by email, retry-safe; jobs that run later are table rows
+
+**Context:** Step 9 bills the customer, but at go-live nobody has entered a card. Founder decisions, 18 Sept 2026: the monthly plan is a Stripe subscription with `collection_method=send_invoice` (Stripe emails the invoice with a pay link); the setup fee goes on that first invoice or is marked "invoiced manually"; the founding-customer price is a go-live checkbox applied as a coupon for the tier's promo period.
+
+**Decisions:**
+- **Prices come from `tiers`**: a Stripe Product per tier version with a fixed id (`docflow_tier_<tier id>`), the price sent as `price_data` from `tiers.monthly_price`, and the founding coupon (`docflow_founding_<tier id>`, amount off = price − promo price, repeating for ⌈promo_days / 30⌉ months). Nothing is typed into Stripe by hand or into code.
+- **Retry-safe, because a database failure after Stripe succeeded must never bill twice:** fixed ids for the product and coupon; the setup fee is added only if no pending one for this tenant exists; an existing live subscription for this tenant is returned rather than duplicated; every create also carries an idempotency key. Order of work: Stripe, then the invite if it hasn't gone, then one database transaction (intake live, go-live email, first-week check-in, status `live`) that re-checks the state under a row lock. A failure before that transaction leaves the tenant not live (ONB-008).
+- **Money:** the setup fee arrives as a string and must be a non-negative whole number of cents (ONB-007); fractions of a cent are refused, never rounded.
+- **`INVOICE_DAYS_UNTIL_DUE = 14`**, in the new `docflow_core/constants.py`, which now holds every Section 7.15.4 constant (the two email-intake limits moved there from `email_intake.py`). Lifecycle events record the values in effect.
+- **Scheduled jobs are rows** (`scheduled_jobs`, 0013), not queue messages with a countdown, so they survive a Redis restart and are visible. A Celery beat task sweeps due rows every 5 minutes through a narrow `scheduler_session` that can see only that table; each job runs in its tenant's own session. Claims use `FOR UPDATE SKIP LOCKED`; a job left running by a dead worker is released after 30 minutes; a failing job is retried twice (5 and 30 minutes later), then marked failed with a `scheduled_job_failed` founder alert. **Running locally now needs `celery beat` as well as the worker** (SETUP.md).
+- **The first-week check-in** emails the owner count-only numbers for non-test documents since go-live, and raises an info-level `first_week_checkin` founder alert.
+- **Open:** the go-live email has no walkthrough link yet, because no walkthrough exists. Adding one is a one-line template edit once the founder has it.
+
+**Related:** Section 7.15.2 Step 9, 7.15.4, 7.16.1; D-005, D-102.
+
+## D-114 — An intake address is not live until go-live
+
+**Context:** Section 7.15.2 Step 2: the intake address "exists from this moment but is not live: until go-live (Step 9) it auto-replies 'this address is not yet active' and processes nothing". Email intake had never checked this, so an onboarding tenant's address would have processed real mail.
+
+**Decisions:**
+- `process_inbound_email` checks `tenants.intake_address_active` after the Message-ID dedupe. When it's false, the email is logged (`raw_emails`, `intake_rejections` with INT-005) and nothing is stored, parsed or sent to the model.
+- **The auto-reply goes through the outbox, at most once a day per sender**, so a mail loop or a busy buyer can't turn the address into a spam source.
+- **Not built:** the Step 2 "optional founder-configured allowlist for testing" before go-live. It's a later addition if the founder wants to email test orders into a not-yet-live tenant.
+
+**Related:** Section 7.2, 7.15.2 Steps 2 and 9, 7.16.3.
+
+## D-115 — No "not confident" check on an optional header field the document doesn't have
+
+**Context:** The founder's first test order carried 7 checks; 5 were VAL-010 ("below our confidence threshold") on buyer email, notes, payment terms, requested delivery and ship-to, all simply absent from the document. A check list that is mostly noise trains reviewers to tick without reading, which undermines the approval gate (Section 7.3). Founder decision, 18 Sept 2026.
+
+**Decision:** The header low-confidence rule skips a field that is both **optional** (not in `REQUIRED_HEADER_FIELDS`: PO number, buyer, order total, currency) **and empty**. The field still shows empty on the review screen. Required fields keep the check whether empty or not, as does any field with a value, and so does the line-level low-confidence rule. The one open test order was re-validated through the normal `validate_document` pass: 5 checks resolved and soft-deleted, audit rows kept.
+
+**Noticed, not changed:**
+- Overall document confidence is still the minimum over *all* header fields (a Phase 1 stand-in, `parse_and_extract._overall_confidence`), so empty optional fields still pull it down. Section 7.1 says it should be the minimum of *required*-field confidences. This is a founder decision because it moves existing numbers.
+- Editing a field does not re-run validation, so a check stays until acknowledged even after the value is corrected.
+
+**Related:** Section 7.1, 7.3, 7.7; D-074.
+
+## D-116 — Review screen clarity, from the founder's first Console review
+
+**Context:** Walking the first test-batch order in the Console (18 Sept 2026), the founder couldn't tell which of eight empty boxes a check referred to (checks showed a raw `currency` and a code), didn't know which fields were mandatory, found the line table squashed, found the line arrow did nothing, and was taken to the order list instead of back to onboarding.
+
+**Decisions (UI only, no rule changes):**
+- Required header fields (mirroring `REQUIRED_HEADER_FIELDS`) carry a red `*`, and the section says to leave absent fields empty rather than guess.
+- Each check leads with the field's on-screen name ("Currency:", "Line 2 · Qty:") and has a **Show "…" →** link that scrolls to and focuses that box. The raw `field`/`scope` detail keys are no longer shown.
+- An empty optional field shows no "Low · 0%" badge or amber fill, matching D-115.
+- **Layout:** the Console review pages use the full width (not the Console's 72rem reading column). The document and fields sit side by side from 1280px at 5:7, and stack below that. The line table has a minimum width and scrolls inside its box rather than squeezing. The Console nav wraps on narrow screens, and the support banner no longer sticks over it.
+- The line-details arrow opens and closes the row. It starts open on lines needing a look, where it had been forced open and so looked broken.
+- In the Console, the review screen's back link is "← Tenant" (the onboarding page), and the "Approved" message links there too.
+
+**Related:** Section 7.3, 7.12, 7.15.2 Step 8; D-111, D-115.

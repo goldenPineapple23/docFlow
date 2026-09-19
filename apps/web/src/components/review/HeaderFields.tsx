@@ -17,13 +17,20 @@ import { ConfidenceBadge, ProvenanceNote, isLowConfidence } from "./confidence";
  * would silently reformat or reject what the document actually printed.
  */
 
-export const HEADER_FIELDS: Array<{ name: keyof DocumentHeader & string; label: string; wide?: boolean }> = [
-  { name: "po_number", label: "PO number" },
-  { name: "buyer_name", label: "Buyer" },
+// `required` mirrors REQUIRED_HEADER_FIELDS in docflow_core/validation.py --
+// the fields an order can't be approved without checking (VAL-006).
+export const HEADER_FIELDS: Array<{
+  name: keyof DocumentHeader & string;
+  label: string;
+  wide?: boolean;
+  required?: boolean;
+}> = [
+  { name: "po_number", label: "PO number", required: true },
+  { name: "buyer_name", label: "Buyer", required: true },
   { name: "order_date", label: "Order date" },
   { name: "requested_delivery_date", label: "Requested delivery" },
-  { name: "order_total", label: "Order total" },
-  { name: "currency", label: "Currency" },
+  { name: "order_total", label: "Order total", required: true },
+  { name: "currency", label: "Currency", required: true },
   { name: "payment_terms", label: "Payment terms" },
   { name: "buyer_contact_email", label: "Buyer email" },
   { name: "ship_to_address", label: "Ship to", wide: true },
@@ -59,7 +66,9 @@ export function HeaderFields({
           Order details
         </h2>
         <p className="text-sm text-violet-900/60">
-          What this order says as a whole — who sent it, when, and the total.
+          What this order says as a whole — who sent it, when, and the total.{" "}
+          <span className="text-red-700">*</span> Required. Leave a field empty if the order
+          doesn&apos;t have it — never fill in a guess.
         </p>
       </div>
 
@@ -74,10 +83,13 @@ export function HeaderFields({
       ) : null}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {HEADER_FIELDS.map(({ name, label, wide }) => {
+        {HEADER_FIELDS.map(({ name, label, wide, required }) => {
           const stored = header[name];
           const current = name in edits ? edits[name] : (stored as string | null);
-          const confidence = header.confidence?.[name];
+          // An optional field the document doesn't have is simply empty, not
+          // "low confidence" -- the same rule the checks follow (D-115).
+          const emptyOptional = !required && (stored === null || String(stored).trim() === "");
+          const confidence = emptyOptional ? undefined : header.confidence?.[name];
           const low = isLowConfidence(confidence);
 
           return (
@@ -85,6 +97,11 @@ export function HeaderFields({
               <div className="flex items-baseline justify-between gap-2">
                 <label htmlFor={`header-${name}`} className="block text-sm font-medium">
                   {label}
+                  {required ? (
+                    <span className="text-red-700" aria-label="required">
+                      {" "}*
+                    </span>
+                  ) : null}
                 </label>
                 <span className="flex items-center gap-2">
                   <ProvenanceNote provenance={header.provenance?.[name]} />

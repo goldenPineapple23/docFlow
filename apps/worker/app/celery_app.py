@@ -35,8 +35,13 @@ celery_app = Celery(
         "app.tasks.parse_and_extract",
         "app.tasks.generate_export",
         "app.tasks.parse_import",
+        "app.tasks.scheduled_jobs",
     ],
 )
+
+# How often `celery beat` asks for due scheduled jobs (D-113). Beat only
+# sends the reminder; the jobs themselves are rows in `scheduled_jobs`.
+SCHEDULED_JOBS_SWEEP_SECONDS = 300
 
 celery_app.conf.update(
     task_default_queue="interactive",
@@ -46,4 +51,11 @@ celery_app.conf.update(
     },
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    beat_schedule={
+        "run-scheduled-jobs": {
+            "task": "docflow.run_scheduled_jobs",
+            "schedule": SCHEDULED_JOBS_SWEEP_SECONDS,
+            "options": {"queue": "bulk"},
+        },
+    },
 )

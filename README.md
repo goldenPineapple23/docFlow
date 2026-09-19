@@ -37,6 +37,12 @@ uvicorn app.main:app --reload
 # Worker (needs Redis running -- Memurai on Windows, see DECISIONS.md D-095)
 # --pool=solo is required on Windows: Celery's default prefork pool does not run there.
 cd apps/worker && celery -A app.celery_app worker --loglevel=info --pool=solo -Q interactive,bulk
+
+# Scheduler (a second terminal, alongside the worker). Every 5 minutes it asks
+# the worker to run due scheduled jobs -- the first-week check-in today, the
+# lifecycle jobs later (DECISIONS.md D-113). Jobs live in the database, so
+# stopping this only delays them; nothing is lost.
+cd apps/worker && celery -A app.celery_app beat --loglevel=info
 ```
 
 (Exact commands will be filled in as each piece is scaffolded — this section is being written as we go, not after the fact.)

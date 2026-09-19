@@ -32,7 +32,18 @@ def test_a_worker_started_from_this_app_registers_the_extraction_task():
         "assert 'docflow.parse_and_extract' in celery_app.tasks\n"
         "assert 'docflow.generate_export' in celery_app.tasks\n"
         "assert 'docflow.parse_import' in celery_app.tasks\n"
+        "assert 'docflow.run_scheduled_jobs' in celery_app.tasks\n"
     )
     worker_root = Path(__file__).resolve().parents[1]
     result = subprocess.run([sys.executable, "-c", probe], cwd=worker_root, capture_output=True)
     assert result.returncode == 0, "the worker would start with no extraction task registered"
+
+
+def test_beat_sweeps_scheduled_jobs_regularly():
+    """D-113: the first-week check-in and every later lifecycle job depend on
+    beat sending the sweep. Its task must be registered (above) and scheduled."""
+    from app.celery_app import SCHEDULED_JOBS_SWEEP_SECONDS, celery_app
+
+    entry = celery_app.conf.beat_schedule["run-scheduled-jobs"]
+    assert entry["task"] == "docflow.run_scheduled_jobs"
+    assert entry["schedule"] == SCHEDULED_JOBS_SWEEP_SECONDS <= 600

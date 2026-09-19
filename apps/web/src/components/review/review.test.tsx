@@ -211,6 +211,29 @@ describe("line items (Section 7.6)", () => {
     expect(onConfirmMapping).toHaveBeenCalledWith(line.id, "22222222-2222-2222-2222-222222222222");
   });
 
+  it("the arrow really opens and closes a line's details, even one that needs a look", async () => {
+    // An unmatched line starts open. The arrow used to be dead on exactly
+    // these lines: it flipped direction while the details stayed put.
+    render(
+      <LineTable
+        lines={[line]}
+        edits={{}}
+        disabled={false}
+        onChange={() => {}}
+        onConfirmMapping={async () => {}}
+      />,
+    );
+    const arrow = screen.getByRole("button", { name: /catalog match and checks for line 1/i });
+    expect(screen.getByText(/no catalog match/i)).toBeInTheDocument();
+
+    await userEvent.click(arrow);
+    expect(screen.queryByText(/no catalog match/i)).not.toBeInTheDocument();
+    expect(arrow).toHaveAttribute("aria-expanded", "false");
+
+    await userEvent.click(arrow);
+    expect(screen.getByText(/no catalog match/i)).toBeInTheDocument();
+  });
+
   it("keeps quantity as a string at its stored scale", () => {
     render(
       <LineTable
@@ -340,5 +363,47 @@ describe("getting around the app (D-090)", () => {
     const links = screen.getAllByRole("link");
     expect(links.some((a) => a.getAttribute("href") === "/review")).toBe(true);
     expect(screen.getByTestId("sign-out")).toBeInTheDocument();
+  });
+});
+
+describe("saying which box a check is about (founder feedback, D-116)", () => {
+  const missingCurrency: DocumentWarning = {
+    id: "44444444-4444-4444-4444-444444444444",
+    code: "VAL-006",
+    title: "A required field is missing",
+    message: "DocFlow couldn't find one of the fields an order needs.",
+    action: "Fill the field in from the original document before approving.",
+    severity: "warning",
+    field_name: "currency",
+    line_number: null,
+    document_line_id: null,
+    detail: { field: "currency", scope: "header" },
+    status: "open",
+    acknowledged_at: null,
+  };
+
+  it("names the field in words and links to it", () => {
+    render(
+      <WarningsPanel warnings={[missingCurrency]} acknowledged={new Set()} disabled={false} onToggle={() => {}} />,
+    );
+    expect(screen.getByTestId(`warning-field-${missingCurrency.id}`)).toHaveTextContent("Currency:");
+    expect(screen.getByRole("button", { name: /show “currency”/i })).toBeInTheDocument();
+    // The raw field/scope keys aren't repeated as jargon.
+    expect(screen.queryByText(/scope:/)).not.toBeInTheDocument();
+  });
+
+  it("marks the required fields, and doesn't flag an empty optional one as low confidence", () => {
+    render(
+      <HeaderFields
+        header={{ ...header, confidence: { ...header.confidence, notes: 0.0, currency: 0.0 }, currency: null }}
+        edits={{}}
+        disabled={false}
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getByText("Currency").closest("label")).toHaveTextContent("Currency *");
+    expect(screen.getByText("Notes").closest("label")).not.toHaveTextContent("*");
+    expect(screen.getByTestId("header-input-notes").className).not.toMatch(/amber/);
+    expect(screen.getByTestId("header-input-currency").className).toMatch(/amber/);
   });
 });

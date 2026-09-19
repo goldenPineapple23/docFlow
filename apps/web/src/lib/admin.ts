@@ -1,5 +1,5 @@
 import { apiFetch } from "./api";
-import { ReviewApiError, request, type CatalogError } from "./review";
+import { ReviewApiError, UNEXPECTED, request, type CatalogError } from "./review";
 
 /**
  * The founder Console API, typed (CLAUDE.md Section 7.15).
@@ -64,6 +64,10 @@ export type TenantOverview = {
   tier_document_allowance: number | null;
   owner: { id: string; email: string; has_login: boolean; invite_sent_at: string | null } | null;
   intake_address: string | null;
+  test_batch_completed_at: string | null;
+  setup_fee_amount: string | null;
+  setup_fee_billing: "stripe" | "invoiced_manually" | null;
+  founding_price: boolean;
 };
 
 export type TenantRow = {
@@ -283,3 +287,91 @@ export const commitImport = (tenantId: string, importId: string) =>
 
 export const discardImport = (tenantId: string, importId: string) =>
   request<{ ok: boolean }>(`${importsBase(tenantId)}/${importId}/discard`, { method: "POST" });
+
+
+// ── Test batch and go-live (Section 7.15.2 Steps 6-9; D-112, D-113) ────────
+
+export type TestBatchDocument = {
+  id: string;
+  original_filename: string;
+  status: string;
+  created_at: string;
+  approved_at: string | null;
+  // Money and confidence arrive as strings (Section 7.1).
+  est_cost_usd: string | null;
+  overall_confidence: string | null;
+  po_number: string | null;
+  buyer_name: string | null;
+};
+
+export type TestBatchUploadResult = {
+  filename: string;
+  document_id?: string;
+  status?: string;
+  possible_duplicate_of?: string;
+  error?: CatalogError;
+};
+
+export const getTestBatch = (tenantId: string) =>
+  request<{ documents: TestBatchDocument[] }>(`/admin/tenants/${tenantId}/test-batch`);
+
+/** Multipart, so not through `request`; the same catalog-error handling. */
+export async function uploadTestBatch(
+  tenantId: string,
+  files: File[],
+): Promise<{ results: TestBatchUploadResult[] }> {
+  const form = new FormData();
+  for (const file of files) form.append("files", file);
+  let response: Response;
+  try {
+    response = await apiFetch(`/admin/tenants/${tenantId}/test-batch`, { method: "POST", body: form });
+  } catch {
+    throw new ReviewApiError(UNEXPECTED, 0);
+  }
+  if (!response.ok) {
+    let catalog: CatalogError = UNEXPECTED;
+    try {
+      const detail = (await response.json())?.detail;
+      if (detail?.code && detail?.title && detail?.action) catalog = detail;
+    } catch {
+      // Not JSON; keep the fallback.
+    }
+    throw new ReviewApiError(catalog, response.status);
+  }
+  return response.json();
+}
+
+export const runTestBatch = (tenantId: string) =>
+  request<{ started: number }>(`/admin/tenants/${tenantId}/test-batch/run`, { method: "POST" });
+
+export const completeTestBatch = (tenantId: string) =>
+  request<{ onboarding_status: string }>(`/admin/tenants/${tenantId}/test-batch/complete`, {
+    method: "POST",
+  });
+
+export type GoLivePlan = {
+  tier_name: string;
+  monthly_price: string;
+  promo_monthly_price: string | null;
+  promo_months: number | null;
+  document_allowance: number;
+  invite_sent: boolean;
+  invoice_days_until_due: number;
+};
+
+export const getGoLivePlan = (tenantId: string) =>
+  request<GoLivePlan>(`/admin/tenants/${tenantId}/go-live`);
+
+export const goLive = (
+  tenantId: string,
+  body: {
+    setup_fee_amount: string;
+    setup_fee_billing: "stripe" | "invoiced_manually";
+    setup_fee_note: string | null;
+    founding_price: boolean;
+  },
+) =>
+  request<{ onboarding_status: string }>(`/admin/tenants/${tenantId}/go-live`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });

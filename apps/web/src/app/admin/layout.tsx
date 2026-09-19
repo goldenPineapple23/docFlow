@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { notFound } from "next/navigation";
+import { notFound, usePathname } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { ConsoleNav } from "@/components/admin/ConsoleNav";
+import { consoleTenantFromPath } from "@/lib/reviewScope";
 
 /**
  * Gate for every /admin/* page. The real security boundary is the backend
@@ -17,6 +18,7 @@ import { ConsoleNav } from "@/components/admin/ConsoleNav";
  */
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<"checking" | "allowed">("checking");
+  const pathname = usePathname();
 
   useEffect(() => {
     let cancelled = false;
@@ -44,6 +46,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     };
   }, []);
 
+  const reviewing = consoleTenantFromPath(pathname) !== null;
+
   if (status === "checking") {
     return null;
   }
@@ -51,7 +55,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   return (
     <>
       <ConsoleNav />
-      <main className="mx-auto max-w-6xl p-6">{children}</main>
+      {/* The review screen sets its own (much wider) width: the document and
+          its fields side by side don't fit the Console's reading column. */}
+      {reviewing ? children : <main className="mx-auto max-w-6xl p-6">{children}</main>}
     </>
   );
 }
