@@ -2,7 +2,17 @@ from docflow_core.config import get_settings
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import admin, auth, documents, email_intake, exports, held, review, stripe_webhooks
+from app.routers import (
+    admin,
+    auth,
+    documents,
+    email_intake,
+    exports,
+    held,
+    home,
+    review,
+    stripe_webhooks,
+)
 
 app = FastAPI(title="DocFlow API")
 
@@ -43,6 +53,7 @@ app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(documents.router)
 app.include_router(held.router)
+app.include_router(home.router)
 app.include_router(email_intake.router)
 app.include_router(review.router)
 app.include_router(exports.router)

@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-09-23** (end of slice 5.7).
+commit as the slice. Statuses below are as of **2026-09-23** (end of slice 5.8a).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -124,7 +124,7 @@ prompting passes the golden fixture and the contamination test live.
 | 5.5 | Founder dashboard from the nightly rollup: attention panel, health strip, tenant list, KPI cards | DONE | `e81f1ec` | D-121 | `0017` |
 | 5.6 | Lifecycle: cancel, reactivate, suspend sweep, wind-down and ready-to-delete queues, hard delete; Stripe webhook sync; 7-day billing trial | DONE (walked in the browser 2026-09-23: cancel, suspend, reactivate, queues OK; the final typed-name delete step was not completed; see `docs/walkthroughs/5.6-lifecycle.md`) | "Phase 5 slice 5.6" (hash: see `git log`) | D-122 – D-125 | `0018`, `0019`, `0020` |
 | 5.7 | Allowances and quarantine (7.16): plan in `docs/plans/5.7-allowance-quarantine.md`. Also: the customer portal header shows the company name; notices are on the Purchase orders list only, each dismissible | DONE (walked in the browser 2026-09-23 as founder, tenant owner and reviewer: all parts OK; final wording tweaks made from that walk) | "Phase 5 slice 5.7" (hash: see `git log`) | D-126, D-127 | `0021` (applied) |
-| 5.8 | Tenant surface: upload page, navigation and dashboard (a); Activity log (b); needs-review digest email (c); team piece (d, undecided); role audit. Plan: `docs/plans/5.8-tenant-surface.md` | PLANNED, scope mostly decided 2026-09-23; team piece and dashboard contents open | — | — | expected `0022` |
+| 5.8 | Tenant surface, in four parts. **a: upload page, navigation, customer dashboard, role audit — DONE.** b: Activity log. c: needs-review digest email. d: team piece (undecided). Plan: `docs/plans/5.8-tenant-surface.md` | 5.8a DONE (real-stack drive passed); b–d planned | "Phase 5 slice 5.8a" (hash: see `git log`) | D-128 | none for 5.8a |
 | 5.9 | Billing plumbing: remaining Stripe wiring not covered by 5.3 / 5.6 | PLANNED (scope to be confirmed — much of it landed in 5.3 and 5.6) | — | — | — |
 | 5.10 | Approved-example prompting (7.13), incl. buyer pre-identification and the contamination test | PLANNED | — | — | — |
 
@@ -202,10 +202,13 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 - Browser walkthroughs planned: after 5.6 (now), after 5.7 (full Console QA),
   after 5.8 (customer side, with a non-technical tester). Checklists live in
   `docs/walkthroughs/`.
-- Latest suites (2026-09-23, end of 5.7): core 396, api 305 (full run), worker 74, web 36 unit + 35 browser. ruff, mypy and web lint/typecheck clean.
+- Latest suites (2026-09-23, end of 5.8a): core 396, api 320, worker 74, web 36 unit + 41 browser. ruff, mypy and web lint/typecheck clean.
 
 - 5.7 not yet built (deliberately): a per-tenant override of the daily AI-cost ceiling (global constant for now), and the full tenant dashboard, audit-log view and roles UI (slice 5.8).
 - Tenant B ("Acme Test Lifecycle B") still sits in the wind-down queue from the 5.6 walkthrough; finish or leave it.
+
+- **Before the first real customer:** an email provider (the founder is setting one up with the domain). Until then every invite, notice and digest waits in the Console Outbox and must be sent by hand, and the inbound intake address cannot receive real mail.
+- No customer can add a second user yet: Section 3 says owner/admin invite everyone after the first, and nothing for that is built (slice 5.8d, undecided).
 
 ## Deferred by decision (Section 3 — do not build)
 

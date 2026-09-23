@@ -6,6 +6,10 @@ AUTH-002 [warning/tenant] Your account can view this, not change it
   what+why: Viewer accounts can read orders and download exports, but editing and approving are left to reviewers so it's always clear who signed off on an order.
   next:     Ask an owner or admin on your account to change your role, or to approve this order.
 
+AUTH-003 [info/tenant] This page is for account admins
+  what+why: The dashboard and the people on this account are managed by your account's admin, so this page isn't part of a reviewer's access.
+  next:     Ask your account admin if you need something from it, or go to Purchase orders.
+
 BUY-001 [warning/founder] Rows with no customer name
   what+why: These rows have no name, so there is no customer to create.
   next:     Add the name, or remove the row.

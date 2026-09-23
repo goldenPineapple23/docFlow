@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { QUEUE_PAGE_SIZE, ReviewApiError, listDocuments, type QueueDocument } from "@/lib/review";
 import { ConfidenceBadge } from "@/components/review/confidence";
 import { PILL, StatusBadge } from "@/components/StatusBadge";
@@ -54,8 +55,25 @@ const FILTERS: Array<{ value: string; label: string; blurb: string }> = [
 ];
 
 export default function ReviewQueuePage() {
+  // useSearchParams needs a Suspense boundary to prerender (Next's rule). The
+  // fallback is the chrome alone, so the page never flashes empty.
+  return (
+    <Suspense fallback={<ReviewChrome />}>
+      <ReviewQueue />
+    </Suspense>
+  );
+}
+
+function ReviewQueue() {
   const scope = useReviewScope();
-  const [status, setStatus] = useState("needs_review");
+  // `/review?status=failed` opens that tab, so the dashboard's tiles link
+  // straight to what they count. `useSearchParams` is read during render, not
+  // in an effect, so the first paint is already the right tab -- which is why
+  // this component sits inside the Suspense boundary below, as Next requires.
+  const params = useSearchParams();
+  const wanted = params.get("status");
+  const [chosen, setStatus] = useState<string | null>(null);
+  const status = chosen ?? (wanted && FILTERS.some((f) => f.value === wanted) ? wanted : "needs_review");
   const [offset, setOffset] = useState(0);
   // The loaded filter and page travel WITH the rows, so "are we showing
   // stale data for a filter or page the user just changed" is derived rather

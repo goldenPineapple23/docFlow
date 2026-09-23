@@ -498,6 +498,17 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="tenant",
     ),
+    "AUTH-003": ErrorCatalogEntry(
+        code="AUTH-003",
+        title="This page is for account admins",
+        message=(
+            "The dashboard and the people on this account are managed by your account's "
+            "admin, so this page isn't part of a reviewer's access."
+        ),
+        action="Ask your account admin if you need something from it, or go to Purchase orders.",
+        severity="info",
+        audience="tenant",
+    ),
     # ── REV-0xx · human review and approval (Section 7.3) ────────────────────
     "REV-001": ErrorCatalogEntry(
         code="REV-001",

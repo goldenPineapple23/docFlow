@@ -23,18 +23,27 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy import text
 
 from app.celery_client import celery_client
-from app.deps import AuthenticatedIdentity, get_current_identity
+from app.deps import AuthenticatedIdentity, get_current_identity, require_reviewer
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
 def _require_tenant(identity: AuthenticatedIdentity) -> UUID:
+    """
+    The tenant this upload belongs to, or a refusal.
+
+    Uploading is changing the account's data, so it takes the same role as
+    reviewing (`require_reviewer`: owner, admin, reviewer) -- a viewer reads
+    (D-128). Until this slice the endpoint checked only that the caller had a
+    tenant at all, so a viewer could add documents; no screen offered it, but
+    the API allowed it.
+
+    A platform-admin-only account (D-004) has no tenant to upload into; the
+    Console's own staging upload is a separate path (Section 7.15.2), not this.
+    """
     if identity.tenant_id is None:
-        # A platform-admin-only account (D-004) has no tenant to upload
-        # into; the Console's own staging upload is a separate, later
-        # feature (Section 7.15.2 Step 1/6), not this endpoint.
         raise HTTPException(status_code=403, detail="This account is not associated with a tenant.")
-    return identity.tenant_id
+    return require_reviewer(identity)
 
 
 @router.post("/upload")

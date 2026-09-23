@@ -175,6 +175,11 @@ def get_current_identity(authorization: str | None = Header(default=None)) -> Au
 # above" anyway.
 REVIEWING_ROLES: frozenset[str] = frozenset({"owner", "admin", "reviewer"})
 
+# The customer's own administrators. The first user of a tenant is stored as
+# `owner` and shown as "Admin" (D-128); `admin` is equivalent and enforced
+# everywhere, though no screen hands it out yet.
+ADMIN_ROLES: frozenset[str] = frozenset({"owner", "admin"})
+
 
 def require_tenant_member(identity: AuthenticatedIdentity) -> UUID:
     """
@@ -206,6 +211,25 @@ def require_reviewer(identity: AuthenticatedIdentity) -> UUID:
         from app.errors import catalog_error
 
         raise catalog_error("AUTH-002", status_code=403, extra={"role": identity.role})
+    return tenant_id
+
+
+def require_tenant_admin(identity: AuthenticatedIdentity) -> UUID:
+    """
+    The tenant, for a route only the customer's own admin may reach -- their
+    dashboard, and managing the people on the account (D-128).
+
+    The tenant's first user is stored as `owner` and shown as "Admin"; the
+    `admin` role is equivalent and remains valid, though nothing hands it out
+    yet. A reviewer is refused here with a catalog code, not a bare 403, and
+    never with a 404: unlike the Console (7.15.1), this surface is one the
+    person is legitimately signed in to -- hiding it would only confuse them.
+    """
+    tenant_id = require_tenant_member(identity)
+    if identity.role not in ADMIN_ROLES:
+        from app.errors import catalog_error
+
+        raise catalog_error("AUTH-003", status_code=403, extra={"role": identity.role})
     return tenant_id
 
 

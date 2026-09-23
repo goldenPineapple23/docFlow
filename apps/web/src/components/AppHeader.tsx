@@ -15,6 +15,17 @@ import { supabase } from "@/lib/supabase";
  * for the person who built it and a dead end for everyone else
  * (DECISIONS.md D-090).
  */
+function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900"
+    >
+      {children}
+    </Link>
+  );
+}
+
 export function AppHeader({
   email: emailProp,
   tenantName: tenantNameProp,
@@ -27,7 +38,11 @@ export function AppHeader({
   // props win (tests, and any screen that already knows); otherwise the header
   // asks who is signed in. If that fails it just says "DocFlow" -- a header must
   // never stand in the way of the page.
-  const [loaded, setLoaded] = useState<{ email: string | null; tenantName: string | null } | null>(null);
+  const [loaded, setLoaded] = useState<{
+    email: string | null;
+    tenantName: string | null;
+    role: string | null;
+  } | null>(null);
   const known = emailProp !== undefined || tenantNameProp !== undefined;
   useEffect(() => {
     if (known) return;
@@ -36,7 +51,11 @@ export function AppHeader({
       .then((res) => (res.ok ? res.json() : null))
       .then((me) => {
         if (cancelled || !me) return;
-        setLoaded({ email: me.email ?? null, tenantName: me.tenant_name ?? null });
+        setLoaded({
+          email: me.email ?? null,
+          tenantName: me.tenant_name ?? null,
+          role: me.role ?? null,
+        });
       })
       .catch(() => {});
     return () => {
@@ -45,6 +64,9 @@ export function AppHeader({
   }, [known]);
   const email = emailProp ?? loaded?.email ?? null;
   const tenantName = (tenantNameProp ?? loaded?.tenantName ?? "").trim() || null;
+  // The dashboard is the account admin's (D-128). Hiding the link is a
+  // courtesy; the API is what refuses a reviewer who types the address.
+  const isAdmin = loaded?.role === "owner" || loaded?.role === "admin";
 
   useEffect(() => {
     // The browser tab says whose portal this is. (React escapes everything it
@@ -81,18 +103,10 @@ export function AppHeader({
               ) : null}
             </span>
           </Link>
-          <Link
-            href="/review"
-            className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900"
-          >
-            Purchase orders
-          </Link>
-          <Link
-            href="/held"
-            className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900"
-          >
-            Held for review
-          </Link>
+          <NavLink href="/review">Purchase orders</NavLink>
+          <NavLink href="/upload">Upload</NavLink>
+          <NavLink href="/held">Held for review</NavLink>
+          {isAdmin ? <NavLink href="/dashboard">Dashboard</NavLink> : null}
         </nav>
 
         <div className="flex items-center gap-3 text-sm">
