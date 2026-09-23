@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-09-23**.
+commit as the slice. Statuses below are as of **2026-09-23** (end of slice 5.7).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -122,8 +122,8 @@ prompting passes the golden fixture and the contamination test live.
 | — | Deal terms at Create tenant; Console exports | DONE | `f5e763d` | D-117, D-118 | `0014` |
 | 5.4 | Operator screens: buyer merge, learned rules (part 1); per-tenant field settings (part 2) | DONE | `f7c6db5`, `c1d81a8` | D-119, D-120 | `0015`, `0016` |
 | 5.5 | Founder dashboard from the nightly rollup: attention panel, health strip, tenant list, KPI cards | DONE | `e81f1ec` | D-121 | `0017` |
-| 5.6 | Lifecycle: cancel, reactivate, suspend sweep, wind-down and ready-to-delete queues, hard delete; Stripe webhook sync; 7-day billing trial | DONE (tests green; browser walkthrough pending, see `docs/walkthroughs/5.6-lifecycle.md`) | "Phase 5 slice 5.6" (hash: see `git log`) | D-122 – D-125 | `0018`, `0019`, `0020` |
-| 5.7 | Allowances and quarantine (7.16) — see below | PLANNED, next | — | — | — |
+| 5.6 | Lifecycle: cancel, reactivate, suspend sweep, wind-down and ready-to-delete queues, hard delete; Stripe webhook sync; 7-day billing trial | DONE (walked in the browser 2026-09-23: cancel, suspend, reactivate, queues OK; the final typed-name delete step was not completed; see `docs/walkthroughs/5.6-lifecycle.md`) | "Phase 5 slice 5.6" (hash: see `git log`) | D-122 – D-125 | `0018`, `0019`, `0020` |
+| 5.7 | Allowances and quarantine (7.16): plan in `docs/plans/5.7-allowance-quarantine.md` | DONE (tests green; browser walkthrough pending, see `docs/walkthroughs/5.7-allowance-quarantine.md`) | "Phase 5 slice 5.7" (hash: see `git log`) | D-126, D-127 | `0021` (applied) |
 | 5.8 | Tenant surface: tenant dashboard, review/status page, notifications, roles, audit-log view | PLANNED | — | — | — |
 | 5.9 | Billing plumbing: remaining Stripe wiring not covered by 5.3 / 5.6 | PLANNED (scope to be confirmed — much of it landed in 5.3 and 5.6) | — | — | — |
 | 5.10 | Approved-example prompting (7.13), incl. buyer pre-identification and the contamination test | PLANNED | — | — | — |
@@ -198,14 +198,14 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   wording (D-008), features doc missing approved-example prompting.
 - `RUNBOOK.md` does not exist yet (Phase 6); several constants and the
   parser-upgrade process must be documented there.
-- One worker test fails because `httpx` is missing from the worker's local venv
-  (pre-existing; `packages/core` already declares it). Reinstall core into the
-  worker venv to fix. Running the worker suite with the API's venv instead
-  gives 13 spurious failures (missing `xlwt`, `pillow_heif`); use the worker's own.
+- The worker's local venv was missing `httpx` (declared by core); installed 2026-09-23, worker suite is now 74 of 74. Run it with the worker's own venv, not the API's (which lacks `xlwt`, `pillow_heif`).
 - Browser walkthroughs planned: after 5.6 (now), after 5.7 (full Console QA),
   after 5.8 (customer side, with a non-technical tester). Checklists live in
   `docs/walkthroughs/`.
-- Latest suites (2026-09-23): core 369, api 283 (1 deselected), worker 73 of 74.
+- Latest suites (2026-09-23, after 5.7): core 394, api 301, worker 74, web 32 unit + 31 browser. ruff, mypy and web lint/typecheck clean.
+
+- 5.7 not yet built (deliberately): a per-tenant override of the daily AI-cost ceiling (global constant for now), and the full tenant dashboard, audit-log view and roles UI (slice 5.8).
+- Tenant B ("Acme Test Lifecycle B") still sits in the wind-down queue from the 5.6 walkthrough; finish or leave it.
 
 ## Deferred by decision (Section 3 — do not build)
 

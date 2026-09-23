@@ -1,0 +1,14 @@
+Subject: DocFlow: your order address for $tenant_name has changed
+
+Hello,
+
+The address that receives orders for $tenant_name has been replaced.
+
+  New address: $new_address
+
+The old address will keep replying to anyone who uses it, telling them to ask
+you for the new one, until $grace_ends. After that it stops working.
+
+Please share the new address with the buyers who send you orders.
+
+-- DocFlow

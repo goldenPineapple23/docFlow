@@ -252,7 +252,12 @@ def cancel(
         payload=payload,
         constants=constants_in_effect("CURE_PERIOD_DAYS", "EXPORT_WINDOW_DAYS"),
     )
-    return {"status": "cancelling", "cancellation_effective_at": effective_at, "rule": plan.rule, "flagged": plan.flagged}
+    return {
+        "status": "cancelling",
+        "cancellation_effective_at": effective_at,
+        "rule": plan.rule,
+        "flagged": plan.flagged,
+    }
 
 
 # ── The sweep: cancelling -> suspended + pending_deletion (same tick) ───────
@@ -386,6 +391,17 @@ def due_for_suspend(session: Session, *, limit: int = 100) -> list[UUID]:
             LIMIT :limit
             """
         ),
+        {"limit": limit},
+    ).all()
+    return [UUID(str(r[0])) for r in rows]
+
+
+def tenants_for_intake_housekeeping(session: Session, *, limit: int = 1000) -> list[UUID]:
+    """Every tenant that still exists, for the periodic intake housekeeping
+    (retiring grace addresses, held-document retention). `lifecycle_session()`
+    only -- read-only; the work happens in each tenant's own session."""
+    rows = session.execute(
+        text("SELECT id FROM tenants WHERE deleted_at IS NULL AND status <> 'deleted' LIMIT :limit"),
         {"limit": limit},
     ).all()
     return [UUID(str(r[0])) for r in rows]

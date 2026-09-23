@@ -217,7 +217,8 @@ def test_non_payment_adds_the_cure_period_to_the_first_past_due_notice(client, s
         body = response.json()
         assert body["flagged"] is False
         expected = first_past_due + timedelta(days=CURE_PERIOD_DAYS)
-        assert abs(datetime.fromisoformat(body["cancellation_effective_at"]) - expected) < timedelta(seconds=2)
+        effective = datetime.fromisoformat(body["cancellation_effective_at"])
+        assert abs(effective - expected) < timedelta(seconds=2)
 
 
 @requires_lifecycle_schema
@@ -287,7 +288,8 @@ def test_the_sweep_moves_a_due_tenant_straight_to_pending_deletion(client, strip
         assert list(events) == ["suspended", "pending_deletion_entered"]
 
         reminder_count = _scalar(
-            "SELECT count(*) FROM scheduled_jobs WHERE tenant_id = :t AND job_type = 'pending_deletion_reminder'",
+            "SELECT count(*) FROM scheduled_jobs WHERE tenant_id = :t "
+            "AND job_type = 'pending_deletion_reminder'",
             t=tenant_id,
         )
         assert reminder_count == 3

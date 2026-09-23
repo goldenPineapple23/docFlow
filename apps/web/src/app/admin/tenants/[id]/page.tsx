@@ -138,6 +138,20 @@ export default function TenantPage({ params }: { params: Promise<{ id: string }>
       <GoLivePanel tenant={tenant} onChanged={refresh} />
 
       <section className="mt-5 rounded-xl border border-gray-200 bg-white p-5">
+        <h2 className="text-sm font-semibold">Held documents and intake address</h2>
+        <p className="mt-1 text-sm text-gray-600">
+          Documents held for review, release and clear, the approved-sender list, and replacing the
+          intake address.
+        </p>
+        <Link
+          href={`/admin/tenants/${id}/quarantine`}
+          className="mt-3 inline-block rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
+        >
+          Open held documents →
+        </Link>
+      </section>
+
+      <section className="mt-5 rounded-xl border border-gray-200 bg-white p-5">
         <h2 className="text-sm font-semibold">Lifecycle</h2>
         <p className="mt-1 text-sm text-gray-600">
           Status: <span className="font-medium">{tenant.status}</span>. Cancel, reactivate and the

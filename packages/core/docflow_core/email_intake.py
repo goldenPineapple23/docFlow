@@ -37,14 +37,22 @@ from celery import Celery
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from docflow_core import file_types
+from docflow_core import allowance, file_types, intake_gate
 from docflow_core.config import get_settings
 
 # Named constants (Section 7.15.4) are defined once, in docflow_core.constants.
 from docflow_core.constants import MAX_ATTACHMENTS_PER_EMAIL, UNKNOWN_SENDER_HOURLY_LIMIT
 from docflow_core.db import tenant_session, token_lookup_session
 from docflow_core.duplicates import find_content_duplicate_at_ingest
+from docflow_core.errors import render_error
 from docflow_core.storage import save_file
+
+# Public mail providers: a buyer using one of these does not make the whole
+# domain "known" (see is_known_sender).
+FREE_MAIL_DOMAINS = frozenset(
+    {"gmail.com", "googlemail.com", "yahoo.com", "outlook.com", "hotmail.com", "live.com",
+     "icloud.com", "aol.com", "msn.com", "proton.me", "protonmail.com"}
+)
 
 # A lightweight Celery producer, separate from apps/api/app/celery_client.py
 # and apps/worker/app/celery_app.py's instances but pointed at the same
@@ -240,6 +248,11 @@ def is_known_sender(session: Session, tenant_id: UUID, sender_email: str) -> boo
     tenant." No buyer/customer records exist yet (Phase 2) -- see
     DECISIONS.md for this slice's scoping to "has a prior non-quarantined
     document for this tenant" only.
+
+    Buyers exist now (Phase 2), so, as D-031 anticipated and D-126 closes: a
+    sender is also known when its address matches a buyer's contact email, or
+    its domain matches a buyer's -- except for the big public mail domains,
+    where one buyer's Gmail address must not make every Gmail sender "known".
     """
     row = session.execute(
         text(
@@ -248,7 +261,37 @@ def is_known_sender(session: Session, tenant_id: UUID, sender_email: str) -> boo
         ),
         {"tenant_id": str(tenant_id), "sender_email": sender_email},
     ).first()
-    return row is not None
+    if row is not None:
+        return True
+    domain = sender_domain_of(sender_email)
+    buyer = session.execute(
+        text(
+            """
+            SELECT 1 FROM buyers
+            WHERE tenant_id = :tenant_id AND deleted_at IS NULL AND contact_email IS NOT NULL
+              AND (lower(contact_email) = lower(:sender_email)
+                   OR (:domain <> '' AND :domain <> ALL(CAST(string_to_array(:free, ',') AS text[]))
+                       AND lower(split_part(contact_email, '@', 2)) = :domain))
+            LIMIT 1
+            """
+        ),
+        {
+            "tenant_id": str(tenant_id),
+            "sender_email": sender_email,
+            "domain": domain,
+            "free": ",".join(sorted(FREE_MAIL_DOMAINS)),
+        },
+    ).first()
+    return buyer is not None
+
+
+def sender_is_allowed(sender_email: str, allowlist: list[str]) -> bool:
+    """Strict-mode allowlist (7.2 / 7.16.3): an entry is a full address or a
+    bare domain, compared case-insensitively."""
+    email = (sender_email or "").lower()
+    domain = sender_domain_of(email)
+    entries = {e.strip().lower() for e in allowlist}
+    return email in entries or (domain != "" and domain in entries)
 
 
 def count_unknown_sender_documents_last_hour(session: Session, tenant_id: UUID) -> int:
@@ -287,6 +330,8 @@ def evaluate_email(
     auth: AuthResult,
     sender_known: bool,
     unknown_sender_count_last_hour: int,
+    ceiling_hold: str | None = None,
+    sender_allowed: bool = True,
 ) -> EmailDecision:
     """
     Pure decision function -- no DB access -- so the abuse-defense ordering
@@ -295,10 +340,16 @@ def evaluate_email(
     """
     if num_attachments == 0:
         return EmailDecision(reject_no_attachment=True, quarantine_reason=None)
+    # The abuse ceilings come first: they pause the whole tenant, and only the
+    # founder can lift them (7.16.2).
+    if ceiling_hold:
+        return EmailDecision(reject_no_attachment=False, quarantine_reason=ceiling_hold)
     if num_attachments > MAX_ATTACHMENTS_PER_EMAIL:
         return EmailDecision(reject_no_attachment=False, quarantine_reason="attachment_cap")
     if should_quarantine_for_auth(auth):
         return EmailDecision(reject_no_attachment=False, quarantine_reason="auth_fail")
+    if not sender_allowed:
+        return EmailDecision(reject_no_attachment=False, quarantine_reason="sender_not_allowed")
     if not sender_known and unknown_sender_count_last_hour >= UNKNOWN_SENDER_HOURLY_LIMIT:
         return EmailDecision(reject_no_attachment=False, quarantine_reason="unknown_sender_velocity")
     return EmailDecision(reject_no_attachment=False, quarantine_reason=None)
@@ -318,7 +369,12 @@ def resolve_tenant_by_token(token: str) -> tuple[UUID, str] | None:
     """
     with token_lookup_session(token) as session:
         row = session.execute(
-            text("SELECT tenant_id, status FROM intake_addresses WHERE token = :token"),
+            text(
+                "SELECT tenant_id, "
+                "CASE WHEN status = 'grace' AND grace_ends_at IS NOT NULL AND grace_ends_at < now() "
+                "     THEN 'retired' ELSE status END AS status "
+                "FROM intake_addresses WHERE token = :token"
+            ),
             {"token": token},
         ).mappings().first()
     if row is None:
@@ -445,12 +501,15 @@ def _reply_intake_blocked(
     ).scalar_one()
     if earlier > 1:  # the rejection just written is one of them
         return
+    # The wording comes from the catalog entry for this code, filled with the
+    # tenant's name (Section 7.16.5: intake auto-replies render from the catalog).
+    entry = render_error(error_code, tenant_name=tenant_name)
     email_outbox.enqueue(
         session,
         tenant_id=tenant_id,
         to_address=sender,
         template=template,
-        params={"tenant_name": tenant_name},
+        params={"tenant_name": tenant_name, "message": entry.message, "action": entry.action},
         related_type="intake_rejection",
     )
 
@@ -565,6 +624,39 @@ def _accept_attachment(
     )
 
 
+def reply_address_changed(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult:
+    """Mail to a rotated (grace-period) address (7.16.3): nothing is processed;
+    the sender is told the address has changed and to ask the tenant for the new
+    one. Logged like every other refusal, replied to at most once a day."""
+    auth = parse_authentication_results(parsed.headers)
+    with tenant_session(tenant_id) as session:
+        if parsed.message_id:
+            # A retried webhook delivery is idempotent here too (Section 7.8).
+            duplicate = session.execute(
+                text("SELECT id FROM raw_emails WHERE tenant_id = :t AND message_id = :m"),
+                {"t": str(tenant_id), "m": parsed.message_id},
+            ).mappings().first()
+            if duplicate is not None:
+                return ProcessResult(
+                    outcome="duplicate", raw_email_id=UUID(str(duplicate["id"])), attachments=[]
+                )
+        name = session.execute(
+            text("SELECT name FROM tenants WHERE id = :id"), {"id": str(tenant_id)}
+        ).scalar_one()
+        _insert_intake_rejection(
+            session, tenant_id, parsed, original_filename=None, detected_type=None, error_code="INT-008"
+        )
+        raw_email_id = _insert_raw_email(
+            session, tenant_id, parsed, auth, sender_domain_of(parsed.sender_email),
+            outcome="rejected", attachment_count=len(parsed.attachments),
+        )
+        _reply_intake_blocked(
+            session, tenant_id, name, parsed.sender_email,
+            error_code="INT-008", template="intake_address_changed",
+        )
+    return ProcessResult(outcome="rejected", raw_email_id=raw_email_id, attachments=[])
+
+
 def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult:
     """
     The full CLAUDE.md Section 7.16.3 pipeline for one inbound email, given
@@ -605,7 +697,10 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
         # (D-123) -- intake_address_active is the one flag both states set
         # false, so the tenant's current lifecycle status picks the reply.
         tenant = session.execute(
-            text("SELECT name, status, intake_address_active FROM tenants WHERE id = :id"),
+            text(
+                "SELECT name, status, intake_address_active, strict_sender_mode, sender_allowlist "
+                "FROM tenants WHERE id = :id"
+            ),
             {"id": str(tenant_id)},
         ).mappings().first()
         if tenant is not None and not tenant["intake_address_active"]:
@@ -639,7 +734,14 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
         unknown_sender_count = (
             0 if sender_known else count_unknown_sender_documents_last_hour(session, tenant_id)
         )
-        decision = evaluate_email(num_attachments, auth, sender_known, unknown_sender_count)
+        ceiling_hold = intake_gate.hold_reason(session, tenant_id)
+        strict = bool(tenant is not None and tenant["strict_sender_mode"])
+        sender_allowed = not strict or sender_is_allowed(
+            parsed.sender_email, list(tenant["sender_allowlist"] or [])
+        )
+        decision = evaluate_email(
+            num_attachments, auth, sender_known, unknown_sender_count, ceiling_hold, sender_allowed
+        )
 
         if decision.quarantine_reason:
             for attachment in parsed.attachments:
@@ -656,6 +758,18 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
                     )
                 )
             result_outcome = "quarantined"
+            if decision.quarantine_reason in ("abuse_ceiling", "cost_breaker"):
+                # "The intake address auto-replies 'received and held'" (7.16.2).
+                # The rejection row is what limits this to one reply a day per
+                # sender; the document itself is safely stored.
+                _insert_intake_rejection(
+                    session, tenant_id, parsed, original_filename=None, detected_type=None,
+                    error_code="INT-007",
+                )
+                _reply_intake_blocked(
+                    session, tenant_id, tenant["name"] if tenant else "", parsed.sender_email,
+                    error_code="INT-007", template="intake_held",
+                )
         else:
             any_accepted = False
             for attachment in parsed.attachments:
@@ -665,6 +779,8 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
                     any_accepted = True
                     pending_enqueues.append(outcome.document_id)
             result_outcome = "processed" if any_accepted else "rejected"
+            if any_accepted:
+                allowance.record_thresholds(session, tenant_id)
 
         raw_email_id = _insert_raw_email(
             session,

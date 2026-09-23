@@ -23,22 +23,27 @@ export default function LifecyclePage() {
   const [windDown, setWindDown] = useState<WindDownTenant[] | null>(null);
   const [ready, setReady] = useState<ReadyToDeleteTenant[] | null>(null);
   const [error, setError] = useState<CatalogError | null>(null);
-
-  const load = useCallback(async () => {
-    const [w, r] = await Promise.all([getWindDownQueue(), getReadyToDeleteQueue()]);
-    setWindDown(w.tenants);
-    setReady(r.tenants);
-  }, []);
+  // Bumping this refetches. The fetch lives in the effect (setState only
+  // inside its promise callbacks), which is what react-hooks/set-state-in-effect
+  // wants, and a delete just bumps the counter.
+  const [refresh, setRefresh] = useState(0);
+  const reload = useCallback(() => setRefresh((n) => n + 1), []);
 
   useEffect(() => {
     let cancelled = false;
-    load().catch((e) => {
-      if (!cancelled) setError(e instanceof ReviewApiError ? e.catalog : UNEXPECTED);
-    });
+    Promise.all([getWindDownQueue(), getReadyToDeleteQueue()])
+      .then(([w, r]) => {
+        if (cancelled) return;
+        setWindDown(w.tenants);
+        setReady(r.tenants);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof ReviewApiError ? e.catalog : UNEXPECTED);
+      });
     return () => {
       cancelled = true;
     };
-  }, [load]);
+  }, [refresh]);
 
   return (
     <>
@@ -65,7 +70,7 @@ export default function LifecyclePage() {
         {ready && ready.length > 0 ? (
           <ul className="mt-3 space-y-3">
             {ready.map((t) => (
-              <ReadyRow key={t.id} tenant={t} onDeleted={() => void load()} />
+              <ReadyRow key={t.id} tenant={t} onDeleted={reload} />
             ))}
           </ul>
         ) : null}

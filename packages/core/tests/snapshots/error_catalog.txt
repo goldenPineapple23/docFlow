@@ -266,6 +266,18 @@ INT-006 [info/both] This account is no longer active
   what+why: DocFlow is no longer reading orders for this account. This email was logged, not processed.
   next:     Please contact this company directly to send your order another way.
 
+INT-007 [warning/both] Received and held for review
+  what+why: DocFlow is reviewing unusual volume on this account, so new documents are being held instead of processed. Nothing has been discarded.
+  next:     DocFlow has already been alerted and will release them once the volume is confirmed.
+
+INT-008 [info/both] This address has changed
+  what+why: Orders for {tenant_name} are now read at a different address, so this email was logged, not processed.
+  next:     Please contact {tenant_name} for the new address and send your order there.
+
+INT-009 [warning/tenant] Held: sender isn't on your approved list
+  what+why: This account only accepts orders from approved senders, and this sender isn't on the list, so we're holding the document instead of processing it.
+  next:     Open 'Held for review' to release it, or ask DocFlow to add the sender to your list.
+
 LIFE-001 [warning/founder] This tenant can't be cancelled from here
   what+why: Cancel only applies to an active tenant. This one is already cancelling, suspended, pending deletion or deleted.
   next:     Check the tenant's current status on the Lifecycle tab.
@@ -289,6 +301,22 @@ LIFE-005 [warning/founder] That name doesn't match
 LIFE-006 [warning/founder] This tenant isn't ready to delete
   what+why: A tenant can only be hard-deleted once it is in the pending-deletion window and that window has elapsed.
   next:     Check the Ready to delete queue -- it only lists tenants past their window.
+
+LIM-001 [info/tenant] You've used most of this month's documents
+  what+why: You've used {used} of {allowance} documents included in {tier} this month. Documents continue to process normally.
+  next:     {next_tier} includes {next_allowance} documents per month -- contact us to upgrade.
+
+LIM-002 [info/tenant] You've reached your monthly allowance
+  what+why: You've used {used} of {allowance} documents included in {tier} this month. Documents continue to process normally.
+  next:     {next_tier} includes {next_allowance} documents per month -- contact us to upgrade.
+
+LIM-003 [info/tenant] You've used most of this month's documents
+  what+why: You've used {used} of {allowance} documents included in {tier} this month. Documents continue to process normally.
+  next:     Contact us if you expect to keep going above this level -- we'll set up a plan that fits.
+
+LIM-004 [info/tenant] You've reached your monthly allowance
+  what+why: You've used {used} of {allowance} documents included in {tier} this month. Documents continue to process normally.
+  next:     Contact us if you expect to keep going above this level -- we'll set up a plan that fits.
 
 ONB-001 [warning/founder] Load the catalog first
   what+why: The test batch is matched against this tenant's catalog, and no catalog has been committed yet, so the results wouldn't show how DocFlow will really perform.
@@ -345,6 +373,26 @@ ONB-013 [warning/founder] Say why in the note
 ONB-014 [warning/founder] That setup fee option isn't available
   what+why: There is no current version of the chosen setup fee preset in the presets table.
   next:     Choose Founding, Standard, Complex, Waived or Custom; if one is missing, check setup_fee_presets.
+
+QUA-001 [info/tenant] Only DocFlow can release these documents
+  what+why: These documents are held because of unusual volume or a failed sender check, which DocFlow reviews itself rather than leaving it to your account.
+  next:     No action is needed: DocFlow has already been alerted and will release them once they're confirmed.
+
+QUA-002 [info/tenant] Those documents are no longer held
+  what+why: One or more of the documents you chose have already been released or removed.
+  next:     Refresh 'Held for review' to see what is still waiting.
+
+QUA-003 [warning/founder] That name doesn't match
+  what+why: The name typed doesn't exactly match this tenant, so nothing was cleared.
+  next:     Type the tenant's name exactly as shown to clear its held documents.
+
+QUA-004 [warning/founder] This address can't be replaced
+  what+why: This tenant has no active intake address to replace, so no new address was issued.
+  next:     Check that the tenant went live and hasn't been suspended, then try again.
+
+QUA-005 [warning/founder] That approved-sender list can't be saved
+  what+why: An entry isn't a valid email address or domain, or the list is empty while the approved-sender rule is on, which would hold every order.
+  next:     Enter full addresses (buyer@example.com) or bare domains (example.com), at least one.
 
 REV-001 [warning/tenant] Some warnings still need a look
   what+why: This order has warnings nobody has acknowledged yet. DocFlow doesn't approve an order while something on it is still unexplained.

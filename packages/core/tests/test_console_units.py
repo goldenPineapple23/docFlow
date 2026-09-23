@@ -56,6 +56,16 @@ TEMPLATE_PARAMS = {
         "days_remaining": 15,
     },
     "reactivated": {"tenant_name": "Acme Test Distributor", "app_url": "https://app.example.test"},
+    # Slice 5.7 (D-126): allowances and quarantine.
+    "allowance_notice": {
+        "tenant_name": "Acme Test Distributor", "title": "t", "message": "m", "action": "a",
+    },
+    "intake_held": {"tenant_name": "Acme Test Distributor", "message": "m"},
+    "intake_address_changed": {"tenant_name": "Acme Test Distributor", "message": "m", "action": "a"},
+    "intake_address_rotated": {
+        "tenant_name": "Acme Test Distributor", "new_address": "orders+x@intake.example.test",
+        "grace_ends": "2026-10-31",
+    },
 }
 
 

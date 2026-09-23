@@ -676,3 +676,65 @@ export const deleteTenant = (tenantId: string, body: { confirm_name: string; rea
     method: "POST",
     body: JSON.stringify(body),
   });
+
+
+// ── Allowances, quarantine, intake address (slice 5.7, D-126) ───────────────
+
+export type QuarantineReason =
+  | "abuse_ceiling"
+  | "cost_breaker"
+  | "attachment_cap"
+  | "auth_fail"
+  | "unknown_sender_velocity"
+  | "sender_not_allowed"
+  | "manual";
+
+export type HeldDocumentRow = {
+  id: string;
+  original_filename: string;
+  content_sha256: string;
+  sender_email: string | null;
+  source: string;
+  quarantine_reason: QuarantineReason;
+  quarantined_at: string;
+  created_at: string;
+  subject: string | null;
+  spf_result: string | null;
+  dkim_result: string | null;
+  dmarc_result: string | null;
+  file_type: string | null;
+};
+
+export type QuarantineView = {
+  usage: { used: number; allowance: number | null; tier: string | null; month: string };
+  sender_settings: { strict_sender_mode: boolean; sender_allowlist: string[] };
+  expired_held: number;
+  groups: { reason: QuarantineReason; count: number; title: string; message: string }[];
+  documents: HeldDocumentRow[];
+};
+
+export const getQuarantine = (tenantId: string) =>
+  request<QuarantineView>(`/admin/tenants/${tenantId}/quarantine`);
+
+export const releaseQuarantine = (tenantId: string, documentIds: string[]) =>
+  request<{ released: string[]; skipped: string[] }>(`/admin/tenants/${tenantId}/quarantine/release`, {
+    method: "POST",
+    body: JSON.stringify({ document_ids: documentIds }),
+  });
+
+export const clearQuarantine = (tenantId: string, documentIds: string[], confirmName: string) =>
+  request<{ cleared: string[] }>(`/admin/tenants/${tenantId}/quarantine/clear`, {
+    method: "POST",
+    body: JSON.stringify({ document_ids: documentIds, confirm_name: confirmName }),
+  });
+
+export const rotateIntakeAddress = (tenantId: string) =>
+  request<{ address: string; grace_ends_at: string }>(`/admin/tenants/${tenantId}/intake-address/rotate`, {
+    method: "POST",
+  });
+
+export const putSenderSettings = (tenantId: string, strict: boolean, allowlist: string[]) =>
+  request<{ strict_sender_mode: boolean; sender_allowlist: string[] }>(
+    `/admin/tenants/${tenantId}/sender-settings`,
+    { method: "PUT", body: JSON.stringify({ strict_sender_mode: strict, sender_allowlist: allowlist }) },
+  );

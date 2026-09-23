@@ -22,8 +22,6 @@ from uuid import uuid4
 
 import pytest
 from docflow_core.config import get_settings
-from docflow_core.db import platform_session
-from sqlalchemy import text
 
 from tests.test_console_api import _Console, _environment, _scalar, stripe  # noqa: F401
 from tests.test_lifecycle_api import requires_lifecycle_schema  # noqa: F401
@@ -133,7 +131,10 @@ def test_past_due_records_the_first_notice_once_and_clears_it_on_recovery(client
         period_end = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
         _post(
             client,
-            _subscription_event(event_id=_event_id("pd3"), customer=customer, status="active", period_end=period_end),
+            _subscription_event(
+                event_id=_event_id("pd3"), customer=customer, status="active", period_end=period_end
+            ),
         )
         assert _scalar("SELECT first_past_due_at FROM tenants WHERE id = :t", t=tenant_id) is None
-        assert _scalar("SELECT stripe_subscription_status FROM tenants WHERE id = :t", t=tenant_id) == "active"
+        status = _scalar("SELECT stripe_subscription_status FROM tenants WHERE id = :t", t=tenant_id)
+        assert status == "active"

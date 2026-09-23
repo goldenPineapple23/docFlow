@@ -17,7 +17,7 @@ import { consoleTenantFromPath } from "@/lib/reviewScope";
  * work once the Console's real layout exists -- see DECISIONS.md.
  */
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const [status, setStatus] = useState<"checking" | "allowed">("checking");
+  const [status, setStatus] = useState<"checking" | "allowed" | "denied">("checking");
   const pathname = usePathname();
 
   useEffect(() => {
@@ -27,18 +27,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       .then(async (res) => {
         if (cancelled) return;
         if (!res.ok) {
-          notFound();
+          setStatus("denied");
           return;
         }
         const data = await res.json();
         if (!data.is_platform_admin) {
-          notFound();
+          setStatus("denied");
           return;
         }
         setStatus("allowed");
       })
       .catch(() => {
-        if (!cancelled) notFound();
+        if (!cancelled) setStatus("denied");
       });
 
     return () => {
@@ -50,6 +50,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   if (status === "checking") {
     return null;
+  }
+  // notFound() only works while rendering, not inside the fetch callback
+  // above -- calling it there left a non-admin on a blank page.
+  if (status === "denied") {
+    notFound();
   }
 
   return (

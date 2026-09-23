@@ -40,6 +40,12 @@ export function AppHeader({ email }: { email?: string | null }) {
           >
             Purchase orders
           </Link>
+          <Link
+            href="/held"
+            className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900"
+          >
+            Held for review
+          </Link>
         </nav>
 
         <div className="flex items-center gap-3 text-sm">

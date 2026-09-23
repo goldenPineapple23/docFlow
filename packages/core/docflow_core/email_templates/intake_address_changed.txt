@@ -1,0 +1,9 @@
+Subject: Your email to $tenant_name went to an old address
+
+Hello,
+
+$message
+
+$action
+
+-- DocFlow (automatic reply; this mailbox is not monitored)

@@ -11,9 +11,10 @@ authenticated identity (Section 7.5 / Section 10).
 from __future__ import annotations
 
 import hashlib
+from typing import Any
 from uuid import UUID, uuid4
 
-from docflow_core import file_types
+from docflow_core import allowance, file_types, intake_gate, quarantine
 from docflow_core.db import tenant_session
 from docflow_core.duplicates import find_content_duplicate_at_ingest
 from docflow_core.errors import get_error
@@ -27,12 +28,13 @@ from app.deps import AuthenticatedIdentity, get_current_identity
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
-def _require_tenant(identity: AuthenticatedIdentity) -> None:
+def _require_tenant(identity: AuthenticatedIdentity) -> UUID:
     if identity.tenant_id is None:
         # A platform-admin-only account (D-004) has no tenant to upload
         # into; the Console's own staging upload is a separate, later
         # feature (Section 7.15.2 Step 1/6), not this endpoint.
         raise HTTPException(status_code=403, detail="This account is not associated with a tenant.")
+    return identity.tenant_id
 
 
 @router.post("/upload")
@@ -40,9 +42,9 @@ async def upload_document(
     file: UploadFile,
     identity: AuthenticatedIdentity = Depends(get_current_identity),
 ) -> dict:
-    _require_tenant(identity)
+    tenant_id = _require_tenant(identity)
     content = await file.read()
-    return ingest_upload(identity.tenant_id, file.filename or "upload", content)
+    return ingest_upload(tenant_id, file.filename or "upload", content)
 
 
 def ingest_upload(
@@ -93,8 +95,17 @@ def ingest_upload(
 
     content_sha256 = hashlib.sha256(content).hexdigest()
     status = "staged" if is_test_batch else "pending"
+    hold: str | None = None
 
     with tenant_session(tenant_id) as session:
+        # The same abuse ceilings email intake applies (Section 7.16.2, D-126):
+        # one rule for every way a document can arrive. A held document is
+        # stored, never sent to the model, and the founder is alerted. The
+        # setup test batch is exempt (Section 7.15.2).
+        if not is_test_batch:
+            hold = intake_gate.hold_reason(session, tenant_id)
+            if hold:
+                status = "quarantined"
         # CLAUDE.md Section 7.8: the same content for the same tenant "is
         # linked to the existing document and surfaced as a possible
         # duplicate". The link is written into the INSERT below rather than
@@ -130,8 +141,19 @@ def ingest_upload(
                 "duplicate_of_document_id": str(existing) if existing else None,
             },
         )
+        if hold:
+            session.execute(
+                text(
+                    "UPDATE documents SET quarantine_reason = :reason, quarantined_at = now() "
+                    "WHERE id = :id AND tenant_id = :t"
+                ),
+                {"reason": hold, "id": str(document_id), "t": str(tenant_id)},
+            )
+        elif not is_test_batch:
+            # It counts now, so the 80% / 100% notices may fire (7.16.1).
+            allowance.record_thresholds(session, tenant_id)
 
-    if not is_test_batch:
+    if not is_test_batch and not hold:
         # Enqueued after the transaction commits, so the task never races a
         # document row that isn't visible yet. Interactive priority (Section
         # 5.1): a single upload a user is waiting on, never the bulk queue.
@@ -141,7 +163,16 @@ def ingest_upload(
             queue="interactive",
         )
 
-    response = {"document_id": str(document_id), "status": status}
+    response: dict[str, Any] = {"document_id": str(document_id), "status": status}
+    if hold:
+        # What the person sees: the catalog's own wording, never a made-up string.
+        entry = quarantine.reason_entry(hold)
+        response["held"] = {
+            "code": entry.code,
+            "title": entry.title,
+            "message": entry.message,
+            "action": entry.action,
+        }
     if existing is not None:
         response["possible_duplicate_of"] = str(existing)
     return response

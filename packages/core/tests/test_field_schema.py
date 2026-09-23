@@ -16,6 +16,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+
 from docflow_core.field_schema import (
     DEFAULT_SCHEMA,
     FieldSchema,
@@ -100,7 +101,8 @@ def test_an_order_with_no_scored_required_field_is_zero_not_an_error():
 
 
 def test_the_screen_payload_lists_every_field_with_its_state():
-    payload = FieldSchema(version=7, header=dict(DEFAULT_SCHEMA.header), line=dict(DEFAULT_SCHEMA.line)).as_dict()
+    schema = FieldSchema(version=7, header=dict(DEFAULT_SCHEMA.header), line=dict(DEFAULT_SCHEMA.line))
+    payload = schema.as_dict()
     assert payload["version"] == 7
     po = next(f for f in payload["fields"] if f["name"] == "po_number")
     assert (po["level"], po["state"], po["locked"]) == ("header", "required", True)

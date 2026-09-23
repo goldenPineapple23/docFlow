@@ -1,0 +1,9 @@
+Subject: Your email to $tenant_name was received and is being held
+
+Hello,
+
+Your email to $tenant_name's order address was received.
+
+$message
+
+-- DocFlow (automatic reply; this mailbox is not monitored)

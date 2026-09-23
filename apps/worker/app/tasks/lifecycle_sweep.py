@@ -16,13 +16,16 @@ scheduled-jobs sweep:
      retried inline; the tenant's own suspension already committed.
   2. Tenants already in pending_deletion whose window has elapsed: alerted
      (deduped) so the founder sees them in the Ready to delete queue.
+  3. Intake housekeeping (Section 7.16.3, D-126): rotated addresses whose
+     grace period ended are retired, and held documents past their retention
+     period raise one deduplicated alert. Nothing is ever deleted.
 """
 
 from __future__ import annotations
 
 import logging
 
-from docflow_core import founder_alerts, lifecycle
+from docflow_core import founder_alerts, intake_admin, lifecycle
 from docflow_core.db import lifecycle_session, tenant_session
 from docflow_core.external_services import (
     ExternalServiceError,
@@ -79,5 +82,15 @@ def run_lifecycle_sweep() -> dict:
             lifecycle.raise_ready_to_delete_alert(session, tenant_id)
         ready_alerted += 1
 
-    logger.info("lifecycle_sweep_complete suspended=%d ready_alerted=%d", suspended, ready_alerted)
-    return {"suspended": suspended, "ready_alerted": ready_alerted}
+    retired = 0
+    with lifecycle_session() as session:
+        housekeeping_ids = lifecycle.tenants_for_intake_housekeeping(session)
+    for tenant_id in housekeeping_ids:
+        with tenant_session(tenant_id) as session:
+            retired += intake_admin.housekeeping(session, tenant_id)["retired_addresses"]
+
+    logger.info(
+        "lifecycle_sweep_complete suspended=%d ready_alerted=%d addresses_retired=%d",
+        suspended, ready_alerted, retired,
+    )
+    return {"suspended": suspended, "ready_alerted": ready_alerted, "addresses_retired": retired}

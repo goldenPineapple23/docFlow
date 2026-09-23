@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   cancelTenant,
@@ -34,30 +34,30 @@ export default function TenantLifecyclePage({ params }: { params: Promise<{ id: 
   const [error, setError] = useState<CatalogError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const [t, s] = await Promise.all([getTenantOverview(id), getLifecycle(id)]);
-    setTenantName(t.tenant.name);
-    setStatus(s);
-  }, [id]);
+  // Bumping this refetches (the fetch lives in the effect; setState only in
+  // its promise callbacks -- react-hooks/set-state-in-effect).
+  const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    load().catch((e) => {
-      if (!cancelled) setError(e instanceof ReviewApiError ? e.catalog : UNEXPECTED);
-    });
+    Promise.all([getTenantOverview(id), getLifecycle(id)])
+      .then(([t, s]) => {
+        if (cancelled) return;
+        setTenantName(t.tenant.name);
+        setStatus(s);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof ReviewApiError ? e.catalog : UNEXPECTED);
+      });
     return () => {
       cancelled = true;
     };
-  }, [load]);
+  }, [id, refresh]);
 
-  async function announce(message: string) {
+  function announce(message: string) {
     setError(null);
     setNotice(message);
-    try {
-      await load();
-    } catch (e) {
-      setError(e instanceof ReviewApiError ? e.catalog : UNEXPECTED);
-    }
+    setRefresh((n) => n + 1);
   }
 
   return (
@@ -151,25 +151,28 @@ function CancelForm({
   const [reason, setReason] = useState<CancellationReason>("customer_requested");
   const [note, setNote] = useState("");
   const [override, setOverride] = useState("");
-  const [preview, setPreview] = useState<CancelPreview | null>(null);
-  const [previewing, setPreviewing] = useState(false);
-  const [confirming, setConfirming] = useState(false);
+  // The preview and the "are you sure" step both belong to ONE reason.
+  // Keying them by it means changing the reason discards both without any
+  // setState inside the effect (react-hooks/set-state-in-effect).
+  const [loaded, setLoaded] = useState<{ reason: CancellationReason; preview: CancelPreview | null } | null>(null);
+  const [confirmingFor, setConfirmingFor] = useState<CancellationReason | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const preview = loaded?.reason === reason ? loaded.preview : null;
+  const previewing = loaded?.reason !== reason;
+  const confirming = confirmingFor === reason;
+  const setConfirming = (on: boolean) => setConfirmingFor(on ? reason : null);
 
   useEffect(() => {
     let cancelled = false;
-    setPreview(null);
-    setConfirming(false);
-    setPreviewing(true);
     previewCancel(tenantId, reason)
       .then((p) => {
-        if (!cancelled) setPreview(p);
+        if (!cancelled) setLoaded({ reason, preview: p });
       })
       .catch((e) => {
-        if (!cancelled) onError(e instanceof ReviewApiError ? e.catalog : UNEXPECTED);
-      })
-      .finally(() => {
-        if (!cancelled) setPreviewing(false);
+        if (cancelled) return;
+        setLoaded({ reason, preview: null });
+        onError(e instanceof ReviewApiError ? e.catalog : UNEXPECTED);
       });
     return () => {
       cancelled = true;

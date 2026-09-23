@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { AppHeader } from "@/components/AppHeader";
+import { HeldStrip } from "@/components/HeldStrip";
 import { getTenantOverview } from "@/lib/admin";
 import { useReviewScope } from "@/lib/reviewScope";
 
@@ -15,7 +16,14 @@ import { useReviewScope } from "@/lib/reviewScope";
  */
 export function ReviewChrome() {
   const { tenantId } = useReviewScope();
-  if (!tenantId) return <AppHeader />;
+  if (!tenantId) {
+    return (
+      <>
+        <AppHeader />
+        <HeldStrip />
+      </>
+    );
+  }
   return <SupportBanner tenantId={tenantId} />;
 }
 

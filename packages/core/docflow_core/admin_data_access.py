@@ -182,7 +182,11 @@ def list_tenants(*, platform_admin_user_id: UUID, filters: dict[str, Any] | None
             text(
                 """
                 WITH month_usage AS (
-                    SELECT d.tenant_id, count(*) AS used, max(d.created_at) AS last_document_at,
+                    -- A linked duplicate counts once (7.16.1), but its AI cost was still
+                    -- spent, so only the COUNT excludes it (docflow_core.usage).
+                    SELECT d.tenant_id,
+                           count(*) FILTER (WHERE d.duplicate_of_document_id IS NULL) AS used,
+                           max(d.created_at) AS last_document_at,
                            coalesce(sum(d.est_cost_usd), 0) AS ai_cost_month
                     FROM documents d JOIN tenants t ON t.id = d.tenant_id
                     WHERE NOT d.is_test_batch AND d.deleted_at IS NULL
@@ -1199,6 +1203,7 @@ def list_ready_to_delete(*, platform_admin_user_id: UUID) -> list[dict[str, Any]
 _PURGE_TABLES = (
     "documents",
     "intake_rejections",
+    "allowance_notices",
     "raw_emails",
     "buyer_merge_candidates",
     "buyer_merges",

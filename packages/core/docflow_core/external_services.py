@@ -268,7 +268,9 @@ def void_pending_setup_fee(*, customer_id: str, tenant_id: UUID) -> None:
             raise ExternalServiceError("stripe", f"invoice item delete returned {response.status_code}")
 
 
-def verify_webhook_signature(payload: bytes, sig_header: str, secret: str, *, tolerance_seconds: int = 300) -> dict:
+def verify_webhook_signature(
+    payload: bytes, sig_header: str, secret: str, *, tolerance_seconds: int = 300
+) -> dict:
     """
     Stripe's documented signature scheme (no `stripe` SDK dependency in this
     codebase -- see the module docstring): the header is

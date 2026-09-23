@@ -1216,7 +1216,152 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="founder",
     ),
+    # ── LIM / INT / QUA · allowances and quarantine (Section 7.16, slice 5.7) ─
+    # `{name}` placeholders are filled by render_error(); get_error() returns
+    # the raw template, which is what the snapshot test records.
+    "LIM-001": ErrorCatalogEntry(
+        code="LIM-001",
+        title="You've used most of this month's documents",
+        message=(
+            "You've used {used} of {allowance} documents included in {tier} this month. "
+            "Documents continue to process normally."
+        ),
+        action="{next_tier} includes {next_allowance} documents per month -- contact us to upgrade.",
+        severity="info",
+        audience="tenant",
+    ),
+    "LIM-002": ErrorCatalogEntry(
+        code="LIM-002",
+        title="You've reached your monthly allowance",
+        message=(
+            "You've used {used} of {allowance} documents included in {tier} this month. "
+            "Documents continue to process normally."
+        ),
+        action="{next_tier} includes {next_allowance} documents per month -- contact us to upgrade.",
+        severity="info",
+        audience="tenant",
+    ),
+    "LIM-003": ErrorCatalogEntry(
+        code="LIM-003",
+        title="You've used most of this month's documents",
+        message=(
+            "You've used {used} of {allowance} documents included in {tier} this month. "
+            "Documents continue to process normally."
+        ),
+        action="Contact us if you expect to keep going above this level -- we'll set up a plan that fits.",
+        severity="info",
+        audience="tenant",
+    ),
+    "LIM-004": ErrorCatalogEntry(
+        code="LIM-004",
+        title="You've reached your monthly allowance",
+        message=(
+            "You've used {used} of {allowance} documents included in {tier} this month. "
+            "Documents continue to process normally."
+        ),
+        action="Contact us if you expect to keep going above this level -- we'll set up a plan that fits.",
+        severity="info",
+        audience="tenant",
+    ),
+    "INT-007": ErrorCatalogEntry(
+        code="INT-007",
+        title="Received and held for review",
+        message=(
+            "DocFlow is reviewing unusual volume on this account, so new documents are being "
+            "held instead of processed. Nothing has been discarded."
+        ),
+        action="DocFlow has already been alerted and will release them once the volume is confirmed.",
+        severity="warning",
+        audience="both",
+    ),
+    "INT-008": ErrorCatalogEntry(
+        code="INT-008",
+        title="This address has changed",
+        message=(
+            "Orders for {tenant_name} are now read at a different address, so this email was "
+            "logged, not processed."
+        ),
+        action="Please contact {tenant_name} for the new address and send your order there.",
+        severity="info",
+        audience="both",
+    ),
+    "INT-009": ErrorCatalogEntry(
+        code="INT-009",
+        title="Held: sender isn't on your approved list",
+        message=(
+            "This account only accepts orders from approved senders, and this sender isn't on "
+            "the list, so we're holding the document instead of processing it."
+        ),
+        action="Open 'Held for review' to release it, or ask DocFlow to add the sender to your list.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "QUA-001": ErrorCatalogEntry(
+        code="QUA-001",
+        title="Only DocFlow can release these documents",
+        message=(
+            "These documents are held because of unusual volume or a failed sender check, "
+            "which DocFlow reviews itself rather than leaving it to your account."
+        ),
+        action=(
+            "No action is needed: DocFlow has already been alerted and will release them "
+            "once they're confirmed."
+        ),
+        severity="info",
+        audience="tenant",
+    ),
+    "QUA-002": ErrorCatalogEntry(
+        code="QUA-002",
+        title="Those documents are no longer held",
+        message="One or more of the documents you chose have already been released or removed.",
+        action="Refresh 'Held for review' to see what is still waiting.",
+        severity="info",
+        audience="tenant",
+    ),
+    "QUA-003": ErrorCatalogEntry(
+        code="QUA-003",
+        title="That name doesn't match",
+        message="The name typed doesn't exactly match this tenant, so nothing was cleared.",
+        action="Type the tenant's name exactly as shown to clear its held documents.",
+        severity="warning",
+        audience="founder",
+    ),
+    "QUA-004": ErrorCatalogEntry(
+        code="QUA-004",
+        title="This address can't be replaced",
+        message="This tenant has no active intake address to replace, so no new address was issued.",
+        action="Check that the tenant went live and hasn't been suspended, then try again.",
+        severity="warning",
+        audience="founder",
+    ),
+    "QUA-005": ErrorCatalogEntry(
+        code="QUA-005",
+        title="That approved-sender list can't be saved",
+        message=(
+            "An entry isn't a valid email address or domain, or the list is empty while "
+            "the approved-sender rule is on, which would hold every order."
+        ),
+        action="Enter full addresses (buyer@example.com) or bare domains (example.com), at least one.",
+        severity="warning",
+        audience="founder",
+    ),
 }
+
+
+def render_error(code: str, **params: object) -> ErrorCatalogEntry:
+    """The catalog entry with its `{placeholders}` filled (e.g. LIM-002's
+    numbers). The wording still lives only in the catalog; callers supply
+    values, never prose."""
+    entry = get_error(code)
+    values = {k: str(v) for k, v in params.items()}
+    return ErrorCatalogEntry(
+        code=entry.code,
+        title=entry.title.format(**values),
+        message=entry.message.format(**values),
+        action=entry.action.format(**values),
+        severity=entry.severity,
+        audience=entry.audience,
+    )
 
 
 def get_error(code: str) -> ErrorCatalogEntry:

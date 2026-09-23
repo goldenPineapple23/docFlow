@@ -11,6 +11,7 @@ so changing a number later never rewrites history.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 # ── Lifecycle (Section 7.14 / 7.15.4) ───────────────────────────────────────
@@ -42,6 +43,14 @@ UNKNOWN_SENDER_HOURLY_LIMIT = 20
 QUARANTINE_TTL_DAYS = 30
 ROTATED_ADDRESS_GRACE_DAYS = 30
 ALLOWANCE_THRESHOLDS = (0.8, 1.0)
+# The per-tenant daily AI-spend circuit breaker (Section 7.9, 7.16.2; D-126).
+# Estimated model cost for one tenant in one UTC day. Founder-chosen; a heavy
+# legitimate day at the Scale tier (~100 documents at up to ~$0.35) is ~$35.
+# Money is a Decimal, never a float (Section 7).
+DAILY_AI_COST_CEILING_USD = Decimal("50")
+# Backstop on the same day's input + output tokens, so a change in model
+# pricing can't quietly make the dollar figure meaningless.
+DAILY_TOKEN_CEILING = 20_000_000
 
 # ── Billing (slice 5.3, D-113; trial delay D-125) ───────────────────────────
 # Stripe invoices go to the customer with this many days to pay (Net 15).

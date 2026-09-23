@@ -41,6 +41,11 @@ ALERT_TYPES: dict[str, str] = {
     "tenant_entered_pending_deletion": "A tenant entered the pending-deletion window",
     "tenant_ready_to_delete": "A tenant's deletion window has elapsed",
     "stripe_cancel_failed": "Cancelling a tenant's Stripe subscription failed",
+    # Slice 5.7 (Section 7.16)
+    "allowance_reached": "A tenant used its whole monthly allowance",
+    "abuse_ceiling_tripped": "A tenant hit the abuse ceiling; new documents are held",
+    "cost_breaker_tripped": "A tenant hit the daily AI-cost ceiling; new documents are held",
+    "quarantine_ttl_elapsed": "Held documents are past their retention period",
 }
 
 SEVERITIES = ("info", "warning", "high", "critical")

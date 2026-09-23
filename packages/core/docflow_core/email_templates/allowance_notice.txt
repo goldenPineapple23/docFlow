@@ -1,0 +1,11 @@
+Subject: DocFlow: $title
+
+Hello,
+
+This is a note about the DocFlow account for $tenant_name.
+
+$message
+
+$action
+
+-- DocFlow

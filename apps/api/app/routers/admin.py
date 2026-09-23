@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from docflow_core import (
@@ -30,10 +30,13 @@ from docflow_core import (
     external_services,
     field_schema,
     file_types,
+    intake_admin,
     learned_rules,
     lifecycle,
     metrics,
     onboarding,
+    quarantine,
+    usage,
 )
 from docflow_core.admin_data_access import ConsoleError
 from docflow_core.catalog_import import CatalogImportError
@@ -1216,7 +1219,7 @@ def _queue_depths() -> dict[str, int | None]:
         import redis
 
         client = redis.Redis.from_url(get_settings().redis_url, socket_timeout=1)
-        return {name: int(client.llen(name)) for name in ("interactive", "bulk")}
+        return {name: int(cast(int, client.llen(name))) for name in ("interactive", "bulk")}
     except Exception:  # noqa: BLE001 -- the strip degrades, the page does not
         return {"interactive": None, "bulk": None}
 
@@ -1283,3 +1286,135 @@ def recompute_rollup(
         "docflow.run_daily_rollup", args=[body.days, "manual"], queue="interactive"
     )
     return {"queued": True, "days": body.days}
+
+
+# ── Allowances, quarantine, intake address (slice 5.7, D-126) ───────────────
+#
+# The Console's side of Section 7.16. Each request is one `admin_actions` row
+# (written by _console_act, 404 for a tenant that doesn't exist), then the work
+# runs in that tenant's own session with the founder as the actor and
+# `acting_as_tenant_id` on what it writes (Section 7.15.1). The founder may
+# release any hold, including one whose ceiling is still tripped: an explicit
+# human act, logged like every other.
+
+
+def _quarantine_error(exc: quarantine.QuarantineError) -> HTTPException:
+    status = {"QUA-003": 422, "QUA-005": 422}.get(exc.code, 409)
+    return catalog_error(exc.code, status_code=status, extra=exc.detail or None)
+
+
+@router.get("/tenants/{tenant_id}/quarantine")
+def get_quarantine(
+    tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    _console_act(identity, tenant_id, "quarantine_read", target_type="tenant", target_id=tenant_id)
+    with tenant_session(tenant_id) as session:
+        groups = quarantine.held_summary(session, tenant_id, role=None)
+        rows = quarantine.list_held(session, tenant_id)
+        a = usage.allowance_for(session, tenant_id)
+        sender = intake_admin.get_sender_settings(session, tenant_id)
+        expired = quarantine.expired_count(session, tenant_id)
+    return {
+        "usage": {"used": a.used, "allowance": a.allowance, "tier": a.tier_name, "month": a.month},
+        "sender_settings": sender,
+        "expired_held": expired,
+        "groups": [
+            {"reason": g.reason, "count": g.count, "title": g.entry.title, "message": g.entry.message}
+            for g in groups
+        ],
+        "documents": [_jsonable(dict(r)) for r in rows],
+    }
+
+
+class QuarantineIds(BaseModel):
+    document_ids: list[UUID] = Field(min_length=1, max_length=500)
+
+
+@router.post("/tenants/{tenant_id}/quarantine/release")
+def release_quarantine(
+    tenant_id: UUID,
+    body: QuarantineIds,
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    admin_id = _console_act(
+        identity, tenant_id, "quarantine_release", target_type="tenant", target_id=tenant_id,
+        payload={"count": len(body.document_ids)},
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            result = quarantine.release(
+                session, tenant_id, body.document_ids, role=None,
+                actor_user_id=admin_id, acting_as_tenant_id=tenant_id,
+            )
+        except quarantine.QuarantineError as exc:
+            raise _quarantine_error(exc) from exc
+    # Oldest first: the order they were received.
+    queue = "interactive" if len(result.released) <= 10 else "bulk"
+    for document_id in result.released:
+        celery_client.send_task(
+            "docflow.parse_and_extract", args=[str(tenant_id), str(document_id)], queue=queue
+        )
+    return {"released": [str(i) for i in result.released], "skipped": [str(i) for i in result.skipped]}
+
+
+class QuarantineClear(BaseModel):
+    document_ids: list[UUID] = Field(min_length=1, max_length=500)
+    confirm_name: str
+
+
+@router.post("/tenants/{tenant_id}/quarantine/clear")
+def clear_quarantine(
+    tenant_id: UUID,
+    body: QuarantineClear,
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    _console_act(
+        identity, tenant_id, "quarantine_clear", target_type="tenant", target_id=tenant_id,
+        payload={"count": len(body.document_ids)},
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            cleared = quarantine.clear(session, tenant_id, body.document_ids, confirm_name=body.confirm_name)
+        except quarantine.QuarantineError as exc:
+            raise _quarantine_error(exc) from exc
+    return {"cleared": [str(i) for i in cleared]}
+
+
+@router.post("/tenants/{tenant_id}/intake-address/rotate")
+def rotate_intake_address(
+    tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    admin_id = _console_act(
+        identity, tenant_id, "intake_address_rotate", target_type="tenant", target_id=tenant_id
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            result = intake_admin.rotate_address(session, tenant_id, actor_user_id=admin_id)
+        except quarantine.QuarantineError as exc:
+            raise _quarantine_error(exc) from exc
+    return {"address": result["address"], "grace_ends_at": result["grace_ends_at"].isoformat()}
+
+
+class SenderSettings(BaseModel):
+    strict_sender_mode: bool
+    sender_allowlist: list[str] = Field(default_factory=list, max_length=200)
+
+
+@router.put("/tenants/{tenant_id}/sender-settings")
+def put_sender_settings(
+    tenant_id: UUID,
+    body: SenderSettings,
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    admin_id = _console_act(
+        identity, tenant_id, "sender_settings_update", target_type="tenant", target_id=tenant_id,
+        payload={"strict_sender_mode": body.strict_sender_mode, "entries": len(body.sender_allowlist)},
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            return intake_admin.set_sender_allowlist(
+                session, tenant_id, strict=body.strict_sender_mode,
+                entries=body.sender_allowlist, actor_user_id=admin_id,
+            )
+        except quarantine.QuarantineError as exc:
+            raise _quarantine_error(exc) from exc

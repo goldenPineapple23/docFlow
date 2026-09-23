@@ -33,7 +33,7 @@ async def receive_inbound_email(token: str, request: Request) -> dict:
         raise HTTPException(status_code=400, detail="Malformed request body: not valid JSON.") from exc
 
     resolved = email_intake.resolve_tenant_by_token(token)
-    if resolved is None or resolved[1] != "active":
+    if resolved is None or resolved[1] not in ("active", "grace"):
         # Generic 404 whether the token never existed or exists but isn't
         # active -- CLAUDE.md Section 7.15.1's "unreachable, not just
         # hidden" principle, applied here to intake tokens (DECISIONS.md).
@@ -41,12 +41,19 @@ async def receive_inbound_email(token: str, request: Request) -> dict:
         # accepted here and turned away inside process_inbound_email, with
         # the "not yet active" auto-reply (D-114).
         raise HTTPException(status_code=404)
-    tenant_id, _status = resolved
+    tenant_id, address_status = resolved
 
     try:
         parsed = email_intake.parse_postmark_payload(payload)
     except email_intake.MalformedPayloadError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if address_status == "grace":
+        # A rotated address inside its grace period (7.16.3): nothing is
+        # processed, and the sender is told the address has changed. Past the
+        # grace period the lookup treats it as retired, so it 404s above.
+        result = email_intake.reply_address_changed(tenant_id, parsed)
+        return {"outcome": result.outcome}
 
     result = email_intake.process_inbound_email(tenant_id, parsed)
     return {"outcome": result.outcome}
