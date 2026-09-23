@@ -41,7 +41,14 @@ from docflow_core import (
 from docflow_core.admin_data_access import ConsoleError
 from docflow_core.catalog_import import CatalogImportError
 from docflow_core.config import get_settings
-from docflow_core.constants import INVOICE_DAYS_UNTIL_DUE, ROLLUP_STALE_HOURS, TRIAL_PERIOD_DAYS
+from docflow_core.constants import (
+    ABUSE_CEILING_MULTIPLIER,
+    DAILY_AI_COST_CEILING_USD,
+    DAILY_TOKEN_CEILING,
+    INVOICE_DAYS_UNTIL_DUE,
+    ROLLUP_STALE_HOURS,
+    TRIAL_PERIOD_DAYS,
+)
 from docflow_core.db import tenant_session
 from docflow_core.errors import get_error
 from docflow_core.external_services import ExternalServiceError
@@ -1314,15 +1321,36 @@ def get_quarantine(
         a = usage.allowance_for(session, tenant_id)
         sender = intake_admin.get_sender_settings(session, tenant_id)
         expired = quarantine.expired_count(session, tenant_id)
+        spend, tokens = usage.daily_ai_spend(session, tenant_id)
+    ceiling = a.allowance * ABUSE_CEILING_MULTIPLIER if a.allowance else None
     return {
         "usage": {"used": a.used, "allowance": a.allowance, "tier": a.tier_name, "month": a.month},
+        # Where the two ceilings stand NOW, so a hold made earlier can be judged:
+        # a hold whose ceiling is no longer reached is safe to release.
+        "limits": {
+            "monthly_ceiling": ceiling,
+            "monthly_ceiling_reached": ceiling is not None and a.used >= ceiling,
+            "daily_cost_ceiling_usd": str(DAILY_AI_COST_CEILING_USD),
+            "spend_today_usd": str(spend),
+            "daily_cost_ceiling_reached": spend >= DAILY_AI_COST_CEILING_USD
+            or tokens >= DAILY_TOKEN_CEILING,
+        },
         "sender_settings": sender,
         "expired_held": expired,
         "groups": [
-            {"reason": g.reason, "count": g.count, "title": g.entry.title, "message": g.entry.message}
+            {
+                "reason": g.reason,
+                "label": quarantine.reason_label(g.reason),
+                "count": g.count,
+                "title": g.entry.title,
+                "message": g.entry.message,
+            }
             for g in groups
         ],
-        "documents": [_jsonable(dict(r)) for r in rows],
+        "documents": [
+            {**_jsonable(dict(r)), "reason_label": quarantine.reason_label(r["quarantine_reason"])}
+            for r in rows
+        ],
     }
 
 

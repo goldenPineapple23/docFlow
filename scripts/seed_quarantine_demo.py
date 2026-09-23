@@ -18,6 +18,7 @@ Section 0 rule 4).
                  85 shows the 80% banner, 100 the 100% banner, 120 "keeps processing"
   --ceiling      go to 3x the allowance, so the NEXT real document is held (abuse ceiling)
   --set-tier     give the tenant the cheapest current tier if it has none (a test tenant only)
+  --no-held      with --usage/--ceiling, change only the usage; don't add more held documents
   --clean        remove everything this script added
 """
 
@@ -90,7 +91,13 @@ def clean(tenant_id: UUID) -> None:
     print(f"Removed {docs} seeded documents and {mails} seeded emails.")
 
 
-def seed(tenant_id: UUID, usage_pct: int | None, ceiling: bool, set_tier: bool) -> None:
+def seed(
+    tenant_id: UUID,
+    usage_pct: int | None,
+    ceiling: bool,
+    set_tier: bool,
+    with_held: bool = True,
+) -> None:
     with platform_session() as session:
         tenant = (
             session.execute(
@@ -132,7 +139,9 @@ def seed(tenant_id: UUID, usage_pct: int | None, ceiling: bool, set_tier: bool) 
             print(f"Gave {tenant['name']} the {tier['name']} tier.")
         allowance = int(tenant["document_allowance"])
 
-        for reason, sender, subject, spf, dkim, dmarc, count in HELD:
+        for reason, sender, subject, spf, dkim, dmarc, count in (
+            HELD if with_held else []
+        ):
             message_id = f"{PREFIX}{reason}-{uuid4().hex[:8]}"
             session.execute(
                 text(
@@ -187,9 +196,11 @@ def seed(tenant_id: UUID, usage_pct: int | None, ceiling: bool, set_tier: bool) 
                         "age": 30 - 5 * i,
                     },
                 )
-        print(
-            "Seeded 6 held documents: attachment cap x2, unknown senders x2, failed sender check x1, abuse ceiling x1."
-        )
+        if with_held:
+            print(
+                "Seeded 6 held documents: attachment cap x2, unknown senders x2, "
+                "failed sender check x1, abuse ceiling x1."
+            )
 
         target = None
         if ceiling:
@@ -233,6 +244,11 @@ if __name__ == "__main__":
     parser.add_argument("--ceiling", action="store_true")
     parser.add_argument("--set-tier", action="store_true")
     parser.add_argument("--clean", action="store_true")
+    parser.add_argument(
+        "--no-held",
+        action="store_true",
+        help="change only the usage figure; do not add another set of held documents",
+    )
     args = parser.parse_args()
     if not args.tenant_id and not args.tenant_of:
         parser.error("give a tenant id, or --tenant-of <email>")
@@ -240,4 +256,4 @@ if __name__ == "__main__":
     if args.clean:
         clean(tid)
     else:
-        seed(tid, args.usage, args.ceiling, args.set_tier)
+        seed(tid, args.usage, args.ceiling, args.set_tier, with_held=not args.no_held)

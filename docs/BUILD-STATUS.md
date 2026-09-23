@@ -123,7 +123,7 @@ prompting passes the golden fixture and the contamination test live.
 | 5.4 | Operator screens: buyer merge, learned rules (part 1); per-tenant field settings (part 2) | DONE | `f7c6db5`, `c1d81a8` | D-119, D-120 | `0015`, `0016` |
 | 5.5 | Founder dashboard from the nightly rollup: attention panel, health strip, tenant list, KPI cards | DONE | `e81f1ec` | D-121 | `0017` |
 | 5.6 | Lifecycle: cancel, reactivate, suspend sweep, wind-down and ready-to-delete queues, hard delete; Stripe webhook sync; 7-day billing trial | DONE (walked in the browser 2026-09-23: cancel, suspend, reactivate, queues OK; the final typed-name delete step was not completed; see `docs/walkthroughs/5.6-lifecycle.md`) | "Phase 5 slice 5.6" (hash: see `git log`) | D-122 – D-125 | `0018`, `0019`, `0020` |
-| 5.7 | Allowances and quarantine (7.16): plan in `docs/plans/5.7-allowance-quarantine.md` | DONE (tests green; browser walkthrough pending, see `docs/walkthroughs/5.7-allowance-quarantine.md`) | "Phase 5 slice 5.7" (hash: see `git log`) | D-126, D-127 | `0021` (applied) |
+| 5.7 | Allowances and quarantine (7.16): plan in `docs/plans/5.7-allowance-quarantine.md`. Also: the customer portal header shows the company name; notices are on the Purchase orders list only, each dismissible | DONE (walked in the browser 2026-09-23 as founder, tenant owner and reviewer: all parts OK; final wording tweaks made from that walk) | "Phase 5 slice 5.7" (hash: see `git log`) | D-126, D-127 | `0021` (applied) |
 | 5.8 | Tenant surface: tenant dashboard, review/status page, notifications, roles, audit-log view | PLANNED | — | — | — |
 | 5.9 | Billing plumbing: remaining Stripe wiring not covered by 5.3 / 5.6 | PLANNED (scope to be confirmed — much of it landed in 5.3 and 5.6) | — | — | — |
 | 5.10 | Approved-example prompting (7.13), incl. buyer pre-identification and the contamination test | PLANNED | — | — | — |
@@ -202,7 +202,7 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 - Browser walkthroughs planned: after 5.6 (now), after 5.7 (full Console QA),
   after 5.8 (customer side, with a non-technical tester). Checklists live in
   `docs/walkthroughs/`.
-- Latest suites (2026-09-23, after 5.7): core 394, api 301, worker 74, web 32 unit + 31 browser. ruff, mypy and web lint/typecheck clean.
+- Latest suites (2026-09-23, end of 5.7): core 396, api 305 (full run), worker 74, web 36 unit + 35 browser. ruff, mypy and web lint/typecheck clean.
 
 - 5.7 not yet built (deliberately): a per-tenant override of the daily AI-cost ceiling (global constant for now), and the full tenant dashboard, audit-log view and roles UI (slice 5.8).
 - Tenant B ("Acme Test Lifecycle B") still sits in the wind-down queue from the 5.6 walkthrough; finish or leave it.

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { QUEUE_PAGE_SIZE, ReviewApiError, listDocuments, type QueueDocument } from "@/lib/review";
 import { ConfidenceBadge } from "@/components/review/confidence";
 import { PILL, StatusBadge } from "@/components/StatusBadge";
+import { HeldStrip } from "@/components/HeldStrip";
 import { ReviewChrome } from "@/components/review/ReviewChrome";
 import { useReviewScope } from "@/lib/reviewScope";
 
@@ -103,6 +104,10 @@ export default function ReviewQueuePage() {
         shown to a person before it counts. Nothing is approved automatically, so this list is
         the whole account, not just the ones that looked wrong.
       </p>
+
+      {/* Allowance and held-document notices: the customer's own list only, not the
+          founder acting-as (those are tenant-scoped calls) and not a single order. */}
+      {!scope.tenantId ? <HeldStrip /> : null}
 
       <div className="mt-4 flex flex-wrap gap-2">
         {FILTERS.map((filter) => (

@@ -703,13 +703,21 @@ export type HeldDocumentRow = {
   dkim_result: string | null;
   dmarc_result: string | null;
   file_type: string | null;
+  reason_label: string;
 };
 
 export type QuarantineView = {
   usage: { used: number; allowance: number | null; tier: string | null; month: string };
   sender_settings: { strict_sender_mode: boolean; sender_allowlist: string[] };
   expired_held: number;
-  groups: { reason: QuarantineReason; count: number; title: string; message: string }[];
+  limits: {
+    monthly_ceiling: number | null;
+    monthly_ceiling_reached: boolean;
+    daily_cost_ceiling_usd: string;
+    spend_today_usd: string;
+    daily_cost_ceiling_reached: boolean;
+  };
+  groups: { reason: QuarantineReason; label: string; count: number; title: string; message: string }[];
   documents: HeldDocumentRow[];
 };
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { listOutbox, type OutboxEmail } from "@/lib/admin";
-import { ReviewApiError, type CatalogError } from "@/lib/review";
+import { ReviewApiError, UNEXPECTED, type CatalogError } from "@/lib/review";
 import { CatalogErrorBox } from "@/components/admin/CatalogErrorBox";
 import { OutboxList } from "@/components/admin/OutboxList";
 
@@ -22,7 +22,7 @@ export default function OutboxPage() {
         if (!cancelled) setEmails(rows);
       })
       .catch((e) => {
-        if (!cancelled && e instanceof ReviewApiError) setError(e.catalog);
+        if (!cancelled) setError(e instanceof ReviewApiError ? e.catalog : UNEXPECTED);
       });
     return () => {
       cancelled = true;

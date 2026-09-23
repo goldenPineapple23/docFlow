@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 
 /**
@@ -13,8 +15,42 @@ import { supabase } from "@/lib/supabase";
  * for the person who built it and a dead end for everyone else
  * (DECISIONS.md D-090).
  */
-export function AppHeader({ email }: { email?: string | null }) {
+export function AppHeader({
+  email: emailProp,
+  tenantName: tenantNameProp,
+}: {
+  email?: string | null;
+  tenantName?: string | null;
+}) {
   const router = useRouter();
+  // The customer's own company name and email, from their session. Explicit
+  // props win (tests, and any screen that already knows); otherwise the header
+  // asks who is signed in. If that fails it just says "DocFlow" -- a header must
+  // never stand in the way of the page.
+  const [loaded, setLoaded] = useState<{ email: string | null; tenantName: string | null } | null>(null);
+  const known = emailProp !== undefined || tenantNameProp !== undefined;
+  useEffect(() => {
+    if (known) return;
+    let cancelled = false;
+    apiFetch("/auth/me")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((me) => {
+        if (cancelled || !me) return;
+        setLoaded({ email: me.email ?? null, tenantName: me.tenant_name ?? null });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [known]);
+  const email = emailProp ?? loaded?.email ?? null;
+  const tenantName = (tenantNameProp ?? loaded?.tenantName ?? "").trim() || null;
+
+  useEffect(() => {
+    // The browser tab says whose portal this is. (React escapes everything it
+    // renders; document.title is plain text too.)
+    document.title = tenantName ? `${tenantName} — DocFlow` : "DocFlow";
+  }, [tenantName]);
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -28,11 +64,22 @@ export function AppHeader({ email }: { email?: string | null }) {
           <Link href="/review" className="flex items-center gap-2">
             <span
               aria-hidden="true"
-              className="grid h-7 w-7 place-items-center rounded-md bg-slate-900 text-xs font-bold text-white"
+              className="grid h-9 w-9 place-items-center rounded-md bg-slate-900 text-sm font-bold text-white"
             >
               DF
             </span>
-            <span className="text-[15px] font-semibold tracking-tight text-slate-900">DocFlow</span>
+            <span className="flex min-w-0 flex-col leading-tight">
+              <span
+                data-testid="tenant-name"
+                title={tenantName ?? undefined}
+                className="max-w-[14rem] truncate text-xl font-semibold tracking-tight text-slate-900 sm:max-w-[30rem] sm:text-2xl"
+              >
+                {tenantName ?? "DocFlow"}
+              </span>
+              {tenantName ? (
+                <span className="text-xs font-medium tracking-wide text-slate-500">Powered by DocFlow</span>
+              ) : null}
+            </span>
           </Link>
           <Link
             href="/review"

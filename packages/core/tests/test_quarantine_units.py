@@ -196,3 +196,25 @@ def test_the_new_templates_render_and_carry_the_catalog_wording():
         {"tenant_name": "Acme Test", "new_address": "orders+abc@x.test", "grace_ends": "2026-10-23"},
     )
     assert "orders+abc@x.test" in rotated and "2026-10-23" in rotated
+
+
+def test_every_reason_has_a_plain_label_for_the_founder():
+    for reason in (
+        "abuse_ceiling",
+        "cost_breaker",
+        "attachment_cap",
+        "auth_fail",
+        "unknown_sender_velocity",
+        "sender_not_allowed",
+        "manual",
+    ):
+        label = quarantine.reason_label(reason)
+        assert label != reason and "_" not in label, reason
+
+
+def test_no_customer_wording_says_docflow_reads_or_reviews_their_documents():
+    # A customer must not be led to think DocFlow staff read their documents.
+    for code in ("INT-004", "INT-007", "QUA-001"):
+        blob = f"{CATALOG[code].message} {CATALOG[code].action}".lower()
+        assert "reviews these" not in blob and "review these" not in blob, code
+        assert "nothing for you to do" not in blob, code

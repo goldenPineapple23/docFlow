@@ -286,7 +286,10 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
             "This email had more attachments than DocFlow allows in one message, so we're "
             "holding all of them until someone confirms they're real."
         ),
-        action="Open 'Held for review' to release these attachments, or resend them in smaller batches.",
+        action=(
+            "Tick the ones you recognize and release them, or ask the sender to resend in "
+            "smaller batches."
+        ),
         severity="warning",
         audience="tenant",
     ),
@@ -297,7 +300,7 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
             "This account received more than 20 documents from unknown senders in the last "
             "hour, so we're holding new ones until someone confirms they're real."
         ),
-        action="Open 'Held for review' to release the ones you recognize.",
+        action="Tick the ones you recognize and release them.",
         severity="warning",
         audience="tenant",
     ),
@@ -308,7 +311,7 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
             "This email failed the sending domain's own authentication check, so DocFlow held "
             "it instead of processing it automatically."
         ),
-        action="DocFlow will review this before releasing it -- no action is needed from you right now.",
+        action="DocFlow has been alerted and will release it once the sender is confirmed.",
         severity="high",
         audience="both",
     ),
@@ -1267,10 +1270,11 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         code="INT-007",
         title="Received and held for review",
         message=(
-            "DocFlow is reviewing unusual volume on this account, so new documents are being "
-            "held instead of processed. Nothing has been discarded."
+            "This account received an unusual volume of documents, so new ones are being held "
+            "instead of processed until the volume is confirmed as expected. Nothing has been "
+            "discarded."
         ),
-        action="DocFlow has already been alerted and will release them once the volume is confirmed.",
+        action="DocFlow has been alerted and will release them once the volume is confirmed.",
         severity="warning",
         audience="both",
     ),
@@ -1292,7 +1296,7 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
             "This account only accepts orders from approved senders, and this sender isn't on "
             "the list, so we're holding the document instead of processing it."
         ),
-        action="Open 'Held for review' to release it, or ask DocFlow to add the sender to your list.",
+        action="Tick it and release it, or ask DocFlow to add the sender to your list.",
         severity="warning",
         audience="tenant",
     ),
@@ -1300,13 +1304,10 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         code="QUA-001",
         title="Only DocFlow can release these documents",
         message=(
-            "These documents are held because of unusual volume or a failed sender check, "
-            "which DocFlow reviews itself rather than leaving it to your account."
+            "These documents are held because of a surge in volume or a failed sender check, "
+            "so only DocFlow can release them."
         ),
-        action=(
-            "No action is needed: DocFlow has already been alerted and will release them "
-            "once they're confirmed."
-        ),
+        action="DocFlow has been alerted and will release them once they're confirmed.",
         severity="info",
         audience="tenant",
     ),

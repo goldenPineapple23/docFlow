@@ -53,6 +53,24 @@ _REASON_CODE = {
 }
 
 
+# What the FOUNDER sees for each reason in the Console (a label, not customer
+# wording -- the customer reads the catalog entry above). Says what tripped, in
+# words that don't need the code table.
+REASON_LABELS = {
+    "abuse_ceiling": "Monthly volume ceiling reached (3x the allowance)",
+    "cost_breaker": "Daily AI-cost ceiling reached",
+    "attachment_cap": "Too many attachments in one email",
+    "auth_fail": "Sender failed its authentication check",
+    "unknown_sender_velocity": "Too many new senders in one hour",
+    "sender_not_allowed": "Sender is not on the approved list",
+    "manual": "Held manually",
+}
+
+
+def reason_label(reason: str) -> str:
+    return REASON_LABELS.get(reason, reason)
+
+
 class QuarantineError(Exception):
     """A refusal with an error-catalog code (QUA-0xx)."""
 

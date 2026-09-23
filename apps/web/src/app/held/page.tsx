@@ -84,8 +84,8 @@ export default function HeldPage() {
         <h1 className="mt-1 text-xl font-semibold">Held for review</h1>
         <p className="mt-1 max-w-3xl text-sm text-gray-600">
           These documents arrived and are stored safely, but haven&apos;t been read yet. Nothing has
-          been discarded. They don&apos;t count toward your monthly documents until they&apos;re
-          released.
+          been discarded, and every held document is listed below. They don&apos;t count toward your
+          monthly documents until they&apos;re released.
         </p>
 
         {notice ? <p className="mt-4 text-sm text-green-800">{notice}</p> : null}
@@ -114,11 +114,7 @@ export default function HeldPage() {
                   {g.count} {g.count === 1 ? "document" : "documents"} — {g.title}
                 </p>
                 <p className="mt-1">{g.message}</p>
-                <p className="mt-1 text-gray-700">
-                  {g.can_release
-                    ? g.action
-                    : "DocFlow reviews these itself, so there is nothing for you to do. It has already been alerted."}
-                </p>
+                <p className="mt-1 text-gray-700">{g.action}</p>
               </div>
             ))}
           </section>

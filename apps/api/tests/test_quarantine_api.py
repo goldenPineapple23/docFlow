@@ -621,8 +621,11 @@ def test_rotating_the_address_keeps_a_grace_reply_then_retires_it(client, celery
                 {"t": str(t.tenant_id)},
             )
         assert _email(client, t, "buyer-g@example.test", token=old_token).status_code == 404
+        # The running worker's own sweep retires expired grace addresses for every
+        # tenant every few minutes, so it may get here first: either this call
+        # retires it (1) or the sweep already did (0). The END STATE is the point.
         with tenant_session(t.tenant_id) as session:
-            assert intake_admin.housekeeping(session, t.tenant_id)["retired_addresses"] == 1
+            assert intake_admin.housekeeping(session, t.tenant_id)["retired_addresses"] in (0, 1)
         assert {a["status"] for a in t.rows("SELECT status FROM intake_addresses WHERE tenant_id = :t")} == {
             "active",
             "retired",
@@ -740,3 +743,26 @@ def test_a_reviewer_and_a_viewer_can_see_but_not_change_what_is_held(client):
             "too many attachments" in held["groups"][0]["title"].lower()
             or held["groups"][0]["code"] == "INT-002"
         )
+
+
+@requires_database
+@requires_quarantine_schema
+def test_the_console_names_each_hold_and_shows_whether_its_ceiling_is_still_reached(client):
+    """A document held for a ceiling that is no longer reached must say so, so the
+    founder can see it is safe to release (a hold outlives the surge that caused it)."""
+    with _Console() as console, _Tenant() as t:
+        t.seed(1, status="quarantined", reason="abuse_ceiling")
+        t.seed(1, status="quarantined", reason="auth_fail")
+        view = client.get(f"/admin/tenants/{t.tenant_id}/quarantine", headers=console.headers()).json()
+
+        labels = {d["quarantine_reason"]: d["reason_label"] for d in view["documents"]}
+        assert labels["abuse_ceiling"] == "Monthly volume ceiling reached (3x the allowance)"
+        assert labels["auth_fail"] == "Sender failed its authentication check"
+        assert view["limits"]["monthly_ceiling"] == t.allowance * 3
+        assert view["limits"]["monthly_ceiling_reached"] is False  # the tenant is nowhere near it
+        assert view["limits"]["daily_cost_ceiling_usd"] == "50"
+        assert view["limits"]["daily_cost_ceiling_reached"] is False
+
+        t.seed(t.allowance * 3)  # now the ceiling really is reached
+        again = client.get(f"/admin/tenants/{t.tenant_id}/quarantine", headers=console.headers()).json()
+        assert again["limits"]["monthly_ceiling_reached"] is True

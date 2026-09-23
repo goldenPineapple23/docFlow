@@ -23,7 +23,7 @@ const HELD = {
       can_release: true,
       title: "Held: unusual volume from new senders",
       message: "This account received more than 20 documents from unknown senders in the last hour.",
-      action: "Open 'Held for review' to release the ones you recognize.",
+      action: "Tick the ones you recognize and release them.",
     },
     {
       code: "INT-007",
@@ -31,8 +31,8 @@ const HELD = {
       count: 1,
       can_release: false,
       title: "Received and held for review",
-      message: "DocFlow is reviewing unusual volume on this account, so new documents are being held.",
-      action: "DocFlow has already been alerted and will release them once the volume is confirmed.",
+      message: "This account received an unusual volume of documents, so new ones are being held.",
+      action: "DocFlow has been alerted and will release them once the volume is confirmed.",
     },
   ],
   documents: [
@@ -77,11 +77,12 @@ test("the Held for review page explains each hold and only lets the customer rel
 
   const own = page.getByTestId("held-group-unknown_sender_velocity");
   await expect(own).toContainText("2 documents");
-  await expect(own).toContainText("Open 'Held for review' to release the ones you recognize.");
+  await expect(own).toContainText("Tick the ones you recognize and release them.");
 
   // A hold DocFlow reviews itself: no dead button, and it says what has been done.
   const theirs = page.getByTestId("held-group-abuse_ceiling");
-  await expect(theirs).toContainText("nothing for you to do");
+  await expect(theirs).toContainText("DocFlow has been alerted");
+  await expect(theirs).not.toContainText("nothing for you to do");
   await expect(page.getByLabel("Select po-held-by-docflow.pdf")).toBeDisabled();
 
   await expect(page.getByTestId("release-selected")).toBeDisabled();
@@ -155,17 +156,26 @@ const VIEW = {
   usage: { used: 312, allowance: 300, tier: "Starter", month: "2026-09" },
   sender_settings: { strict_sender_mode: false, sender_allowlist: [] },
   expired_held: 1,
-  groups: [{ reason: "auth_fail", count: 2, title: "Held: sender couldn't be verified", message: "This email failed the sending domain's own authentication check." }],
+  limits: {
+    monthly_ceiling: 900,
+    monthly_ceiling_reached: false,
+    daily_cost_ceiling_usd: "50",
+    spend_today_usd: "0.01",
+    daily_cost_ceiling_reached: false,
+  },
+  groups: [{ reason: "auth_fail", label: "Sender failed its authentication check", count: 2, title: "Held: sender couldn't be verified", message: "This email failed the sending domain's own authentication check." }],
   documents: [
     {
       id: "doc-1", original_filename: "po-one.pdf", content_sha256: "abcdef0123456789abcdef", sender_email: "ap@spoof.example.test",
       source: "email", quarantine_reason: "auth_fail", quarantined_at: "2026-09-23T10:00:00Z", created_at: "2026-09-23T10:00:00Z",
       subject: "Urgent PO", spf_result: "fail", dkim_result: "none", dmarc_result: "fail", file_type: "pdf",
+      reason_label: "Sender failed its authentication check",
     },
     {
       id: "doc-2", original_filename: "po-two.xlsx", content_sha256: "0123456789abcdef012345", sender_email: "ap@spoof.example.test",
       source: "email", quarantine_reason: "auth_fail", quarantined_at: "2026-09-23T10:01:00Z", created_at: "2026-09-23T10:01:00Z",
       subject: "Urgent PO", spf_result: "fail", dkim_result: "none", dmarc_result: "fail", file_type: "xlsx",
+      reason_label: "Sender failed its authentication check",
     },
   ],
 };
@@ -195,6 +205,10 @@ test("the Console lists what the founder needs to decide and releases in bulk", 
 
   await expect(page.getByTestId("usage")).toContainText("312 / 300 documents (Starter)");
   await expect(page.getByText("past the retention period")).toBeVisible();
+  await expect(page.getByTestId("monthly-ceiling")).toContainText("312 of 900 this month");
+  await expect(page.getByTestId("monthly-ceiling")).toContainText("not reached");
+  await expect(page.getByTestId("daily-ceiling")).toContainText("$0.01 of $50");
+  await expect(page.getByRole("row", { name: /po-one\.pdf/ })).toContainText("Sender failed its authentication check");
   const row = page.getByRole("row", { name: /po-one\.pdf/ });
   await expect(row).toContainText("ap@spoof.example.test");
   await expect(row).toContainText("Urgent PO");
@@ -264,4 +278,100 @@ test("replacing the intake address asks first, then shows the new one and the gr
   await page.getByTestId("rotate").click();
   await expect(page.getByText(/New address issued: orders\+newtoken@intake\.example\.test/)).toBeVisible();
   expect(asked).toContain("new intake address");
+});
+
+test("each notice has its own X, stays hidden after a reload, and returns when it changes", async ({ page }) => {
+  let held = HELD;
+  await page.route(`${API}/held`, (route) => route.fulfill({ json: held }));
+  await page.route(`${API}/allowance`, (route) =>
+    route.fulfill({
+      json: {
+        used: 260,
+        allowance: 300,
+        tier: "Starter",
+        month: "2026-09",
+        banner: {
+          threshold_pct: 80,
+          code: "LIM-001",
+          title: "You've used most of this month's documents",
+          message: "You've used 260 of 300 documents included in Starter this month.",
+          action: "Growth includes 1,000 documents per month -- contact us to upgrade.",
+        },
+      },
+    }),
+  );
+  await page.route(/\/review\/documents/, (route) =>
+    route.request().url().startsWith(API)
+      ? route.fulfill({ json: { documents: [], total: 0, limit: 50, offset: 0 } })
+      : route.continue(),
+  );
+
+  await page.goto("/review");
+  await expect(page.getByTestId("allowance-banner")).toBeVisible();
+  await expect(page.getByTestId("held-strip")).toBeVisible();
+
+  // They sit under the "Purchase orders" heading, not in the header.
+  const headingBox = await page.getByRole("heading", { name: "Purchase orders" }).boundingBox();
+  const bannerBox = await page.getByTestId("allowance-banner").boundingBox();
+  expect(bannerBox!.y).toBeGreaterThan(headingBox!.y);
+
+  // Dismiss one: only that one goes.
+  await page.getByTestId("allowance-banner").getByRole("button", { name: "Hide this message" }).click();
+  await expect(page.getByTestId("allowance-banner")).toHaveCount(0);
+  await expect(page.getByTestId("held-strip")).toBeVisible();
+
+  // Still hidden after a reload.
+  await page.reload();
+  await expect(page.getByTestId("held-strip")).toBeVisible();
+  await expect(page.getByTestId("allowance-banner")).toHaveCount(0);
+
+  // Dismiss the other, then let the held set change: it comes back.
+  await page.getByTestId("held-strip").getByRole("button", { name: "Hide this message" }).click();
+  await expect(page.getByTestId("held-strip")).toHaveCount(0);
+  held = { ...HELD, total: 4, groups: [{ ...HELD.groups[0], count: 3 }, HELD.groups[1]] };
+  await page.reload();
+  await expect(page.getByTestId("held-strip")).toBeVisible();
+  await expect(page.getByTestId("held-strip")).toContainText("4 documents are being held");
+  await expect(page.getByTestId("allowance-banner")).toHaveCount(0); // that one stays dismissed
+});
+
+// ── The customer's company name in the header ───────────────────────────────
+
+async function stubQueue(page: Page, tenantName: string | null) {
+  await page.route(`${API}/auth/me`, (route) =>
+    route.fulfill({
+      json: { email: "owner@example.test", tenant_id: "t1", tenant_name: tenantName, role: "owner", is_platform_admin: false },
+    }),
+  );
+  await page.route(`${API}/allowance`, (route) =>
+    route.fulfill({ json: { used: 1, allowance: 300, tier: "Starter", month: "2026-09", banner: null } }),
+  );
+  await page.route(`${API}/held`, (route) => route.fulfill({ json: { total: 0, groups: [], documents: [] } }));
+  await page.route(/\/review\/documents/, (route) =>
+    route.request().url().startsWith(API)
+      ? route.fulfill({ json: { documents: [], total: 0, limit: 50, offset: 0 } })
+      : route.continue(),
+  );
+}
+
+test("the portal header carries the customer's own company name", async ({ page }) => {
+  await stubQueue(page, "Bella's Test Coffee Haus");
+  await page.goto("/review");
+  await expect(page.getByTestId("tenant-name")).toHaveText("Bella's Test Coffee Haus");
+  await expect(page.getByText("Powered by DocFlow")).toBeVisible();
+  await expect(page).toHaveTitle("Bella's Test Coffee Haus — DocFlow");
+});
+
+test("a company name is text, never markup", async ({ page }) => {
+  await stubQueue(page, "Bella <b>Bold</b> <img src=x onerror=alert(1)> Coffee");
+  await page.goto("/review");
+  await expect(page.getByTestId("tenant-name")).toHaveText("Bella <b>Bold</b> <img src=x onerror=alert(1)> Coffee");
+  await expect(page.getByTestId("tenant-name").locator("b, img")).toHaveCount(0);
+});
+
+test("with no company name the header just says DocFlow", async ({ page }) => {
+  await stubQueue(page, null);
+  await page.goto("/review");
+  await expect(page.getByTestId("tenant-name")).toHaveText("DocFlow");
+  await expect(page.getByText("Powered by DocFlow")).toHaveCount(0);
 });

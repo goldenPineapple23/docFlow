@@ -248,15 +248,15 @@ INT-001 [warning/tenant] No attachment to process
 
 INT-002 [warning/tenant] Held: too many attachments
   what+why: This email had more attachments than DocFlow allows in one message, so we're holding all of them until someone confirms they're real.
-  next:     Open 'Held for review' to release these attachments, or resend them in smaller batches.
+  next:     Tick the ones you recognize and release them, or ask the sender to resend in smaller batches.
 
 INT-003 [warning/tenant] Held: unusual volume from new senders
   what+why: This account received more than 20 documents from unknown senders in the last hour, so we're holding new ones until someone confirms they're real.
-  next:     Open 'Held for review' to release the ones you recognize.
+  next:     Tick the ones you recognize and release them.
 
 INT-004 [high/both] Held: sender couldn't be verified
   what+why: This email failed the sending domain's own authentication check, so DocFlow held it instead of processing it automatically.
-  next:     DocFlow will review this before releasing it -- no action is needed from you right now.
+  next:     DocFlow has been alerted and will release it once the sender is confirmed.
 
 INT-005 [info/both] This address isn't active yet
   what+why: DocFlow is still being set up for this account, so orders sent to this address are not read yet. This email was logged, not processed.
@@ -267,8 +267,8 @@ INT-006 [info/both] This account is no longer active
   next:     Please contact this company directly to send your order another way.
 
 INT-007 [warning/both] Received and held for review
-  what+why: DocFlow is reviewing unusual volume on this account, so new documents are being held instead of processed. Nothing has been discarded.
-  next:     DocFlow has already been alerted and will release them once the volume is confirmed.
+  what+why: This account received an unusual volume of documents, so new ones are being held instead of processed until the volume is confirmed as expected. Nothing has been discarded.
+  next:     DocFlow has been alerted and will release them once the volume is confirmed.
 
 INT-008 [info/both] This address has changed
   what+why: Orders for {tenant_name} are now read at a different address, so this email was logged, not processed.
@@ -276,7 +276,7 @@ INT-008 [info/both] This address has changed
 
 INT-009 [warning/tenant] Held: sender isn't on your approved list
   what+why: This account only accepts orders from approved senders, and this sender isn't on the list, so we're holding the document instead of processing it.
-  next:     Open 'Held for review' to release it, or ask DocFlow to add the sender to your list.
+  next:     Tick it and release it, or ask DocFlow to add the sender to your list.
 
 LIFE-001 [warning/founder] This tenant can't be cancelled from here
   what+why: Cancel only applies to an active tenant. This one is already cancelling, suspended, pending deletion or deleted.
@@ -375,8 +375,8 @@ ONB-014 [warning/founder] That setup fee option isn't available
   next:     Choose Founding, Standard, Complex, Waived or Custom; if one is missing, check setup_fee_presets.
 
 QUA-001 [info/tenant] Only DocFlow can release these documents
-  what+why: These documents are held because of unusual volume or a failed sender check, which DocFlow reviews itself rather than leaving it to your account.
-  next:     No action is needed: DocFlow has already been alerted and will release them once they're confirmed.
+  what+why: These documents are held because of a surge in volume or a failed sender check, so only DocFlow can release them.
+  next:     DocFlow has been alerted and will release them once they're confirmed.
 
 QUA-002 [info/tenant] Those documents are no longer held
   what+why: One or more of the documents you chose have already been released or removed.

@@ -108,7 +108,30 @@ export default function TenantQuarantinePage({ params }: { params: Promise<{ id:
               </dd>
               <dt className="text-gray-500">Held now</dt>
               <dd>{view.documents.length}</dd>
+              <dt className="text-gray-500">Volume ceiling</dt>
+              <dd data-testid="monthly-ceiling">
+                {view.limits.monthly_ceiling === null
+                  ? "none (no tier set)"
+                  : `${view.usage.used} of ${view.limits.monthly_ceiling} this month — ${
+                      view.limits.monthly_ceiling_reached ? "REACHED, new documents are held" : "not reached"
+                    }`}
+              </dd>
+              <dt className="text-gray-500">AI cost today</dt>
+              <dd data-testid="daily-ceiling">
+                ${view.limits.spend_today_usd} of ${view.limits.daily_cost_ceiling_usd} —{" "}
+                {view.limits.daily_cost_ceiling_reached ? "REACHED, new documents are held" : "not reached"}
+              </dd>
             </dl>
+            {view.documents.some(
+              (d) =>
+                (d.quarantine_reason === "abuse_ceiling" && !view.limits.monthly_ceiling_reached) ||
+                (d.quarantine_reason === "cost_breaker" && !view.limits.daily_cost_ceiling_reached),
+            ) ? (
+              <p className="mt-3 rounded border border-sky-300 bg-sky-50 p-2 text-sky-950">
+                Some documents were held for a ceiling that is no longer reached, so they are safe to
+                release.
+              </p>
+            ) : null}
             {view.expired_held > 0 ? (
               <p className="mt-3 rounded border border-amber-300 bg-amber-50 p-2 text-amber-950">
                 {view.expired_held} held {view.expired_held === 1 ? "document is" : "documents are"} past
@@ -130,7 +153,7 @@ export default function TenantQuarantinePage({ params }: { params: Promise<{ id:
               <ul className="mt-2 list-disc pl-5 text-sm text-gray-700">
                 {view.groups.map((g) => (
                   <li key={g.reason}>
-                    <strong>{g.count}</strong> {g.reason}: {g.message}
+                    <strong>{g.count}</strong> — {g.label}
                   </li>
                 ))}
               </ul>
@@ -193,7 +216,7 @@ export default function TenantQuarantinePage({ params }: { params: Promise<{ id:
                             />
                           </td>
                           <td className="py-1.5">{new Date(d.created_at).toLocaleString()}</td>
-                          <td className="py-1.5">{d.quarantine_reason}</td>
+                          <td className="py-1.5">{d.reason_label}</td>
                           <td className="py-1.5">
                             {d.sender_email ?? "—"}
                             {d.subject ? <span className="block text-gray-500">{d.subject}</span> : null}
@@ -253,7 +276,7 @@ export default function TenantQuarantinePage({ params }: { params: Promise<{ id:
                 if (!window.confirm("Issue a new intake address for this tenant?")) return;
                 void act(async () => {
                   const r = await rotateIntakeAddress(id);
-                  return `New address issued: ${r.address}. The old one replies until ${new Date(r.grace_ends_at).toLocaleDateString()}.`;
+                  return `New address issued: ${r.address}. The old one replies until ${new Date(r.grace_ends_at).toLocaleDateString()}. The owner has been emailed the new address; until an email provider is set up, that email waits in the Outbox.`;
                 });
               }}
               className="mt-3 rounded border border-gray-300 px-4 py-2 font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
