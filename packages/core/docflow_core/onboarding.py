@@ -63,13 +63,16 @@ def _lifecycle_event(
     payload: dict[str, Any] | None = None,
     constants: dict[str, Any] | None = None,
 ) -> None:
+    # clock_timestamp(), not now() -- see docflow_core.lifecycle._lifecycle_event:
+    # now() is frozen for the whole transaction in Postgres, which would tie
+    # created_at for any two events logged in one transaction.
     session.execute(
         text(
             """
             INSERT INTO tenant_lifecycle_events
                 (id, tenant_id, event_type, actor_user_id, constants_in_effect, payload, created_at)
             VALUES (:id, :tenant_id, :event_type, :actor, CAST(:constants AS jsonb),
-                    CAST(:payload AS jsonb), now())
+                    CAST(:payload AS jsonb), clock_timestamp())
             """
         ),
         {
@@ -398,7 +401,9 @@ def complete_go_live(
             "go_live_email_outbox_id": str(outbox_id) if outbox_id else None,
             "first_week_checkin_job_id": str(job_id),
         },
-        constants=constants_in_effect("FIRST_WEEK_CHECKIN_DAYS", "INVOICE_DAYS_UNTIL_DUE"),
+        constants=constants_in_effect(
+            "FIRST_WEEK_CHECKIN_DAYS", "INVOICE_DAYS_UNTIL_DUE", "TRIAL_PERIOD_DAYS"
+        ),
     )
 
 

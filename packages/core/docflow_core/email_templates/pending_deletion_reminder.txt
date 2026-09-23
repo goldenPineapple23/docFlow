@@ -1,0 +1,16 @@
+Subject: DocFlow: $days_remaining days left before $tenant_name's data is deleted
+
+Hello,
+
+A reminder: $tenant_name's DocFlow account is suspended, and your data is
+scheduled for permanent deletion on:
+
+  $deletion_date ($days_remaining days from today)
+
+Until then you can still sign in and download every order in every export
+format (CSV, Excel, JSON, QuickBooks).
+
+Changed your mind? Reply to this email or contact us any time before that
+date and we'll turn your account back on -- no re-setup needed.
+
+-- DocFlow

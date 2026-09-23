@@ -186,7 +186,7 @@ EXP-003 [warning/tenant] This download link has expired
   what+why: Download links only work for a few minutes, so a copied or old link can't be used to fetch an order file.
   next:     Open the order in DocFlow and download the file again from there.
 
-EXP-004 [error/both] Export didn't match the approved data
+EXP-004 [high/both] Export didn't match the approved data
   what+why: The file we generated failed our integrity check against the approved snapshot, so we didn't give it to you.
   next:     Try again; if it fails a second time, DocFlow has already been alerted.
 
@@ -198,7 +198,7 @@ EXP-006 [warning/tenant] QuickBooks can't import this order yet
   what+why: QuickBooks Desktop only imports an order that has a buyer name and an order date, and whose line totals add up exactly to the order total. This one doesn't, so we didn't make a file QuickBooks would reject.
   next:     Check the buyer name, order date, order total and line totals, or download the order as CSV or Excel instead.
 
-EXP-007 [error/both] The export file couldn't be saved
+EXP-007 [high/both] The export file couldn't be saved
   what+why: The file was built and checked against the approved order, but saving it failed, so there's nothing to download yet. The failure has been logged.
   next:     Try the export again in a minute.
 
@@ -261,6 +261,34 @@ INT-004 [high/both] Held: sender couldn't be verified
 INT-005 [info/both] This address isn't active yet
   what+why: DocFlow is still being set up for this account, so orders sent to this address are not read yet. This email was logged, not processed.
   next:     Please send the order to your usual contact at the company for now.
+
+INT-006 [info/both] This account is no longer active
+  what+why: DocFlow is no longer reading orders for this account. This email was logged, not processed.
+  next:     Please contact this company directly to send your order another way.
+
+LIFE-001 [warning/founder] This tenant can't be cancelled from here
+  what+why: Cancel only applies to an active tenant. This one is already cancelling, suspended, pending deletion or deleted.
+  next:     Check the tenant's current status on the Lifecycle tab.
+
+LIFE-002 [warning/founder] Say why, in at least 20 characters
+  what+why: A for-cause cancellation takes effect immediately, so DocFlow keeps a reason with it.
+  next:     Add a short explanation of the cause and submit again.
+
+LIFE-003 [warning/founder] The effective date can only move later
+  what+why: The founder may push a cancellation's effective date out, never pull it earlier.
+  next:     Choose a date on or after the computed effective date shown.
+
+LIFE-004 [warning/founder] This tenant can't be reactivated from here
+  what+why: Reactivate only applies to a tenant that is suspended or pending deletion.
+  next:     Check the tenant's current status on the Lifecycle tab.
+
+LIFE-005 [warning/founder] That name doesn't match
+  what+why: Deleting a tenant is irreversible, so DocFlow asks for the tenant's name typed exactly, not just a click. What was typed didn't match.
+  next:     Copy the tenant's name exactly as shown and try again.
+
+LIFE-006 [warning/founder] This tenant isn't ready to delete
+  what+why: A tenant can only be hard-deleted once it is in the pending-deletion window and that window has elapsed.
+  next:     Check the Ready to delete queue -- it only lists tenants past their window.
 
 ONB-001 [warning/founder] Load the catalog first
   what+why: The test batch is matched against this tenant's catalog, and no catalog has been committed yet, so the results wouldn't show how DocFlow will really perform.

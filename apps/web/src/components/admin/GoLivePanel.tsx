@@ -17,7 +17,9 @@ import { dealSummary, money } from "@/components/admin/DealTermsFields";
  *
  * Billing (D-113): the monthly plan is a Stripe subscription invoiced by
  * email, and the setup fee either goes on that first invoice or is invoiced
- * by hand.
+ * by hand. That first invoice doesn't go out immediately -- the subscription
+ * starts on a trial, so nothing is billed until trial_period_days after
+ * go-live (D-125); the tenant itself is live and usable right away.
  *
  * Two clicks, because it bills a customer: "Go live" shows exactly what is
  * about to happen, and "Confirm" does it.
@@ -112,15 +114,18 @@ export function GoLivePanel({ tenant, onChanged }: { tenant: TenantOverview; onC
                   {plan.founding_price && plan.promo_monthly_price
                     ? `${money(plan.promo_monthly_price)}/month for ${plan.promo_months} months, then ${money(plan.monthly_price)}`
                     : money(plan.monthly_price)}
-                  /month, invoiced by Stripe with {plan.invoice_days_until_due} days to pay.
+                  /month. Nothing is billed until {plan.trial_period_days} days after go-live, when
+                  Stripe sends one invoice for the first month
+                  {feeBilled ? ` plus the ${money(plan.setup_fee_amount)} setup fee` : ""}, due{" "}
+                  {plan.invoice_days_until_due} days later.
                 </li>
-                <li>
-                  {feeBilled
-                    ? `Add the ${money(plan.setup_fee_amount)} setup fee to that first invoice.`
-                    : /^0+(\.0+)?$/.test(plan.setup_fee_amount)
+                {!feeBilled ? (
+                  <li>
+                    {/^0+(\.0+)?$/.test(plan.setup_fee_amount)
                       ? "Charge no setup fee (waived)."
                       : `Record the ${money(plan.setup_fee_amount)} setup fee as invoiced by you.`}
-                </li>
+                  </li>
+                ) : null}
                 <li>Turn on the intake address, so buyers&apos; orders start being read.</li>
                 <li>{plan.invite_sent ? "Send the go-live email." : "Send the owner's invite and the go-live email."}</li>
                 <li>Schedule the first-week check-in.</li>

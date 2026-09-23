@@ -38,6 +38,7 @@ celery_app = Celery(
         "app.tasks.parse_import",
         "app.tasks.daily_rollup",
         "app.tasks.scheduled_jobs",
+        "app.tasks.lifecycle_sweep",
     ],
 )
 
@@ -48,6 +49,11 @@ SCHEDULED_JOBS_SWEEP_SECONDS = 300
 # timezone DocFlow serves, and well clear of the working day it summarises.
 DAILY_ROLLUP_HOUR_UTC = 3
 DAILY_ROLLUP_MINUTE_UTC = 15
+# The lifecycle sweep (Section 7.15.4, D-123): moves cancelling tenants to
+# suspended/pending_deletion at their effective date, and raises the
+# ready-to-delete alert. Same cadence as the scheduled-jobs sweep -- neither
+# needs to be tighter than a few minutes for a solo-founder's tenant count.
+LIFECYCLE_SWEEP_SECONDS = 300
 
 celery_app.conf.update(
     task_default_queue="interactive",
@@ -66,6 +72,11 @@ celery_app.conf.update(
         "run-daily-rollup": {
             "task": "docflow.run_daily_rollup",
             "schedule": crontab(hour=DAILY_ROLLUP_HOUR_UTC, minute=DAILY_ROLLUP_MINUTE_UTC),
+            "options": {"queue": "bulk"},
+        },
+        "run-lifecycle-sweep": {
+            "task": "docflow.run_lifecycle_sweep",
+            "schedule": LIFECYCLE_SWEEP_SECONDS,
             "options": {"queue": "bulk"},
         },
     },

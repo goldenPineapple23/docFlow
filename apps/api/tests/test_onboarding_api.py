@@ -27,6 +27,7 @@ fictional (CLAUDE.md Section 0 rule 4).
 from __future__ import annotations
 
 import io
+import time
 import zipfile
 from decimal import Decimal
 from uuid import UUID
@@ -307,6 +308,7 @@ def test_go_live_bills_the_recorded_deal_and_turns_everything_on(
                 "750.00", "stripe", True,
             )
             assert plan["setup_fee_preset_name"] == "Founding customer"
+            assert plan["trial_period_days"] == 7  # D-125: nothing billed until 7 days after go-live
 
             response = client.post(f"/admin/tenants/{tenant_id}/go-live", headers=console.headers())
             assert response.status_code == 200, response.text
@@ -315,6 +317,8 @@ def test_go_live_bills_the_recorded_deal_and_turns_everything_on(
             assert call["monthly_price"] == Decimal("299.00")  # from the tiers table
             assert call["promo_monthly_price"] == Decimal("199.00") and call["promo_months"] == 3
             assert call["setup_fee"] == Decimal("750.00")  # from setup_fee_presets
+            # D-125: a trial delays the first invoice, roughly 7 days out.
+            assert call["trial_end"] - time.time() == pytest.approx(7 * 86400, abs=60)
 
             tenant = console.overview(client, tenant_id)
             assert tenant["onboarding_status"] == "live"

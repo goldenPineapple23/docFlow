@@ -1102,7 +1102,7 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
             "so we didn't give it to you."
         ),
         action="Try again; if it fails a second time, DocFlow has already been alerted.",
-        severity="error",
+        severity="high",
         audience="both",
     ),
     "EXP-005": ErrorCatalogEntry(
@@ -1142,8 +1142,79 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
             "so there's nothing to download yet. The failure has been logged."
         ),
         action="Try the export again in a minute.",
-        severity="error",
+        severity="high",
         audience="both",
+    ),
+    # ── INT-006 · email intake (Section 7.14, slice 5.6) ────────────────────
+    "INT-006": ErrorCatalogEntry(
+        code="INT-006",
+        title="This account is no longer active",
+        message=(
+            "DocFlow is no longer reading orders for this account. This email was logged, "
+            "not processed."
+        ),
+        action="Please contact this company directly to send your order another way.",
+        severity="info",
+        audience="both",
+    ),
+    # ── LIFE-0xx · tenant lifecycle actions (Section 7.14 / 7.15.4, slice 5.6) ─
+    # Founder-audience, like every other Console refusal (CON-0xx, ONB-0xx).
+    "LIFE-001": ErrorCatalogEntry(
+        code="LIFE-001",
+        title="This tenant can't be cancelled from here",
+        message=(
+            "Cancel only applies to an active tenant. This one is already cancelling, "
+            "suspended, pending deletion or deleted."
+        ),
+        action="Check the tenant's current status on the Lifecycle tab.",
+        severity="warning",
+        audience="founder",
+    ),
+    "LIFE-002": ErrorCatalogEntry(
+        code="LIFE-002",
+        title="Say why, in at least 20 characters",
+        message="A for-cause cancellation takes effect immediately, so DocFlow keeps a reason with it.",
+        action="Add a short explanation of the cause and submit again.",
+        severity="warning",
+        audience="founder",
+    ),
+    "LIFE-003": ErrorCatalogEntry(
+        code="LIFE-003",
+        title="The effective date can only move later",
+        message="The founder may push a cancellation's effective date out, never pull it earlier.",
+        action="Choose a date on or after the computed effective date shown.",
+        severity="warning",
+        audience="founder",
+    ),
+    "LIFE-004": ErrorCatalogEntry(
+        code="LIFE-004",
+        title="This tenant can't be reactivated from here",
+        message="Reactivate only applies to a tenant that is suspended or pending deletion.",
+        action="Check the tenant's current status on the Lifecycle tab.",
+        severity="warning",
+        audience="founder",
+    ),
+    "LIFE-005": ErrorCatalogEntry(
+        code="LIFE-005",
+        title="That name doesn't match",
+        message=(
+            "Deleting a tenant is irreversible, so DocFlow asks for the tenant's name typed "
+            "exactly, not just a click. What was typed didn't match."
+        ),
+        action="Copy the tenant's name exactly as shown and try again.",
+        severity="warning",
+        audience="founder",
+    ),
+    "LIFE-006": ErrorCatalogEntry(
+        code="LIFE-006",
+        title="This tenant isn't ready to delete",
+        message=(
+            "A tenant can only be hard-deleted once it is in the pending-deletion window and "
+            "that window has elapsed."
+        ),
+        action="Check the Ready to delete queue -- it only lists tenants past their window.",
+        severity="warning",
+        audience="founder",
     ),
 }
 

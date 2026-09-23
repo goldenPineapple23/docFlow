@@ -13,6 +13,7 @@ const LINKS = [
   { href: "/admin", label: "Attention" },
   { href: "/admin/intakes", label: "Intakes" },
   { href: "/admin/tenants", label: "Tenants" },
+  { href: "/admin/lifecycle", label: "Lifecycle" },
   { href: "/admin/outbox", label: "Outbox" },
 ];
 

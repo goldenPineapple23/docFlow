@@ -1,0 +1,18 @@
+Subject: DocFlow: $tenant_name's account is now suspended
+
+Hello,
+
+$tenant_name's DocFlow account is now suspended. New orders sent to your
+DocFlow address are no longer accepted, and billing has stopped.
+
+You can still sign in, browse your order history, and download every order
+in every export format (CSV, Excel, JSON, QuickBooks) until:
+
+  $deletion_date
+
+After that date your data is permanently deleted.
+
+Changed your mind? Reply to this email or contact us any time before the
+date above and we'll turn your account back on -- no re-setup needed.
+
+-- DocFlow

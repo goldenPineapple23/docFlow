@@ -2,7 +2,7 @@
 
 DocFlow extracts structured data from unstructured inbound purchase orders (PDF, Word, Excel, email, faxes, scans, photos), matches every line item against a distributor's own SKU catalog, presents it for fast human review, and exports clean order data as a file the distributor imports into their own system.
 
-**Start here:** `CLAUDE.md` (working rules — read this before touching code), `DECISIONS.md` (every judgment call made and why), `SETUP.md` (external account setup), `docs/docflow-claude-code-build-prompt-v2.docx` (the full build spec).
+**Start here:** `CLAUDE.md` (working rules — read this before touching code), `docs/BUILD-STATUS.md` (every phase and slice: status, decisions, migrations, what's next), `DECISIONS.md` (every judgment call made and why), `CHECKPOINTS.md` (end-of-phase summaries), `SETUP.md` (external account setup), `docs/docflow-claude-code-build-prompt-v2.docx` (the full build spec).
 
 ## Status
 

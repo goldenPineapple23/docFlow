@@ -1,0 +1,11 @@
+Subject: DocFlow: $tenant_name's account is active again
+
+Hello,
+
+$tenant_name's DocFlow account is active again. Your order address is
+accepting mail, billing has resumed, and nothing about your data or history
+was changed while the account was suspended.
+
+Sign in: $app_url
+
+-- DocFlow

@@ -25,6 +25,7 @@ the worker's rollup task imports it too, and the worker has no need of one.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -1123,3 +1124,190 @@ def list_tenant_intake_files(*, platform_admin_user_id: UUID, tenant_id: UUID) -
             {"tid": str(tenant_id)},
         ).mappings().all()
         return [dict(r) for r in rows]
+
+
+# ── Lifecycle: wind-down / ready-to-delete queues and hard delete ──────────
+# (Section 7.15.4). Cancel and reactivate themselves are NOT here: like
+# go-live, they run through the tenant's own session with acting_as_tenant_id
+# (Section 7.15.1) -- see docflow_core.lifecycle, called directly from the
+# /admin router exactly as onboarding.py already is. These three are
+# genuinely cross-tenant (a queue spanning every tenant, and a delete that
+# has no single tenant session left to act "as" once its business data is
+# gone), so they belong here.
+
+
+def list_wind_down_queue(*, platform_admin_user_id: UUID) -> list[dict[str, Any]]:
+    """Tenants in pending_deletion, soonest deletion first (Section 7.15.4:
+    "tenants in pending_deletion with days remaining")."""
+    with platform_session() as session:
+        _record_admin_action(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            action="read",
+            target_type="wind_down_queue",
+        )
+        rows = session.execute(
+            text(
+                """
+                SELECT id, name, status, cancellation_reason, cancellation_effective_at,
+                       deletion_scheduled_at,
+                       GREATEST(0, CEIL(EXTRACT(EPOCH FROM (deletion_scheduled_at - now())) / 86400))
+                           AS days_remaining
+                FROM tenants
+                WHERE status = 'pending_deletion' AND deleted_at IS NULL
+                ORDER BY deletion_scheduled_at
+                """
+            )
+        ).mappings().all()
+        return [dict(r) for r in rows]
+
+
+def list_ready_to_delete(*, platform_admin_user_id: UUID) -> list[dict[str, Any]]:
+    """pending_deletion tenants whose window has already elapsed -- the only
+    ones `delete_tenant` will accept (Section 7.14: "surfaces tenants whose
+    window has elapsed as 'ready to delete' and waits")."""
+    with platform_session() as session:
+        _record_admin_action(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            action="read",
+            target_type="ready_to_delete_queue",
+        )
+        rows = session.execute(
+            text(
+                """
+                SELECT id, name, cancellation_reason, deletion_scheduled_at
+                FROM tenants
+                WHERE status = 'pending_deletion' AND deletion_scheduled_at <= now()
+                    AND deleted_at IS NULL
+                ORDER BY deletion_scheduled_at
+                """
+            )
+        ).mappings().all()
+        return [dict(r) for r in rows]
+
+
+# Business tables purged on hard delete, children before parents (Section
+# 7.14: "removes the tenant's business data and storage objects"). Every
+# document-child table (headers, lines, warnings, review_actions, snapshots,
+# extraction_runs, exports) cascades from `documents`, so deleting documents
+# is enough for those. `tenant_lifecycle_events` and `admin_actions` are
+# deliberately excluded -- the lifecycle log and the founder's own audit
+# trail must outlive the tenant (Section 7.14: "the fact that a tenant
+# existed and was removed is retained for accounting purposes even though
+# their business data is gone").
+_PURGE_TABLES = (
+    "documents",
+    "intake_rejections",
+    "raw_emails",
+    "buyer_merge_candidates",
+    "buyer_merges",
+    "buyers",
+    "items",
+    "learned_rules",
+    "catalog_imports",
+    "import_mapping_templates",
+    "intake_addresses",
+    "email_outbox",
+    "scheduled_jobs",
+    "tenant_daily_metrics",
+    "tenant_field_schemas",
+    "founder_alerts",
+    "users",
+)
+
+
+def delete_tenant(
+    *, platform_admin_user_id: UUID, tenant_id: UUID, confirm_name: str, reason: str
+) -> None:
+    """
+    Section 7.14's hard delete: "The founder confirmation requires typing
+    the tenant name ... and records who, when, and why in an immutable
+    deletion-event log that itself is not deleted." Refuses anything not
+    already in the ready-to-delete queue (LIFE-006) -- this is the only path
+    that can ever purge a tenant's business data, and it is never automatic.
+
+    The `tenants` row itself is never dropped, only soft-deleted: several
+    tables that must survive (`tenant_lifecycle_events`, `admin_actions`)
+    reference it without ON DELETE CASCADE by design, so a real row delete
+    would simply fail its own foreign keys -- soft delete is not a
+    convenience here, it is the only state the schema allows.
+
+    Storage objects are removed after the transaction commits, the same
+    order as every other cleanup in this module: never delete files for a
+    change that might still roll back.
+    """
+    if len(confirm_name.strip()) == 0 or len(reason.strip()) < 10:
+        raise ConsoleError("LIFE-005")
+    with platform_session() as session:
+        row = session.execute(
+            text(
+                "SELECT name, status, deletion_scheduled_at FROM tenants "
+                "WHERE id = :id FOR UPDATE"
+            ),
+            {"id": str(tenant_id)},
+        ).mappings().first()
+        if row is None:
+            raise ConsoleError("CON-001")
+        if (
+            row["status"] != "pending_deletion"
+            or row["deletion_scheduled_at"] is None
+            or row["deletion_scheduled_at"] > datetime.now(timezone.utc)
+        ):
+            raise ConsoleError("LIFE-006")
+        if confirm_name.strip() != row["name"]:
+            raise ConsoleError("LIFE-005")
+
+        counts: dict[str, int] = {}
+        for table in _PURGE_TABLES:
+            result = session.execute(
+                text(f"DELETE FROM {table} WHERE tenant_id = :id"), {"id": str(tenant_id)}
+            )
+            counts[table] = result.rowcount
+        session.execute(
+            text("UPDATE onboarding_intakes SET linked_tenant_id = NULL WHERE linked_tenant_id = :id"),
+            {"id": str(tenant_id)},
+        )
+        session.execute(
+            text(
+                """
+                UPDATE tenants SET
+                    status = 'deleted',
+                    status_changed_at = now(),
+                    deleted_at = now(),
+                    deleted_by = :by,
+                    deletion_reason = :reason,
+                    updated_at = now()
+                WHERE id = :id
+                """
+            ),
+            {"id": str(tenant_id), "by": str(platform_admin_user_id), "reason": reason},
+        )
+        session.execute(
+            text(
+                """
+                INSERT INTO tenant_lifecycle_events
+                    (id, tenant_id, event_type, actor_user_id, payload, created_at)
+                VALUES (:id, :tenant_id, 'deleted', :actor, CAST(:payload AS jsonb), now())
+                """
+            ),
+            {
+                "id": str(uuid4()),
+                "tenant_id": str(tenant_id),
+                "actor": str(platform_admin_user_id),
+                "payload": json.dumps({"reason": reason, "rows_deleted": counts}, default=str),
+            },
+        )
+        _record_admin_action(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            action="tenant_delete",
+            target_tenant_id=tenant_id,
+            target_type="tenant",
+            target_id=tenant_id,
+            payload={"reason": reason, "rows_deleted": counts},
+        )
+
+    from docflow_core.storage import delete_tenant_storage
+
+    delete_tenant_storage(tenant_id)

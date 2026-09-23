@@ -1,0 +1,18 @@
+Subject: DocFlow: your account for $tenant_name is scheduled to end
+
+Hello,
+
+This confirms that $tenant_name's DocFlow account is scheduled to end.
+
+  Effective date (account suspends): $effective_date
+  Deletion date (data is removed):   $deletion_date
+
+Until the effective date, everything keeps working exactly as it does today.
+After that date, new orders stop being accepted, but you can still sign in,
+browse your history, and download every order in every export format
+(CSV, Excel, JSON, QuickBooks) until the deletion date above.
+
+Changed your mind? Reply to this email or contact us any time before the
+deletion date and we'll turn your account back on -- no re-setup needed.
+
+-- DocFlow

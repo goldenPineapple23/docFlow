@@ -145,6 +145,8 @@ def _reset_rls_settings(session: Session) -> None:
     session.execute(text("RESET app.intake_token"))
     session.execute(text("RESET app.scheduler"))
     session.execute(text("RESET app.rollup"))
+    session.execute(text("RESET app.lifecycle"))
+    session.execute(text("RESET app.stripe_webhook"))
 
 
 @contextmanager
@@ -293,6 +295,56 @@ def scheduler_session() -> Iterator[Session]:
     try:
         _reset_rls_settings(session)
         session.execute(text("SET LOCAL app.scheduler = 'true'"))
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@contextmanager
+def stripe_webhook_session() -> Iterator[Session]:
+    """
+    Used only by the Stripe webhook handler (app/routers/stripe_webhooks.py)
+    to record the event id for idempotency (migration 0019's `webhook_access`
+    policy on `stripe_webhook_events`) and to look up which tenant a
+    `stripe_customer_id`/`stripe_subscription_id` belongs to (`
+    stripe_webhook_lookup`, SELECT only). The actual update to that tenant's
+    subscription status happens in a normal tenant_session() once the
+    tenant_id is known. Not the Section 7.15.1 admin bypass.
+    """
+    session_factory = get_session_factory()
+    session = session_factory()
+    try:
+        _reset_rls_settings(session)
+        session.execute(text("SET LOCAL app.stripe_webhook = 'true'"))
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@contextmanager
+def lifecycle_session() -> Iterator[Session]:
+    """
+    Used only by `docflow_core.lifecycle`'s recurring sweep (Section 7.15.4:
+    "a scheduled job moves cancelling tenants to suspended at their
+    effective date") to find tenants whose cancellation_effective_at has
+    passed (migration 0019's `lifecycle_read` policy). It can SELECT
+    `tenants` and nothing else -- the suspend action for each tenant found
+    then runs inside that tenant's own tenant_session(), exactly like the
+    rollup and the scheduler. Not the Section 7.15.1 admin bypass.
+    """
+    session_factory = get_session_factory()
+    session = session_factory()
+    try:
+        _reset_rls_settings(session)
+        session.execute(text("SET LOCAL app.lifecycle = 'true'"))
         yield session
         session.commit()
     except Exception:

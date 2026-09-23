@@ -2,7 +2,7 @@ from docflow_core.config import get_settings
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import admin, auth, documents, email_intake, exports, review
+from app.routers import admin, auth, documents, email_intake, exports, review, stripe_webhooks
 
 app = FastAPI(title="DocFlow API")
 
@@ -45,6 +45,7 @@ app.include_router(documents.router)
 app.include_router(email_intake.router)
 app.include_router(review.router)
 app.include_router(exports.router)
+app.include_router(stripe_webhooks.router)
 
 # The same review and export routes, a second time, for the founder acting in
 # one tenant from the Console (Section 7.15.1; D-111). Same code, different

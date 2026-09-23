@@ -127,6 +127,7 @@ def start_subscription(
     promo_months: int | None,
     setup_fee: Decimal | None,
     days_until_due: int,
+    trial_end: int | None = None,
 ) -> SubscriptionResult:
     """
     Go-live billing (Section 7.15.2 Step 9; D-113): a monthly subscription at
@@ -134,6 +135,13 @@ def start_subscription(
     send_invoice) because nobody has entered a card yet; the setup fee, when
     billed through Stripe, as a pending invoice item that Stripe puts on that
     first invoice; the founding price as a coupon for the promo months.
+
+    `trial_end` (unix seconds, D-125): delays that first invoice. Stripe
+    generates no invoice at all for a trialing send_invoice subscription
+    until the trial ends, so the pending setup-fee item added below simply
+    waits, untouched, and is swept onto the same invoice as the first
+    month's charge the moment the trial ends -- one invoice, not two. Pass
+    None for an immediate first invoice (reactivation, D-123).
 
     Safe to retry at any time -- a go-live whose database transaction failed
     after Stripe succeeded must never bill twice:
@@ -215,12 +223,83 @@ def start_subscription(
     }
     if coupon_id:
         data["discounts[0][coupon]"] = coupon_id
+    if trial_end:
+        data["trial_end"] = trial_end
     response = _stripe(
         "POST", "subscriptions", data=data, idempotency_key=f"docflow-subscription-{tenant_id}"
     )
     if response.status_code >= 300:
         raise ExternalServiceError("stripe", f"subscription create returned {response.status_code}")
     return _subscription_result(response.json())
+
+
+def cancel_subscription(subscription_id: str) -> None:
+    """
+    Section 7.14: "Cancel recurring billing at the Stripe level (not just
+    internally) so no further charge occurs" -- on a tenant entering
+    suspended. Idempotent: Stripe 404s a subscription that's already
+    canceled or gone, which is treated as success, not an error.
+    """
+    response = _stripe("DELETE", f"subscriptions/{subscription_id}")
+    if response.status_code >= 300 and response.status_code != 404:
+        raise ExternalServiceError("stripe", f"subscription cancel returned {response.status_code}")
+
+
+def void_pending_setup_fee(*, customer_id: str, tenant_id: UUID) -> None:
+    """
+    Cleanup for a tenant cancelled during its trial (D-125): the setup-fee
+    invoice item added at go-live never got swept onto an invoice, because
+    the trial ended in a cancellation instead of a bill. Left alone it would
+    sit pending against the customer and could land on some unrelated
+    future invoice. Idempotent -- nothing pending for this tenant is a
+    no-op, and an item already invoiced (the normal case) is no longer
+    pending and so isn't touched.
+    """
+    pending = _stripe(
+        "GET", "invoiceitems", params={"customer": customer_id, "pending": "true", "limit": 50}
+    )
+    if pending.status_code >= 300:
+        raise ExternalServiceError("stripe", f"invoice item list returned {pending.status_code}")
+    for item in pending.json().get("data", []):
+        if item.get("metadata", {}).get("docflow_setup_fee_for") != str(tenant_id):
+            continue
+        response = _stripe("DELETE", f"invoiceitems/{item['id']}")
+        if response.status_code >= 300 and response.status_code != 404:
+            raise ExternalServiceError("stripe", f"invoice item delete returned {response.status_code}")
+
+
+def verify_webhook_signature(payload: bytes, sig_header: str, secret: str, *, tolerance_seconds: int = 300) -> dict:
+    """
+    Stripe's documented signature scheme (no `stripe` SDK dependency in this
+    codebase -- see the module docstring): the header is
+    `t=<timestamp>,v1=<hex hmac-sha256 of "<timestamp>.<payload>">`, at
+    least one `v1` must match, and the timestamp must be recent -- both
+    checks so a captured event can't be replayed later (Section 7.12:
+    document/webhook content is untrusted until proven otherwise).
+    """
+    import hashlib
+    import hmac
+    import json
+    import time
+
+    timestamp: str | None = None
+    signatures: list[str] = []
+    for item in sig_header.split(","):
+        key, _, value = item.partition("=")
+        if key == "t":
+            timestamp = value
+        elif key == "v1":
+            signatures.append(value)
+    if not timestamp or not signatures:
+        raise ExternalServiceError("stripe", "webhook signature header malformed")
+    if abs(time.time() - int(timestamp)) > tolerance_seconds:
+        raise ExternalServiceError("stripe", "webhook signature timestamp outside tolerance")
+    expected = hmac.new(
+        secret.encode("utf-8"), f"{timestamp}.".encode("utf-8") + payload, hashlib.sha256
+    ).hexdigest()
+    if not any(hmac.compare_digest(expected, sig) for sig in signatures):
+        raise ExternalServiceError("stripe", "webhook signature mismatch")
+    return json.loads(payload)
 
 
 def _subscription_result(sub: dict) -> SubscriptionResult:

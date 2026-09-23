@@ -128,3 +128,18 @@ def copy_into_tenant(storage_path: str, tenant_id: UUID, *, area: str) -> str:
 def delete_file(storage_path: str) -> None:
     """Remove a stored object. Missing is fine: the goal state is 'absent'."""
     _resolve(storage_path).unlink(missing_ok=True)
+
+
+def delete_tenant_storage(tenant_id: UUID) -> None:
+    """
+    Section 7.14: hard deletion "removes the tenant's business data and
+    storage objects." Removes the tenant's entire `tenants/{tenant_id}/`
+    prefix -- every upload, export and onboarding file -- in one go. Only
+    ever called from `docflow_core.admin_data_access.delete_tenant`, itself
+    reachable only after the founder types the tenant's name (Section
+    7.15.4). Missing is fine: the goal state is 'absent'.
+    """
+    import shutil
+
+    prefix = _resolve(f"tenants/{tenant_id}")
+    shutil.rmtree(prefix, ignore_errors=True)

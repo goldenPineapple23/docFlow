@@ -18,6 +18,7 @@ user-facing failure (Section 7.16.5).
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
 
@@ -30,13 +31,14 @@ from docflow_core import (
     field_schema,
     file_types,
     learned_rules,
+    lifecycle,
     metrics,
     onboarding,
 )
 from docflow_core.admin_data_access import ConsoleError
 from docflow_core.catalog_import import CatalogImportError
 from docflow_core.config import get_settings
-from docflow_core.constants import INVOICE_DAYS_UNTIL_DUE, ROLLUP_STALE_HOURS
+from docflow_core.constants import INVOICE_DAYS_UNTIL_DUE, ROLLUP_STALE_HOURS, TRIAL_PERIOD_DAYS
 from docflow_core.db import tenant_session
 from docflow_core.errors import get_error
 from docflow_core.external_services import ExternalServiceError
@@ -747,6 +749,7 @@ def go_live_plan(
         "document_allowance": plan.document_allowance,
         "invite_sent": plan.invite_sent,
         "invoice_days_until_due": INVOICE_DAYS_UNTIL_DUE,
+        "trial_period_days": TRIAL_PERIOD_DAYS,
         "setup_fee_amount": str(plan.setup_fee_amount),
         "setup_fee_billing": plan.setup_fee_billing,
         "setup_fee_note": plan.setup_fee_note,
@@ -772,6 +775,10 @@ def go_live(
 
     Nothing about price is sent: go-live bills the deal recorded on the
     tenant (D-117), refusing with ONB-010 if there isn't one.
+
+    The subscription starts on a trial (D-125): the tenant is fully live and
+    usable immediately, but Stripe generates no invoice -- for the first
+    month or the setup fee -- until TRIAL_PERIOD_DAYS after this moment.
     """
     admin_id = _console_act(identity, tenant_id, "go_live", target_type="tenant", target_id=tenant_id)
     with tenant_session(tenant_id) as session:
@@ -784,6 +791,7 @@ def go_live(
     if plan.customer_id is None:
         raise catalog_error("ONB-008", status_code=502, extra={"reason": "no Stripe customer"})
 
+    trial_end = int((datetime.now(UTC) + timedelta(days=TRIAL_PERIOD_DAYS)).timestamp())
     try:
         subscription = external_services.start_subscription(
             tenant_id=tenant_id,
@@ -795,6 +803,7 @@ def go_live(
             promo_months=plan.promo_months if founding else None,
             setup_fee=fee if plan.setup_fee_billing == "stripe" and fee > 0 else None,
             days_until_due=INVOICE_DAYS_UNTIL_DUE,
+            trial_end=trial_end,
         )
     except ExternalServiceError as exc:
         raise catalog_error("ONB-008", status_code=502) from exc
@@ -824,6 +833,176 @@ def go_live(
         except onboarding.OnboardingError as exc:
             raise _onboarding_error(exc) from exc
     return {"onboarding_status": "live"}
+
+
+# ── Lifecycle actions: cancel, reactivate, wind-down, delete (5.6; D-123) ───
+# Cancel and reactivate run through the tenant's own session with
+# acting_as_tenant_id, exactly like go-live above -- not admin_data_access,
+# which is reserved for genuinely cross-tenant reads/writes (Section 7.15.1).
+
+
+def _lifecycle_error(exc: lifecycle.LifecycleError) -> HTTPException:
+    status = 404 if exc.code == "CON-001" else 409
+    return catalog_error(exc.code, status_code=status, extra=exc.detail or None)
+
+
+@router.get("/tenants/{tenant_id}/lifecycle")
+def get_lifecycle(
+    tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    _console_act(identity, tenant_id, "read", target_type="lifecycle")
+    with tenant_session(tenant_id) as session:
+        row = lifecycle.status(session, tenant_id)
+    if row is None:
+        raise HTTPException(status_code=404)
+    return _jsonable(row)
+
+
+class CancelRequest(BaseModel):
+    reason: Literal["customer_requested", "non_payment", "for_cause"]
+    note: str | None = None
+    override_effective_at: datetime | None = None
+
+
+@router.post("/tenants/{tenant_id}/cancel")
+def cancel_tenant(
+    tenant_id: UUID,
+    body: CancelRequest,
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    """Section 7.15.4's cancel form: the effective date is computed from the
+    reason and shown before confirmation; the founder may only push it
+    later, never earlier (LIFE-003)."""
+    admin_id = _console_act(
+        identity, tenant_id, "cancel", target_type="tenant", target_id=tenant_id,
+        payload={"reason": body.reason},
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            result = lifecycle.cancel(
+                session,
+                tenant_id,
+                reason=body.reason,
+                note=body.note,
+                actor_user_id=admin_id,
+                override_effective_at=body.override_effective_at,
+            )
+        except lifecycle.LifecycleError as exc:
+            raise _lifecycle_error(exc) from exc
+    return _jsonable(result)
+
+
+@router.get("/tenants/{tenant_id}/cancel/preview")
+def preview_cancel(
+    tenant_id: UUID,
+    reason: Literal["customer_requested", "non_payment", "for_cause"],
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    """The computed effective date and the rule that produced it, for the
+    cancel form to show before the founder confirms (Section 7.15.4)."""
+    _console_act(identity, tenant_id, "read", target_type="cancel_preview")
+    with tenant_session(tenant_id) as session:
+        try:
+            plan = lifecycle.compute_effective_at(session, tenant_id, reason)
+        except lifecycle.LifecycleError as exc:
+            raise _lifecycle_error(exc) from exc
+    return {
+        "effective_at": plan.effective_at.isoformat(),
+        "rule": plan.rule,
+        "flagged": plan.flagged,
+    }
+
+
+@router.post("/tenants/{tenant_id}/reactivate")
+def reactivate_tenant(
+    tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    """
+    Section 7.15.4: "Resumes the Stripe subscription (or creates a new one
+    on the tenant's tier version) and returns the tenant to active ... no
+    re-onboarding, no data loss." Reuses start_subscription exactly as
+    go-live does: it returns the tenant's existing non-cancelled
+    subscription if one somehow still exists, or creates a fresh one --
+    the suspend sweep already cancelled the old one at Stripe.
+    """
+    admin_id = _console_act(identity, tenant_id, "reactivate", target_type="tenant", target_id=tenant_id)
+    with tenant_session(tenant_id) as session:
+        try:
+            plan = lifecycle.plan_reactivate(session, tenant_id)
+        except lifecycle.LifecycleError as exc:
+            raise _lifecycle_error(exc) from exc
+    if plan.customer_id is None:
+        raise catalog_error("CON-006", status_code=502, extra={"reason": "no Stripe customer"})
+    try:
+        subscription = external_services.start_subscription(
+            tenant_id=tenant_id,
+            customer_id=plan.customer_id,
+            tier_id=plan.tier_id,
+            tier_name=plan.tier_name,
+            monthly_price=plan.monthly_price,
+            promo_monthly_price=None,
+            promo_months=None,
+            setup_fee=None,
+            days_until_due=INVOICE_DAYS_UNTIL_DUE,
+            trial_end=None,  # D-125's trial is a go-live perk, not a reactivation one
+        )
+    except ExternalServiceError as exc:
+        raise catalog_error("CON-006", status_code=502) from exc
+
+    with tenant_session(tenant_id) as session:
+        try:
+            lifecycle.complete_reactivate(
+                session,
+                tenant_id,
+                actor_user_id=admin_id,
+                plan=plan,
+                billing=lifecycle.ReactivateBilling(
+                    subscription_id=subscription.subscription_id,
+                    subscription_status=subscription.status,
+                    current_period_end=subscription.current_period_end,
+                ),
+                app_url=get_settings().app_base_url,
+            )
+        except lifecycle.LifecycleError as exc:
+            raise _lifecycle_error(exc) from exc
+    return {"status": "active"}
+
+
+@router.get("/lifecycle/wind-down")
+def wind_down_queue(identity: AuthenticatedIdentity = Depends(require_platform_admin)) -> dict:
+    rows = admin_data_access.list_wind_down_queue(platform_admin_user_id=_admin_id(identity))
+    return {"tenants": [_jsonable(r) for r in rows]}
+
+
+@router.get("/lifecycle/ready-to-delete")
+def ready_to_delete_queue(identity: AuthenticatedIdentity = Depends(require_platform_admin)) -> dict:
+    rows = admin_data_access.list_ready_to_delete(platform_admin_user_id=_admin_id(identity))
+    return {"tenants": [_jsonable(r) for r in rows]}
+
+
+class DeleteTenantRequest(BaseModel):
+    confirm_name: str = Field(min_length=1)
+    reason: str = Field(min_length=10)
+
+
+@router.post("/tenants/{tenant_id}/delete")
+def delete_tenant(
+    tenant_id: UUID,
+    body: DeleteTenantRequest,
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    """Section 7.14: type-to-confirm, irreversible. Only reachable for a
+    tenant already in the Ready to delete queue (LIFE-006)."""
+    try:
+        admin_data_access.delete_tenant(
+            platform_admin_user_id=_admin_id(identity),
+            tenant_id=tenant_id,
+            confirm_name=body.confirm_name,
+            reason=body.reason,
+        )
+    except ConsoleError as exc:
+        raise _console_error(exc) from exc
+    return {"status": "deleted"}
 
 
 # ── Operator screens: buyer merge and learned rules (slice 5.4; D-119) ──────

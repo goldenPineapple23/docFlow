@@ -33,6 +33,7 @@ def test_a_worker_started_from_this_app_registers_the_extraction_task():
         "assert 'docflow.generate_export' in celery_app.tasks\n"
         "assert 'docflow.parse_import' in celery_app.tasks\n"
         "assert 'docflow.run_scheduled_jobs' in celery_app.tasks\n"
+        "assert 'docflow.run_lifecycle_sweep' in celery_app.tasks\n"
     )
     worker_root = Path(__file__).resolve().parents[1]
     result = subprocess.run([sys.executable, "-c", probe], cwd=worker_root, capture_output=True)
@@ -47,3 +48,13 @@ def test_beat_sweeps_scheduled_jobs_regularly():
     entry = celery_app.conf.beat_schedule["run-scheduled-jobs"]
     assert entry["task"] == "docflow.run_scheduled_jobs"
     assert entry["schedule"] == SCHEDULED_JOBS_SWEEP_SECONDS <= 600
+
+
+def test_beat_sweeps_the_tenant_lifecycle_regularly():
+    """Section 7.15.4: "a scheduled job moves cancelling tenants to suspended
+    at their effective date." Its task must be registered and scheduled."""
+    from app.celery_app import LIFECYCLE_SWEEP_SECONDS, celery_app
+
+    entry = celery_app.conf.beat_schedule["run-lifecycle-sweep"]
+    assert entry["task"] == "docflow.run_lifecycle_sweep"
+    assert entry["schedule"] == LIFECYCLE_SWEEP_SECONDS <= 600

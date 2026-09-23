@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -223,6 +224,47 @@ def _first_week_checkin(session: Session, job: Job) -> None:
     )
 
 
+def _pending_deletion_reminder(session: Session, job: Job) -> None:
+    """Section 7.14: "Automated reminder emails at reasonable intervals
+    (e.g. day 1, day 15, day 25)" during pending_deletion. A tenant that
+    reactivated before this fired has already had the row cancelled
+    (lifecycle.complete_reactivate), and one still pending_deletion but past
+    its own deletion date just gets the reminder anyway -- the ready-to-
+    delete alert is a separate, deduped condition (lifecycle.raise_
+    ready_to_delete_alert), not this job's concern."""
+    assert job.tenant_id is not None
+    tenant = session.execute(
+        text("SELECT name, status, deletion_scheduled_at FROM tenants WHERE id = :id"),
+        {"id": str(job.tenant_id)},
+    ).mappings().first()
+    if tenant is None or tenant["status"] != "pending_deletion" or tenant["deletion_scheduled_at"] is None:
+        return
+    owner = session.execute(
+        text(
+            "SELECT email FROM users WHERE tenant_id = :id AND role = 'owner' AND deleted_at IS NULL "
+            "ORDER BY created_at LIMIT 1"
+        ),
+        {"id": str(job.tenant_id)},
+    ).first()
+    if owner is None:
+        return
+    remaining = max((tenant["deletion_scheduled_at"] - datetime.now(UTC)).days, 0)
+    email_outbox.enqueue(
+        session,
+        tenant_id=job.tenant_id,
+        to_address=owner[0],
+        template="pending_deletion_reminder",
+        params={
+            "tenant_name": tenant["name"],
+            "deletion_date": tenant["deletion_scheduled_at"].date().isoformat(),
+            "days_remaining": remaining,
+        },
+        related_type="scheduled_job",
+        related_id=job.id,
+    )
+
+
 HANDLERS: dict[str, Callable[[Session, Job], None]] = {
     "first_week_checkin": _first_week_checkin,
+    "pending_deletion_reminder": _pending_deletion_reminder,
 }

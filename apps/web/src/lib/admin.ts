@@ -409,6 +409,7 @@ export type GoLivePlan = {
   document_allowance: number;
   invite_sent: boolean;
   invoice_days_until_due: number;
+  trial_period_days: number;
   setup_fee_amount: string;
   setup_fee_billing: SetupFeeBilling;
   setup_fee_note: string | null;
@@ -611,4 +612,67 @@ export const recomputeRollup = (days = 2) =>
   request<{ queued: boolean; days: number }>("/admin/rollup/recompute", {
     method: "POST",
     body: JSON.stringify({ days }),
+  });
+
+// ── Lifecycle actions (Section 7.14 / 7.15.4; D-123) ────────────────────────
+
+export type CancellationReason = "customer_requested" | "non_payment" | "for_cause";
+
+export type LifecycleStatus = {
+  status: "active" | "cancelling" | "suspended" | "pending_deletion" | "deleted";
+  cancellation_reason: CancellationReason | null;
+  cancellation_effective_at: string | null;
+  deletion_scheduled_at: string | null;
+  stripe_subscription_status: string | null;
+  stripe_current_period_end: string | null;
+  first_past_due_at: string | null;
+};
+
+export const getLifecycle = (tenantId: string) =>
+  request<LifecycleStatus>(`/admin/tenants/${tenantId}/lifecycle`);
+
+export type CancelPreview = { effective_at: string; rule: string; flagged: boolean };
+
+export const previewCancel = (tenantId: string, reason: CancellationReason) =>
+  request<CancelPreview>(`/admin/tenants/${tenantId}/cancel/preview?reason=${reason}`);
+
+export const cancelTenant = (
+  tenantId: string,
+  body: { reason: CancellationReason; note?: string; override_effective_at?: string },
+) =>
+  request<{ status: string; cancellation_effective_at: string; rule: string; flagged: boolean }>(
+    `/admin/tenants/${tenantId}/cancel`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+
+export const reactivateTenant = (tenantId: string) =>
+  request<{ status: string }>(`/admin/tenants/${tenantId}/reactivate`, { method: "POST" });
+
+export type WindDownTenant = {
+  id: string;
+  name: string;
+  status: string;
+  cancellation_reason: CancellationReason | null;
+  cancellation_effective_at: string | null;
+  deletion_scheduled_at: string;
+  days_remaining: number;
+};
+
+export const getWindDownQueue = () =>
+  request<{ tenants: WindDownTenant[] }>("/admin/lifecycle/wind-down");
+
+export type ReadyToDeleteTenant = {
+  id: string;
+  name: string;
+  cancellation_reason: CancellationReason | null;
+  deletion_scheduled_at: string;
+};
+
+export const getReadyToDeleteQueue = () =>
+  request<{ tenants: ReadyToDeleteTenant[] }>("/admin/lifecycle/ready-to-delete");
+
+export const deleteTenant = (tenantId: string, body: { confirm_name: string; reason: string }) =>
+  request<{ status: string }>(`/admin/tenants/${tenantId}/delete`, {
+    method: "POST",
+    body: JSON.stringify(body),
   });

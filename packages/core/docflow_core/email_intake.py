@@ -405,18 +405,43 @@ def _insert_intake_rejection(
 
 
 def _reply_not_active(session: Session, tenant_id: UUID, tenant_name: str, sender: str | None) -> None:
-    """The not-yet-active auto-reply, at most once a day per sender, so a
-    mail loop or a busy buyer never turns this address into a spam cannon."""
+    """The not-yet-active auto-reply. See `_reply_intake_blocked`."""
+    _reply_intake_blocked(
+        session, tenant_id, tenant_name, sender, error_code="INT-005", template="intake_not_active"
+    )
+
+
+def _reply_suspended(session: Session, tenant_id: UUID, tenant_name: str, sender: str | None) -> None:
+    """The account-no-longer-active auto-reply (Section 7.14: 'the inbound
+    email auto-replies with a clear "this account is no longer active"
+    message'). See `_reply_intake_blocked`."""
+    _reply_intake_blocked(
+        session, tenant_id, tenant_name, sender, error_code="INT-006", template="intake_suspended"
+    )
+
+
+def _reply_intake_blocked(
+    session: Session,
+    tenant_id: UUID,
+    tenant_name: str,
+    sender: str | None,
+    *,
+    error_code: str,
+    template: str,
+) -> None:
+    """Auto-reply for mail this tenant's address cannot accept right now, at
+    most once a day per sender, so a mail loop or a busy buyer never turns
+    this address into a spam cannon."""
     if not sender:
         return
     from docflow_core import email_outbox
 
     earlier = session.execute(
         text(
-            "SELECT count(*) FROM intake_rejections WHERE error_code = 'INT-005' "
+            "SELECT count(*) FROM intake_rejections WHERE error_code = :code "
             "AND lower(sender_email) = lower(:sender) AND created_at > now() - interval '1 day'"
         ),
-        {"sender": sender},
+        {"code": error_code, "sender": sender},
     ).scalar_one()
     if earlier > 1:  # the rejection just written is one of them
         return
@@ -424,7 +449,7 @@ def _reply_not_active(session: Session, tenant_id: UUID, tenant_name: str, sende
         session,
         tenant_id=tenant_id,
         to_address=sender,
-        template="intake_not_active",
+        template=template,
         params={"tenant_name": tenant_name},
         related_type="intake_rejection",
     )
@@ -575,19 +600,28 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
         # Section 7.15.2 Step 2: the intake address "exists from this moment but
         # is not live: until go-live (Step 9) it auto-replies 'this address is
         # not yet active' and processes nothing" (D-114). Logged, never read.
+        # Section 7.14: a suspended/pending-deletion tenant's address is
+        # blocked the same way, but with its own "no longer active" wording
+        # (D-123) -- intake_address_active is the one flag both states set
+        # false, so the tenant's current lifecycle status picks the reply.
         tenant = session.execute(
-            text("SELECT name, intake_address_active FROM tenants WHERE id = :id"),
+            text("SELECT name, status, intake_address_active FROM tenants WHERE id = :id"),
             {"id": str(tenant_id)},
         ).mappings().first()
         if tenant is not None and not tenant["intake_address_active"]:
+            suspended = tenant["status"] in ("suspended", "pending_deletion")
+            error_code = "INT-006" if suspended else "INT-005"
             _insert_intake_rejection(
-                session, tenant_id, parsed, original_filename=None, detected_type=None, error_code="INT-005"
+                session, tenant_id, parsed, original_filename=None, detected_type=None, error_code=error_code
             )
             raw_email_id = _insert_raw_email(
                 session, tenant_id, parsed, auth, sender_domain,
                 outcome="rejected", attachment_count=len(parsed.attachments),
             )
-            _reply_not_active(session, tenant_id, tenant["name"], parsed.sender_email)
+            if suspended:
+                _reply_suspended(session, tenant_id, tenant["name"], parsed.sender_email)
+            else:
+                _reply_not_active(session, tenant_id, tenant["name"], parsed.sender_email)
             return ProcessResult(outcome="rejected", raw_email_id=raw_email_id, attachments=[])
 
         num_attachments = len(parsed.attachments)

@@ -36,6 +36,7 @@ TEMPLATE_PARAMS = {
         "document_allowance": "300",
     },
     "intake_not_active": {"tenant_name": "Acme Test Distributor"},
+    "intake_suspended": {"tenant_name": "Acme Test Distributor"},
     "first_week_checkin": {
         "tenant_name": "Acme Test Distributor",
         "documents_received": 12,
@@ -43,6 +44,18 @@ TEMPLATE_PARAMS = {
         "zero_edit_approvals": 7,
         "awaiting_review": 2,
     },
+    "cancellation_confirmed": {
+        "tenant_name": "Acme Test Distributor",
+        "effective_date": "2026-10-01",
+        "deletion_date": "2026-10-31",
+    },
+    "suspended_notice": {"tenant_name": "Acme Test Distributor", "deletion_date": "2026-10-31"},
+    "pending_deletion_reminder": {
+        "tenant_name": "Acme Test Distributor",
+        "deletion_date": "2026-10-31",
+        "days_remaining": 15,
+    },
+    "reactivated": {"tenant_name": "Acme Test Distributor", "app_url": "https://app.example.test"},
 }
 
 
