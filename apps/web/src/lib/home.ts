@@ -45,6 +45,26 @@ export type Home = {
 
 export const getHome = () => request<Home>("/home");
 
+/** One page of the account's activity (slice 5.8b, D-130). `kinds` is the list
+ * of event kinds the API supports, so the page's filter chips come from the
+ * server rather than being a second list that can fall out of step. */
+export type ActivityPage = {
+  items: ActivityItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  kinds: ActivityItem["kind"][];
+};
+
+export function getActivity(opts: { kinds?: string[]; limit?: number; offset?: number } = {}) {
+  const params = new URLSearchParams();
+  for (const kind of opts.kinds ?? []) params.append("kind", kind);
+  if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts.offset) params.set("offset", String(opts.offset));
+  const query = params.toString();
+  return request<ActivityPage>(`/activity${query ? `?${query}` : ""}`);
+}
+
 /** What happened to one file the person chose. */
 export type UploadOutcome =
   | { file: string; ok: true; documentId: string; status: string; duplicateOf: string | null }

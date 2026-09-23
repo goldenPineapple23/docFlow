@@ -84,11 +84,14 @@ test("an admin sees the dashboard link; a reviewer does not", async ({ page }) =
   await expect(nav.getByRole("link", { name: "Purchase orders" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Upload" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Held for review" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Activity" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Dashboard" })).toBeVisible();
 
   await stubIdentity(page, "reviewer");
   await page.reload();
   await expect(nav.getByRole("link", { name: "Upload" })).toBeVisible();
+  // The trail is for the people doing the work as well as the admin (D-130).
+  await expect(nav.getByRole("link", { name: "Activity" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Dashboard" })).toHaveCount(0);
 });
 
@@ -238,4 +241,118 @@ test("a file accepted but held says so in the catalog's words, not as an error",
   await expect(page.getByTestId("results")).toContainText("Received and held for review");
   await expect(page.getByTestId("results")).toContainText("DocFlow has been alerted");
   await expect(page.getByText("0 of 1 file accepted")).toBeVisible();
+});
+
+// ── Activity (5.8b) ─────────────────────────────────────────────────────────
+
+function event(i: number, kind: string, extra: Record<string, unknown> = {}) {
+  return {
+    at: new Date(Date.now() - i * 60_000).toISOString(),
+    kind,
+    document_id: `d${i}`,
+    document_name: `po-${i}.pdf`,
+    po_number: `PO-${1000 + i}`,
+    by: "reviewer@example.test",
+    by_docflow_support: false,
+    detail: null,
+    ...extra,
+  };
+}
+
+const KINDS = ["edited", "approved", "rejected", "reopened", "exported", "released"];
+
+/** Serves /activity like the API does: filtered, paged, and counting the whole
+ * filtered set rather than the page. */
+async function stubActivity(page: Page, all: ReturnType<typeof event>[]) {
+  await page.route(`${API}/activity*`, (route) => {
+    const url = new URL(route.request().url());
+    const wanted = url.searchParams.getAll("kind");
+    const limit = Number(url.searchParams.get("limit") ?? 50);
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    const matching = wanted.length ? all.filter((e) => wanted.includes(e.kind)) : all;
+    return route.fulfill({
+      json: {
+        items: matching.slice(offset, offset + limit),
+        total: matching.length,
+        limit,
+        offset,
+        kinds: KINDS,
+      },
+    });
+  });
+}
+
+test("the activity page filters, pages, and counts the whole filtered set", async ({ page }) => {
+  await stubIdentity(page, "reviewer");
+  const all = [
+    ...Array.from({ length: 60 }, (_, i) => event(i, "approved")),
+    event(90, "edited", { detail: "3 fields" }),
+  ];
+  await stubActivity(page, all);
+
+  await page.goto("/activity");
+
+  await expect(page.getByTestId("activity-count")).toContainText("Showing 1–50 of 61");
+  await expect(page.getByTestId("activity").getByRole("listitem")).toHaveCount(50);
+  await expect(page.getByTestId("newer")).toBeDisabled();
+
+  await page.getByTestId("older").click();
+  await expect(page.getByTestId("activity-count")).toContainText("Showing 51–61 of 61");
+  await expect(page.getByTestId("newer")).toBeEnabled();
+  await expect(page.getByTestId("older")).toBeDisabled();
+
+  // Narrowing starts again at the newest row rather than leaving the reader on
+  // a page that no longer exists.
+  await page.getByRole("button", { name: "Edited" }).click();
+  await expect(page.getByTestId("activity-count")).toContainText("Showing 1–1 of 1");
+  await expect(page.getByTestId("activity")).toContainText("(3 fields)");
+  await expect(page.getByRole("button", { name: "Edited" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("an account with nothing on it says so, and says so differently under a filter", async ({
+  page,
+}) => {
+  await stubIdentity(page, "reviewer");
+  await stubActivity(page, []);
+
+  await page.goto("/activity");
+  await expect(page.getByTestId("activity-empty")).toContainText("Nothing has happened");
+
+  await page.getByRole("button", { name: "Rejected" }).click();
+  await expect(page.getByTestId("activity-empty")).toContainText("Nothing of that kind");
+});
+
+test("a refusal from the API is shown in the catalog's words", async ({ page }) => {
+  await stubIdentity(page, "viewer");
+  await page.route(`${API}/activity*`, (route) =>
+    route.fulfill({
+      status: 403,
+      json: {
+        detail: {
+          code: "AUTH-002",
+          title: "You don't have permission to do that",
+          message: "Your account can view documents but not change them.",
+          action: "Ask your account admin if you need to review orders.",
+        },
+      },
+    }),
+  );
+
+  await page.goto("/activity");
+  await expect(page.getByTestId("catalog-error")).toContainText(
+    "You don't have permission to do that",
+  );
+  await expect(page.getByTestId("catalog-error")).toContainText("Ask your account admin");
+});
+
+test("the dashboard's short list links to the whole trail", async ({ page }) => {
+  await stubIdentity(page, "owner");
+  await page.route(`${API}/home`, (route) => route.fulfill({ json: HOME }));
+  await stubActivity(page, [event(1, "approved")]);
+
+  await page.goto("/dashboard");
+  await page.getByRole("link", { name: /See all activity/ }).click();
+
+  await expect(page).toHaveURL(/\/activity/);
+  await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
 });

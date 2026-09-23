@@ -67,6 +67,9 @@ export function AppHeader({
   // The dashboard is the account admin's (D-128). Hiding the link is a
   // courtesy; the API is what refuses a reviewer who types the address.
   const isAdmin = loaded?.role === "owner" || loaded?.role === "admin";
+  // Activity is for the people who do the work as well as the admin (D-130);
+  // a viewer, if one is ever created, does not get it.
+  const canReview = isAdmin || loaded?.role === "reviewer";
 
   useEffect(() => {
     // The browser tab says whose portal this is. (React escapes everything it
@@ -106,6 +109,7 @@ export function AppHeader({
           <NavLink href="/review">Purchase orders</NavLink>
           <NavLink href="/upload">Upload</NavLink>
           <NavLink href="/held">Held for review</NavLink>
+          {canReview ? <NavLink href="/activity">Activity</NavLink> : null}
           {isAdmin ? <NavLink href="/dashboard">Dashboard</NavLink> : null}
         </nav>
 

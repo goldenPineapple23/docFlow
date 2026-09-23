@@ -1301,3 +1301,21 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Also confirmed by the founder, already built in 5.8a:** a reviewer who reaches `/dashboard` is told they do not have permission, from the catalog (`AUTH-003`, 403) -- not a 404. See D-128 for why this differs from the Console's 404.
 
 **Related:** Section 7.16.1, 7.15.4, 7.16.5; D-126, D-128.
+
+
+## D-130 -- The activity trail: one query, two screens, and the reviewers can read it (slice 5.8b)
+
+**Context:** Section 6's Phase 5 line asks for an "audit log view" and `docflow-mvp-features.docx` for an "audit trail -- who changed what, when". 5.8a put the last ten events on the admin's dashboard; this is the whole trail, paged and filtered.
+
+**Decisions:**
+- **Reviewers see it, not only the admin** (the founder's decision in the 5.8 scoping). The people doing the work are the ones who need to know what a colleague already did, and an audit trail only the boss can read is a weaker check on the work, not a stronger one. It is a read, but not a `member` read: a `viewer`, if one is ever created, does not get it, so the route carries the reviewer role set.
+- **One query, two screens.** `tenant_home._EVENTS_CTE` -- the union of `review_actions`, finished `exports` and released documents -- is now written once and read by both `recent_activity` (the dashboard's ten) and `activity_page` (this page, filtered and paged). A test asserts the dashboard's rows are the first rows of the trail, so the two cannot drift apart and then disagree in front of a customer.
+- **The filter chips come from the API**, not from a second list in the page, for the same reason. An unknown kind in the query string is dropped rather than refused: a stale bookmark should show the whole list, not an error.
+- **`total` counts the whole filtered set**, not the page, so the screen can say "Showing 51-61 of 61" -- what a person needs to know is how much there is, not how much is on screen.
+- **Still no extracted value.** An edit says "3 fields", never what they became (Section 7.10); the PO number and filename are carried so the row can link to the order, where the values properly live. A test asserts a planted value never appears in the response.
+- **Work the founder did inside the account is labelled "DocFlow support"** and the founder's own address is not shown (7.15.1), exactly as on the dashboard -- it is the same rendering component.
+- **Ordering** is `at DESC, sequence DESC NULLS LAST`: `now()` is frozen per transaction, so an edit and the approval written with it share a timestamp and only `review_actions.sequence` says which came first (D-084, and the trap D-123 hit).
+
+**Verified against the running stack**, not only in tests: a real reviewer read the trail for three orders (six events), paged through it, filtered to edits, was shown no extracted value, and the admin's dashboard row matched the trail's first row exactly; a viewer was refused with `AUTH-002`.
+
+**Related:** Section 6 (Phase 5), 7.10, 7.15.1, Section 3; D-084, D-123, D-128.

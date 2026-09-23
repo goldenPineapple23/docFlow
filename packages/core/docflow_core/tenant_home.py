@@ -142,20 +142,17 @@ def this_month(session: Session, tenant_id: UUID) -> dict[str, Any]:
     }
 
 
-def recent_activity(session: Session, tenant_id: UUID, *, limit: int = 10) -> list[Activity]:
-    """The last things that happened in this account, newest first.
+# What a person can filter the Activity page by. The first four are the
+# `review_actions.action` values the schema allows; the last two come from the
+# other two sources in the union below.
+ACTIVITY_KINDS = ("edited", "approved", "rejected", "reopened", "exported", "released")
 
-    Built from the rows the product already writes -- `review_actions`, finished
-    `exports`, and released held documents -- so there is no second record of
-    the truth to keep in step. Values are never included: an edit says how many
-    fields changed, not what they became (Section 7.10).
-
-    The Activity page (slice 5.8b) pages and filters over the same union; this
-    is the same query with a small limit, so the two cannot disagree.
-    """
-    rows = session.execute(
-        text(
-            """
+# Everything that happened in an account, from the rows the product already
+# writes -- `review_actions`, finished `exports`, and released held documents --
+# so there is no second record of the truth to keep in step. The dashboard's
+# ten-item list and the Activity page (5.8b) both read this, so the two cannot
+# disagree; only the filter, the limit and the offset differ.
+_EVENTS_CTE = """
             WITH events AS (
                 SELECT r.created_at AS at, r.sequence AS seq, r.action AS kind, r.document_id,
                        r.user_id, r.acting_as_tenant_id IS NOT NULL AS support,
@@ -177,6 +174,62 @@ def recent_activity(session: Session, tenant_id: UUID, *, limit: int = 10) -> li
                 FROM documents d
                 WHERE d.tenant_id = :t AND d.released_at IS NOT NULL
             )
+"""
+
+
+def recent_activity(session: Session, tenant_id: UUID, *, limit: int = 10) -> list[Activity]:
+    """The last things that happened in this account, newest first -- the
+    dashboard's short list. `activity_page` is the same query, paged."""
+    return _select_activity(session, tenant_id, kinds=(), limit=limit, offset=0)
+
+
+def activity_page(
+    session: Session,
+    tenant_id: UUID,
+    *,
+    kinds: tuple[str, ...] = (),
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """One page of the account's activity, newest first, optionally narrowed to
+    certain kinds of event. `total` is the count matching the same filter, so a
+    page can say which slice of what it is showing.
+
+    Values are never included: an edit says how many fields changed, not what
+    they became (Section 7.10).
+    """
+    kinds = tuple(k for k in kinds if k in ACTIVITY_KINDS)
+    return {
+        "items": _select_activity(session, tenant_id, kinds=kinds, limit=limit, offset=offset),
+        "total": _count_activity(session, tenant_id, kinds=kinds),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+# The kind filter, written once: an empty list means every kind, so the page
+# with no filter and the dashboard's list run the same query.
+_KIND_FILTER = (
+    "WHERE (:kinds = '' OR ev.kind = ANY(CAST(string_to_array(:kinds, ',') AS text[])))"
+)
+
+
+def _count_activity(session: Session, tenant_id: UUID, *, kinds: tuple[str, ...]) -> int:
+    return int(
+        session.execute(
+            text(_EVENTS_CTE + "SELECT count(*) FROM events ev " + _KIND_FILTER),
+            {"t": str(tenant_id), "kinds": ",".join(kinds)},
+        ).scalar_one()
+    )
+
+
+def _select_activity(
+    session: Session, tenant_id: UUID, *, kinds: tuple[str, ...], limit: int, offset: int
+) -> list[Activity]:
+    rows = session.execute(
+        text(
+            _EVENTS_CTE
+            + """
             SELECT ev.at, ev.kind, ev.document_id, ev.support, ev.detail,
                    u.email AS by_email,
                    d.original_filename, h.po_number
@@ -184,15 +237,18 @@ def recent_activity(session: Session, tenant_id: UUID, *, limit: int = 10) -> li
             LEFT JOIN users u ON u.id = ev.user_id
             LEFT JOIN documents d ON d.id = ev.document_id
             LEFT JOIN document_headers h ON h.document_id = ev.document_id
+            """
+            + _KIND_FILTER
+            + """
             -- `now()` is frozen for a transaction, so two review actions written
             -- together share a timestamp; `sequence` is what "these happened in
             -- this order" actually means (D-084). Rows from the other sources
             -- have no sequence and fall back to time alone.
             ORDER BY ev.at DESC, ev.seq DESC NULLS LAST
-            LIMIT :limit
+            LIMIT :limit OFFSET :offset
             """
         ),
-        {"t": str(tenant_id), "limit": limit},
+        {"t": str(tenant_id), "kinds": ",".join(kinds), "limit": limit, "offset": offset},
     ).mappings().all()
     return [
         Activity(
