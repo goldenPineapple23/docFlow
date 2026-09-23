@@ -343,6 +343,15 @@ def test_notices_fire_once_each_and_documents_keep_processing_past_the_allowance
         _email(client, t, "buyer-a@example.test")  # crossing again is not a second email
         assert len(t.outbox("allowance_notice")) == 1
 
+        # The admin has been emailed at 80%, but nobody's screen is interrupted
+        # yet (D-129): the banner waits until the plan is nearly spent, and the
+        # month's running numbers live on the admin's dashboard instead.
+        assert client.get("/allowance", headers=t.headers()).json()["banner"] is None
+        t.seed(int(t.allowance * 0.9) - t.used())
+        near_the_limit = client.get("/allowance", headers=t.headers()).json()["banner"]
+        assert near_the_limit["code"] in ("LIM-001", "LIM-003")
+        assert len(t.outbox("allowance_notice")) == 1  # the banner sends no mail of its own
+
         t.seed(t.allowance - t.used() - 1)
         assert _email(client, t, "buyer-a@example.test").json()["outcome"] == "processed"
         assert len(t.outbox("allowance_notice")) == 2

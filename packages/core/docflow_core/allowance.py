@@ -3,8 +3,9 @@ Allowance thresholds: the 80% and 100% notices (CLAUDE.md Section 7.16.1;
 D-126).
 
 Allowances are SOFT. Nothing here ever blocks, delays or degrades a document:
-it only tells the customer (a banner and one email per threshold per month) and
-tells the founder (an `allowance_reached` alert at 100%, a sales signal).
+it only tells the customer (one email per threshold per month to the account's
+admin, and a banner on their screens once the plan is nearly spent) and tells
+the founder (an `allowance_reached` alert at 100%, a sales signal).
 
 "One email per threshold per month" is enforced by a unique row in
 `allowance_notices`, so a threshold crossed twice, or checked by two requests at
@@ -24,7 +25,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from docflow_core import email_outbox, founder_alerts, usage
-from docflow_core.constants import ALLOWANCE_THRESHOLDS
+from docflow_core.constants import ALLOWANCE_BANNER_THRESHOLD, ALLOWANCE_THRESHOLDS
 from docflow_core.errors import ErrorCatalogEntry, render_error
 
 # The catalog entry for each threshold, with and without a higher tier to
@@ -55,10 +56,18 @@ def _entry(a: usage.Allowance, threshold_pct: int) -> ErrorCatalogEntry:
 
 
 def current_banner(session: Session, tenant_id: UUID) -> Banner | None:
-    """The banner the tenant should see now, or None. Shown from 80% up, and
-    it is the 100% wording once the whole allowance is used."""
+    """The banner the tenant should see now, or None.
+
+    Shown only from `ALLOWANCE_BANNER_THRESHOLD` up (D-129) -- the admin is
+    emailed at the 80% and 100% thresholds and has the running numbers on the
+    dashboard; the people working the queue are interrupted only when the plan
+    is nearly spent. Above that point it is still the crossed threshold's
+    wording, so it becomes the 100% entry once the allowance is used up.
+    """
     a = usage.allowance_for(session, tenant_id)
     if not a.allowance:
+        return None
+    if a.used < ALLOWANCE_BANNER_THRESHOLD * a.allowance:
         return None
     crossed = [_pct(t) for t in ALLOWANCE_THRESHOLDS if a.used >= t * a.allowance]
     if not crossed:

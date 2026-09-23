@@ -97,6 +97,10 @@ def test_the_daily_ceiling_is_fifty_dollars_and_money_is_never_a_float():
     assert isinstance(constants.DAILY_AI_COST_CEILING_USD, Decimal)
     assert constants.ABUSE_CEILING_MULTIPLIER == 3
     assert constants.ALLOWANCE_THRESHOLDS == (0.8, 1.0)
+    # The admin is told at 80%; the people working the queue only near the
+    # limit (D-129). If these ever coincide again, that was a decision.
+    assert constants.ALLOWANCE_BANNER_THRESHOLD == 0.9
+    assert constants.ALLOWANCE_BANNER_THRESHOLD > constants.ALLOWANCE_THRESHOLDS[0]
 
 
 # ── the allowance wording comes from the catalog ────────────────────────────

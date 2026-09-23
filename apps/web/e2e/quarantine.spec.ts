@@ -286,7 +286,8 @@ test("each notice has its own X, stays hidden after a reload, and returns when i
   await page.route(`${API}/allowance`, (route) =>
     route.fulfill({
       json: {
-        used: 260,
+        // Near the limit: the API only sends a banner from 90% up (D-129).
+        used: 275,
         allowance: 300,
         tier: "Starter",
         month: "2026-09",
@@ -294,7 +295,7 @@ test("each notice has its own X, stays hidden after a reload, and returns when i
           threshold_pct: 80,
           code: "LIM-001",
           title: "You've used most of this month's documents",
-          message: "You've used 260 of 300 documents included in Starter this month.",
+          message: "You've used 275 of 300 documents included in Starter this month.",
           action: "Growth includes 1,000 documents per month -- contact us to upgrade.",
         },
       },

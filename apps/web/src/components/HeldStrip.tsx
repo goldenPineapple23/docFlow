@@ -6,10 +6,12 @@ import { getAllowance, getHeld, type Allowance, type Held } from "@/lib/held";
 
 /**
  * The two non-blocking notices a tenant may see on the Purchase orders list
- * (CLAUDE.md Section 7.16.1, 7.16.4; D-126):
+ * (CLAUDE.md Section 7.16.1, 7.16.4; D-126, D-129):
  *
- *   - the allowance banner at 80% and 100% ("You've used 312 of 300 documents
- *     included in Starter this month ..."), and
+ *   - the allowance notice, which the API sends only once the plan is nearly
+ *     spent ("You've used 312 of 300 documents included in Starter this month
+ *     ..."). The month's running numbers belong on the admin's dashboard; a
+ *     reviewer is interrupted here only near the limit. And
  *   - a note that some documents are being held, with the reason in plain
  *     English and a way to the list.
  *

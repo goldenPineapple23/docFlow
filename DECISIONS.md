@@ -1285,3 +1285,19 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Not built here:** the Activity page (5.8b), the needs-review digest email (5.8c), and the team piece (5.8d, still undecided -- today not even the founder can add a second user to a tenant from the Console).
 
 **Related:** Section 3, 7.5, 7.10, 7.11, 7.16.1, 7.16.4, Section 10; D-084, D-090, D-109, D-123, D-126.
+
+
+## D-129 -- The allowance banner waits until the plan is nearly spent
+
+**Context:** Section 7.16.1 says the tenant surface shows a non-blocking banner at 80% and at 100% of the monthly allowance, and that is what slice 5.7 built (D-126). Walking 5.8a, the founder's judgement was that the people working the queue do not need the month's running total at all: "we don't have to keep reminding them how many arrived or how many is left for the plan ... for the reviewer, we'll just flash a message once they are within 5-10% of their limit."
+
+**Decision (23 Sept 2026):**
+- The running numbers live on the **admin's dashboard**, where they already are ("Arrived" and "Counted toward your plan -- 27 / 300"), and are shown there at any usage level. That is the person who is billed and who can act on them.
+- The **banner** on the tenant's own screens appears only from `ALLOWANCE_BANNER_THRESHOLD` (0.9) up -- within 5-10% of the limit -- and above that point is still the crossed threshold's wording, so it becomes the 100% entry once the allowance is spent.
+- The **80% and 100% thresholds are unchanged**: the one email per threshold per month to the account's admin, and the founder's `allowance_reached` alert at 100%, fire exactly as 7.16.1 requires. `ALLOWANCE_THRESHOLDS` still reads `(0.8, 1.0)`.
+
+**Why this is a change to a constant, not to the rule:** 7.15.4 lists the allowance thresholds among the constants that must never be hardcoded, which is where this lives; the banner threshold is a second constant beside them, and a test asserts it is the later of the two so the two cannot silently collapse back together. Everything 7.16.1 exists to guarantee survives: nothing is blocked, delayed or degraded; the customer is told before they pass the line; the founder still gets the sales signal. What moved is which screen carries the reminder, which 7.16.1 does not specify. The deviation is deliberate and recorded here: **the banner is no longer shown at 80%.**
+
+**Also confirmed by the founder, already built in 5.8a:** a reviewer who reaches `/dashboard` is told they do not have permission, from the catalog (`AUTH-003`, 403) -- not a 404. See D-128 for why this differs from the Console's 404.
+
+**Related:** Section 7.16.1, 7.15.4, 7.16.5; D-126, D-128.

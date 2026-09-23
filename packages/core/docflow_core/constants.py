@@ -43,6 +43,13 @@ UNKNOWN_SENDER_HOURLY_LIMIT = 20
 QUARANTINE_TTL_DAYS = 30
 ROTATED_ADDRESS_GRACE_DAYS = 30
 ALLOWANCE_THRESHOLDS = (0.8, 1.0)
+# The thresholds above are when the account's admin is *told* -- one email per
+# threshold per month, and the founder's sales signal at 100%. The banner on
+# the tenant's own screens is held back until this point (D-129): a reviewer
+# works the queue all day and does not need the month's running total, only a
+# word when the plan is nearly spent. The numbers themselves live on the
+# admin's dashboard, where someone who can act on them will look.
+ALLOWANCE_BANNER_THRESHOLD = 0.9
 # The per-tenant daily AI-spend circuit breaker (Section 7.9, 7.16.2; D-126).
 # Estimated model cost for one tenant in one UTC day. Founder-chosen; a heavy
 # legitimate day at the Scale tier (~100 documents at up to ~$0.35) is ~$35.
