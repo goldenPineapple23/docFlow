@@ -53,6 +53,9 @@ class AuthenticatedIdentity:
     tenant_id: UUID | None
     role: str | None
     is_platform_admin: bool
+    # The sign-in is valid but the account's admin removed this person (D-132).
+    # They get no tenant and no role, and a catalog answer saying why (AUTH-004).
+    access_removed: bool = False
 
 
 # The only algorithms a Supabase session token is ever signed with. An
@@ -140,9 +143,24 @@ def _resolve_identity(authorization: str | None) -> AuthenticatedIdentity | None
 
     with identity_lookup_session(auth_user_id) as session:
         user_row = session.execute(
-            text("SELECT id, tenant_id, role FROM users WHERE auth_user_id = :auth_user_id"),
+            text(
+                "SELECT id, tenant_id, role, is_active AND deleted_at IS NULL AS active "
+                "FROM users WHERE auth_user_id = :auth_user_id"
+            ),
             {"auth_user_id": auth_user_id},
         ).mappings().first()
+        # A removed person's Supabase session stays valid until it expires, so
+        # the refusal has to happen here, on every request -- not at sign-in.
+        if user_row is not None and not user_row["active"]:
+            return AuthenticatedIdentity(
+                auth_user_id=auth_user_id,
+                email=email,
+                local_user_id=None,
+                tenant_id=None,
+                role=None,
+                is_platform_admin=False,
+                access_removed=True,
+            )
         is_admin_row = session.execute(
             text("SELECT 1 FROM platform_admins WHERE user_id = :user_id AND revoked_at IS NULL"),
             {"user_id": str(user_row["id"])} if user_row else {"user_id": None},
@@ -162,7 +180,11 @@ def get_current_identity(authorization: str | None = Header(default=None)) -> Au
     """Strict resolver for ordinary tenant-scoped routes: 401 if not authenticated."""
     identity = _resolve_identity(authorization)
     if identity is None:
-        raise HTTPException(status_code=401, detail="Missing or invalid session")
+        from app.errors import catalog_error
+
+        # A catalog answer, so the page can say "you're signed out" and send
+        # the person to sign in -- not "we couldn't reach DocFlow" (D-134).
+        raise catalog_error("AUTH-005", status_code=401)
     return identity
 
 
@@ -189,6 +211,10 @@ def require_tenant_member(identity: AuthenticatedIdentity) -> UUID:
     Console reaches a tenant's documents through its own acting-as path
     (Section 7.15.1), not through these routes.
     """
+    if identity.access_removed:
+        from app.errors import catalog_error
+
+        raise catalog_error("AUTH-004", status_code=403)
     if identity.tenant_id is None:
         raise HTTPException(
             status_code=403, detail="This account is not associated with a tenant."

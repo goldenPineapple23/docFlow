@@ -25,6 +25,8 @@ const KIND_LABELS: Record<string, string> = {
   reopened: "Reopened",
   exported: "Exported",
   released: "Released from hold",
+  invited: "Invited",
+  removed: "Removed from team",
 };
 
 function Chip({
@@ -78,12 +80,14 @@ export default function ActivityPageScreen() {
     };
   }, [kinds, offset]);
 
-  // Choosing a filter starts again at the newest row: staying on page four of a
-  // list you just narrowed shows an empty screen for no reason.
-  function toggle(kind: string) {
+  // One filter at a time (the founder's call in the 5.8d walkthrough): a chip
+  // shows only that kind, and choosing the chip already on goes back to
+  // everything. Choosing starts again at the newest row: staying on page four
+  // of a list you just narrowed shows an empty screen for no reason.
+  function choose(kind: string) {
     setPage(null);
     setOffset(0);
-    setKinds((prev) => (prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind]));
+    setKinds((prev) => (prev.length === 1 && prev[0] === kind ? [] : [kind]));
   }
 
   function go(next: number) {
@@ -103,8 +107,9 @@ export default function ActivityPageScreen() {
       <main className="mx-auto max-w-4xl p-6">
         <h1 className="text-xl font-semibold">Activity</h1>
         <p className="mt-1 max-w-2xl text-sm text-gray-600">
-          Everything that has happened to the orders on this account: who changed what, and when.
-          It never shows what a value was changed to — open the order for that.
+          Everything that has happened on this account: who changed which order, who joined or
+          left the team, and when. It never shows what a value was changed to — open the order
+          for that.
         </p>
 
         <div data-testid="activity-filters" className="mt-4 flex flex-wrap gap-2">
@@ -121,7 +126,7 @@ export default function ActivityPageScreen() {
               key={kind}
               label={KIND_LABELS[kind] ?? kind}
               active={kinds.includes(kind)}
-              onClick={() => toggle(kind)}
+              onClick={() => choose(kind)}
             />
           ))}
         </div>

@@ -10,7 +10,17 @@ import { ReviewApiError, UNEXPECTED, request, type CatalogError } from "./review
 
 export type ActivityItem = {
   at: string;
-  kind: "approved" | "rejected" | "edited" | "reopened" | "exported" | "released";
+  kind:
+    | "approved"
+    | "rejected"
+    | "edited"
+    | "reopened"
+    | "exported"
+    | "released"
+    // About people, not orders (5.8d, D-132): no document, and `detail` is the
+    // address of the person invited or removed.
+    | "invited"
+    | "removed";
   document_id: string | null;
   document_name: string | null;
   po_number: string | null;

@@ -143,12 +143,20 @@ def this_month(session: Session, tenant_id: UUID) -> dict[str, Any]:
 
 
 # What a person can filter the Activity page by. The first four are the
-# `review_actions.action` values the schema allows; the last two come from the
-# other two sources in the union below.
-ACTIVITY_KINDS = ("edited", "approved", "rejected", "reopened", "exported", "released")
+# `review_actions.action` values the schema allows; "exported" and "released"
+# come from two other sources in the union below, and the team kinds from
+# `tenant_lifecycle_events`.
+ACTIVITY_KINDS = (
+    "edited", "approved", "rejected", "reopened", "exported", "released", "invited", "removed",
+)
+# The kinds that are about people, not orders (5.8d, D-132): they carry no
+# document, and their `detail` is the address of the person invited or removed
+# -- one of the account's own team, never anything from a document.
+TEAM_KINDS = ("invited", "removed")
 
 # Everything that happened in an account, from the rows the product already
-# writes -- `review_actions`, finished `exports`, and released held documents --
+# writes -- `review_actions`, finished `exports`, released held documents, and
+# invites and removals of people --
 # so there is no second record of the truth to keep in step. The dashboard's
 # ten-item list and the Activity page (5.8b) both read this, so the two cannot
 # disagree; only the filter, the limit and the offset differ.
@@ -173,6 +181,22 @@ _EVENTS_CTE = """
                        d.released_acting_as_tenant_id IS NOT NULL, NULL
                 FROM documents d
                 WHERE d.tenant_id = :t AND d.released_at IS NOT NULL
+                UNION ALL
+                -- Invites and removals (5.8d). The founder's own first invite
+                -- ('invite_sent', Console Step 3) is here too. Its actor has
+                -- no row in this tenant, so it reads as "DocFlow support"
+                -- (7.15.1), the same as any other work the founder did here.
+                SELECT l.created_at, NULL,
+                       CASE WHEN l.event_type = 'user_removed' THEN 'removed' ELSE 'invited' END,
+                       CAST(NULL AS uuid), l.actor_user_id,
+                       NOT EXISTS (
+                           SELECT 1 FROM users a WHERE a.id = l.actor_user_id AND a.tenant_id = :t
+                       ),
+                       (SELECT p.email FROM users p
+                        WHERE p.id = CAST(l.payload ->> 'user_id' AS uuid) AND p.tenant_id = :t)
+                FROM tenant_lifecycle_events l
+                WHERE l.tenant_id = :t
+                  AND l.event_type IN ('invite_sent', 'user_invited', 'user_removed')
             )
 """
 

@@ -20,7 +20,12 @@ export const ACTIVITY_VERBS: Record<ActivityItem["kind"], string> = {
   reopened: "reopened",
   exported: "exported",
   released: "released",
+  invited: "invited",
+  removed: "removed",
 };
+
+/** Rows about people rather than orders (5.8d, D-132). */
+const TEAM_KINDS: ReadonlySet<ActivityItem["kind"]> = new Set(["invited", "removed"]);
 
 export function ago(iso: string): string {
   const minutes = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -59,14 +64,18 @@ export function ActivityList({
             {item.by_docflow_support ? "DocFlow support" : (item.by ?? "Someone")}
           </span>
           <span>{ACTIVITY_VERBS[item.kind] ?? item.kind}</span>
-          {item.document_id ? (
+          {TEAM_KINDS.has(item.kind) ? (
+            <span>{item.detail ?? "a team member"}</span>
+          ) : item.document_id ? (
             <Link href={`/review/${item.document_id}`} className="text-blue-700 underline">
               {item.po_number ?? item.document_name ?? "an order"}
             </Link>
           ) : (
             <span>{item.po_number ?? item.document_name ?? "an order"}</span>
           )}
-          {item.detail ? <span className="text-gray-500">({item.detail})</span> : null}
+          {item.detail && !TEAM_KINDS.has(item.kind) ? (
+            <span className="text-gray-500">({item.detail})</span>
+          ) : null}
           <span className="ml-auto text-gray-500" title={exactly(item.at)}>
             {showDate ? `${exactly(item.at)} · ${ago(item.at)}` : ago(item.at)}
           </span>

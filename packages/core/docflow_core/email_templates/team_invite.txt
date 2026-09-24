@@ -1,0 +1,13 @@
+Subject: $inviter invited you to $tenant_name on DocFlow
+
+Hello,
+
+$inviter has invited you to review purchase orders for $tenant_name in
+DocFlow. Use the link below to choose your password and sign in:
+
+$invite_link
+
+The link works once and expires after a while. If it has expired, ask
+$inviter to send you a new one from DocFlow's Team page.
+
+-- DocFlow

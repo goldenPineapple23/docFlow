@@ -272,8 +272,9 @@ def get_document(
         if document is None:
             # RLS already hid another tenant's document, so this is a 404 for
             # "not yours" and "not there" alike -- a tenant cannot probe for
-            # the existence of another tenant's document (Section 7.5).
-            raise HTTPException(status_code=404)
+            # the existence of another tenant's document (Section 7.5). Said
+            # in the catalog's words: the order screen shows this to a person.
+            raise catalog_error("REV-006", status_code=404)
 
         # A viewer opening a document should not start the review clock on
         # behalf of a reviewer who has not looked at it yet.

@@ -307,6 +307,17 @@ test("the activity page filters, pages, and counts the whole filtered set", asyn
   await expect(page.getByTestId("activity-count")).toContainText("Showing 1–1 of 1");
   await expect(page.getByTestId("activity")).toContainText("(3 fields)");
   await expect(page.getByRole("button", { name: "Edited" })).toHaveAttribute("aria-pressed", "true");
+
+  // One filter at a time: choosing another replaces it rather than adding to it.
+  await page.getByRole("button", { name: "Approved" }).click();
+  await expect(page.getByRole("button", { name: "Approved" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Edited" })).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("activity-count")).toContainText("of 60");
+
+  // Choosing the one already on goes back to everything.
+  await page.getByRole("button", { name: "Approved" }).click();
+  await expect(page.getByRole("button", { name: "Everything" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("activity-count")).toContainText("of 61");
 });
 
 test("an account with nothing on it says so, and says so differently under a filter", async ({

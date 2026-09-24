@@ -10,6 +10,14 @@ AUTH-003 [info/tenant] This page is for account admins
   what+why: The dashboard and the people on this account are managed by your account's admin, so this page isn't part of a reviewer's access.
   next:     Ask your account admin if you need something from it, or go to Purchase orders.
 
+AUTH-004 [warning/tenant] Your access to this account has ended
+  what+why: Your account's admin has removed you from this DocFlow account, so you can no longer see or change its orders. Your past work is still in the account's history.
+  next:     If you think this is a mistake, ask your account's admin to invite you again.
+
+AUTH-005 [info/tenant] You're signed out
+  what+why: This browser isn't signed in to DocFlow, or your sign-in has expired, so DocFlow can't show this page. Nothing was changed.
+  next:     Sign in again; DocFlow will bring you back to this page.
+
 BUY-001 [warning/founder] Rows with no customer name
   what+why: These rows have no name, so there is no customer to create.
   next:     Add the name, or remove the row.
@@ -418,9 +426,45 @@ REV-005 [warning/tenant] Someone else changed this order first
   what+why: This order changed while you had it open, so saving now would quietly overwrite what the other person did.
   next:     Reload the order, check what changed, then make your edit again.
 
+REV-006 [info/tenant] We can't find that order
+  what+why: There's no order at this address on your account. The link may be mistyped, or the order may belong to a different account.
+  next:     Go back to Purchase orders and open the order from the list.
+
 RUL-001 [info/founder] Proposed rules can't be switched on here
   what+why: This rule is only a proposal. Proposals are not part of DocFlow yet, and no rule becomes active without a person confirming it in a review.
   next:     Nothing to do. Confirm the match in a review if you want the rule.
+
+TEAM-001 [info/tenant] That doesn't look like an email address
+  what+why: DocFlow sends the invite by email, so it needs a complete address to send it to.
+  next:     Check the address (it should look like name@company.com) and try again.
+
+TEAM-002 [info/tenant] This person is already on the team
+  what+why: Someone with this email address already has access to this account.
+  next:     If they haven't signed in yet, use Resend invite next to their name instead.
+
+TEAM-003 [warning/tenant] This address can't be added here
+  what+why: This email address is already used for a different DocFlow sign-in, and one address can belong to only one account. Nothing was changed.
+  next:     Ask the person for another work address to invite, or contact DocFlow if they need both.
+
+TEAM-004 [warning/tenant] We couldn't create the invite just now
+  what+why: DocFlow's sign-in service didn't answer, so no invite was created and nobody was added. DocFlow has logged the failure.
+  next:     Try again in a few minutes.
+
+TEAM-005 [info/tenant] They have already signed in
+  what+why: This person has set their password and signed in, so there's no invite left to resend.
+  next:     If they've forgotten their password, they can reset it from the sign-in page.
+
+TEAM-006 [info/tenant] You can't remove yourself
+  what+why: Removing your own access would leave the account without you, and you're the person who manages who's on it.
+  next:     Ask DocFlow if the account's admin needs to change.
+
+TEAM-007 [info/tenant] The account's admin can't be removed here
+  what+why: Every account keeps its admin, the person who manages who's on it, so this page only removes reviewers.
+  next:     Contact DocFlow if the account's admin needs to change.
+
+TEAM-008 [info/tenant] That person isn't on this team
+  what+why: There's no one with access to this account matching that request; they may already have been removed.
+  next:     Reload the Team page to see who is on the account now.
 
 VAL-001 [warning/tenant] Line total doesn't match quantity times price
   what+why: On this line, the printed total isn't the quantity multiplied by the unit price. DocFlow changed nothing -- all three numbers are exactly as the document printed them.

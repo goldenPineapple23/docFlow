@@ -111,6 +111,8 @@ export function AppHeader({
           <NavLink href="/held">Held for review</NavLink>
           {canReview ? <NavLink href="/activity">Activity</NavLink> : null}
           {isAdmin ? <NavLink href="/dashboard">Dashboard</NavLink> : null}
+          {/* Only the account's admin adds or removes people (D-132). */}
+          {isAdmin ? <NavLink href="/team">Team</NavLink> : null}
         </nav>
 
         <div className="flex items-center gap-3 text-sm">

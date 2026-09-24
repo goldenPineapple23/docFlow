@@ -41,8 +41,8 @@ def _require_tenant(identity: AuthenticatedIdentity) -> UUID:
     A platform-admin-only account (D-004) has no tenant to upload into; the
     Console's own staging upload is a separate path (Section 7.15.2), not this.
     """
-    if identity.tenant_id is None:
-        raise HTTPException(status_code=403, detail="This account is not associated with a tenant.")
+    # `require_reviewer` refuses an account with no tenant, or a removed
+    # person (AUTH-004), before it checks the role.
     return require_reviewer(identity)
 
 

@@ -1,7 +1,11 @@
 from docflow_core.config import get_settings
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from app.errors import catalog_detail
 from app.routers import (
     activity,
     admin,
@@ -13,6 +17,7 @@ from app.routers import (
     home,
     review,
     stripe_webhooks,
+    team,
 )
 
 app = FastAPI(title="DocFlow API")
@@ -50,6 +55,25 @@ app.add_middleware(
     max_age=600,
 )
 
+
+@app.exception_handler(RequestValidationError)
+async def _malformed_document_id(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """An order address with something that is not an order id in it -- a
+    mistyped link, or `/review/team` -- is "not found", in the same words as
+    an order that does not exist or belongs to another account (REV-006). It
+    used to answer 422, which no screen could explain, and the order screen
+    said "We couldn't reach DocFlow" (found in the 5.8d walkthrough).
+
+    Only a bad `document_id` in the path is treated this way; every other
+    validation failure keeps FastAPI's own answer. On the Console's acting-as
+    mount the admin gate runs first, so a non-admin still gets a bare 404.
+    """
+    errors = exc.errors()
+    if errors and all(tuple(e.get("loc", ())) == ("path", "document_id") for e in errors):
+        return JSONResponse(status_code=404, content={"detail": catalog_detail("REV-006")})
+    return await request_validation_exception_handler(request, exc)
+
+
 app.include_router(auth.router)
 app.include_router(activity.router)
 app.include_router(admin.router)
@@ -60,6 +84,7 @@ app.include_router(email_intake.router)
 app.include_router(review.router)
 app.include_router(exports.router)
 app.include_router(stripe_webhooks.router)
+app.include_router(team.router)
 
 # The same review and export routes, a second time, for the founder acting in
 # one tenant from the Console (Section 7.15.1; D-111). Same code, different

@@ -904,11 +904,8 @@ def send_invite(*, platform_admin_user_id: UUID, tenant_id: UUID) -> dict[str, A
     user row now (`users.auth_user_id`, D-012), so the first sign-in lands in
     the right tenant with the right role.
     """
-    from docflow_core import email_outbox
-    from docflow_core.config import get_settings
-    from docflow_core.external_services import generate_invite_link
+    from docflow_core import email_outbox, invites
 
-    settings = get_settings()
     with platform_session() as session:
         row = session.execute(
             text(
@@ -926,30 +923,22 @@ def send_invite(*, platform_admin_user_id: UUID, tenant_id: UUID) -> dict[str, A
         if row is None:
             raise ConsoleError("CON-004")
 
-        link = generate_invite_link(
-            email=row["email"], redirect_to=f"{settings.app_base_url}/auth/accept"
-        )
-        if row["auth_user_id"] is not None and str(row["auth_user_id"]) != str(link.auth_user_id):
-            raise ConsoleError("CON-005")
-        session.execute(
-            text(
-                "UPDATE users SET auth_user_id = :auth_user_id, invite_sent_at = now(), "
-                "updated_at = now() WHERE id = :id"
-            ),
-            {"auth_user_id": str(link.auth_user_id), "id": str(row["user_id"])},
-        )
+        # The same path the Team page's invites take (D-132).
+        try:
+            outbox_id = invites.issue(
+                session,
+                tenant_id=tenant_id,
+                user_id=row["user_id"],
+                email=row["email"],
+                existing_auth_user_id=row["auth_user_id"],
+                template="invite",
+                params={"tenant_name": row["tenant_name"]},
+            )
+        except invites.InviteLinkedElsewhere:
+            raise ConsoleError("CON-005") from None
         session.execute(
             text("UPDATE tenants SET invite_sent_at = now(), updated_at = now() WHERE id = :id"),
             {"id": str(tenant_id)},
-        )
-        outbox_id = email_outbox.enqueue(
-            session,
-            tenant_id=tenant_id,
-            to_address=row["email"],
-            template="invite",
-            params={"tenant_name": row["tenant_name"], "invite_link": link.url},
-            related_type="user",
-            related_id=row["user_id"],
         )
         session.execute(
             text(
@@ -1200,24 +1189,30 @@ def list_ready_to_delete(*, platform_admin_user_id: UUID) -> list[dict[str, Any]
 # trail must outlive the tenant (Section 7.14: "the fact that a tenant
 # existed and was removed is retained for accounting purposes even though
 # their business data is gone").
+#
+# The order matters wherever one purged table points at another without
+# cascade, and a test (`test_purge_order_respects_every_foreign_key`) checks it
+# against the live schema, because getting it wrong once rolled back a real
+# delete: `founder_alerts` point at the email each alert sent, and
+# `buyer_merges` at the suggestion they came from, so both go first.
 _PURGE_TABLES = (
     "documents",
     "intake_rejections",
     "allowance_notices",
     "raw_emails",
-    "buyer_merge_candidates",
     "buyer_merges",
+    "buyer_merge_candidates",
     "buyers",
     "items",
     "learned_rules",
     "catalog_imports",
     "import_mapping_templates",
     "intake_addresses",
+    "founder_alerts",
     "email_outbox",
     "scheduled_jobs",
     "tenant_daily_metrics",
     "tenant_field_schemas",
-    "founder_alerts",
     "users",
 )
 
@@ -1263,6 +1258,16 @@ def delete_tenant(
         if confirm_name.strip() != row["name"]:
             raise ConsoleError("LIFE-005")
 
+        # The lifecycle log outlives the tenant, but the tenant's own people do
+        # not: an event one of them caused (a Team-page invite, D-132) keeps
+        # its row and loses the name. The founder's own events keep theirs.
+        session.execute(
+            text(
+                "UPDATE tenant_lifecycle_events SET actor_user_id = NULL "
+                "WHERE tenant_id = :id AND actor_user_id IN (SELECT id FROM users WHERE tenant_id = :id)"
+            ),
+            {"id": str(tenant_id)},
+        )
         counts: dict[str, int] = {}
         for table in _PURGE_TABLES:
             result = session.execute(

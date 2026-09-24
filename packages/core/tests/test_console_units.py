@@ -66,6 +66,11 @@ TEMPLATE_PARAMS = {
         "tenant_name": "Acme Test Distributor", "new_address": "orders+x@intake.example.test",
         "grace_ends": "2026-10-31",
     },
+    # Slice 5.8d (D-132): an invite from the account's admin.
+    "team_invite": {
+        "tenant_name": "Acme Test Distributor", "inviter": "admin@example.test",
+        "invite_link": "https://example.test/x",
+    },
     # Slice 5.8c (D-131): the "needs review" digest.
     "review_digest": {
         "tenant_name": "Acme Test Distributor", "count": "3", "arrived": "3 new purchase orders are",

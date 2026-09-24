@@ -454,3 +454,114 @@ def test_delete_purges_business_data_but_keeps_the_tenant_row_and_its_history(
             t=tenant_id,
         )
         assert delete_action == 1
+
+
+@requires_lifecycle_schema
+def test_delete_succeeds_for_a_tenant_whose_rows_point_at_each_other(client, stripe, _environment):
+    """Found when the founder tried to delete a real tenant in the wind-down
+    queue: the purge deleted `email_outbox` before `founder_alerts`, which point
+    at the email each alert sent, and the whole delete rolled back. The same
+    ordering fault sat between `buyer_merges` and `buyer_merge_candidates`, and
+    the Team page (D-132) would have added a third: kept lifecycle events whose
+    actor is one of the tenant's own users. The earlier delete test used a
+    tenant with none of these links, so it could not see any of them."""
+    with _Console() as console:
+        tenant_id = console.create_tenant(client).json()["tenant_id"]
+        _activate(tenant_id)
+        owner_id = _scalar("SELECT id FROM users WHERE tenant_id = :t AND role = 'owner'", t=tenant_id)
+        with platform_session() as session:
+            outbox_id = session.execute(
+                text(
+                    "INSERT INTO email_outbox (tenant_id, to_address, template, subject, body_text, status) "
+                    "VALUES (:t, 'founder@example.com', 'founder_alert', 's', 'b', 'held') RETURNING id"
+                ),
+                {"t": tenant_id},
+            ).scalar_one()
+            session.execute(
+                text(
+                    "INSERT INTO founder_alerts (type, severity, tenant_id, email_outbox_id) "
+                    "VALUES ('tenant_pending_deletion', 'info', :t, :o)"
+                ),
+                {"t": tenant_id, "o": outbox_id},
+            )
+            kept, merged = (
+                session.execute(
+                    text(
+                        "INSERT INTO buyers (tenant_id, name, normalized_name) "
+                        "VALUES (:t, :n, :n) RETURNING id"
+                    ),
+                    {"t": tenant_id, "n": name},
+                ).scalar_one()
+                for name in ("acme test buyer", "acme test buyer inc")
+            )
+            candidate = session.execute(
+                text(
+                    "INSERT INTO buyer_merge_candidates (tenant_id, buyer_id, existing_buyer_id, "
+                    "similarity_score, status) VALUES (:t, :m, :k, 0.95, 'merged') RETURNING id"
+                ),
+                {"t": tenant_id, "m": merged, "k": kept},
+            ).scalar_one()
+            session.execute(
+                text(
+                    "INSERT INTO buyer_merges (tenant_id, kept_buyer_id, merged_buyer_id, candidate_id, "
+                    "merged_by) VALUES (:t, :k, :m, :c, :u)"
+                ),
+                {"t": tenant_id, "k": kept, "m": merged, "c": candidate, "u": owner_id},
+            )
+            session.execute(
+                text(
+                    "INSERT INTO tenant_lifecycle_events (tenant_id, event_type, actor_user_id, payload) "
+                    "VALUES (:t, 'user_invited', :u, '{}'::jsonb)"
+                ),
+                {"t": tenant_id, "u": owner_id},
+            )
+            session.execute(
+                text(
+                    "UPDATE tenants SET status = 'pending_deletion', "
+                    "deletion_scheduled_at = now() - interval '1 day' WHERE id = :id"
+                ),
+                {"id": tenant_id},
+            )
+
+        response = client.post(
+            f"/admin/tenants/{tenant_id}/delete", headers=console.headers(),
+            json={"confirm_name": "Acme Test Distributor", "reason": "offboarding: window elapsed"},
+        )
+        assert response.status_code == 200, response.text
+        assert _scalar("SELECT status FROM tenants WHERE id = :t", t=tenant_id) == "deleted"
+        assert _scalar("SELECT count(*) FROM users WHERE tenant_id = :t", t=tenant_id) == 0
+        # The history keeps the event -- that it happened -- but no longer
+        # names a person whose account data is gone.
+        assert _scalar(
+            "SELECT count(*) FROM tenant_lifecycle_events "
+            "WHERE tenant_id = :t AND event_type = 'user_invited' AND actor_user_id IS NULL",
+            t=tenant_id,
+        ) == 1
+
+
+@requires_lifecycle_schema
+def test_purge_order_respects_every_foreign_key():
+    """Every purged table that points at another purged table without ON DELETE
+    CASCADE / SET NULL must be purged first -- read from the live schema, so a
+    table added later cannot quietly break the founder's delete again."""
+    from docflow_core.admin_data_access import _PURGE_TABLES
+
+    order = {table: i for i, table in enumerate(_PURGE_TABLES)}
+    with platform_session() as session:
+        links = session.execute(
+            text(
+                """
+                SELECT c.conrelid::regclass::text AS child, c.confrelid::regclass::text AS parent,
+                       c.conname
+                FROM pg_constraint c
+                WHERE c.contype = 'f' AND c.confdeltype NOT IN ('c', 'n')
+                  AND c.conrelid::regclass::text = ANY(string_to_array(:tables, ','))
+                  AND c.confrelid::regclass::text = ANY(string_to_array(:tables, ','))
+                  AND c.conrelid <> c.confrelid
+                """
+            ),
+            {"tables": ",".join(_PURGE_TABLES)},
+        ).all()
+    assert links, "no links found -- the query is broken, not the order"
+    wrong = [f"{child} -> {parent} ({name})" for child, parent, name in links if order[child] > order[parent]]
+    assert not wrong, f"purged after the table it points at: {wrong}"

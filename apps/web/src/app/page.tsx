@@ -5,12 +5,18 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
+import { CatalogErrorBox } from "@/components/admin/CatalogErrorBox";
+import type { CatalogError } from "@/lib/review";
 
 type Identity = {
   email: string;
   tenant_id: string | null;
   role: string | null;
   is_platform_admin: boolean;
+  // Set when the account's admin removed this person (D-132). `refusal` is the
+  // catalog's own wording (AUTH-004); this page never words it itself.
+  access_removed?: boolean;
+  refusal?: CatalogError | null;
 };
 
 /**
@@ -24,6 +30,11 @@ type Identity = {
  * work, not in front of a fact about yourself.
  *
  * **The founder's own account goes to the Console**, for the same reason.
+ *
+ * **A person the account's admin removed is told so** (D-132). They sign in
+ * successfully -- their password still works -- but belong to no account, and
+ * this page used to stop at "Signed in as ..." with nowhere to go, the same
+ * dead end as D-090. It now shows the catalog's explanation and a way out.
  *
  * **A password-reset link lands here** -- Supabase sends it to the site's
  * base URL -- and used to stop here, signed in but never asked for a new
@@ -85,7 +96,23 @@ export default function Home() {
           </p>
         )}
 
-        {identity !== "loading" && identity !== "signed_out" && (
+        {identity !== "loading" && identity !== "signed_out" && identity.refusal ? (
+          <div className="space-y-3 text-left" data-testid="access-removed">
+            <CatalogErrorBox error={identity.refusal} />
+            <p className="text-center text-sm text-gray-600">Signed in as {identity.email}</p>
+            <p className="text-center">
+              <button
+                type="button"
+                onClick={() => void supabase.auth.signOut().then(() => router.push("/login"))}
+                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Sign out
+              </button>
+            </p>
+          </div>
+        ) : null}
+
+        {identity !== "loading" && identity !== "signed_out" && !identity.refusal && (
           <div className="space-y-3">
             <p>Signed in as {identity.email}</p>
 

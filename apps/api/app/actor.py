@@ -25,7 +25,12 @@ from uuid import UUID
 
 from fastapi import Header, HTTPException, Request
 
-from app.deps import REVIEWING_ROLES, AuthenticatedIdentity, _resolve_identity
+from app.deps import (
+    REVIEWING_ROLES,
+    AuthenticatedIdentity,
+    _resolve_identity,
+    require_tenant_member,
+)
 
 ACTING_TENANT_PARAM = "acting_tenant_id"
 
@@ -63,11 +68,11 @@ class Actor:
 
 
 def tenant_actor_from_identity(identity: AuthenticatedIdentity) -> Actor:
-    if identity.tenant_id is None:
-        # A platform-admin-only account (D-004) reaches a tenant through the
-        # Console's acting-as mount, never through the tenant routes.
-        raise HTTPException(status_code=403, detail="This account is not associated with a tenant.")
-    return Actor(tenant_id=identity.tenant_id, user_id=identity.local_user_id, role=identity.role)
+    # A platform-admin-only account (D-004) reaches a tenant through the
+    # Console's acting-as mount, never through the tenant routes; a removed
+    # person (D-132) is refused with AUTH-004. One check for every route.
+    tenant_id = require_tenant_member(identity)
+    return Actor(tenant_id=tenant_id, user_id=identity.local_user_id, role=identity.role)
 
 
 def current_actor(request: Request, authorization: str | None = Header(default=None)) -> Actor:
@@ -90,5 +95,7 @@ def current_actor(request: Request, authorization: str | None = Header(default=N
         return actor
     identity = _resolve_identity(authorization)
     if identity is None:
-        raise HTTPException(status_code=401, detail="Missing or invalid session")
+        from app.errors import catalog_error
+
+        raise catalog_error("AUTH-005", status_code=401)
     return tenant_actor_from_identity(identity)

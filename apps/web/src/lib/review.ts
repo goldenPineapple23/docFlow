@@ -216,6 +216,16 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // Not JSON. Keep the fallback.
     }
+    // Signed out, or the sign-in expired: send the person to sign in and back
+    // here afterwards, rather than leaving an error on a page they can't use
+    // (D-134). The catalog entry still shows until the browser moves.
+    if (response.status === 401 && typeof window !== "undefined") {
+      const here = window.location.pathname + window.location.search;
+      // A full page load on purpose: this runs in a data helper, not a
+      // component, and signing in starts the page over anyway.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- see above
+      window.location.href = `/login?next=${encodeURIComponent(here)}`;
+    }
     throw new ReviewApiError(catalog, response.status);
   }
 

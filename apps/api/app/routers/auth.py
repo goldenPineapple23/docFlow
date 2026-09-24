@@ -10,11 +10,13 @@ current session to a local identity (tenant, role, platform-admin status).
 
 from __future__ import annotations
 
+from docflow_core import team
 from docflow_core.db import tenant_session
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 
 from app.deps import AuthenticatedIdentity, get_current_identity
+from app.errors import catalog_detail
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -30,10 +32,18 @@ def get_me(identity: AuthenticatedIdentity = Depends(get_current_identity)) -> d
             tenant_name = session.execute(
                 text("SELECT name FROM tenants WHERE id = :id"), {"id": str(identity.tenant_id)}
             ).scalar_one_or_none()
+            # The Team page's "Signed in" (D-132): every signed-in screen calls
+            # this, so the first visit is the moment an invite was accepted.
+            if identity.local_user_id is not None:
+                team.mark_signed_in(session, identity.local_user_id)
     return {
         "email": identity.email,
         "tenant_id": str(identity.tenant_id) if identity.tenant_id else None,
         "tenant_name": tenant_name.strip() if tenant_name else None,
         "role": identity.role,
         "is_platform_admin": identity.is_platform_admin,
+        # So the page sign-in lands on can say why a removed person sees
+        # nothing, in the catalog's words rather than its own (AUTH-004).
+        "access_removed": identity.access_removed,
+        "refusal": catalog_detail("AUTH-004") if identity.access_removed else None,
     }

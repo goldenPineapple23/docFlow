@@ -1338,3 +1338,53 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Verified against the running stack**, not only in tests: an order sent to a live tenant's intake address was extracted by the real worker, which created the digest due exactly 15 minutes later; the real beat sweep sent it 19 minutes after arrival, to the account's admin, with counts only (held in the outbox, no provider configured).
 
 **Related:** Section 5.1, 6 (Phase 5), 7.9, 7.10, 7.14; D-058, D-103 (outbox), D-113 (scheduled jobs), D-128.
+
+## D-132 -- The Team page: the account's admin adds and removes reviewers (slice 5.8d)
+
+**Context:** Section 3 says every user after a tenant's first "is invited by a tenant owner/admin", and until now nobody could add a second person to an account -- not the customer, not the founder. The founder chose option A on 2026-09-24: a small Team page for the account's admin.
+
+**Decisions:**
+- **Scope, as chosen:** list the people on the account, invite a reviewer, resend an invite, remove someone. No role changes, no second admin (the `admin` role stays valid in the schema, D-128), nothing about billing, and no Console button (option B was not chosen).
+- **One invite path.** The founder's first-user invite (Console Step 3) and the Team page both go through the new `docflow_core.invites.issue`: a Supabase link without Supabase's own email, the user row linked to that sign-in, and DocFlow's outbox. The founder's `send_invite` was refactored onto it with no change in behaviour (Section 10: no second handler). The Team page's email is its own template, `team_invite`, naming who invited the person and telling them to ask that person, not DocFlow, if the link expires.
+- **Rules enforced by the API, not the page:** only the owner/admin reaches `/team` (a reviewer gets AUTH-003, as on the dashboard); only reviewers are invited; only reviewers (or a viewer) can be removed, so the account's admin always stays (TEAM-007); nobody removes themselves (TEAM-006); a user id from another account is simply not found in this tenant's session (TEAM-008). Every refusal is a catalog entry, TEAM-001..008.
+- **Remove means `is_active = false`, never a delete.** The person's approvals and edits stay in the history under their name. Inviting the same address again restores the same row.
+- **A removed person is refused from their next request.** Found while planning this slice: sign-in (`app.deps._resolve_identity`) never looked at `is_active` or `deleted_at`, so deactivating someone would have changed nothing. It could not happen before, because nothing deactivated anyone, and it is fixed here, before Remove exists. Their Supabase session stays valid until it expires, so the check runs on every request, and the answer is a catalog entry (AUTH-004), not a bare 403.
+- **An address already used for another DocFlow sign-in is refused (TEAM-003) without saying where.** One Supabase sign-in maps to one DocFlow user (`users.auth_user_id` is unique); the database refuses the link, and the tenant's session cannot see -- and so cannot reveal -- who holds it (Section 7.5). If Supabase cannot be reached, nothing is created (TEAM-004).
+- **"Invite sent" vs "Signed in"** needs one new fact, so migration `0023_team.sql` adds `users.first_signed_in_at`. It is stamped by `GET /auth/me`, which every signed-in screen calls, so there is no separate "accepted" step; existing people are stamped on their next visit. Resend is offered only to someone who has not signed in (TEAM-005).
+- **Invites and removals are on the Activity page** (kinds `invited` and `removed`), from `tenant_lifecycle_events`, naming who did it and the address of the person. The founder's own first invite appears there too, labelled "DocFlow support" (7.15.1). These rows carry no order and link nowhere; the only address shown is one of the account's own team, never anything from a document (7.10).
+- **Held email is said plainly.** With no email provider configured the invite waits in the outbox, and the page says DocFlow is holding it rather than claiming it was emailed.
+- **Removed people stop getting the digest** (D-131 already sends only to active users).
+- **Found in the founder's walkthrough, fixed before commit:**
+  1. A removed person who *signs in again* landed on the start page, which forwards account members to their queue and the founder to the Console. A removed person is neither, so it stopped at "Signed in as ..." with nowhere to go (the D-090 dead end again). `/auth/me` now carries the catalog's AUTH-004 entry for a removed person, and the start page shows it with a Sign out button. The automated tests had only checked a removed person who was already on a page.
+  2. An order address that leads nowhere (the walkthrough typed `/review/team`) showed "We couldn't reach DocFlow": the API answered 422 for a non-id and a bare 404 for a missing order, and the screen blamed the connection. Both now answer REV-006 ("We can't find that order"). A missing order, another account's order and a malformed address give byte-identical answers, so nothing can be learned about another account (7.5). Only a bad `document_id` in the path is treated this way; other validation errors keep FastAPI's answer. This defect predates 5.8d.
+  3. The upload route and the review routes' actor checked "has a tenant" themselves with a bare-string 403; both now use the one member check, so a removed person gets AUTH-004 everywhere.
+  4. **The Activity page's filters are now one at a time** (founder's call): choosing a chip shows only that kind, choosing it again returns to everything. This reverses D-130's several-at-once chips in the page only; the API still accepts several kinds.
+- **Walked by the founder, 2026-09-24:** invite, accept as a second person, reviewer refused the Team page, "Signed in" status, the trail's invite/remove rows, remove with confirmation, locked out on the next click and on signing in again, and restore by re-inviting -- all as expected after the fixes above.
+
+**Related:** Section 3, 7.5, 7.10, 7.15.1, 7.16.5, Section 10; D-012, D-103, D-105, D-128, D-130, D-131.
+
+## D-133 -- The hard delete failed for any tenant whose rows point at each other
+
+**Context:** On 2026-09-24 the founder tried the typed-name delete on a tenant in the ready-to-delete queue (Acme Test Lifecycle B) and got "We couldn't reach DocFlow". The API had answered 500: the purge in `admin_data_access.delete_tenant` deletes the tenant's tables in a fixed order, and deleted `email_outbox` before `founder_alerts`, which point at the email each alert sent. The delete runs in one transaction, so it rolled back completely and nothing was lost; the tenant stayed in `pending_deletion`.
+
+**Decisions:**
+- **A schema check instead of a one-line reorder.** Reading every foreign key between purged tables from the live schema found a second fault of the same kind (`buyer_merges` point at `buyer_merge_candidates`, which were deleted first), so any tenant where the founder had ever merged buyers could not be deleted either. Both are reordered, and a new test (`test_purge_order_respects_every_foreign_key`) reads the live schema and fails if any purged table is ever deleted after a table it points at, so a table added later cannot bring this back.
+- **The kept history loses the names of the tenant's own people.** `tenant_lifecycle_events` deliberately outlives the tenant (Section 7.14), and from the Team page (D-132) its events can name one of the tenant's users as the actor, which would have blocked deleting `users`. Those actors are now set to NULL before the purge: the event is kept (that it happened), the person is not (their account data is being deleted). Events the founder caused keep the founder's name.
+- **Why no test saw it:** the existing delete test used a freshly created tenant with none of these links. The new regression test builds a tenant with all three -- an alert tied to its email, a merge tied to its suggestion, and an event whose actor is the tenant's own admin -- and deletes it.
+
+**Still open:** the Console showed "We couldn't reach DocFlow" for what was a server error. That fallback wording is wrong for a 500 -- DocFlow was reached; it failed. Worth a catalog entry of its own ("DocFlow hit an error; nothing was changed; it has been logged").
+
+**Related:** Section 7.14, 7.15.4; D-123, D-132.
+
+## D-134 -- A signed-out visitor is sent to sign in, not told DocFlow is unreachable
+
+**Context:** In the 5.8d walkthrough, a fresh private window (which starts with no sign-in) opened `/team` and an order address, and both said "We couldn't reach DocFlow". The API had answered 401 with a bare string; the page, finding no catalog entry, fell back to its connection-failure wording. The same was true on every customer page for an expired sign-in.
+
+**Decisions:**
+- **401 is a catalog entry** (AUTH-005, "You're signed out"), from the one place that resolves a session (`app.deps`, and the review routes' actor).
+- **The page sends the person to sign in and back.** `lib/review.ts`'s `request()` -- which every customer page's data calls go through -- redirects a 401 to `/login?next=<this page>`, and the sign-in page returns there afterwards. `next` is honoured only as a path on this site (`lib/signIn.ts`, with tests), so a crafted link cannot bounce someone to another site after they sign in.
+- **The Console is unchanged:** it deliberately answers 404 to anyone who is not the founder, signed in or not (7.15.1).
+
+**Still open (as in D-133):** a server error (500) still falls back to "We couldn't reach DocFlow".
+
+**Related:** Section 7.16.5, 7.15.1; D-090, D-132, D-133.

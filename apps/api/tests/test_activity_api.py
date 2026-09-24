@@ -96,6 +96,8 @@ def test_filtering_narrows_the_rows_and_the_total_together(client):
             "reopened",
             "exported",
             "released",
+            "invited",
+            "removed",
         }
 
 

@@ -4,11 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { PasswordInput } from "@/components/PasswordInput";
+import { afterSignIn } from "@/lib/signIn";
 
 // There is no /signup route anywhere in this app (CLAUDE.md Section 3: "No
 // public signup"). This page only signs in an account that a tenant owner
 // or the founder already created via an invite -- see docs/docflow-
 // claude-code-build-prompt-v2.docx Section 7.15.2 Step 3.
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -28,7 +30,7 @@ export default function LoginPage() {
       setError("We couldn't sign you in with that email and password.");
       return;
     }
-    router.push("/");
+    router.push(afterSignIn(window.location.search));
   }
 
   return (

@@ -40,6 +40,11 @@ ROUTE_ACCESS: dict[tuple[str, str], Access] = {
     # The account's activity trail (5.8b). A read, but not a `member` one: the
     # people who do the work see what a colleague did; a viewer would not.
     ("GET", "/activity"): "reviewer",
+    # The people on the account (5.8d, D-132). Only the admin manages them.
+    ("GET", "/team"): "admin",
+    ("POST", "/team/invite"): "admin",
+    ("POST", "/team/{user_id}/resend"): "admin",
+    ("POST", "/team/{user_id}/remove"): "admin",
     # Intake
     ("POST", "/documents/upload"): "reviewer",
     # Review

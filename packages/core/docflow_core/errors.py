@@ -509,6 +509,113 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="info",
         audience="tenant",
     ),
+    "AUTH-004": ErrorCatalogEntry(
+        code="AUTH-004",
+        title="Your access to this account has ended",
+        message=(
+            "Your account's admin has removed you from this DocFlow account, so you can no "
+            "longer see or change its orders. Your past work is still in the account's history."
+        ),
+        action="If you think this is a mistake, ask your account's admin to invite you again.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "AUTH-005": ErrorCatalogEntry(
+        code="AUTH-005",
+        title="You're signed out",
+        message=(
+            "This browser isn't signed in to DocFlow, or your sign-in has expired, so DocFlow "
+            "can't show this page. Nothing was changed."
+        ),
+        action="Sign in again; DocFlow will bring you back to this page.",
+        severity="info",
+        audience="tenant",
+    ),
+    # ── TEAM-0xx · the people on an account (slice 5.8d, D-132) ──────────────
+    "TEAM-001": ErrorCatalogEntry(
+        code="TEAM-001",
+        title="That doesn't look like an email address",
+        message="DocFlow sends the invite by email, so it needs a complete address to send it to.",
+        action="Check the address (it should look like name@company.com) and try again.",
+        severity="info",
+        audience="tenant",
+    ),
+    "TEAM-002": ErrorCatalogEntry(
+        code="TEAM-002",
+        title="This person is already on the team",
+        message="Someone with this email address already has access to this account.",
+        action=(
+            "If they haven't signed in yet, use Resend invite next to their name instead."
+        ),
+        severity="info",
+        audience="tenant",
+    ),
+    "TEAM-003": ErrorCatalogEntry(
+        code="TEAM-003",
+        title="This address can't be added here",
+        message=(
+            "This email address is already used for a different DocFlow sign-in, and one "
+            "address can belong to only one account. Nothing was changed."
+        ),
+        action="Ask the person for another work address to invite, or contact DocFlow if they need both.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "TEAM-004": ErrorCatalogEntry(
+        code="TEAM-004",
+        title="We couldn't create the invite just now",
+        message=(
+            "DocFlow's sign-in service didn't answer, so no invite was created and nobody was "
+            "added. DocFlow has logged the failure."
+        ),
+        action="Try again in a few minutes.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "TEAM-005": ErrorCatalogEntry(
+        code="TEAM-005",
+        title="They have already signed in",
+        message=(
+            "This person has set their password and signed in, so there's no invite left to "
+            "resend."
+        ),
+        action="If they've forgotten their password, they can reset it from the sign-in page.",
+        severity="info",
+        audience="tenant",
+    ),
+    "TEAM-006": ErrorCatalogEntry(
+        code="TEAM-006",
+        title="You can't remove yourself",
+        message=(
+            "Removing your own access would leave the account without you, and you're the "
+            "person who manages who's on it."
+        ),
+        action="Ask DocFlow if the account's admin needs to change.",
+        severity="info",
+        audience="tenant",
+    ),
+    "TEAM-007": ErrorCatalogEntry(
+        code="TEAM-007",
+        title="The account's admin can't be removed here",
+        message=(
+            "Every account keeps its admin, the person who manages who's on it, so this page "
+            "only removes reviewers."
+        ),
+        action="Contact DocFlow if the account's admin needs to change.",
+        severity="info",
+        audience="tenant",
+    ),
+    "TEAM-008": ErrorCatalogEntry(
+        code="TEAM-008",
+        title="That person isn't on this team",
+        message=(
+            "There's no one with access to this account matching that request; they may "
+            "already have been removed."
+        ),
+        action="Reload the Team page to see who is on the account now.",
+        severity="info",
+        audience="tenant",
+    ),
     # ── REV-0xx · human review and approval (Section 7.3) ────────────────────
     "REV-001": ErrorCatalogEntry(
         code="REV-001",
@@ -566,6 +673,17 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         ),
         action="Reload the order, check what changed, then make your edit again.",
         severity="warning",
+        audience="tenant",
+    ),
+    "REV-006": ErrorCatalogEntry(
+        code="REV-006",
+        title="We can't find that order",
+        message=(
+            "There's no order at this address on your account. The link may be mistyped, or "
+            "the order may belong to a different account."
+        ),
+        action="Go back to Purchase orders and open the order from the list.",
+        severity="info",
         audience="tenant",
     ),
     # ── CON-0xx · the founder Console (Section 7.15, Phase 5) ────────────────
