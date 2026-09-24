@@ -202,7 +202,7 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 - Browser walkthroughs planned: after 5.6 (now), after 5.7 (full Console QA),
   after 5.8 (customer side, with a non-technical tester). Checklists live in
   `docs/walkthroughs/`.
-- Latest suites (2026-09-24, end of 5.9): core 429, api 362 (0 skipped; the run took 33 min against staging), worker 74, web 42 unit + 57 browser. mypy (api, worker), web lint and typecheck clean; ruff clean apart from 3 old findings in the proof-of-concept `docs/parse_pos.py`.
+- Latest suites (2026-09-24, end of 5.9): core 429, api 362 (0 skipped; the run took 33 min against staging), worker 74, web 42 unit + 57 browser. mypy (api, worker), web lint and typecheck clean; ruff clean (the 3 old findings in the proof-of-concept `docs/parse_pos.py` fixed in a follow-up commit).
 - Fixed 2026-09-24 from the founder's walkthrough: the Console's typed-name delete failed for any tenant whose rows point at each other (D-133, now guarded by a live-schema test); a signed-out visitor saw "We couldn't reach DocFlow" instead of being sent to sign in (D-134).
 - Fixed in 5.9: a server error (500) now answers SYS-001 in the catalog's words instead of "We couldn't reach DocFlow" (D-136).
 
