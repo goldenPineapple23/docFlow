@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
@@ -26,6 +27,19 @@ function NavLink({ href, children }: { href: string; children: React.ReactNode }
   );
 }
 
+type SignedIn = { email: string | null; tenantName: string | null; role: string | null };
+
+// Every page draws its own header, so without this each click started with no
+// company name for as long as "who is signed in?" took, and the links jumped
+// sideways when it arrived (founder's walkthrough, 5.9). The answer is
+// remembered for the life of the tab and refreshed quietly on each page.
+let remembered: SignedIn | null = null;
+
+/** Called on sign-out, so the next person never sees the last one's company. */
+export function forgetSignedIn() {
+  remembered = null;
+}
+
 export function AppHeader({
   email: emailProp,
   tenantName: tenantNameProp,
@@ -38,11 +52,10 @@ export function AppHeader({
   // props win (tests, and any screen that already knows); otherwise the header
   // asks who is signed in. If that fails it just says "DocFlow" -- a header must
   // never stand in the way of the page.
-  const [loaded, setLoaded] = useState<{
-    email: string | null;
-    tenantName: string | null;
-    role: string | null;
-  } | null>(null);
+  const [loaded, setLoaded] = useState<SignedIn | null>(() => remembered);
+  // True once there is an answer, or once asking failed: only then may the
+  // header fall back to DocFlow's own logo. Before that it holds the space.
+  const [settled, setSettled] = useState(() => remembered !== null);
   const known = emailProp !== undefined || tenantNameProp !== undefined;
   useEffect(() => {
     if (known) return;
@@ -50,14 +63,16 @@ export function AppHeader({
     apiFetch("/auth/me")
       .then((res) => (res.ok ? res.json() : null))
       .then((me) => {
-        if (cancelled || !me) return;
-        setLoaded({
-          email: me.email ?? null,
-          tenantName: me.tenant_name ?? null,
-          role: me.role ?? null,
-        });
+        if (cancelled) return;
+        if (me) {
+          remembered = { email: me.email ?? null, tenantName: me.tenant_name ?? null, role: me.role ?? null };
+          setLoaded(remembered);
+        }
+        setSettled(true);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setSettled(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -78,6 +93,7 @@ export function AppHeader({
   }, [tenantName]);
 
   async function signOut() {
+    forgetSignedIn();
     await supabase.auth.signOut();
     router.push("/login");
   }
@@ -86,25 +102,33 @@ export function AppHeader({
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
       <div className="mx-auto flex max-w-[110rem] items-center justify-between gap-4 px-5 py-3">
         <nav className="flex items-center gap-5">
-          <Link href="/review" className="flex items-center gap-2">
-            <span
-              aria-hidden="true"
-              className="grid h-9 w-9 place-items-center rounded-md bg-slate-900 text-sm font-bold text-white"
-            >
-              DF
-            </span>
-            <span className="flex min-w-0 flex-col leading-tight">
-              <span
-                data-testid="tenant-name"
-                title={tenantName ?? undefined}
-                className="max-w-[14rem] truncate text-xl font-semibold tracking-tight text-slate-900 sm:max-w-[30rem] sm:text-2xl"
-              >
-                {tenantName ?? "DocFlow"}
+          {/* The customer's own name leads; DocFlow's logo sits underneath as
+              "Powered by" (founder's request, 2026-09-24). The logo is never
+              inside the name element, which only ever holds escaped text. */}
+          <Link href="/review" className="flex min-w-0 flex-col leading-tight">
+            {tenantName ? (
+              <>
+                <span
+                  data-testid="tenant-name"
+                  title={tenantName}
+                  className="max-w-[14rem] truncate text-xl font-semibold tracking-tight text-slate-900 sm:max-w-[30rem] sm:text-2xl"
+                >
+                  {tenantName}
+                </span>
+                <span data-testid="powered-by" className="mt-0.5 flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                  Powered by
+                  <Image src="/docflow-logo.png" alt="DocFlow" width={402} height={86} className="h-3 w-auto" />
+                </span>
+              </>
+            ) : settled || known ? (
+              <span data-testid="tenant-name" className="py-1">
+                <Image src="/docflow-logo.png" alt="DocFlow" width={402} height={86} priority className="h-7 w-auto" />
               </span>
-              {tenantName ? (
-                <span className="text-xs font-medium tracking-wide text-slate-500">Powered by DocFlow</span>
-              ) : null}
-            </span>
+            ) : (
+              // Still asking who is signed in: keep the name's space so nothing
+              // beside it moves when the answer arrives.
+              <span aria-hidden="true" data-testid="tenant-name-pending" className="block h-[2.625rem] w-44" />
+            )}
           </Link>
           <NavLink href="/review">Purchase orders</NavLink>
           <NavLink href="/upload">Upload</NavLink>

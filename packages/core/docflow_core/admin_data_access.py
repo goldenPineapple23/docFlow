@@ -27,7 +27,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -120,6 +121,8 @@ def get_tenant_overview(*, platform_admin_user_id: UUID, tenant_id: UUID) -> dic
                 SELECT t.id, t.name, t.primary_currency, t.timezone, t.status, t.onboarding_status,
                        t.went_live_at, t.invite_sent_at, t.intake_address_active,
                        t.stripe_customer_id, t.stripe_subscription_status, t.created_at,
+                       t.stripe_subscription_id, t.stripe_current_period_end, t.first_past_due_at,
+                       t.founding_price_ends_at,
                        t.onboarding_intake_id, t.test_batch_completed_at,
                        t.setup_fee_amount, t.setup_fee_billing, t.setup_fee_note, t.founding_price,
                        tr.code AS tier_code, tr.name AS tier_name, tr.version AS tier_version,
@@ -128,6 +131,13 @@ def get_tenant_overview(*, platform_admin_user_id: UUID, tenant_id: UUID) -> dic
                        tr.promo_days AS tier_promo_days,
                        tr.document_allowance AS tier_document_allowance,
                        sp.code AS setup_fee_preset, sp.name AS setup_fee_preset_name,
+                       -- The plan billed at go-live, so Deal terms keeps saying
+                       -- what was agreed after a plan change (D-138): the
+                       -- tenant's tier_id is the plan now, not the deal.
+                       gl.name AS golive_tier_name, gl.version AS golive_tier_version,
+                       gl.monthly_price AS golive_monthly_price,
+                       gl.promo_monthly_price AS golive_promo_monthly_price,
+                       gl.promo_days AS golive_promo_days,
                        (SELECT count(*) FROM buyer_merge_candidates c
                           JOIN buyers n ON n.id = c.buyer_id AND n.deleted_at IS NULL
                           JOIN buyers e ON e.id = c.existing_buyer_id AND e.deleted_at IS NULL
@@ -140,6 +150,12 @@ def get_tenant_overview(*, platform_admin_user_id: UUID, tenant_id: UUID) -> dic
                 FROM tenants t
                 LEFT JOIN tiers tr ON tr.id = t.tier_id
                 LEFT JOIN setup_fee_presets sp ON sp.id = t.setup_fee_preset_id
+                LEFT JOIN LATERAL (
+                    SELECT tr2.* FROM tenant_lifecycle_events e
+                    JOIN tiers tr2 ON tr2.id = CAST(e.payload ->> 'tier_id' AS uuid)
+                    WHERE e.tenant_id = t.id AND e.event_type = 'onboarding_live'
+                    ORDER BY e.created_at DESC LIMIT 1
+                ) gl ON true
                 WHERE t.id = :id
                 """
             ),
@@ -161,7 +177,37 @@ def get_tenant_overview(*, platform_admin_user_id: UUID, tenant_id: UUID) -> dic
             ),
             {"id": str(tenant_id)},
         ).scalar()
-        return {**dict(tenant), "owner": dict(owner) if owner else None, "intake_address": address}
+        return {
+            **dict(tenant),
+            "owner": dict(owner) if owner else None,
+            "intake_address": address,
+            "billing": _billing_summary(tenant),
+        }
+
+
+def _billing_summary(tenant: Any) -> dict[str, Any]:
+    """The Billing card (slice 5.9): what DocFlow knows, from the webhook-synced
+    columns -- never a live Stripe call on page load (7.15.3). Stripe stays the
+    source of truth for invoices and payments; the card links there."""
+    from docflow_core import external_services
+    from docflow_core.constants import TRIAL_PERIOD_DAYS
+
+    trial_ends_at = None
+    if tenant["stripe_subscription_status"] == "trialing" and tenant["went_live_at"] is not None:
+        # D-125: the free week starts at go-live. Stripe holds the exact
+        # moment; this is the date to tell a customer.
+        trial_ends_at = tenant["went_live_at"] + timedelta(days=TRIAL_PERIOD_DAYS)
+    return {
+        "subscription_id": tenant["stripe_subscription_id"],
+        "status": tenant["stripe_subscription_status"],
+        "current_period_end": tenant["stripe_current_period_end"],
+        "first_past_due_at": tenant["first_past_due_at"],
+        "trial_ends_at": trial_ends_at,
+        # D-139: the founding price applies until this moment (None: no
+        # founding discount on the subscription).
+        "founding_price_ends_at": tenant["founding_price_ends_at"],
+        "stripe_dashboard_url": external_services.stripe_dashboard_url(tenant["stripe_customer_id"]),
+    }
 
 
 def list_tenants(*, platform_admin_user_id: UUID, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -328,10 +374,29 @@ def dashboard(*, platform_admin_user_id: UUID, days: int = 30) -> dict[str, Any]
             text(
                 """
                 SELECT
-                    (SELECT coalesce(sum(tr.monthly_price), 0)
+                    -- Paying customers only (founder's decision, D-135): a
+                    -- customer in their free week (Stripe "trialing", D-125)
+                    -- has not paid anything yet, so they are shown beside
+                    -- MRR, not in it. This departs from 7.15.3's formula,
+                    -- which counted trials too.
+                    -- What each customer actually pays (D-139): the founding
+                    -- price until their founding period ends, then the list
+                    -- price. `founding_price_ends_at` is only ever set while a
+                    -- founding discount is really on the subscription.
+                    (SELECT coalesce(sum(CASE
+                                WHEN t.founding_price_ends_at > now()
+                                     AND tr.promo_monthly_price IS NOT NULL
+                                THEN tr.promo_monthly_price ELSE tr.monthly_price END), 0)
                        FROM tenants t JOIN tiers tr ON tr.id = t.tier_id
                       WHERE t.status = 'active' AND t.deleted_at IS NULL
-                        AND t.stripe_subscription_status IN ('active', 'trialing')) AS mrr,
+                        AND t.stripe_subscription_status = 'active') AS mrr,
+                    (SELECT coalesce(sum(CASE
+                                WHEN t.founding_price_ends_at > now()
+                                     AND tr.promo_monthly_price IS NOT NULL
+                                THEN tr.promo_monthly_price ELSE tr.monthly_price END), 0)
+                       FROM tenants t JOIN tiers tr ON tr.id = t.tier_id
+                      WHERE t.status = 'active' AND t.deleted_at IS NULL
+                        AND t.stripe_subscription_status = 'trialing') AS mrr_in_trial,
                     (SELECT count(*) FROM tenants
                       WHERE went_live_at IS NOT NULL AND deleted_at IS NULL) AS live_tenants,
                     (SELECT count(*) FROM tenants
@@ -889,6 +954,148 @@ def update_deal_terms(
             payload=payload,
         )
         return resolved.summary()
+
+
+# ── Plan change for a live tenant (Section 7.16.1; slice 5.9, D-138) ─────────
+
+
+def change_tier(*, platform_admin_user_id: UUID, tenant_id: UUID, tier_code: str) -> dict[str, Any]:
+    """
+    Move a live customer to another plan, or to the current version of their
+    own (Section 7.15.2: "existing tenants keep their version until the
+    founder explicitly moves them"). Founder only, from the Console (the
+    founder's decision, 2026-09-24).
+
+    Section 7.16.1: "Tier changes take effect immediately on the allowance and
+    on the next Stripe invoice; prorate per Stripe's defaults. A downgrade is
+    allowed even if the current month is already over the new allowance."
+    The allowance follows `tenants.tier_id`, so it changes the moment this
+    commits; Stripe prorates onto the next invoice.
+
+    A founding customer keeps the founding price -- the new tier's -- for what
+    is left of their 90 days (docflow-pricing.docx: "first 90 days"; the
+    founder's option (a)). Stripe holds when that ends.
+
+    Stripe is called inside the transaction, as at go-live: if it refuses,
+    nothing in DocFlow changes (BIL-005); if DocFlow then failed to commit, a
+    retry repeats the same Stripe update under the same idempotency key.
+    """
+    from time import time
+
+    from docflow_core import external_services
+
+    with platform_session() as session:
+        row = session.execute(
+            text(
+                """
+                SELECT t.name, t.status, t.onboarding_status, t.tier_id, t.stripe_subscription_id,
+                       t.founding_price, tr.code AS tier_code, tr.name AS tier_name,
+                       tr.version AS tier_version, tr.monthly_price, tr.document_allowance
+                FROM tenants t LEFT JOIN tiers tr ON tr.id = t.tier_id
+                WHERE t.id = :id FOR UPDATE OF t
+                """
+            ),
+            {"id": str(tenant_id)},
+        ).mappings().first()
+        if row is None:
+            raise ConsoleError("CON-001")
+        if row["onboarding_status"] != "live" or not row["stripe_subscription_id"]:
+            raise ConsoleError("BIL-001")
+        if row["status"] != "active":
+            raise ConsoleError("BIL-002", {"status": row["status"]})
+        target = session.execute(
+            text(
+                "SELECT id, code, name, version, monthly_price, promo_monthly_price, document_allowance "
+                "FROM tiers WHERE code = :c AND is_current"
+            ),
+            {"c": tier_code},
+        ).mappings().first()
+        if target is None:
+            raise ConsoleError("BIL-003")
+        if str(target["id"]) == str(row["tier_id"]):
+            raise ConsoleError("BIL-004")
+
+        try:
+            result, founding_months = external_services.change_subscription_tier(
+                tenant_id=tenant_id,
+                subscription_id=row["stripe_subscription_id"],
+                tier_id=UUID(str(target["id"])),
+                tier_name=target["name"],
+                monthly_price=Decimal(target["monthly_price"]),
+                promo_monthly_price=(
+                    Decimal(target["promo_monthly_price"]) if target["promo_monthly_price"] is not None else None
+                ),
+                founding=bool(row["founding_price"]),
+                now=int(time()),
+            )
+        except external_services.ExternalServiceError as exc:
+            # Stripe's own reason goes to the founder's log so a refusal can be
+            # diagnosed; it never reaches a person on screen (BIL-005 does).
+            logger.error(
+                "tier_change_failed tenant_id=%s service=%s reason=%s", tenant_id, exc.service, exc.reason
+            )
+            raise ConsoleError("BIL-005") from None
+
+        session.execute(
+            text(
+                """
+                UPDATE tenants SET tier_id = :tier, stripe_subscription_status = :status,
+                    -- D-139: the new coupon's end, from Stripe's answer, or
+                    -- none when no founding months carried over.
+                    founding_price_ends_at = CASE WHEN :months > 0 THEN coalesce(
+                        to_timestamp(CAST(:founding_end AS double precision)),
+                        now() + make_interval(months => CAST(:months AS integer))
+                    ) END,
+                    updated_at = now()
+                WHERE id = :id
+                """
+            ),
+            {
+                "tier": str(target["id"]),
+                "status": result.status,
+                "id": str(tenant_id),
+                "months": founding_months,
+                "founding_end": result.founding_ends_at,
+            },
+        )
+        before = {
+            "tier": row["tier_code"],
+            "version": row["tier_version"],
+            "monthly_price": None if row["monthly_price"] is None else str(row["monthly_price"]),
+            "document_allowance": row["document_allowance"],
+        }
+        after = {
+            "tier": target["code"],
+            "version": target["version"],
+            "monthly_price": str(target["monthly_price"]),
+            "document_allowance": target["document_allowance"],
+        }
+        payload = {"before": before, "after": after, "founding_months_carried": founding_months}
+        session.execute(
+            text(
+                """
+                INSERT INTO tenant_lifecycle_events
+                    (id, tenant_id, event_type, actor_user_id, payload, created_at)
+                VALUES (:id, :tenant_id, 'tier_changed', :actor, :payload, clock_timestamp())
+                """
+            ),
+            {
+                "id": str(uuid4()),
+                "tenant_id": str(tenant_id),
+                "actor": str(platform_admin_user_id),
+                "payload": payload,
+            },
+        )
+        _record_admin_action(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            action="tier_change",
+            target_tenant_id=tenant_id,
+            target_type="tenant",
+            target_id=tenant_id,
+            payload=payload,
+        )
+    return {**payload, "subscription_status": result.status}
 
 
 # ── Invite (Section 7.15.2 Step 3) ──────────────────────────────────────────

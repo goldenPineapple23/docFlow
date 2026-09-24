@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
+import { forgetSignedIn } from "@/components/AppHeader";
 import { CatalogErrorBox } from "@/components/admin/CatalogErrorBox";
 import type { CatalogError } from "@/lib/review";
 
@@ -103,7 +104,10 @@ export default function Home() {
             <p className="text-center">
               <button
                 type="button"
-                onClick={() => void supabase.auth.signOut().then(() => router.push("/login"))}
+                onClick={() => {
+                  forgetSignedIn();
+                  void supabase.auth.signOut().then(() => router.push("/login"));
+                }}
                 className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 Sign out

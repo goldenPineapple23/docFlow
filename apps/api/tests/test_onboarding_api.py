@@ -29,6 +29,7 @@ from __future__ import annotations
 import io
 import time
 import zipfile
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -328,6 +329,11 @@ def test_go_live_bills_the_recorded_deal_and_turns_everything_on(
             assert (tenant["setup_fee_amount"], tenant["setup_fee_billing"], tenant["founding_price"]) == (
                 "750.00", "stripe", True,
             )
+            # D-139: when the founding price ends is recorded, so MRR counts what
+            # they pay. This fake Stripe returns no discount, so the coupon's own
+            # length decides: three months from go-live.
+            ends = datetime.fromisoformat(tenant["billing"]["founding_price_ends_at"])
+            assert 88 <= (ends - datetime.now(ends.tzinfo)).days <= 92
             templates = [e["template"] for e in console.outbox(client, tenant_id)]
             assert "invite" in templates and "go_live" in templates  # invite sent because it hadn't been
             with platform_session() as session:

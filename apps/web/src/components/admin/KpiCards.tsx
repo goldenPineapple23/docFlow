@@ -136,7 +136,11 @@ export function KpiCards({ data }: { data: Dashboard }) {
         <Card
           label="MRR"
           value={usd(money.mrr, 0)}
-          note="DocFlow's view of active subscriptions — Stripe is the source of truth for cash"
+          note={
+            Number(money.mrr_in_trial ?? 0) > 0
+              ? `What paying customers actually pay, founding prices included · + ${usd(money.mrr_in_trial ?? null, 0)} in free trial. DocFlow's view — Stripe is the source of truth for cash`
+              : "What paying customers actually pay, founding prices included. DocFlow's view — Stripe is the source of truth for cash"
+          }
         />
         <Card
           label="Margin after AI"

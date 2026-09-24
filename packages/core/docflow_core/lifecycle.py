@@ -523,6 +523,9 @@ def complete_reactivate(
                 stripe_subscription_id = :sub_id,
                 stripe_subscription_status = :sub_status,
                 stripe_current_period_end = :period_end,
+                -- D-139: the founding price is a go-live perk; a reactivated
+                -- subscription is at list price.
+                founding_price_ends_at = NULL,
                 updated_at = now()
             WHERE id = :id
             """

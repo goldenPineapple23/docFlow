@@ -18,6 +18,26 @@ AUTH-005 [info/tenant] You're signed out
   what+why: This browser isn't signed in to DocFlow, or your sign-in has expired, so DocFlow can't show this page. Nothing was changed.
   next:     Sign in again; DocFlow will bring you back to this page.
 
+BIL-001 [info/founder] This tenant has no subscription yet
+  what+why: A plan change moves a live Stripe subscription. This tenant isn't live, so its plan is still part of the deal terms.
+  next:     Change the tier in Deal terms on the Overview; go-live bills whatever is set there.
+
+BIL-002 [info/founder] Only an active tenant's plan can change
+  what+why: This tenant is cancelling, suspended or winding down, so changing what it pays would bill for a service it is leaving.
+  next:     Reactivate the tenant first if it is staying, then change the plan.
+
+BIL-003 [warning/founder] That plan isn't one DocFlow offers
+  what+why: The plan asked for doesn't match a current tier.
+  next:     Pick Starter, Growth or Scale from the list.
+
+BIL-004 [info/founder] The tenant is already on that plan
+  what+why: This tenant already pays the current version of that tier, so there is nothing to change.
+  next:     Pick a different tier, or leave the plan as it is.
+
+BIL-005 [warning/founder] Stripe didn't make the plan change
+  what+why: Stripe refused or didn't answer, so the subscription and DocFlow's record are both unchanged. The failure has been logged.
+  next:     Try again in a few minutes; check the customer in Stripe if it keeps failing.
+
 BUY-001 [warning/founder] Rows with no customer name
   what+why: These rows have no name, so there is no customer to create.
   next:     Add the name, or remove the row.
@@ -433,6 +453,10 @@ REV-006 [info/tenant] We can't find that order
 RUL-001 [info/founder] Proposed rules can't be switched on here
   what+why: This rule is only a proposal. Proposals are not part of DocFlow yet, and no rule becomes active without a person confirming it in a review.
   next:     Nothing to do. Confirm the match in a review if you want the rule.
+
+SYS-001 [high/both] DocFlow hit a problem on its side
+  what+why: DocFlow received your request but failed while handling it. Nothing was changed, and the failure has been logged.
+  next:     Try again in a minute. If it happens again, DocFlow already has the details.
 
 TEAM-001 [info/tenant] That doesn't look like an email address
   what+why: DocFlow sends the invite by email, so it needs a complete address to send it to.

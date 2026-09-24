@@ -359,7 +359,10 @@ test("the portal header carries the customer's own company name", async ({ page 
   await stubQueue(page, "Bella's Test Coffee Haus");
   await page.goto("/review");
   await expect(page.getByTestId("tenant-name")).toHaveText("Bella's Test Coffee Haus");
-  await expect(page.getByText("Powered by DocFlow")).toBeVisible();
+  // "Powered by" with DocFlow's logo underneath the customer's name.
+  const poweredBy = page.getByTestId("powered-by");
+  await expect(poweredBy).toContainText("Powered by");
+  await expect(poweredBy.getByRole("img", { name: "DocFlow" })).toBeVisible();
   await expect(page).toHaveTitle("Bella's Test Coffee Haus — DocFlow");
 });
 
@@ -370,9 +373,9 @@ test("a company name is text, never markup", async ({ page }) => {
   await expect(page.getByTestId("tenant-name").locator("b, img")).toHaveCount(0);
 });
 
-test("with no company name the header just says DocFlow", async ({ page }) => {
+test("with no company name the header just shows DocFlow's logo", async ({ page }) => {
   await stubQueue(page, null);
   await page.goto("/review");
-  await expect(page.getByTestId("tenant-name")).toHaveText("DocFlow");
-  await expect(page.getByText("Powered by DocFlow")).toHaveCount(0);
+  await expect(page.getByTestId("tenant-name").getByRole("img", { name: "DocFlow" })).toBeVisible();
+  await expect(page.getByTestId("powered-by")).toHaveCount(0);
 });

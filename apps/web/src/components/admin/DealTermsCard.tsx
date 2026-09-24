@@ -116,10 +116,13 @@ export function DealTermsCard({ tenant, onChanged }: { tenant: TenantOverview; o
         <>
           <p data-testid="deal-summary" className="mt-1 text-sm">
             {dealSummary({
-              tierName: tenant.tier_name,
-              monthlyPrice: tenant.tier_monthly_price,
-              promoMonthlyPrice: tenant.tier_promo_monthly_price,
-              promoDays: tenant.tier_promo_days,
+              // Once live, the deal is what go-live billed; the plan now is on
+              // the Billing card (a plan change must not rewrite the deal).
+              tierName: live && tenant.golive_tier_name ? tenant.golive_tier_name : tenant.tier_name,
+              monthlyPrice: live && tenant.golive_tier_name ? (tenant.golive_monthly_price ?? null) : tenant.tier_monthly_price,
+              promoMonthlyPrice:
+                live && tenant.golive_tier_name ? (tenant.golive_promo_monthly_price ?? null) : tenant.tier_promo_monthly_price,
+              promoDays: live && tenant.golive_tier_name ? (tenant.golive_promo_days ?? null) : tenant.tier_promo_days,
               founding: tenant.founding_price,
               feeAmount: tenant.setup_fee_amount,
               feeBilling: tenant.setup_fee_billing,

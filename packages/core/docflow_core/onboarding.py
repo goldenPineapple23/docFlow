@@ -312,6 +312,9 @@ class GoLiveBilling:
     subscription_id: str | None
     subscription_status: str | None
     current_period_end: int | None
+    # From Stripe's answer when it includes it (D-139); otherwise computed
+    # below from the coupon's length, which is what Stripe itself applies.
+    founding_ends_at: int | None = None
 
 
 def complete_go_live(
@@ -344,6 +347,12 @@ def complete_go_live(
                 stripe_subscription_id = :sub_id,
                 stripe_subscription_status = :sub_status,
                 stripe_current_period_end = :period_end,
+                -- When the founding price ends (D-139), so MRR can count
+                -- what a founding customer actually pays.
+                founding_price_ends_at = CASE WHEN :founding THEN coalesce(
+                    to_timestamp(CAST(:founding_end AS double precision)),
+                    now() + make_interval(months => CAST(:promo_months AS integer))
+                ) END,
                 updated_at = now()
             WHERE id = :id
             """
@@ -353,6 +362,9 @@ def complete_go_live(
             "sub_id": billing.subscription_id,
             "sub_status": billing.subscription_status,
             "period_end": period_end,
+            "founding": bool(plan.founding_price and plan.promo_months and billing.subscription_id),
+            "founding_end": billing.founding_ends_at,
+            "promo_months": plan.promo_months or 0,
         },
     )
 

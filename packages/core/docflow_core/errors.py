@@ -531,6 +531,68 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="info",
         audience="tenant",
     ),
+    # ── BIL-0xx · plan changes from the Console (slice 5.9, D-138) ───────────
+    "BIL-001": ErrorCatalogEntry(
+        code="BIL-001",
+        title="This tenant has no subscription yet",
+        message=(
+            "A plan change moves a live Stripe subscription. This tenant isn't live, so its "
+            "plan is still part of the deal terms."
+        ),
+        action="Change the tier in Deal terms on the Overview; go-live bills whatever is set there.",
+        severity="info",
+        audience="founder",
+    ),
+    "BIL-002": ErrorCatalogEntry(
+        code="BIL-002",
+        title="Only an active tenant's plan can change",
+        message=(
+            "This tenant is cancelling, suspended or winding down, so changing what it pays "
+            "would bill for a service it is leaving."
+        ),
+        action="Reactivate the tenant first if it is staying, then change the plan.",
+        severity="info",
+        audience="founder",
+    ),
+    "BIL-003": ErrorCatalogEntry(
+        code="BIL-003",
+        title="That plan isn't one DocFlow offers",
+        message="The plan asked for doesn't match a current tier.",
+        action="Pick Starter, Growth or Scale from the list.",
+        severity="warning",
+        audience="founder",
+    ),
+    "BIL-004": ErrorCatalogEntry(
+        code="BIL-004",
+        title="The tenant is already on that plan",
+        message="This tenant already pays the current version of that tier, so there is nothing to change.",
+        action="Pick a different tier, or leave the plan as it is.",
+        severity="info",
+        audience="founder",
+    ),
+    "BIL-005": ErrorCatalogEntry(
+        code="BIL-005",
+        title="Stripe didn't make the plan change",
+        message=(
+            "Stripe refused or didn't answer, so the subscription and DocFlow's record are "
+            "both unchanged. The failure has been logged."
+        ),
+        action="Try again in a few minutes; check the customer in Stripe if it keeps failing.",
+        severity="warning",
+        audience="founder",
+    ),
+    # ── SYS-0xx · DocFlow itself failed (slice 5.9, D-136) ──────────────────
+    "SYS-001": ErrorCatalogEntry(
+        code="SYS-001",
+        title="DocFlow hit a problem on its side",
+        message=(
+            "DocFlow received your request but failed while handling it. Nothing was "
+            "changed, and the failure has been logged."
+        ),
+        action="Try again in a minute. If it happens again, DocFlow already has the details.",
+        severity="high",
+        audience="both",
+    ),
     # ── TEAM-0xx · the people on an account (slice 5.8d, D-132) ──────────────
     "TEAM-001": ErrorCatalogEntry(
         code="TEAM-001",

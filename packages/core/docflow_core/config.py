@@ -44,7 +44,9 @@ class Settings(BaseSettings):
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
 
-    redis_url: str = "redis://localhost:6379/0"
+    # 127.0.0.1, not localhost: see .env.example (a ~2 s IPv6 fallback per
+    # connection on Windows made the Console dashboard take ~10 s).
+    redis_url: str = "redis://127.0.0.1:6379/0"
 
     # Signs the short-lived URLs the review screen's document viewer loads
     # from (Section 7.4 / 7.12). Separate from the Supabase secrets on

@@ -293,6 +293,27 @@ def update_deal_terms(
     return {"deal": deal}
 
 
+class TierChangeBody(BaseModel):
+    tier: str
+
+
+@router.post("/tenants/{tenant_id}/tier")
+def change_tier(
+    tenant_id: UUID,
+    body: TierChangeBody,
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    """A live tenant's plan change, founder only (Section 7.16.1; D-138).
+    Before go-live the plan is part of the deal terms instead (BIL-001)."""
+    try:
+        result = admin_data_access.change_tier(
+            platform_admin_user_id=_admin_id(identity), tenant_id=tenant_id, tier_code=body.tier
+        )
+    except ConsoleError as exc:
+        raise _console_error(exc) from exc
+    return {"change": result}
+
+
 @router.post("/tenants/{tenant_id}/invite")
 def send_invite(tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)) -> dict:
     try:
@@ -837,6 +858,7 @@ def go_live(
                     subscription_id=subscription.subscription_id,
                     subscription_status=subscription.status,
                     current_period_end=subscription.current_period_end,
+                    founding_ends_at=subscription.founding_ends_at,
                 ),
                 app_url=get_settings().app_base_url,
             )

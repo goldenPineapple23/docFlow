@@ -6,6 +6,8 @@ import { getTenantOverview, listOutbox, sendInvite, type OutboxEmail, type Tenan
 import { ReviewApiError, type CatalogError } from "@/lib/review";
 import { CatalogErrorBox } from "@/components/admin/CatalogErrorBox";
 import { DealTermsCard } from "@/components/admin/DealTermsCard";
+import { BillingCard } from "@/components/admin/BillingCard";
+import { PlanChange } from "@/components/admin/PlanChange";
 import { GoLivePanel } from "@/components/admin/GoLivePanel";
 import { TestBatchPanel } from "@/components/admin/TestBatchPanel";
 import { OutboxList } from "@/components/admin/OutboxList";
@@ -93,6 +95,14 @@ export default function TenantPage({ params }: { params: Promise<{ id: string }>
       </dl>
 
       <DealTermsCard tenant={tenant} onChanged={refresh} />
+
+      {tenant.onboarding_status === "live" || tenant.billing?.subscription_id ? (
+        <BillingCard tenant={tenant}>
+          {tenant.onboarding_status === "live" && tenant.status === "active" ? (
+            <PlanChange tenant={tenant} onChanged={refresh} />
+          ) : null}
+        </BillingCard>
+      ) : null}
 
       <section data-testid="onboarding-steps" className="mt-5 rounded-xl border border-gray-200 bg-white p-5">
         <h2 className="text-sm font-semibold">Catalog, customers and rules</h2>

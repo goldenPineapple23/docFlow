@@ -1,9 +1,13 @@
+import logging
+import traceback
+
 from docflow_core.config import get_settings
 from fastapi import Depends, FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.errors import catalog_detail
 from app.routers import (
@@ -21,6 +25,41 @@ from app.routers import (
 )
 
 app = FastAPI(title="DocFlow API")
+logger = logging.getLogger("docflow.api")
+
+
+class _CatchUnexpected(BaseHTTPMiddleware):
+    """
+    A failure nobody anticipated answers SYS-001 in the catalog's words
+    (D-136), instead of a bare 500.
+
+    It has to sit *inside* the CORS middleware (it is added before it, and
+    Starlette wraps in reverse): Starlette's own last-resort handler runs
+    outside CORS, so its 500 carried no CORS headers, the browser discarded it,
+    and every screen reported "We couldn't reach DocFlow" for what was really
+    DocFlow failing (found when the Console's delete crashed, D-133).
+
+    What reaches the log is the exception type and the code locations only --
+    never the exception's message, which for a database error includes the
+    bound parameters, i.e. customer data (Section 7.10).
+    """
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        try:
+            return await call_next(request)
+        except Exception as exc:  # noqa: BLE001 -- answered and logged below
+            frames = "".join(traceback.format_tb(exc.__traceback__))
+            logger.error(
+                "unhandled_error method=%s path=%s error=%s\n%s",
+                request.method,
+                request.url.path,
+                type(exc).__name__,
+                frames,
+            )
+            return JSONResponse(status_code=500, content={"detail": catalog_detail("SYS-001")})
+
+
+app.add_middleware(_CatchUnexpected)
 
 # The browser app and the API are separate origins -- `localhost:3000` and
 # `localhost:8000` in development, and separate hosts once deployed -- so the

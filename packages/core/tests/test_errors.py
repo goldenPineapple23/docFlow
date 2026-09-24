@@ -31,7 +31,7 @@ SOURCE_DIRECTORIES = (
     REPO_ROOT / "apps" / "worker" / "app",
 )
 
-CODE_PATTERN = re.compile(r"\b(?:DOC|INT|AUTH|LIM|QUA|EXP|VAL|REV|CON|IMP|CAT|BUY|TEAM)-\d{3}\b")
+CODE_PATTERN = re.compile(r"\b(?:DOC|INT|AUTH|LIM|QUA|EXP|VAL|REV|CON|IMP|CAT|BUY|TEAM|SYS|BIL)-\d{3}\b")
 
 
 def _render_catalog() -> str:

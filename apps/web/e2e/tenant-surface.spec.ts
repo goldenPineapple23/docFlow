@@ -367,3 +367,35 @@ test("the dashboard's short list links to the whole trail", async ({ page }) => 
   await expect(page).toHaveURL(/\/activity/);
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
 });
+
+test("moving between pages keeps the company name and links in place", async ({ page }) => {
+  // Founder's walkthrough (5.9): every page used to start with no company name
+  // until "who is signed in?" answered, and the links jumped when it did.
+  let calls = 0;
+  await page.route(`${API}/auth/me`, async (route) => {
+    calls += 1;
+    // Slow on every page after the first, to prove the header doesn't wait.
+    if (calls > 1) await new Promise((r) => setTimeout(r, 1500));
+    await route.fulfill({
+      json: { email: "person@example.test", tenant_id: "t1", tenant_name: "Bella's Test Coffee", role: "owner", is_platform_admin: false },
+    });
+  });
+  await page.route(`${API}/allowance`, (route) =>
+    route.fulfill({ json: { used: 1, allowance: 300, tier: "Starter", month: "2026-09", banner: null } }),
+  );
+  await page.route(`${API}/held`, (route) => route.fulfill({ json: { total: 0, groups: [], documents: [] } }));
+  await page.route(/\/review\/documents/, (route) =>
+    route.request().url().startsWith(API)
+      ? route.fulfill({ json: { documents: [], total: 0, limit: 50, offset: 0 } })
+      : route.continue(),
+  );
+
+  await page.goto("/review");
+  await expect(page.getByTestId("tenant-name")).toHaveText("Bella's Test Coffee");
+
+  await page.getByRole("navigation").getByRole("link", { name: "Held for review" }).click();
+  await expect(page).toHaveURL(/\/held/);
+  // Straight away -- well inside the 1.5 s the slow answer takes.
+  await expect(page.getByTestId("tenant-name")).toHaveText("Bella's Test Coffee", { timeout: 700 });
+  await expect(page.getByRole("navigation").getByRole("link", { name: "Team" })).toBeVisible({ timeout: 700 });
+});

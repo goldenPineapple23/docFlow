@@ -98,8 +98,27 @@ export type TenantOverview = {
   setup_fee_preset: SetupFeePreset["code"] | null;
   setup_fee_preset_name: string | null;
   founding_price: boolean;
+  // The plan billed at go-live (D-138): Deal terms shows this once live, so a
+  // later plan change does not rewrite what was agreed. Null before go-live.
+  golive_tier_name?: string | null;
+  golive_tier_version?: number | null;
+  golive_monthly_price?: string | null;
+  golive_promo_monthly_price?: string | null;
+  golive_promo_days?: number | null;
   open_merge_candidates: number;
   learned_rules: number;
+  // The Billing card (slice 5.9): webhook-synced facts, never a live Stripe
+  // call on page load, plus a link to the customer in Stripe.
+  billing: {
+    subscription_id: string | null;
+    status: string | null;
+    current_period_end: string | null;
+    first_past_due_at: string | null;
+    trial_ends_at: string | null;
+    // D-139: the founding price applies until then; null when none is running.
+    founding_price_ends_at?: string | null;
+    stripe_dashboard_url: string | null;
+  };
 };
 
 export type TenantRow = {
@@ -206,6 +225,20 @@ export const updateDealTerms = (tenantId: string, body: DealTerms) =>
   request<{ deal: Record<string, unknown> }>(`/admin/tenants/${tenantId}/deal-terms`, {
     method: "PUT",
     body: JSON.stringify(body),
+  });
+
+/** A live tenant's plan change (Section 7.16.1; D-138). Founder only. */
+export type PlanChange = {
+  before: { tier: string; version: number; monthly_price: string | null; document_allowance: number | null };
+  after: { tier: string; version: number; monthly_price: string; document_allowance: number };
+  founding_months_carried: number;
+  subscription_status: string;
+};
+
+export const changeTier = (tenantId: string, tier: Tier["code"]) =>
+  request<{ change: PlanChange }>(`/admin/tenants/${tenantId}/tier`, {
+    method: "POST",
+    body: JSON.stringify({ tier }),
   });
 
 export const listTenants = () => request<TenantRow[]>("/admin/tenants");
@@ -580,6 +613,8 @@ export type Dashboard = {
   };
   money: {
     mrr: string;
+    // Trialing subscriptions (D-135): shown beside MRR, never in it.
+    mrr_in_trial?: string;
     live_tenants: number;
     live_60: number;
     retained_60: number;

@@ -1388,3 +1388,74 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Still open (as in D-133):** a server error (500) still falls back to "We couldn't reach DocFlow".
 
 **Related:** Section 7.16.5, 7.15.1; D-090, D-132, D-133.
+
+## D-135 -- MRR counts paying customers only
+
+**Context:** Section 7.15.3 defines MRR as the sum of `tiers.monthly_price` for active tenants whose subscription is `active` or `trialing`. Since D-125 every new customer spends their first week `trialing` with nothing invoiced, so the spec's formula counted revenue that had not been, and might never be, paid.
+
+**Decision (founder, 2026-09-24):** MRR counts `active` subscriptions only. Trials are shown beside it ("+ $X in free trial"), never in it. A deliberate departure from 7.15.3's wording. The dashboard's MRR had no test against a hand-written query, which 7.15.3 requires for every KPI; one now exists (`test_billing_api.py`).
+
+**Still open:** MRR uses each tier's list price, so a founding customer paying the promo price is counted at full price for their 90 days. Counting what they actually pay needs the founding end date stored in DocFlow (a small migration, kept current from Stripe's webhooks) -- awaiting the founder's call.
+
+## D-136 -- A server failure answers in the catalog's words, and a browser can read it
+
+**Context:** Found through D-133: an unexpected failure (a 500) showed "We couldn't reach DocFlow". Starlette's last-resort 500 is sent from outside the CORS middleware, so it carried no CORS headers, the browser discarded it, and the page could only report a network failure.
+
+**Decision:** a middleware inside CORS catches any unanticipated exception and answers SYS-001 ("DocFlow hit a problem on its side ... Nothing was changed, and the failure has been logged"). The log gets the exception type, route and code locations -- never the exception's message, which for a database error carries bound parameters, i.e. customer data (Section 7.10). A test forces a crash and checks the answer, the CORS header, and that a planted value reaches neither the response nor the log.
+
+## D-137 -- Tier prices change by a new version, through a previewing script
+
+**Context:** Section 7.15.2: "Changing a tier's price creates a new version; existing tenants keep their version until the founder explicitly moves them."
+
+**Decision (founder, 2026-09-24):** no editing screen yet, but built so one can be added without changing the rules. `docflow_core.tiers` holds `preview` and `create`: a version is never edited, a change is `version + 1` which becomes the one offered to new tenants, carrying over anything not named; refusals for a negative price, fractions of a cent, a founding price at or above the monthly price, a founding price without its period, or no change at all; the before and after logged as a founder action. `scripts/new_tier_version.py` calls them, previews by default, and writes only with `--apply`. A future Console screen would call the same two functions through an admin route. Its tests write a version and roll it back, so the real tiers are never touched.
+
+## D-138 -- Changing a live customer's plan
+
+**Context:** Section 7.16.1: tier changes take effect immediately on the allowance and on the next Stripe invoice, prorated per Stripe's defaults; a downgrade is allowed even when already over the new allowance. Until now a live customer's plan could not change at all (deal terms lock at go-live, ONB-011).
+
+**Decisions:**
+- **Founder only, from the Console** (founder, 2026-09-24): "Change plan…" on the tenant page's new Billing card. Customers are told to contact DocFlow. The same action moves a customer from an old price version to the current one.
+- **Stripe first, inside the transaction, as at go-live.** The subscription's one item moves to the new price with `proration_behavior=create_prorations`, under an idempotency key per tenant and target tier; if Stripe refuses, nothing in DocFlow changes (BIL-005, Stripe's own words never shown). Then `tenants.tier_id` moves, so the allowance follows at once, with a `tier_changed` lifecycle event and an `admin_actions` row holding before and after.
+- **Founding customers keep a founding price -- the new tier's -- for what is left of their 90 days** (founder's option (a); `docflow-pricing.docx`: "Founding customer promo (first 90 days)", a period, not a plan). Stripe holds when the founding discount ends, so it is read from the subscription at the moment of the change, turned into whole billing months rounded up (nobody loses a month to arithmetic), and replaced by a coupon sized for the new tier. If the period is over, or the new tier has no founding price, the old coupon is removed rather than left discounting a price it was never sized for.
+- **Refusals (BIL-001..005):** not live (the plan is still a deal term), not active (cancelling or winding down), an unknown tier, already on that tier's current version, Stripe refused.
+- **The Billing card** shows plan and price, subscription status, when the free week or current period ends, the setup fee and how it is billed, the date it went overdue, and a link to the customer in Stripe (test or live dashboard to match the key in use). All from webhook-synced columns -- no live Stripe call on page load (7.15.3), and no invoice or payment views (Section 10).
+
+**Found in the founder's walkthrough against the real Stripe sandbox, fixed before commit:**
+1. **The founding discount was not recognised.** Stripe's current API (`2026-08-26.dahlia`, this account's version) names a discount's coupon under `source.coupon`; the code read only the older `coupon` field, and the test stand-in used only the older shape, so every test passed. The real plan change (Growth to Starter) therefore carried 0 founding months, left the Growth founding coupon ($150 off) on a Starter price, and recorded no founding date. The parser now reads every shape; the tests use the sandbox's own answer, verbatim, plus the older shapes; and a coupon that is not DocFlow's founding coupon is left alone. Changing the tenant back to Growth through the fixed Console repairs the sandbox subscription.
+2. **"Open in Stripe" landed in the wrong account.** A Stripe sandbox is an account of its own; a link without the account opened whichever account the browser last used ("No such customer"). The link now names the account the key belongs to (looked up from Stripe once per process).
+3. **The Console dashboard took about 11 seconds.** Not DocFlow's queries (under half a second each) but the Redis address: on Windows `localhost` is tried as IPv6 first and each connection waited ~2 s before falling back. The health strip's worker check opens several. `REDIS_URL` is now `redis://127.0.0.1:6379/0` in the local `.env`, `.env.example` and the code default; the worker check went from 9.3 s to 1.1 s (its own one-second wait for replies). This also sped up every enqueue on this machine.
+
+4. **The corrected plan change was then refused by Stripe (BIL-005).** Stripe limits a coupon's name to 40 characters; the carried-over founding coupon was named "DocFlow founding price (Growth, 3 months left)" (47). Renamed "DocFlow founding: Growth (3 mo left)", every name DocFlow sends is capped at 40, and the test stand-in now enforces the limit. The refusal had been logged as just "stripe"; the founder's log now also records Stripe's error code and the parameter it objected to (e.g. `parameter_invalid_string name`) -- never Stripe's message text, which can echo what was sent (an existing test forbids it).
+
+5. **The carried-over founding coupon covered one invoice too many.** The months owed were computed from time left, rounded up (86 days -> 3), so a customer who had already had one founding invoice would have had three more -- four in all, where `docflow-pricing.docx` says 90 days. They are now counted as invoices: the monthly invoice dates from the subscription's next one that fall before the original discount's end (19 Oct and 19 Nov for the walkthrough tenant -- 2). The test uses Stripe's own timestamps from the sandbox.
+6. **Open, founder action in Stripe:** the sandbox subscription shows "Auto-cancels Dec 18". DocFlow set no cancellation; Stripe's account-level rule for unpaid invoices will cancel a subscription 90 days after an invoice goes unpaid (the go-live invoice of 19 Sep is unpaid in the sandbox). The agreed policy (D-125) is that suspension is always the founder's decision, so that Stripe setting should leave subscriptions past due rather than cancel them. It is a Stripe dashboard setting, not code.
+
+**Lesson:** a stand-in for an outside service is only as good as its copy of that service's answers and rules; record them from the real thing.
+
+**Related:** Section 7.15.2, 7.15.3, 7.16.1, Section 10; D-113, D-117, D-125, D-135, D-137.
+
+## D-139 -- MRR counts what founding customers actually pay
+
+**Context:** D-135 left MRR at each tier's list price, so a founding customer paying the promo price (`docflow-pricing.docx`: "Founding customer promo (first 90 days)") was counted at full price for their 90 days.
+
+**Decision (founder, 2026-09-24):** count what they actually pay -- the tier's founding price until their founding period ends, then the list price. Trials are counted the same way beside MRR.
+
+- **The end date is stored** (`tenants.founding_price_ends_at`, migration `0024`): the dashboard sums every tenant and must not call Stripe once per tenant. DocFlow sets it at the only three moments it creates or changes a founding discount -- go-live, a plan change (the new coupon's end, D-138), and reactivation (cleared: the founding price is a go-live perk). Each time it takes the end from Stripe's own answer (subscriptions are now requested with their discounts expanded), and falls back to the coupon's length, which is what Stripe applies.
+- **Backfill:** founding customers already live get go-live + ceil(promo_days / 30) months, which is how their coupon was created -- except any tenant that was reactivated.
+- **MRR keys off the stored date, not the `founding_price` flag,** so a reactivated founding customer is counted at list price.
+- The Billing card shows "founding price until <date>".
+
+**Known limit:** a discount edited by hand in Stripe's dashboard is not seen by DocFlow; changes should go through the Console.
+
+**Related:** Section 7.15.3; D-125, D-135, D-138.
+
+
+## D-140 -- The customer's header: DocFlow's logo, and no jumping between pages
+
+**Context:** Founder's request (2026-09-24): the "DF" box goes; the customer's company name leads, with "Powered by" and DocFlow's logo under it, smaller; the Console shows the logo too, with "Console" in the arrows' teal. Then, in the walkthrough: clicking between customer pages made the links jump, and each page showed DocFlow instead of the company name for a moment.
+
+**Decisions:**
+- The logo is the founder's own artwork with its grey background removed (`public/docflow-logo.png`), plus a light version for the Console's dark bar (`docflow-logo-light.png`: letters near-white, the arrows kept blue). The logo never sits inside the company-name element, which only ever holds escaped text.
+- **Why it jumped:** every page draws its own header and asked "who is signed in?" from scratch, so each click began with no name; the fallback (the larger logo) was a different width, and the links moved twice. The answer is now remembered for the life of the tab and refreshed quietly on each page, so the name and links are there immediately; on the very first load the header holds the name's space instead of showing the logo. Sign-out forgets it, so a second person on the same browser never sees the first one's company. A browser test delays the answer by 1.5 s on the second page and checks the name is there at once.
+
+**Related:** Section 7.12; D-090, D-128.
