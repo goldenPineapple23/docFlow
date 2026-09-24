@@ -66,6 +66,11 @@ TEMPLATE_PARAMS = {
         "tenant_name": "Acme Test Distributor", "new_address": "orders+x@intake.example.test",
         "grace_ends": "2026-10-31",
     },
+    # Slice 5.8c (D-131): the "needs review" digest.
+    "review_digest": {
+        "tenant_name": "Acme Test Distributor", "count": "3", "arrived": "3 new purchase orders are",
+        "in_all": "i", "review_link": "https://app.example.test/review", "interval_minutes": "15",
+    },
 }
 
 

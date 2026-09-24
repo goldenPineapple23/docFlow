@@ -1,0 +1,15 @@
+Subject: DocFlow: $arrived ready for review
+
+Hello,
+
+$arrived ready for review in DocFlow for $tenant_name.
+
+$in_all
+
+Open the review queue:
+$review_link
+
+DocFlow sends this at most once every $interval_minutes minutes, and only when
+new orders arrive -- orders already waiting never trigger a reminder.
+
+-- DocFlow

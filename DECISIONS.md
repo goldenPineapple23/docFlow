@@ -1319,3 +1319,22 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Verified against the running stack**, not only in tests: a real reviewer read the trail for three orders (six events), paged through it, filtered to edits, was shown no extracted value, and the admin's dashboard row matched the trail's first row exactly; a viewer was refused with `AUTH-002`.
 
 **Related:** Section 6 (Phase 5), 7.10, 7.15.1, Section 3; D-084, D-123, D-128.
+
+## D-131 -- The "needs review" digest email (slice 5.8c)
+
+**Context:** Section 6's Phase 5 line asks for "email notifications", and a customer's reviewers need to know that orders are waiting without watching the screen. The 5.8 scoping settled the shape with the founder: a digest, at most one email per tenant every 15 minutes, to owner, admin and reviewers (not viewers), counts only, no re-nagging -- because a 500-document backfill (Section 5.1) must not send 500 emails.
+
+**Decisions:**
+- **A scheduled job, not a new mechanism.** The digest is a `review_digest` row in `scheduled_jobs` (0013), run by the existing beat sweep in the tenant's own session, retried and reported to the founder on failure like every other job. Migration `0022_review_digest.sql` only widens the job-type check and adds two indexes.
+- **One pending digest per tenant, enforced by the database.** When an order reaches `needs_review`, the worker upserts its id into the tenant's pending digest (a partial unique index on `(tenant_id) WHERE job_type = 'review_digest' AND status = 'pending'`), so two workers finishing orders at the same moment extend one job instead of creating two. Once the sweep claims the job it leaves the index, so an order that arrives while the email is being written starts the *next* digest rather than being lost.
+- **The timer starts at the first new order.** The job runs `REVIEW_DIGEST_INTERVAL_MIN` (15, in `constants.py`) after the order that created it, and never sooner than that after the previous digest began. With the sweep every five minutes, an email goes 15-20 minutes after the first order of a batch.
+- **No re-nagging.** Only a newly arrived order creates a digest. Orders that simply sit in the queue never produce another email; if every order a digest collected was reviewed before it fired, nothing is sent. What the job decided (sent to how many, or why it skipped) is written onto its own row as counts, so the Console can explain a missing email.
+- **Counts only (Section 7.10).** The email says how many new orders are ready, how many wait in all, and roughly how long the oldest has waited ("about 3 hours" -- relative, so no timezone is involved), with a link to the queue. No PO number, buyer, filename or value. The job's payload holds document ids, never content.
+- **Who gets it:** active, undeleted users with the owner, admin or reviewer role. A viewer does not. A person whose invite is not yet accepted still gets it -- it is a reason to sign in.
+- **Who does not:** test-batch orders never start a digest (the founder reviews them during onboarding), and a tenant that is not live, or is suspended or pending deletion, is not emailed. `cancelling` tenants still are: everything keeps working until the effective date (7.14).
+- **Wiring:** the worker calls `review_digest.note_needs_review` last, in its own transaction, after validation -- the same rule as every post-extraction step (D-058): an order ready for review never loses its extraction over a notification.
+- **Not built:** a per-person opt-out (needs a settings page; nobody has asked -- open item), and re-sending on a reopened (approved -> needs review) order, which is a human action inside the account, not an arrival.
+
+**Verified against the running stack**, not only in tests: an order sent to a live tenant's intake address was extracted by the real worker, which created the digest due exactly 15 minutes later; the real beat sweep sent it 19 minutes after arrival, to the account's admin, with counts only (held in the outbox, no provider configured).
+
+**Related:** Section 5.1, 6 (Phase 5), 7.9, 7.10, 7.14; D-058, D-103 (outbox), D-113 (scheduled jobs), D-128.

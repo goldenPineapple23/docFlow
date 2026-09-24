@@ -35,6 +35,10 @@ STUCK_PROCESSING_TIMEOUT_MIN = 30
 STAGING_TTL_DAYS = 90
 FIRST_WEEK_CHECKIN_DAYS = 7
 ROLLUP_STALE_HOURS = 36
+# The "needs review" digest (slice 5.8c, D-131): at most one email per tenant
+# per this many minutes, sent this long after the first new order that starts
+# it. A 500-document backfill is one or two emails, not 500.
+REVIEW_DIGEST_INTERVAL_MIN = 15
 
 # ── Limits and abuse (Section 7.16) ─────────────────────────────────────────
 ABUSE_CEILING_MULTIPLIER = 3

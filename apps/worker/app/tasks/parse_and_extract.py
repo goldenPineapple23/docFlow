@@ -28,7 +28,7 @@ from io import BytesIO
 from uuid import UUID, uuid4
 
 import anthropic
-from docflow_core import field_schema, file_types, previews
+from docflow_core import field_schema, file_types, previews, review_digest
 from docflow_core.buyers import identify_and_link_buyer
 from docflow_core.config import get_settings
 from docflow_core.db import tenant_session
@@ -693,3 +693,13 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
         )
     except Exception as exc:  # noqa: BLE001 -- see the comment above
         logger.error("validation_failed document_id=%s error_type=%s", did, type(exc).__name__)
+
+    # The "needs review" digest (slice 5.8c, D-131): add this order to the
+    # tenant's pending digest email. Last, and in its own transaction, for the
+    # same reason as every step above: a document that is ready for review
+    # must never lose its extraction over a notification.
+    try:
+        with tenant_session(tid) as session:
+            review_digest.note_needs_review(session, tid, did)
+    except Exception as exc:  # noqa: BLE001 -- see the comment above
+        logger.error("review_digest_failed document_id=%s error_type=%s", did, type(exc).__name__)
