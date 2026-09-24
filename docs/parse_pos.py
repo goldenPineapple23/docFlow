@@ -189,8 +189,7 @@ def extract(client: Anthropic, path: Path) -> dict | None:
     raw = "".join(b.text for b in message.content if b.type == "text").strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
+        raw = raw.removeprefix("json")
         raw = raw.strip()
 
     try:
@@ -268,7 +267,7 @@ def main():
         print(f"→ {f.name}")
         try:
             result = extract(client, f)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 -- proof of concept: one bad file must not stop the batch
             print(f"  ! Failed: {e}")
             continue
         if not result:
@@ -301,7 +300,7 @@ def main():
     print(f"Line items extracted: {sum(len(r.get('line_items') or []) for r in results)}")
     print(f"Fields flagged      : {len(review)}  (see output/review_needed.txt)")
     print(f"Estimated API cost  : ${total_cost:.4f}")
-    print(f"Combined CSV        : output/extracted.csv")
+    print("Combined CSV        : output/extracted.csv")
     print(f"{'='*60}\n")
 
 
