@@ -375,6 +375,8 @@ def score_candidates(
     for item in catalog.items:
         desc_score = description_similarity(raw_description, item.description)
         sku_score = sku_similarity(raw_sku, item.sku)
+        left: str | None
+        right: str | None
         if sku_score > desc_score:
             score, matched_on, left, right = sku_score, "sku", raw_sku, item.sku
         else:
@@ -693,7 +695,8 @@ def match_document_lines(
         if result.matched:
             provenance[PROVENANCE_FIELD_MATCH] = result.provenance
             summary.lines_matched += 1
-            summary.by_method[result.method] = summary.by_method.get(result.method, 0) + 1
+            method = result.method or "unknown"
+            summary.by_method[method] = summary.by_method.get(method, 0) + 1
             if result.learned_rule_id is not None:
                 applied[result.learned_rule_id] = applied.get(result.learned_rule_id, 0) + 1
         else:

@@ -566,6 +566,8 @@ def _accept_attachment(
     """
     validation = file_types.validate_upload(attachment.content, attachment.filename)
     if not validation.ok:
+        # A failed validation always carries its catalog code (file_types).
+        assert validation.error_code is not None
         _insert_intake_rejection(
             session,
             tenant_id,
@@ -739,8 +741,10 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
         )
         ceiling_hold = intake_gate.hold_reason(session, tenant_id)
         strict = bool(tenant is not None and tenant["strict_sender_mode"])
-        sender_allowed = not strict or sender_is_allowed(
-            parsed.sender_email, list(tenant["sender_allowlist"] or [])
+        # `strict` is only ever true with a tenant row in hand.
+        sender_allowed = not strict or (
+            tenant is not None
+            and sender_is_allowed(parsed.sender_email, list(tenant["sender_allowlist"] or []))
         )
         decision = evaluate_email(
             num_attachments, auth, sender_known, unknown_sender_count, ceiling_hold, sender_allowed
@@ -786,6 +790,8 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
                 outcome = _accept_attachment(session, tenant_id, parsed, attachment)
                 attachment_outcomes.append(outcome)
                 if outcome.accepted:
+                    # An accepted attachment always has its document row.
+                    assert outcome.document_id is not None
                     any_accepted = True
                     pending_enqueues.append(outcome.document_id)
             result_outcome = "processed" if any_accepted else "rejected"

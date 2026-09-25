@@ -86,12 +86,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: apps/worker/requirements.lock.txt
       - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[dev,files]"
+      # Pinned, not ranges (H7): the worker's lockfile holds every core
+      # dependency, the `files` extras and the lint/type/test tools.
+      - run: pip install -r ../../apps/worker/requirements.lock.txt
+      - run: pip install --no-deps -e .
       - run: pip install pip-audit
       - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
         run: python "${{ github.workspace }}/scripts/ci/create_app_role.py"
       - run: ruff check .
+      - run: mypy docflow_core
       - name: Test (against the local Supabase stack, as docflow_app)
         run: pytest -v --junitxml=junit.xml
       - name: No unapproved skipped tests

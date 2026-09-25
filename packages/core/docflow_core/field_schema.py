@@ -146,10 +146,10 @@ class FieldSchema:
     def hidden_line_fields(self) -> tuple[str, ...]:
         return self.names("line", "hidden")
 
-    def overrides(self) -> dict[str, dict[str, str]]:
+    def overrides(self) -> dict[str, dict[str, State]]:
         """Only what differs from the defaults -- what gets stored, so a field
         added to DocFlow later starts at its own default for every tenant."""
-        out: dict[str, dict[str, str]] = {}
+        out: dict[str, dict[str, State]] = {}
         for level, defs in _BY_LEVEL.items():
             changed = {
                 d.name: self.state(level, d.name) for d in defs if self.state(level, d.name) != d.default

@@ -433,7 +433,7 @@ def extract_document(
             system=system,
             messages=[{"role": "user", "content": user_content}],
             output_config={"format": {"type": "json_schema", "schema": RESPONSE_SCHEMA}},
-        )
+        )  # type: ignore[call-overload]  # content blocks are plain dicts, not the SDK TypedDicts
     except anthropic.APIError as exc:
         logger.error("extraction_api_error model_id=%s error_type=%s", EXTRACTION_MODEL, type(exc).__name__)
         return ExtractionResult(
@@ -547,7 +547,7 @@ def read_buyer_header(client: anthropic.Anthropic, content: list[dict[str, Any]]
             system=ROUTING_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": content}],
             output_config={"format": {"type": "json_schema", "schema": ROUTING_SCHEMA}},
-        )
+        )  # type: ignore[call-overload]  # content blocks are plain dicts, not the SDK TypedDicts
     except anthropic.APIError as exc:
         logger.error("routing_api_error model_id=%s error_type=%s", ROUTING_MODEL, type(exc).__name__)
         return RoutingResult(

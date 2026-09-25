@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from docflow_core import email_outbox
 from docflow_core.constants import FIRST_WEEK_CHECKIN_DAYS, constants_in_effect
+from docflow_core.db import rowcount
 
 ORDER = (
     "tenant_created",
@@ -98,13 +99,13 @@ def advance(
     """Move onboarding_status forward to `to`, from any earlier state. Never
     backward. Returns whether it moved (and so whether an event was written)."""
     earlier = list(ORDER[: ORDER.index(to)])
-    moved = session.execute(
+    moved = rowcount(session.execute(
         text(
             "UPDATE tenants SET onboarding_status = :to, updated_at = now() "
             "WHERE id = :id AND onboarding_status = ANY(string_to_array(:earlier, ','))"
         ),
         {"to": to, "id": str(tenant_id), "earlier": ",".join(earlier)},
-    ).rowcount
+    ))
     if moved:
         _lifecycle_event(
             session, tenant_id, f"onboarding_{to}", actor_user_id=actor_user_id,

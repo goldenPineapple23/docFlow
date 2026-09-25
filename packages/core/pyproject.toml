@@ -35,11 +35,13 @@ files = [
     "pillow==12.3.0",
     "python-docx==1.2.0",
 ]
+# Exact pins, the same as apps/worker/requirements.lock.txt, which is what
+# the core CI job installs (H7).
 dev = [
-    "pytest>=8.2",
-    "ruff>=0.5",
-    "mypy>=1.10",
-    "python-dotenv>=1.0",
+    "pytest==9.1.1",
+    "ruff==0.16.8",
+    "mypy==2.3.1",
+    "python-dotenv==1.2.3",
 ]
 
 [tool.setuptools.packages.find]
@@ -58,6 +60,12 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+
+# Type-checked in CI since Phase 5.5 Stage 0 (review H7: core was never
+# type-checked; it had 24 errors). Same settings as the api and worker.
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
 
 # This lint config is new as of Phase 1 (packages/core had no [tool.ruff]
 # section before -- see DECISIONS.md). admin_data_access.py and db.py are

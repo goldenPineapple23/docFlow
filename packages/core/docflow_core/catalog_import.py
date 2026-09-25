@@ -31,6 +31,7 @@ match the founder's spreadsheet; failures are IMP-0xx.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 from collections import defaultdict
@@ -42,6 +43,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from docflow_core.buyers import find_near_duplicate_candidates, normalize_buyer_name
+from docflow_core.db import rowcount
 
 KINDS = ("catalog", "buyers")
 
@@ -175,8 +177,8 @@ class Finding:
     code: str
     severity: str  # 'blocker' | 'warning' | 'info'
     field: str | None
-    rows: list[int] = field(default_factory=list)
-    keys: list[str] = field(default_factory=list)  # SKUs / names, for non-row findings
+    rows: list[int] = dataclasses.field(default_factory=list)
+    keys: list[str] = dataclasses.field(default_factory=list)  # SKUs / names, for non-row findings
 
     def as_json(self) -> dict[str, Any]:
         return {
@@ -788,13 +790,13 @@ def commit_import(
             )
         # Section 7.15.2 Step 4: "Advance onboarding_status to catalog_loaded
         # on first commit." Only ever forward.
-        advanced = session.execute(
+        advanced = rowcount(session.execute(
             text(
                 "UPDATE tenants SET onboarding_status = 'catalog_loaded', updated_at = now() "
                 "WHERE id = :id AND onboarding_status = 'tenant_created'"
             ),
             {"id": str(tenant_id)},
-        ).rowcount
+        ))
         if advanced:
             session.execute(
                 text(
@@ -850,7 +852,7 @@ def commit_import(
                 diff.near_duplicates.get(record.row_number, []),
                 document_id=None,
             )
-        for record, buyer_id in diff.update:
+        for record, existing_buyer_id in diff.update:
             # Fill in what the list adds; never blank out what a buyer
             # record already has.
             session.execute(
@@ -864,7 +866,7 @@ def commit_import(
                     """
                 ),
                 {
-                    "id": buyer_id,
+                    "id": existing_buyer_id,
                     "account": record.values["external_account_number"],
                     "email": record.values["contact_email"],
                     "import_id": iid,

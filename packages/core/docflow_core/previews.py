@@ -153,7 +153,7 @@ def _extract_text(content: bytes, file_type: FileTypeName) -> str:
         from docx import Document
 
         document = Document(io.BytesIO(content))
-        lines = [p.text for p in document.paragraphs]
+        lines: list[str] = [p.text for p in document.paragraphs]
         # A Word PO's line items almost always live in a table, which
         # `paragraphs` skips entirely.
         for table in document.tables:
@@ -167,7 +167,7 @@ def _extract_text(content: bytes, file_type: FileTypeName) -> str:
         from openpyxl import load_workbook
 
         workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-        lines: list[str] = []
+        lines = []
         for sheet in workbook.worksheets:
             lines.append(f"--- {sheet.title} ---")
             for row in sheet.iter_rows(values_only=True):

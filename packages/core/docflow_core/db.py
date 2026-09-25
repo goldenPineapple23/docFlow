@@ -49,12 +49,12 @@ a separate, explicitly named, import-restricted module (Section 7.15.1).
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Any, Iterator, cast
 from uuid import UUID
 
 import psycopg
 from psycopg.types.json import JsonbBinaryDumper, JsonbDumper
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import CursorResult, Engine, Result, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 # psycopg3 doesn't know a bare Python dict/list should serialize as jsonb --
@@ -69,6 +69,14 @@ psycopg.adapters.register_dumper(list, JsonbBinaryDumper)
 from docflow_core.config import get_settings
 
 _engine: Engine | None = None
+
+
+def rowcount(result: Result[Any]) -> int:
+    """Rows affected by an INSERT/UPDATE/DELETE. `Session.execute` is typed as
+    returning `Result`, but a DML statement always returns a `CursorResult`,
+    which is what carries `rowcount`."""
+    return cast(CursorResult[Any], result).rowcount
+
 _SessionLocal: sessionmaker[Session] | None = None
 
 

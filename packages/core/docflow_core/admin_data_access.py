@@ -32,10 +32,10 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import text
+from sqlalchemy import RowMapping, text
 
 from docflow_core import deal_terms
-from docflow_core.db import platform_session
+from docflow_core.db import platform_session, rowcount
 
 logger = logging.getLogger(__name__)
 
@@ -701,7 +701,7 @@ def create_tenant(
                 except deal_terms.DealTermsError as exc:
                     raise ConsoleError(exc.code, exc.detail) from exc
                 tier_code = resolved.tier_code
-                tier = {"id": resolved.tier_id}
+                tier: dict[str, Any] | RowMapping | None = {"id": resolved.tier_id}
             else:
                 tier = session.execute(
                     text("SELECT id FROM tiers WHERE code = :code AND is_current"),
@@ -1213,7 +1213,7 @@ def acknowledge_alert(*, platform_admin_user_id: UUID, alert_id: UUID) -> bool:
             target_type="founder_alert",
             target_id=alert_id,
         )
-        return result.rowcount == 1
+        return rowcount(result) == 1
 
 
 def list_outbox(
@@ -1480,7 +1480,7 @@ def delete_tenant(
             result = session.execute(
                 text(f"DELETE FROM {table} WHERE tenant_id = :id"), {"id": str(tenant_id)}
             )
-            counts[table] = result.rowcount
+            counts[table] = rowcount(result)
         session.execute(
             text("UPDATE onboarding_intakes SET linked_tenant_id = NULL WHERE linked_tenant_id = :id"),
             {"id": str(tenant_id)},
