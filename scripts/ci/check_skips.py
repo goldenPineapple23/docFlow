@@ -17,6 +17,9 @@ where the test id is "<classname>::<name>" as JUnit records it, e.g.
 
 Stale approvals (listed, but the test ran) are reported, not failed, so that
 fixing an environment gap doesn't break the build; delete them when seen.
+
+It also lists failed tests as GitHub annotations (`::error::`), so a failure
+can be read from the run's summary page without opening the log.
 """
 
 import sys
@@ -54,6 +57,32 @@ def skipped_tests(junit_path: Path) -> list[tuple[str, str]]:
     return found
 
 
+def failed_tests(junit_path: Path) -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
+    for case in ET.parse(junit_path).iter("testcase"):
+        for tag in ("failure", "error"):
+            bad = case.find(tag)
+            if bad is not None:
+                message = (bad.get("message") or "").strip().splitlines()
+                first = message[0][:300] if message else tag
+                found.append((f"{case.get('classname', '')}::{case.get('name', '')}", first))
+                break
+    return found
+
+
+def annotate_failures(suite: str, failures: list[tuple[str, str]]) -> None:
+    """GitHub shows at most 10 error annotations per step, so group them."""
+    if not failures:
+        return
+    groups = 10
+    size = max(1, -(-len(failures) // groups))
+    for start in range(0, len(failures), size):
+        chunk = failures[start : start + size]
+        body = "%0A".join(f"{t} -- {m}".replace("%", "%25") for t, m in chunk)
+        title = f"{suite}: failed tests {start + 1}-{start + len(chunk)} of {len(failures)}"
+        print(f"::error title={title}::{body}")
+
+
 def main(argv: list[str]) -> int:
     if len(argv) not in (3, 4):
         print(__doc__, file=sys.stderr)
@@ -61,6 +90,7 @@ def main(argv: list[str]) -> int:
     suite, junit_path = argv[1], Path(argv[2])
     approvals_path = Path(argv[3]) if len(argv) == 4 else DEFAULT_APPROVALS
 
+    annotate_failures(suite, failed_tests(junit_path))
     approved = read_approvals(approvals_path, suite)
     skipped = skipped_tests(junit_path)
     unapproved = [(t, why) for t, why in skipped if t not in approved]
