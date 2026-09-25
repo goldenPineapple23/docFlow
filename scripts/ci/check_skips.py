@@ -97,7 +97,11 @@ def main(argv: list[str]) -> int:
     stale = sorted(approved - {t for t, _ in skipped})
 
     total = sum(1 for _ in ET.parse(junit_path).iter("testcase"))
-    print(f"[{suite}] {total} tests, {len(skipped)} skipped, {len(unapproved)} unapproved")
+    failed = len(failed_tests(junit_path))
+    summary = f"{total} tests, {failed} failed, {len(skipped)} skipped, {len(unapproved)} unapproved"
+    print(f"[{suite}] {summary}")
+    # Also as an annotation, so the counts are on the run page, not only in the log.
+    print(f"::notice title={suite} test counts::{summary}")
     for test_id in stale:
         print(f"  stale approval (test ran; remove it): {test_id}")
     for test_id, why in unapproved:

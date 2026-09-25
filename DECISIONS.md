@@ -1579,3 +1579,70 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Decision:** **Orders →** is the first link under "Catalog, customers and rules" on the tenant page, and the list shows **← Tenant**. Same page, same acting-as routes; nothing new behind it.
 
 **Related:** Section 7.15.1, 7.15.3; D-111, D-116.
+
+
+---
+
+# Phase 5.5 -- Remediation (docs/REVIEW-PHASE5.md, bucket (a))
+
+The founder inserted Phase 5.5 between Phase 5 and Phase 6 on 2026-09-25 and answered the review's five open questions. Each answer is recorded below (D-149 to D-153) as the founder gave it; D-148 is the CI database built on answer 5.
+
+
+## D-148 -- CI runs every Python suite against a local Supabase stack, and fails on any unapproved skip
+
+**Context:** review H7. CI ran pytest with no `DATABASE_URL`, so 348 of 391 API tests (every RLS and tenant-isolation test among them) skipped and CI still reported green. `packages/core` was never type-checked (24 mypy errors) and its CI job installed dependencies from version ranges.
+
+**Decision:**
+- The core, api and worker jobs start the **Supabase CLI local stack** (`supabase/config.toml`, CLI pinned to 2.118.0 via `supabase/setup-cli@v2.1.2`): Postgres 17 as on staging (17.6), the `auth` schema, the Supabase roles, public signup off. `supabase start` applies every file in `supabase/migrations/` in order as `postgres`, as the founder does by hand on staging.
+- `scripts/ci/create_app_role.py` then creates `docflow_app` exactly as SETUP.md Step 1.6 does, and asserts it has neither BYPASSRLS nor SUPERUSER nor CREATE on `public`. The suites connect as that role. A Redis service backs the queue. Only Postgres, the API gateway and Auth run; Storage, Realtime, Studio, Edge Functions and analytics are off.
+- `scripts/ci/check_skips.py` reads each suite's JUnit report and fails the job on any skipped test not listed in `.github/approved-skips.txt` with a reason. The list starts **empty**. The `live_api` tests are deselected, not skipped: Section 5 runs the golden fixture against its recorded response in CI and live at checkpoints.
+- The worker job installs LibreOffice so the `.doc` tests run rather than skip.
+- Core: `mypy docflow_core` runs in CI; the job installs the worker's lockfile (which pins every core dependency and the lint/type/test tools). The 24 errors were typing only and were fixed without behaviour change (`db.rowcount()` helper; duplicate `validation._is_blank` removed, review L5; `dataclasses.field` no longer shadowed; Optionals narrowed where the code already guaranteed a value).
+- The skip check also writes failed tests as GitHub annotations, so a failure can be read from the run page (and through the public API) without the log.
+- `packages/core/tests/test_ci_guards.py` fails if any Python job stops starting the database, stops connecting as `docflow_app`, or stops running the skip check, and requires a reason on every approved skip. Dropping the safety net therefore means editing a test as well as the workflow.
+- One test depended on staging's own data (`test_tier_versions` borrowed the founder's platform-admin row) and failed on the fresh database; it now creates its own inside the transaction it rolls back. That was the only one: 391 of 391 API tests pass on a database holding nothing but the migrations.
+
+**What CI still does not reproduce:** staging is reached through Supabase's transaction-mode pooler; CI connects to Postgres directly. The pooling defences (D-016) are therefore still proven only against staging. Supabase's pooler can be switched on in `config.toml` later if that gap matters.
+
+**Related:** Section 5 ("the full test suite", "merges to main are blocked on green"), Section 7.5; review H7; D-013, D-016, D-087.
+
+
+## D-149 -- No value is ever rounded between the document and the export (founder's answer 1)
+
+**Founder's rule:** no fixed scale; `NUMERIC(p,6)` only moves the silent-rounding cliff.
+- Document-derived numeric fields (unit_price, quantity, line_total, order_total, any numeric custom field): unconstrained `NUMERIC` in Postgres, `Decimal` in Python, strings in JSON and TypeScript, preserved exactly through the working copy, `approved_json` and every export.
+- More than 6 decimal places raises a catalog-coded **warning** ("unusual precision, please confirm"): warn, never round, never reject.
+- UI accepts and shows exactly what was printed or typed: no numeric coercion, no JS `Number`, no `toFixed`.
+- Exports write the exact decimal string. Where a format (e.g. IIF) can't take the precision, a catalog-coded warning at export time, and the format's documented limit goes to the founder to decide.
+- `tiers` prices stay fixed-scale money (DocFlow's own prices, not document data).
+- Staging backfill: model-extracted values restored from `raw_json` where never human-edited; list every document whose `approved_json` or exports differ from what was printed, and every human-edited value already rounded (unrecoverable).
+
+**Related:** review C1; Section 7.1, 7.4, 10. Built in Phase 5.5 Stage 1.
+
+
+## D-150 -- Worker hosting is not decided (founder's answer 2)
+
+Options are presented in Phase 5.5 Stage 3 (parsing isolation enforced by the platform or OS, with cost and operational burden), then the build stops for the founder's choice.
+
+**Related:** review H5, H6; D-003.
+
+
+## D-151 -- Destructive Console actions need MFA enrolment and a fresh MFA challenge (founder's answer 3)
+
+Every `platform_admins` account must enrol TOTP MFA, and hard delete, clear-quarantine, cancel-tenant, intake-address rotation and any other destructive Console action require an MFA challenge passed within the last 5 minutes. Supabase Auth supports TOTP MFA (`auth.mfa.totp` in its configuration); if a gap turns up while building, the founder hears about it before any workaround is built.
+
+**Related:** Section 7.15.1; review H9. Built in Phase 5.5 Stage 2.
+
+
+## D-152 -- Matching speed and per-tenant fairness are fixed in Phase 5.5, measured (founder's answer 4)
+
+Not left for Phase 6's load test to discover. Every performance claim carries its command, dataset size and p50/p95.
+
+**Related:** Section 5.1; review H4; D-063. Stages 3 (fairness) and 4 (matching).
+
+
+## D-153 -- CI gets a real database, preferably the Supabase CLI local stack (founder's answer 5)
+
+Target: zero API tests skipped in CI. Built as D-148.
+
+**Related:** review H7.
