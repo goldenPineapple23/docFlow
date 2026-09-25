@@ -1459,3 +1459,74 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 - **Why it jumped:** every page draws its own header and asked "who is signed in?" from scratch, so each click began with no name; the fallback (the larger logo) was a different width, and the links moved twice. The answer is now remembered for the life of the tab and refreshed quietly on each page, so the name and links are there immediately; on the very first load the header holds the name's space instead of showing the logo. Sign-out forgets it, so a second person on the same browser never sees the first one's company. A browser test delays the answer by 1.5 s on the second page and checks the name is there at once.
 
 **Related:** Section 7.12; D-090, D-128.
+
+
+## D-141 -- Approved-example prompting: how the buyer is found, what an example is, and who switches it on
+
+**Context:** Slice 5.10, the last of Phase 5. Section 7.13 adds approved-example prompting to the MVP: for an order from buyer X, the extraction prompt may carry up to 3 of X's most recent human-approved orders from the same tenant, as text plus approved values. The features document and Master Spec do not list it yet (Section 3 says treat it as in scope and note the pending update, which is already listed under "Known open items"). Founder decisions, 2026-09-25: **build the header-only routing read** (Haiku) and **no second pass** in this slice.
+
+**Decisions:**
+- **Off unless the founder switches it on**, per tenant (`tenants.example_prompting_enabled`, from 0001). Console → tenant → Example prompting. Switching on needs the founder to tick "I ran the live golden check with examples and it passed" (EXM-001 otherwise); switching off needs nothing and applies from the next order. Both directions write `admin_actions` and a `tenant_lifecycle_events` row with the constants in effect. With the flag off nothing below runs: no query and no routing call, and the request is exactly the one sent before this slice (same system prompt, same prompt hash).
+- **Finding the buyer before extraction**, cheapest first:
+  1. The intake email's sender is a buyer's own contact email.
+  2. Otherwise the sender's company domain belongs to exactly one buyer. Free-mail domains never count.
+  3. Otherwise, and only if at least one buyer in the tenant already has enough history, one `claude-haiku-4-5` call reads the header (text cut to 3,000 characters; a scanned page goes as it is) and returns the buyer's name and email with a confidence. These are matched read-only in the order Section 7.6 uses: email, exact normalized name, then a founder-made alias. The call creates nothing, moves no rule counter, and its answer is never stored as a value. Below 0.80 confidence, or if the read suspects an injection, no buyer is known.
+  - **Not used:** "whoever sent this buyer's earlier orders". A tenant's own staff forwarding orders for several buyers would make that lend one buyer's examples to another.
+  - The model is a routing pass, which Section 3 allows a cheaper model for. Verified against the Anthropic models table on 2026-09-25: `claude-haiku-4-5`, $1 / $5 per million tokens, structured outputs supported.
+- **The gate:** the buyer needs at least 10 approved or exported orders (`EXAMPLE_MIN_APPROVED_DOCS`). Test-batch orders count; the founder approved them in the normal review screen.
+- **An example:**
+  - The approved snapshot reshaped into the response schema: printed values only. Catalog matches, internal IDs and hashes are left out.
+  - Plus the text the parser sent the model for that order, cut to 6,000 characters (about 1,500 tokens, `EXAMPLE_TEXT_CHAR_BUDGET`).
+  - Newest approval first, at most 3, never the order being read, and never from another tenant. Every query is tenant-scoped with an explicit tenant filter as well, and the text file's path is checked for the tenant prefix.
+  - **That text is now kept** (`documents.extracted_text_path`, migration `0025`), for any order the worker read as text. An order read visually (a scan or photo) keeps none and can never be an example, which is how "never the raw file, never an image" is enforced by construction. Orders approved before this slice have no stored text, so they count towards the 10 but can't be shown. The Console shows both numbers.
+- **The prompt:**
+  - Examples go before the document, each in `<past_example>` with `<past_document_text>` and `<past_correct_extraction>`.
+  - An addendum to the system prompt, present only when examples are, says they describe other documents, are never a source of values, and are data rather than instructions (injections in them set `injection_suspected` like any other).
+  - Example text and values cannot open or close any of DocFlow's fences; such tags are rewritten to square brackets.
+  - The prompt hash covers the prompt actually sent, so an order read with examples is distinguishable in `documents.prompt_hash`.
+- **Cost, logged separately (7.13):** `extraction_runs.example_input_tokens` is measured with the token-counting endpoint. It is best effort: a failure to measure leaves it NULL and never fails the order, and `input_tokens` is exact either way. On the golden fixture the overhead is about 2,570 tokens, roughly $0.005 per order. The routing read is its own run. The order's `est_cost_usd` includes it, so cost per document and margin on the dashboard stay honest. The circuit breaker counts everything.
+- **The reviewer sees** "Read with N earlier approved orders from this customer as examples…" on the order. It is a count only; the examples are other orders.
+- **Second pass not built** (founder): a low-confidence order is not re-read with examples once its buyer is known. Section 7.13 allows it but doesn't require it; with the header read in place few orders would qualify.
+
+**Tests:**
+- The contamination test and the golden fixture with examples run against recorded responses in CI (captured live by `scripts/record_example_fixtures.py`, which refuses to record a wrong answer) and live with `-m live_api`. The contamination document has no payment terms and no note while every example has both; they came back null. Both passed live on the first run.
+- Database tests cover tenant isolation (a same-named buyer in another tenant), approved-only, the threshold, newest first, the sender rules, the read-only routing match, the switch (404 to a tenant owner, EXM-001, both directions logged) and the breaker reading the new runs.
+- `scripts/seed_example_history.py` gives a buyer 10 approved orders through the real worker and `approve_document`, for the Phase 5 exit drive.
+
+**Related:** Section 3, 7.1, 7.2, 7.5, 7.6, 7.9, 7.10, 7.13, 10; D-057, D-081, D-120, D-142.
+
+
+## D-142 -- Every model call is an `extraction_runs` row; the daily cost breaker was reading an empty table
+
+**Context:** Found while planning 5.10. `extraction_runs` (0004, "one row per model call") existed, and two things read it: the per-tenant daily cost circuit breaker (`usage.daily_ai_spend`, D-126) and the Console health strip's model-call and error counts. But nothing wrote to it. The worker recorded cost on `documents` only. So the $50/day breaker could never trip on real spend, and the health strip always showed 0 model calls. Its test inserted runs by hand, which is why it passed.
+
+**Decision:** the worker records every call in the same transaction as the document's result: the routing read first (`run_kind = 'buyer_routing'`, migration 0025), then the extraction, succeeded or failed. A malformed response still records its tokens and cost, because it was paid for. `documents.current_extraction_run_id` points at the run the working copy came from, as 0004 intended. Model output is stored in `raw_response`, never logged.
+
+**Consequence:** migration 0025 must be applied before the worker runs this code, because run recording is part of the result's transaction. Test cleanup that deletes runs before documents now clears the pointer first; the tenant hard-delete relies on the cascade from `documents` and was already safe.
+
+**Found on the real-stack drive:** the routing run and the extraction run are written in one transaction, so with the column default `now()` they shared a `created_at` and sorted extraction first. They now take `clock_timestamp()`, the same fix as D-123's lifecycle events, with a regression test.
+
+**Lesson:** a guard that is tested by writing its input by hand proves the guard, not that anything feeds it. Check that the writer exists too.
+
+**Related:** Section 7.9, 7.16.2, 9; D-057, D-121, D-126, D-141.
+
+
+## D-143 -- The tenant page's Audit tab
+
+**Context:** Section 7.15.3 lists "Audit" among the tenant page's tabs. Found missing while writing the 5.10 walkthrough: every lifecycle event and Console action was recorded, but no screen listed them for one tenant. Founder, 2026-09-25: build it in this slice.
+
+**Decisions:**
+- **Console → tenant → Audit** (`GET /admin/tenants/{id}/audit`) is one read of two tables, newest first and paged 50 at a time:
+  - `tenant_lifecycle_events`: creation, onboarding steps, plan changes, cancel/suspend/reactivate, address rotation, settings such as example prompting, user invited/removed.
+  - `admin_actions` for that tenant: every Console action.
+  - Each row shows when, what (plain English, with any unknown name shown as itself so nothing is hidden), who, and whether it was DocFlow support, plus the payload as text.
+- **Where it lives:** in `admin_data_access`, the only layer allowed to read `admin_actions` across tenants (7.15.1). Reading it is itself one `admin_actions` row, written first. 404 to anyone but a platform admin, and for a tenant that doesn't exist.
+- **Page views are hidden by default** (`read`, `acting_as_read`, `quarantine_read`). They are audited like every Console request, but they would bury the changes. A checkbox shows them.
+- **Not included:** a reviewer's edits to orders. Those are on each order's own trail (review actions), which already shows DocFlow-support edits.
+- Payloads are IDs, flags and counts by construction, never document data (7.10), and are rendered as text only (7.12).
+
+**Tests:** `apps/api/tests/test_tenant_audit_api.py` (404s, order, views hidden and shown, the read audited, paging) and a browser test that includes text that looks like HTML.
+
+**Note:** example prompting was switched on for Acme Test Prospect during the 5.10 drive by a script run under the founder's user id, so the trail shows it as the founder's action.
+
+**Related:** Section 7.10, 7.12, 7.15.1, 7.15.3; D-111, D-141.

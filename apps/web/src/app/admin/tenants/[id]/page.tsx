@@ -141,6 +141,18 @@ export default function TenantPage({ params }: { params: Promise<{ id: string }>
             </Link>{" "}
             <span className="text-gray-600">what this customer is checked on</span>
           </li>
+          <li>
+            <Link href={`/admin/tenants/${id}/examples`} className="font-medium text-blue-700 hover:underline">
+              Example prompting →
+            </Link>{" "}
+            <span className="text-gray-600">past approved orders shown to the model</span>
+          </li>
+          <li>
+            <Link href={`/admin/tenants/${id}/audit`} className="font-medium text-blue-700 hover:underline">
+              Audit →
+            </Link>{" "}
+            <span className="text-gray-600">every change to this account, and who made it</span>
+          </li>
         </ul>
       </section>
 

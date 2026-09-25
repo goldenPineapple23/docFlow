@@ -350,6 +350,18 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
         </div>
       ) : null}
 
+      {detail.document.examples_used > 0 ? (
+        <p
+          data-testid="examples-note"
+          className="mt-3 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-700"
+        >
+          Read with {detail.document.examples_used} earlier approved{" "}
+          {detail.document.examples_used === 1 ? "order" : "orders"} from this customer as examples
+          of their layout. Every value still comes from this document alone; check it against the
+          original as usual.
+        </p>
+      ) : null}
+
       {banner ? <div className="mt-3"><BannerView banner={banner} /></div> : null}
 
       {rejecting ? (

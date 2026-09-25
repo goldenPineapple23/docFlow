@@ -581,6 +581,22 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="founder",
     ),
+    # ── EXM-0xx · approved-example prompting (slice 5.10, D-141) ────────────
+    "EXM-001": ErrorCatalogEntry(
+        code="EXM-001",
+        title="Confirm the live golden check first",
+        message=(
+            "Example prompting changes what the extraction model is sent, so it may only be "
+            "switched on after a live golden-fixture run with examples has passed (Section "
+            "7.13). The confirmation wasn't ticked, so nothing was changed."
+        ),
+        action=(
+            "Run `pytest -m live_api tests/test_example_prompting_golden.py` in apps/api; when "
+            "it passes, tick the confirmation and switch it on again."
+        ),
+        severity="warning",
+        audience="founder",
+    ),
     # ── SYS-0xx · DocFlow itself failed (slice 5.9, D-136) ──────────────────
     "SYS-001": ErrorCatalogEntry(
         code="SYS-001",

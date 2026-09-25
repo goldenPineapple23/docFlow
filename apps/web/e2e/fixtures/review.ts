@@ -27,6 +27,7 @@ export function detail(overrides: Record<string, unknown> = {}) {
       duplicate_of_document_id: null,
       is_possible_change_order: false,
       change_order_of_document_id: null,
+      examples_used: 0,
     },
     header: {
       po_number: "BCH-2291",

@@ -1,0 +1,20 @@
+{
+  "_comment": "Hand-derived known-good values for contamination_po.txt (Section 7.13 contamination test). payment_terms and notes are null because the document does not print them -- every past example does.",
+  "header": {
+    "po_number": "ATB-7781",
+    "order_date": "2026-04-02",
+    "requested_delivery_date": "2026-04-09",
+    "buyer_name": "Acme Test Bakery Co",
+    "buyer_contact_email": "purchasing@acmetestbakery.example",
+    "ship_to_address": "Acme Test Bakery Co, Loading Dock 3, 88 Test Mill Road, Springfield, IL 62704",
+    "payment_terms": null,
+    "order_total": "751.20",
+    "currency": "CAD",
+    "notes": null
+  },
+  "line_items": [
+    { "line_number": 1, "sku": "FL-2001", "description": "Bread Flour 50lb", "quantity": "10", "unit": "BAG", "unit_price": "31.20", "line_total": "312.00" },
+    { "line_number": 2, "sku": "SG-110", "description": "Cane Sugar 25lb", "quantity": "8", "unit": "BAG", "unit_price": "18.75", "line_total": "150.00" },
+    { "line_number": 3, "sku": "BT-500", "description": "Unsalted Butter 36ct", "quantity": "3", "unit": "CS", "unit_price": "96.40", "line_total": "289.20" }
+  ]
+}

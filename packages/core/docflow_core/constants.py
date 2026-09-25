@@ -63,6 +63,22 @@ DAILY_AI_COST_CEILING_USD = Decimal("50")
 # pricing can't quietly make the dollar figure meaningless.
 DAILY_TOKEN_CEILING = 20_000_000
 
+# ── Approved-example prompting (Section 7.13; slice 5.10, D-141) ────────────
+# A buyer needs this many approved (or exported) orders before any of them is
+# ever shown to the model as an example. The build prompt's number.
+EXAMPLE_MIN_APPROVED_DOCS = 10
+# Never more than this many examples in one prompt (Section 10: "more than 3").
+EXAMPLE_MAX_PER_PROMPT = 3
+# Each example's document text is cut to this many characters (~1,500 tokens)
+# before it goes in the prompt -- "truncated to a fixed token budget".
+EXAMPLE_TEXT_CHAR_BUDGET = 6000
+# The routing pass reads only the top of a text document: the buyer's name is
+# in the header, never on page 40.
+ROUTING_TEXT_CHAR_BUDGET = 3000
+# The routing pass's buyer must be at least this certain, the same bar as the
+# review threshold (Section 3: confidence threshold default 0.80).
+ROUTING_MIN_CONFIDENCE = 0.80
+
 # ── Billing (slice 5.3, D-113; trial delay D-125) ───────────────────────────
 # Stripe invoices go to the customer with this many days to pay (Net 15).
 # Not named by the build prompt; a founder decision, kept here with the rest.

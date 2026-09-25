@@ -126,6 +126,9 @@ export type DocumentDetail = {
     duplicate_of_document_id: string | null;
     is_possible_change_order: boolean;
     change_order_of_document_id: string | null;
+    // Approved past orders from this customer shown to the model as examples
+    // (Section 7.13). 0 when the feature is off or none qualified.
+    examples_used: number;
   };
   header: DocumentHeader;
   lines: DocumentLine[];

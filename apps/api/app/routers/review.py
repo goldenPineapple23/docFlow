@@ -264,7 +264,13 @@ def get_document(
                 "is_possible_duplicate, duplicate_of_document_id, "
                 "is_possible_change_order, change_order_of_document_id, "
                 "approved_at, approved_by, approved_snapshot_hash, review_started_at, "
-                "field_schema_version "
+                "field_schema_version, "
+                # How many approved past orders the model was shown (Section
+                # 7.13: a reviewer can see why a value may have been read the
+                # way it was). A count only; the examples themselves are
+                # other orders and stay on their own screens.
+                "(SELECT jsonb_array_length(r.examples_used) FROM extraction_runs r "
+                " WHERE r.id = documents.current_extraction_run_id) AS examples_used "
                 "FROM documents WHERE id = :id AND deleted_at IS NULL"
             ),
             {"id": str(document_id)},
@@ -335,6 +341,7 @@ def get_document(
             "duplicate_of_document_id": _uuid(document["duplicate_of_document_id"]),
             "is_possible_change_order": document["is_possible_change_order"],
             "change_order_of_document_id": _uuid(document["change_order_of_document_id"]),
+            "examples_used": document["examples_used"] or 0,
         },
         "header": _header_payload(header),
         "lines": [_line_payload(line) for line in lines],

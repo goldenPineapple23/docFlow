@@ -1,0 +1,19 @@
+PURCHASE ORDER
+
+Acme Test Bakery Co
+88 Test Mill Road, Springfield, IL 62704
+purchasing@acmetestbakery.example
+
+PO Number: ATB-7781
+Order Date: 2026-04-02
+Deliver By: 2026-04-09
+Currency: CAD
+
+Ship To: Acme Test Bakery Co, Loading Dock 3, 88 Test Mill Road, Springfield, IL 62704
+
+ITEM        DESCRIPTION                     QTY   UOM   UNIT PRICE   TOTAL
+FL-2001     Bread Flour 50lb                 10    BAG     31.20      312.00
+SG-110      Cane Sugar 25lb                   8    BAG     18.75      150.00
+BT-500      Unsalted Butter 36ct              3    CS      96.40      289.20
+
+                                             ORDER TOTAL:          751.20

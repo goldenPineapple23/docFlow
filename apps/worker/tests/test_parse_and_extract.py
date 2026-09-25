@@ -202,6 +202,14 @@ def test_overall_confidence_handles_empty():
 # ── matching is wired in, and cannot cost the document its extraction ───────
 
 
+def _no_examples(monkeypatch, mod):
+    """The example planner reads the database; these tests have none. A
+    tenant with the feature off gets exactly this plan."""
+    from docflow_core.example_prompting import ExamplePlan
+
+    monkeypatch.setattr(mod.example_prompting, "plan", lambda *args, **kwargs: ExamplePlan())
+
+
 def _drive_successful_task(monkeypatch, *, buyer_id, matcher):
     """
     Runs `parse_and_extract` end to end over a plain-text PO with the model
@@ -252,7 +260,9 @@ def _drive_successful_task(monkeypatch, *, buyer_id, matcher):
     monkeypatch.setattr(mod, "tenant_session", fake_tenant_session)
     monkeypatch.setattr(mod, "read_file", lambda path: b"PURCHASE ORDER\nPO Number: BCH-2291\n")
     monkeypatch.setattr(mod.anthropic, "Anthropic", lambda api_key=None: object())
-    monkeypatch.setattr(mod, "extract_document", lambda client, content: result)
+    monkeypatch.setattr(mod, "extract_document", lambda client, content, **kwargs: result)
+    _no_examples(monkeypatch, mod)
+    monkeypatch.setattr(mod, "save_file", lambda tenant_id, name, data: f"tenants/{tenant_id}/uploads/x.txt")
     monkeypatch.setattr(
         mod,
         "identify_and_link_buyer",
@@ -393,8 +403,9 @@ def test_a_page_read_visually_is_named_in_the_preview_not_dropped():
 
 def _drive_task_over(monkeypatch, filename: str, content: bytes, *, save_file):
     import contextlib
-    from types import SimpleNamespace
     from uuid import uuid4
+
+    from docflow_core.extraction import ExtractionResult
 
     import app.tasks.parse_and_extract as mod
 
@@ -406,14 +417,15 @@ def _drive_task_over(monkeypatch, filename: str, content: bytes, *, save_file):
     def fake_tenant_session(tenant_id):
         yield session
 
-    failed = SimpleNamespace(
+    failed = ExtractionResult(
         ok=False, model_id="m", prompt_hash="h", schema_version="s", raw_response={}
     )
     monkeypatch.setattr(mod, "tenant_session", fake_tenant_session)
     monkeypatch.setattr(mod, "read_file", lambda path: content)
     monkeypatch.setattr(mod, "save_file", save_file)
     monkeypatch.setattr(mod.anthropic, "Anthropic", lambda api_key=None: object())
-    monkeypatch.setattr(mod, "extract_document", lambda client, blocks: failed)
+    monkeypatch.setattr(mod, "extract_document", lambda client, blocks, **kwargs: failed)
+    _no_examples(monkeypatch, mod)
 
     tenant_id = uuid4()
     mod.parse_and_extract(str(tenant_id), str(uuid4()))
@@ -436,7 +448,8 @@ def test_the_task_stores_a_preview_under_the_tenant_even_when_extraction_fails(m
 
     session, tenant_id = _drive_task_over(monkeypatch, "po.docx", fb.build_docx(), save_file=fake_save)
 
-    assert len(saved) == 1 and saved[0][0] == tenant_id
+    previews_saved = [entry for entry in saved if entry[1].startswith("preview")]
+    assert len(previews_saved) == 1 and previews_saved[0][0] == tenant_id
     updates = [params for sql, params in session.statements if "preview_storage_path" in sql]
     assert updates == [
         {
@@ -459,3 +472,122 @@ def test_a_preview_failure_never_touches_the_document(monkeypatch):
     assert not [sql for sql, _ in session.statements if "preview_storage_path" in sql]
     # The run still reached the model call and recorded its outcome.
     assert [params for sql, params in session.statements if params.get("model_id") == "m"]
+
+
+# ── Section 7.13: the text an example needs, and the runs it costs (D-141/142) ──
+
+
+def test_the_text_sent_to_the_model_is_kept_for_a_text_document(monkeypatch):
+    from tests import fixture_builders as fb
+
+    saved: list[tuple] = []
+
+    def fake_save(tenant_id, name, data):
+        saved.append((tenant_id, name, data))
+        return f"tenants/{tenant_id}/uploads/{name}"
+
+    session, tenant_id = _drive_task_over(monkeypatch, "po.docx", fb.build_docx(), save_file=fake_save)
+
+    kept = [entry for entry in saved if entry[1] == "extracted.txt"]
+    assert len(kept) == 1 and kept[0][0] == tenant_id
+    assert b"CF-1001" in kept[0][2]
+    updates = [params for sql, params in session.statements if "extracted_text_path" in sql]
+    assert updates and updates[0]["path"] == f"tenants/{tenant_id}/uploads/extracted.txt"
+
+
+def test_a_document_read_visually_keeps_no_text_and_can_never_be_an_example(monkeypatch):
+    """An example is never a file or an image (Section 7.13, Section 10)."""
+    from tests import fixture_builders as fb
+
+    saved: list[tuple] = []
+
+    def fake_save(tenant_id, name, data):
+        saved.append((tenant_id, name, data))
+        return f"tenants/{tenant_id}/uploads/{name}"
+
+    session, _ = _drive_task_over(monkeypatch, "fax.tif", fb.build_tiff(), save_file=fake_save)
+
+    assert not [entry for entry in saved if entry[1] == "extracted.txt"]
+    assert not [sql for sql, _ in session.statements if "extracted_text_path" in sql]
+
+
+def test_a_failed_extraction_is_still_recorded_as_a_model_run(monkeypatch):
+    """The daily cost breaker reads extraction_runs (Section 7.9); a call that
+    failed still happened and must be there."""
+    from tests import fixture_builders as fb
+
+    session, _ = _drive_task_over(
+        monkeypatch, "po.docx", fb.build_docx(), save_file=lambda t, n, d: f"tenants/{t}/uploads/{n}"
+    )
+
+    runs = [params for sql, params in session.statements if "INSERT INTO extraction_runs" in sql]
+    assert len(runs) == 1
+    assert runs[0]["run_kind"] == "extraction" and runs[0]["succeeded"] is False
+
+
+def test_a_successful_extraction_records_its_run_and_points_the_document_at_it(monkeypatch):
+    session = _drive_successful_task(monkeypatch, buyer_id=None, matcher=lambda *a, **k: _NoMatches())
+
+    runs = [params for sql, params in session.statements if "INSERT INTO extraction_runs" in sql]
+    assert len(runs) == 1 and runs[0]["succeeded"] is True and runs[0]["examples_used"] == "[]"
+    updates = [params for sql, params in session.statements if "current_extraction_run_id" in sql]
+    assert updates and updates[0]["run_id"] == runs[0]["id"]
+
+
+def test_the_routing_read_is_its_own_run_and_its_cost_is_part_of_the_document(monkeypatch):
+    from docflow_core.example_prompting import ExamplePlan
+    from docflow_core.extraction import RoutingResult
+
+    import app.tasks.parse_and_extract as mod
+
+    routing = RoutingResult(
+        ok=True, model_id="routing-model", prompt_hash="r", schema_version="routing",
+        raw_response={}, input_tokens=900, output_tokens=40, est_cost_usd=Decimal("0.0011"),
+    )
+    captured = {}
+
+    def fake_extract(client, content, **kwargs):
+        captured.update(kwargs)
+        from docflow_core.extraction import ExtractionResult
+
+        return ExtractionResult(
+            ok=False, model_id="m", prompt_hash="h", schema_version="s", raw_response={},
+            est_cost_usd=Decimal("0.0100"),
+        )
+
+    from tests import fixture_builders as fb
+
+    session, _ = _drive_task_over(
+        monkeypatch, "po.docx", fb.build_docx(), save_file=lambda t, n, d: f"tenants/{t}/uploads/{n}"
+    )
+    # Re-drive with a routing plan in place.
+    monkeypatch.setattr(mod.example_prompting, "plan", lambda *a, **k: ExamplePlan(routing=routing))
+    monkeypatch.setattr(mod, "extract_document", fake_extract)
+    session.statements.clear()
+    from uuid import uuid4
+
+    mod.parse_and_extract(str(uuid4()), str(uuid4()))
+
+    runs = [params for sql, params in session.statements if "INSERT INTO extraction_runs" in sql]
+    assert [r["run_kind"] for r in runs] == ["buyer_routing", "extraction"]
+    assert captured["examples"] == []
+    costs = [params["est_cost_usd"] for sql, params in session.statements if "status = 'failed'" in sql]
+    assert costs == ["0.0111"]
+
+
+def test_a_planning_failure_means_no_examples_never_a_lost_document(monkeypatch):
+    from uuid import uuid4
+
+    import app.tasks.parse_and_extract as mod
+
+    def broken_plan(*args, **kwargs):
+        raise RuntimeError("database away")
+
+    monkeypatch.setattr(mod.example_prompting, "plan", broken_plan)
+    plan = mod._plan_examples(object(), uuid4(), uuid4(), None, [])
+    assert plan.examples == [] and plan.outcome == "planning_failed"
+
+
+class _NoMatches:
+    lines_considered = 0
+    lines_matched = 0

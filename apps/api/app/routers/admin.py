@@ -27,6 +27,7 @@ from docflow_core import (
     buyer_merge,
     catalog_import,
     deal_terms,
+    example_prompting,
     external_services,
     field_schema,
     file_types,
@@ -53,7 +54,7 @@ from docflow_core.db import tenant_session
 from docflow_core.errors import get_error
 from docflow_core.external_services import ExternalServiceError
 from docflow_core.storage import read_file, save_file
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, EmailStr, Field
 
 from app.actor import Actor
@@ -1236,6 +1237,77 @@ def put_field_schema(
             else 0
         )
     return {"schema": schema.as_dict(), "rechecked_documents": rechecked}
+
+
+# ── Tenant audit trail (Section 7.15.3 "Audit" tab; D-143) ──────────────────
+
+
+@router.get("/tenants/{tenant_id}/audit")
+def get_tenant_audit(
+    tenant_id: UUID,
+    include_views: bool = False,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    """Lifecycle events and Console actions for one tenant, newest first.
+    Read-only; the read itself is audited (written first, in the data layer)."""
+    result = admin_data_access.tenant_audit(
+        platform_admin_user_id=_admin_id(identity),
+        tenant_id=tenant_id,
+        include_views=include_views,
+        limit=limit,
+        offset=offset,
+    )
+    if result is None:
+        raise HTTPException(status_code=404)
+    return result
+
+
+# ── Approved-example prompting (slice 5.10; Section 7.13, D-141) ────────────
+
+
+class ExamplePromptingRequest(BaseModel):
+    enabled: bool
+    # 7.13: switched on "after a live golden run passes with the feature
+    # enabled" -- the founder confirms that they ran it (EXM-001 otherwise).
+    golden_run_confirmed: bool = False
+
+
+@router.get("/tenants/{tenant_id}/example-prompting")
+def get_example_prompting(
+    tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
+) -> dict:
+    _console_act(identity, tenant_id, "read", target_type="example_prompting")
+    with tenant_session(tenant_id) as session:
+        return example_prompting.overview(session, tenant_id)
+
+
+@router.put("/tenants/{tenant_id}/example-prompting")
+def put_example_prompting(
+    tenant_id: UUID,
+    body: ExamplePromptingRequest,
+    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+) -> dict:
+    admin_id = _console_act(
+        identity,
+        tenant_id,
+        "example_prompting_set",
+        target_type="tenant",
+        target_id=tenant_id,
+        payload={"enabled": body.enabled, "golden_run_confirmed": body.golden_run_confirmed},
+    )
+    with tenant_session(tenant_id) as session:
+        try:
+            return example_prompting.set_enabled(
+                session,
+                tenant_id,
+                enabled=body.enabled,
+                golden_run_confirmed=body.golden_run_confirmed,
+                actor_user_id=admin_id,
+            )
+        except example_prompting.ExamplePromptingError as exc:
+            raise catalog_error(exc.code, status_code=422) from exc
 
 
 # ── Dashboard (Section 7.15.3; slice 5.5, D-121) ────────────────────────────

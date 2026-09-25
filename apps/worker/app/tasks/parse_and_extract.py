@@ -28,12 +28,21 @@ from io import BytesIO
 from uuid import UUID, uuid4
 
 import anthropic
-from docflow_core import field_schema, file_types, previews, review_digest
+from docflow_core import (
+    example_prompting,
+    field_schema,
+    file_types,
+    model_runs,
+    previews,
+    review_digest,
+)
 from docflow_core.buyers import identify_and_link_buyer
 from docflow_core.config import get_settings
 from docflow_core.db import tenant_session
 from docflow_core.duplicates import detect_document_relationships
+from docflow_core.example_prompting import ExamplePlan
 from docflow_core.extraction import (
+    ExtractionResult,
     build_text_content,
     extract_document,
     wrap_document_content,
@@ -43,6 +52,7 @@ from docflow_core.matching import match_document_lines
 from docflow_core.storage import read_file, save_file
 from docflow_core.validation import validate_document
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
 from app.conversion import ConversionError, PreparedArtifact, format_cell_value, prepare_artifacts
@@ -360,6 +370,91 @@ def _store_preview(
         logger.error("preview_failed document_id=%s error_type=%s", document_id, type(exc).__name__)
 
 
+def _store_extracted_text(tenant_id: UUID, document_id: UUID, parts: list[dict]) -> None:
+    """
+    Keep the text this task sent the model, so the order can later be shown
+    to the model as a past example (Section 7.13: "the same extracted text
+    the parser produced"). Only when every part is text: a document read
+    visually has no text of its own and can never be an example -- an example
+    is never a file or an image. Best effort, like the preview: a document
+    whose text couldn't be kept reviews and exports exactly the same.
+    """
+    if not parts or any(part["type"] != "text" for part in parts):
+        return
+    body = "\n\n".join(part["text"] for part in parts).strip()
+    if not body:
+        return
+    try:
+        path = save_file(tenant_id, "extracted.txt", body.encode("utf-8"))
+        with tenant_session(tenant_id) as session:
+            session.execute(
+                text("UPDATE documents SET extracted_text_path = :path WHERE id = :id"),
+                {"id": str(document_id), "path": path},
+            )
+    except Exception as exc:  # noqa: BLE001 -- see the docstring
+        logger.error(
+            "extracted_text_store_failed document_id=%s error_type=%s", document_id, type(exc).__name__
+        )
+
+
+def _plan_examples(
+    client: anthropic.Anthropic,
+    tenant_id: UUID,
+    document_id: UUID,
+    sender_email: str | None,
+    parts: list[dict],
+) -> ExamplePlan:
+    """
+    Approved-example prompting (Section 7.13). Any failure here means "no
+    examples", which is exactly how a tenant with the feature off is read --
+    the feature must never cost a document its extraction.
+    """
+    try:
+        plan = example_prompting.plan(
+            client,
+            tenant_id,
+            document_id,
+            sender_email=sender_email,
+            parts=parts,
+            session_factory=tenant_session,
+        )
+    except Exception as exc:  # noqa: BLE001 -- see the docstring
+        logger.error("example_planning_failed document_id=%s error_type=%s", document_id, type(exc).__name__)
+        return ExamplePlan(outcome="planning_failed")
+    # IDs and outcomes only (Section 7.10).
+    logger.info(
+        "example_plan document_id=%s outcome=%s identified_by=%s examples=%d routing=%s",
+        document_id,
+        plan.outcome,
+        plan.identified_by,
+        len(plan.examples),
+        plan.routing is not None,
+    )
+    return plan
+
+
+def _record_runs(
+    session: Session, tenant_id: UUID, document_id: UUID, plan: ExamplePlan, result: ExtractionResult
+) -> UUID:
+    """Every model call this document cost, one extraction_runs row each
+    (D-142) -- the routing read first, because it happened first."""
+    if plan.routing is not None:
+        model_runs.record_routing(session, tenant_id, document_id, plan.routing)
+    return model_runs.record_extraction(session, tenant_id, document_id, result)
+
+
+def _total_cost(plan: ExamplePlan, result: ExtractionResult) -> Decimal | None:
+    """The document's whole model bill: extraction plus the routing read, so
+    cost per document and margin on the dashboard stay honest."""
+    routing_cost = plan.routing.est_cost_usd if plan.routing is not None else None
+    costs = [c for c in (result.est_cost_usd, routing_cost) if c is not None]
+    return sum(costs, Decimal("0")) if costs else None
+
+
+def _money(value: Decimal | None) -> str | None:
+    return str(value) if value is not None else None
+
+
 def _mark_failed(tenant_id: UUID, document_id: UUID, *, raw_response: dict | None = None) -> None:
     with tenant_session(tenant_id) as session:
         session.execute(
@@ -415,7 +510,10 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
 
     with tenant_session(tid) as session:
         row = session.execute(
-            text("SELECT storage_path, original_filename, status FROM documents WHERE id = :id"),
+            text(
+                "SELECT storage_path, original_filename, status, sender_email "
+                "FROM documents WHERE id = :id"
+            ),
             {"id": str(did)},
         ).mappings().first()
         if row is None:
@@ -433,6 +531,7 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
         )
         storage_path = row["storage_path"]
         original_filename = row["original_filename"]
+        sender_email = row.get("sender_email")
 
     content = read_file(storage_path)
 
@@ -476,19 +575,23 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
     # extraction fails. Stays here in the worker: building a preview is
     # parsing (Section 7.11), and the API only serves what this wrote.
     _store_preview(tid, did, validation.file_type, content, parts)
+    _store_extracted_text(tid, did, parts)
 
     settings = get_settings()
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    result = extract_document(client, content_blocks)
+    plan = _plan_examples(client, tid, did, sender_email, parts)
+    result = extract_document(client, content_blocks, examples=plan.examples)
 
     if not result.ok:
         with tenant_session(tid) as session:
+            _record_runs(session, tid, did, plan, result)
             session.execute(
                 text(
                     """
                     UPDATE documents
                     SET status = 'failed', model_id = :model_id, prompt_hash = :prompt_hash,
-                        schema_version = :schema_version, raw_json = :raw_json, processed_at = now()
+                        schema_version = :schema_version, raw_json = :raw_json,
+                        est_cost_usd = :est_cost_usd, processed_at = now()
                     WHERE id = :id
                     """
                 ),
@@ -498,6 +601,7 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                     "prompt_hash": result.prompt_hash,
                     "schema_version": result.schema_version,
                     "raw_json": result.raw_response,
+                    "est_cost_usd": _money(_total_cost(plan, result)),
                 },
             )
         return
@@ -512,6 +616,7 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
     overall_confidence = _overall_confidence(result.header_confidence, schema)
 
     with tenant_session(tid) as session:
+        run_id = _record_runs(session, tid, did, plan, result)
         session.execute(
             text(
                 """
@@ -521,7 +626,8 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                     output_tokens = :output_tokens, est_cost_usd = :est_cost_usd,
                     injection_suspected = :injection_suspected,
                     overall_confidence = :overall_confidence, raw_json = :raw_json,
-                    field_schema_version = :field_schema_version, processed_at = now()
+                    field_schema_version = :field_schema_version,
+                    current_extraction_run_id = :run_id, processed_at = now()
                 WHERE id = :id
                 """
             ),
@@ -533,7 +639,8 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                 "field_schema_version": schema.version or None,
                 "input_tokens": result.input_tokens,
                 "output_tokens": result.output_tokens,
-                "est_cost_usd": str(result.est_cost_usd) if result.est_cost_usd is not None else None,
+                "est_cost_usd": _money(_total_cost(plan, result)),
+                "run_id": str(run_id),
                 "injection_suspected": result.injection_suspected,
                 "overall_confidence": str(overall_confidence),
                 "raw_json": result.raw_response,

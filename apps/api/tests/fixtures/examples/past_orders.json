@@ -1,0 +1,73 @@
+{
+  "_comment": "Section 7.13 test fixtures. Three earlier, already-approved orders from the golden fixture's buyer (Bella's Coffee House, the Section 8.3 fixture -- fictional). Every PO number, date, quantity, total and note here differs from docs/sample_po.txt, so any of them turning up in an extraction of that file is contamination. Hand-written; they never came from a customer.",
+  "examples": [
+    {
+      "document_id": "00000000-0000-4000-8000-000000000101",
+      "text": "PURCHASE ORDER\n\nBella's Coffee House\n1442 Oak Street, Portland, OR 97204\norders@bellascoffee.com\n\nPO Number: BCH-2240\nDate: January 9, 2026\nRequested Delivery: 01/16/2026\nTerms: Net 30\n\nShip To: Bella's Coffee House, 1442 Oak Street, Portland, OR 97204\n\nITEM        DESCRIPTION                     QTY   UOM   UNIT PRICE   TOTAL\nCF-1001     Colombian Whole Bean 5lb          9    CS      $46.00    $414.00\nCF-3300     Sumatra Dark Roast 5lb            5    CS      $58.40    $292.00\nLID-12      12oz Lids (1000ct)                3    BOX     $31.50     $94.50\n\n                                             ORDER TOTAL:           $800.50\n\nNote: Side entrance only this week -- front is being painted.",
+      "extraction": {
+        "header": {
+          "po_number": "BCH-2240",
+          "order_date": "2026-01-09",
+          "requested_delivery_date": "2026-01-16",
+          "buyer_name": "Bella's Coffee House",
+          "buyer_contact_email": "orders@bellascoffee.com",
+          "ship_to_address": "Bella's Coffee House, 1442 Oak Street, Portland, OR 97204",
+          "payment_terms": "Net 30",
+          "order_total": "800.50",
+          "currency": "USD",
+          "notes": "Side entrance only this week -- front is being painted."
+        },
+        "line_items": [
+          {"line_number": 1, "sku": "CF-1001", "description": "Colombian Whole Bean 5lb", "quantity": "9", "unit": "CS", "unit_price": "46.00", "line_total": "414.00"},
+          {"line_number": 2, "sku": "CF-3300", "description": "Sumatra Dark Roast 5lb", "quantity": "5", "unit": "CS", "unit_price": "58.40", "line_total": "292.00"},
+          {"line_number": 3, "sku": "LID-12", "description": "12oz Lids (1000ct)", "quantity": "3", "unit": "BOX", "unit_price": "31.50", "line_total": "94.50"}
+        ]
+      }
+    },
+    {
+      "document_id": "00000000-0000-4000-8000-000000000102",
+      "text": "PURCHASE ORDER\n\nBella's Coffee House\n1442 Oak Street, Portland, OR 97204\norders@bellascoffee.com\n\nPO Number: BCH-2255\nDate: February 2, 2026\nRequested Delivery: 02/10/2026\nTerms: Net 30\n\nShip To: Bella's Coffee House, 1442 Oak Street, Portland, OR 97204\n\nITEM        DESCRIPTION                     QTY   UOM   UNIT PRICE   TOTAL\nSY-0045     Vanilla Syrup 750ml              30    EA       $8.10    $243.00\nSY-0071     Caramel Syrup 750ml              18    EA       $8.10    $145.80\nMLK-OAT     Oat Milk Barista 32oz            40    EA       $3.95    $158.00\n\n                                             ORDER TOTAL:           $546.80\n\nNote: Call Dana at the counter when the truck is 10 minutes out.",
+      "extraction": {
+        "header": {
+          "po_number": "BCH-2255",
+          "order_date": "2026-02-02",
+          "requested_delivery_date": "2026-02-10",
+          "buyer_name": "Bella's Coffee House",
+          "buyer_contact_email": "orders@bellascoffee.com",
+          "ship_to_address": "Bella's Coffee House, 1442 Oak Street, Portland, OR 97204",
+          "payment_terms": "Net 30",
+          "order_total": "546.80",
+          "currency": "USD",
+          "notes": "Call Dana at the counter when the truck is 10 minutes out."
+        },
+        "line_items": [
+          {"line_number": 1, "sku": "SY-0045", "description": "Vanilla Syrup 750ml", "quantity": "30", "unit": "EA", "unit_price": "8.10", "line_total": "243.00"},
+          {"line_number": 2, "sku": "SY-0071", "description": "Caramel Syrup 750ml", "quantity": "18", "unit": "EA", "unit_price": "8.10", "line_total": "145.80"},
+          {"line_number": 3, "sku": "MLK-OAT", "description": "Oat Milk Barista 32oz", "quantity": "40", "unit": "EA", "unit_price": "3.95", "line_total": "158.00"}
+        ]
+      }
+    },
+    {
+      "document_id": "00000000-0000-4000-8000-000000000103",
+      "text": "PURCHASE ORDER\n\nBella's Coffee House\n1442 Oak Street, Portland, OR 97204\norders@bellascoffee.com\n\nPO Number: BCH-2270\nDate: February 27, 2026\nRequested Delivery: 03/06/2026\nTerms: Net 30\n\nShip To: Bella's Coffee House, 1442 Oak Street, Portland, OR 97204\n\nITEM        DESCRIPTION                     QTY   UOM   UNIT PRICE   TOTAL\nCF-2210     Ethiopian Yirgacheffe 5lb         8    CS      $61.00    $488.00\nCUP-16      16oz Paper Cups (1000ct)          6    BOX     $61.25    $367.50\n\n                                             ORDER TOTAL:           $855.50\n\nNote: Invoice to accounts@bellascoffee.com, not the orders inbox.",
+      "extraction": {
+        "header": {
+          "po_number": "BCH-2270",
+          "order_date": "2026-02-27",
+          "requested_delivery_date": "2026-03-06",
+          "buyer_name": "Bella's Coffee House",
+          "buyer_contact_email": "orders@bellascoffee.com",
+          "ship_to_address": "Bella's Coffee House, 1442 Oak Street, Portland, OR 97204",
+          "payment_terms": "Net 30",
+          "order_total": "855.50",
+          "currency": "USD",
+          "notes": "Invoice to accounts@bellascoffee.com, not the orders inbox."
+        },
+        "line_items": [
+          {"line_number": 1, "sku": "CF-2210", "description": "Ethiopian Yirgacheffe 5lb", "quantity": "8", "unit": "CS", "unit_price": "61.00", "line_total": "488.00"},
+          {"line_number": 2, "sku": "CUP-16", "description": "16oz Paper Cups (1000ct)", "quantity": "6", "unit": "BOX", "unit_price": "61.25", "line_total": "367.50"}
+        ]
+      }
+    }
+  ]
+}

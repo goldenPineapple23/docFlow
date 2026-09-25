@@ -171,6 +171,24 @@ test("a document carrying an embedded instruction says so before anything else",
   await expect(page.getByTestId("injection-banner")).toContainText("embedded instruction");
 });
 
+test("an order read with past examples says how many, and says nothing when there were none", async ({ page }) => {
+  // Section 7.13 (D-141): a reviewer can see why a value may have been read
+  // the way it was.
+  const state = {
+    detail: detail({ document: { ...detail().document, examples_used: 3 } }),
+  };
+  await stubApi(page, state);
+  await page.goto(`/review/${DOCUMENT_ID}`);
+  await expect(page.getByTestId("examples-note")).toContainText(
+    "Read with 3 earlier approved orders from this customer as examples",
+  );
+
+  state.detail = detail();
+  await page.reload();
+  await expect(page.getByTestId("approve-button")).toBeVisible();
+  await expect(page.getByTestId("examples-note")).toHaveCount(0);
+});
+
 test("the original document renders in a sandboxed frame", async ({ page }) => {
   const state = { detail: detail() };
   await stubApi(page, state);

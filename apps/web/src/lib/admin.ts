@@ -567,6 +567,62 @@ export const saveFieldSchema = (
     { method: "PUT", body: JSON.stringify(body) },
   );
 
+// ── Tenant audit trail (Section 7.15.3 "Audit" tab; D-143) ────────────────
+
+export type AuditEntry = {
+  at: string;
+  source: "lifecycle" | "console";
+  event: string;
+  actor_email: string | null;
+  actor_is_docflow: boolean;
+  payload: Record<string, unknown>;
+  constants: Record<string, unknown>;
+};
+
+export const getTenantAudit = (
+  tenantId: string,
+  opts: { includeViews: boolean; limit: number; offset: number },
+) =>
+  request<{ total: number; entries: AuditEntry[] }>(
+    `/admin/tenants/${tenantId}/audit?include_views=${opts.includeViews}&limit=${opts.limit}&offset=${opts.offset}`,
+  );
+
+// ── Approved-example prompting (slice 5.10; Section 7.13, D-141) ───────────
+
+export type ExampleBuyer = {
+  buyer_id: string;
+  name: string;
+  approved: number;
+  with_text: number;
+  qualifies: boolean;
+};
+
+export type ExamplePromptingOverview = {
+  enabled: boolean;
+  min_approved: number;
+  max_examples: number;
+  buyers: ExampleBuyer[];
+  this_month: {
+    runs_with_examples: number;
+    example_input_tokens: number;
+    example_cost_usd: string;
+    routing_runs: number;
+    routing_cost_usd: string;
+  };
+};
+
+export const getExamplePrompting = (tenantId: string) =>
+  request<ExamplePromptingOverview>(`/admin/tenants/${tenantId}/example-prompting`);
+
+export const setExamplePrompting = (
+  tenantId: string,
+  body: { enabled: boolean; golden_run_confirmed: boolean },
+) =>
+  request<ExamplePromptingOverview>(`/admin/tenants/${tenantId}/example-prompting`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+
 
 // ── Dashboard (slice 5.5; D-121) ───────────────────────────────────────────
 

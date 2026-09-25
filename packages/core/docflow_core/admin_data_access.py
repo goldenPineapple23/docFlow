@@ -1528,3 +1528,87 @@ def delete_tenant(
     from docflow_core.storage import delete_tenant_storage
 
     delete_tenant_storage(tenant_id)
+
+
+# ── Tenant audit trail (Section 7.15.3's "Audit" tab; slice 5.10, D-143) ─────
+
+# Console actions that only looked at something. They are audited like every
+# other Console request (7.15.1), but on the Audit tab they would bury the
+# changes, so they are shown only when asked for.
+_VIEW_ACTIONS = ("read", "acting_as_read", "quarantine_read")
+
+
+def tenant_audit(
+    *,
+    platform_admin_user_id: UUID,
+    tenant_id: UUID,
+    include_views: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any] | None:
+    """
+    One tenant's trail, newest first: every `tenant_lifecycle_events` row
+    (creation, onboarding steps, cancel/suspend/reactivate, address rotation,
+    settings such as example prompting) and every Console action taken on
+    it (`admin_actions`). Payloads are IDs, flags and counts by construction
+    -- neither table ever holds document data (7.10). Reading it is itself one
+    `admin_actions` row, written first. None if the tenant doesn't exist.
+    """
+    with platform_session() as session:
+        exists = session.execute(text("SELECT 1 FROM tenants WHERE id = :id"), {"id": str(tenant_id)}).first()
+        if exists is None:
+            return None
+        _record_admin_action(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            action="read",
+            target_tenant_id=tenant_id,
+            target_type="audit",
+            payload={"include_views": include_views, "offset": offset},
+        )
+        trail = f"""
+            SELECT e.created_at AS at, 'lifecycle' AS source, e.event_type AS event,
+                   e.actor_user_id AS actor_id, e.payload, e.constants_in_effect AS constants
+            FROM tenant_lifecycle_events e
+            WHERE e.tenant_id = :t
+            UNION ALL
+            SELECT a.created_at, 'console', a.action, a.platform_admin_user_id, a.payload, NULL
+            FROM admin_actions a
+            WHERE a.target_tenant_id = :t
+              AND (:include_views OR a.action NOT IN {_VIEW_ACTIONS})
+        """
+        params = {"t": str(tenant_id), "include_views": include_views}
+        total = session.execute(text(f"SELECT count(*) FROM ({trail}) x"), params).scalar_one()
+        rows = (
+            session.execute(
+                text(
+                    f"""
+                    SELECT x.*, u.email AS actor_email,
+                           (p.user_id IS NOT NULL) AS actor_is_docflow
+                    FROM ({trail}) x
+                    LEFT JOIN users u ON u.id = x.actor_id
+                    LEFT JOIN platform_admins p ON p.user_id = x.actor_id
+                    ORDER BY x.at DESC
+                    LIMIT :limit OFFSET :offset
+                    """
+                ),
+                {**params, "limit": limit, "offset": offset},
+            )
+            .mappings()
+            .all()
+        )
+    return {
+        "total": int(total),
+        "entries": [
+            {
+                "at": row["at"].isoformat(),
+                "source": row["source"],
+                "event": row["event"],
+                "actor_email": row["actor_email"],
+                "actor_is_docflow": bool(row["actor_is_docflow"]),
+                "payload": row["payload"] or {},
+                "constants": row["constants"] or {},
+            }
+            for row in rows
+        ],
+    }

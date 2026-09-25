@@ -7,6 +7,100 @@ phase."
 
 ---
 
+## Phase 5 — Founder Console, tenant surface, operations — COMPLETE, awaiting "go" (2026-09-25)
+
+Built as ten slices from 18 to 25 Sept 2026, each walked by the founder
+before the next began. Slice-by-slice detail is in `docs/BUILD-STATUS.md`;
+the reasoning is in `DECISIONS.md` D-102 – D-142.
+
+### Exit criteria
+
+| Criterion (Section 6) | Result |
+|---|---|
+| The founder runs all nine steps of the onboarding process against a fake prospect from the Console, ending with a live tenant whose owner can sign in by invite and see their reviewed test batch | **Met in 5.3** (18 Sept): Acme Test Prospect went from intake to live entirely from the Console. Stripe test-mode subscription, setup fee on the first invoice, founding price, first-week check-in scheduled. |
+| The Console never calls a parsing, extraction or review function the tenant surface doesn't, **verified by a module-dependency check** | **Met, with a check added at this checkpoint** (`apps/api/tests/test_console_shared_paths.py`). Until today this rested on the design (D-111, D-112), not a check. The test confirms each of these from the code: <br>• the admin router imports no extraction, review, matching or validation module and no worker code <br>• it sends documents to extraction only through the tenant surface's own task <br>• its test-batch upload is the tenant's `ingest_upload` <br>• every acting-as route is served by the very same endpoint function as the tenant's route <br>• there is one catalog parser, used by the one catalog import |
+| A full cancel → suspend → export window → reactivate cycle, and a full cancel → delete cycle, work end to end in staging for each of the three cancellation reasons, with the correct effective date | **Met by the lifecycle tests against the staging database** (effective date for each reason, including the non-payment fallback; suspend sweep; reactivation with no data loss; typed-name delete, purge order across every foreign key). **Walked in the browser:** cancel → suspend → reactivate (23 Sept), and a real typed-name delete (Acme Test Lifecycle B, 24 Sept, which found D-133). The browser walk used one reason, not all three; the other two rest on the tests. |
+| The dashboard's KPI cards match a hand-computed query on the same staging data | **Met in 5.5**: every card is checked against independent hand-written SQL (D-121). |
+| With example prompting on for a test buyer with 10+ approved documents, the golden fixture still extracts exactly, and the contamination test passes live | **Met today** (details below). |
+
+**Example prompting, the last criterion:**
+- **Live model tests:** golden fixture without examples, golden fixture with examples, contamination test. All three passed.
+- **Real-stack drive** on Acme Test Prospect:
+  - Ten fictional Bella's Coffee House orders went through the real worker task and were approved by a real tenant user with `approve_document` (`scripts/seed_example_history.py`).
+  - The feature was turned on, then `docs/sample_po.txt` was put through the real worker as an upload with no sender.
+  - The Haiku routing read found the buyer from the header, and Sonnet read the order with 3 examples (2,704 example tokens).
+  - Every value came back exactly the golden fixture's.
+  - Two runs were recorded. The order's cost ($0.0189) is the extraction ($0.0180) plus the look-up ($0.0009).
+
+### Verification at the checkpoint
+
+| Suite | Result |
+|---|---|
+| `packages/core` | 443 passed |
+| `apps/api` | **385 passing, 0 skipped.** The full run (23 min against staging): 366 passed, 10 skipped because it began before migration 0025 was applied. Those 10, plus the 9 tests added afterwards (dependency check, Audit tab), then passed on their own, along with every file changed during the run. |
+| `apps/worker` | 80 passed, 0 skipped |
+| `apps/web` | 42 Vitest + 60 Playwright |
+| Lint / typecheck | ruff clean (repo root and api); mypy clean (api, worker); ESLint and tsc clean |
+| Live model tests | golden fixture, golden with examples, contamination: all passed against the real API |
+
+Migrations `0011` – `0025` are applied to `docflow-staging`.
+
+### What was built
+
+- **Console foundations (5.1):** tiers table (versioned prices, never in code), email outbox, founder alerts, invites, intake staging.
+- **Catalog and customer import (5.2):** one import path with preview, column mapping, a validation report with blockers, and diff commit (retire, never delete).
+- **Test batch, acting-as review, go-live (5.3):**
+  - Steps 6–9 as screens.
+  - The tenant's review and export routes are mounted a second time behind an audited admin gate.
+  - Stripe subscription invoiced by email; scheduled jobs are table rows.
+  - Deal terms and setup-fee presets.
+- **Operator screens (5.4):** buyer merge becomes a `buyer_alias` rule; learned-rule management; per-tenant field settings (required, optional or hidden, versioned).
+- **Founder dashboard (5.5):** attention panel, health strip, tenant list and KPI cards, all from a nightly rollup.
+- **Lifecycle (5.6):** cancel with a reason-based effective date, suspend sweep, reactivate, wind-down and ready-to-delete queues, typed-name hard delete, Stripe webhook sync, 7-day billing trial.
+- **Allowances and quarantine (5.7):** metering, banners and emails, abuse ceilings, the daily AI-cost breaker, intake abuse layers, quarantine screens.
+- **Tenant surface (5.8):** upload page, dashboard, activity page, needs-review digest email, team page, role audit.
+- **Billing (5.9):** plan change from the Console, Billing card, MRR counted as what customers actually pay.
+- **Approved-example prompting (5.10, D-141):**
+  - A per-tenant switch that needs a golden-run confirmation.
+  - Buyer pre-identification from the sender's email or domain, else a Haiku header read.
+  - Up to 3 of the buyer's newest approved orders as text plus values. The parser's text is now stored per order.
+  - The contamination test, recorded and live.
+  - A "read with N earlier orders" note for reviewers.
+  - Cost tracked separately in the Console.
+- **The tenant page's Audit tab (D-143),** found missing at this checkpoint and built into 5.10 at the founder's request: lifecycle events and Console actions, newest first, with page views on request.
+
+### What was assumed
+
+- **Only two roles are handed out** (founder decision, 5.8a): owner (shown as Admin) and reviewer. Viewer stays in the schema.
+- **The allowance banner waits until 90%** (D-129), a deliberate deviation from 7.16.1's 80%; the 80% and 100% emails are unchanged.
+- **`CURE_PERIOD_DAYS` = 0** (D-125): Net-15 invoice terms are themselves the grace period; suspension is always the founder's decision.
+- **Test-batch orders count towards a buyer's 10 approved orders** for example prompting; the founder approved them in the normal review screen (D-141).
+- **No second extraction pass with examples** (founder, D-141).
+- **Example prompting is off for every tenant.** It was switched on for Acme Test Prospect for the drive and left on there; it is test data.
+
+### What is open
+
+- **Before the first real customer:**
+  - an email provider (until then every invite, notice and digest waits in the Console outbox)
+  - the Stripe setting that auto-cancels a subscription after 90 days unpaid (D-125)
+  - `RUNBOOK.md` (Phase 6)
+- **Stranded test data:**
+  - Interrupted test runs (19–24 Sept) left five `console-…@example.com` platform admins. With the founder's OK they were **revoked and deactivated on 2026-09-25**, not deleted: two of them are named as the actor on the `created` events of leftover test tenants, and deleting them would rewrite that history. The founder is now the only active platform admin.
+  - The same runs left three "Acme Test Distributor" tenants (two active, one in wind-down). All staging data is test data; the founder will clean up in a QA pass after all phases are built.
+  - The test helper that strands them (`_Console` cleanup when a lifecycle event names its user) should be fixed in Phase 6.
+- **Carried from before:** IIF against real QuickBooks Desktop; the stuck-in-processing alert (7.9, Phase 6); custom per-tenant fields (D-120); per-person digest opt-out; " -- " versus real dashes in catalog text; pending document updates listed in BUILD-STATUS.
+- **Orders approved before 2026-09-25 have no stored text,** so they count towards a buyer's 10 but can't be shown as examples.
+
+### Found at this checkpoint, not by the tests
+
+- **The Audit tab 7.15.3 lists had never been built**; found while writing the walkthrough, built now (D-143).
+
+- **The daily AI-cost breaker could never trip** (D-142). It and the health strip's model counts read `extraction_runs`, which nothing wrote to. Its test inserted rows by hand. Every model call is recorded now.
+- **The Phase 5 dependency criterion had no check.** It held by design but nothing verified it; `test_console_shared_paths.py` does now.
+- **The two runs of one order sorted in the wrong order** on the real drive: same-transaction `now()`, the D-123 trap again. Fixed with `clock_timestamp()` and a regression test.
+
+---
+
 ## Phase 4 — Export — COMPLETE, awaiting "go" (2026-09-18)
 
 ### Exit criteria, both met

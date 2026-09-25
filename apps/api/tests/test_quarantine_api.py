@@ -274,6 +274,10 @@ class _Tenant:
         tid = str(self.tenant_id)
         with platform_session() as session:
             session.execute(text("UPDATE tenants SET status = 'active' WHERE id = :t"), {"t": tid})
+            # A document points at its current run (D-142); runs go first below.
+            session.execute(
+                text("UPDATE documents SET current_extraction_run_id = NULL WHERE tenant_id = :t"), {"t": tid}
+            )
             for table in _CLEAN_TABLES:
                 session.execute(text(f"DELETE FROM {table} WHERE tenant_id = :t"), {"t": tid})
             session.execute(text("DELETE FROM admin_actions WHERE target_tenant_id = :t"), {"t": tid})

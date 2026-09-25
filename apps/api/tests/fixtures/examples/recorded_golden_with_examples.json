@@ -1,0 +1,71 @@
+{
+  "header": {
+    "po_number": "BCH-2291",
+    "order_date": "2026-03-14",
+    "requested_delivery_date": "2026-03-21",
+    "buyer_name": "Bella's Coffee House",
+    "buyer_contact_email": "orders@bellascoffee.com",
+    "ship_to_address": "Bella's Coffee House, 1442 Oak Street, Portland, OR 97204",
+    "payment_terms": "Net 30",
+    "order_total": "1356.00",
+    "currency": "USD",
+    "notes": "Please deliver before 10am. Back door access only."
+  },
+  "header_confidence": {
+    "po_number": 0.99,
+    "order_date": 0.98,
+    "requested_delivery_date": 0.98,
+    "buyer_name": 0.98,
+    "buyer_contact_email": 0.98,
+    "ship_to_address": 0.97,
+    "payment_terms": 0.97,
+    "order_total": 0.97,
+    "currency": 0.6,
+    "notes": 0.95
+  },
+  "line_items": [
+    {
+      "line_number": 1,
+      "sku": "CF-1001",
+      "description": "Colombian Whole Bean 5lb",
+      "quantity": "12",
+      "unit": "CS",
+      "unit_price": "47.50",
+      "line_total": "570.00",
+      "confidence": 0.98
+    },
+    {
+      "line_number": 2,
+      "sku": "CF-2210",
+      "description": "Ethiopian Yirgacheffe 5lb",
+      "quantity": "6",
+      "unit": "CS",
+      "unit_price": "62.00",
+      "line_total": "372.00",
+      "confidence": 0.98
+    },
+    {
+      "line_number": 3,
+      "sku": "SY-0045",
+      "description": "Vanilla Syrup 750ml",
+      "quantity": "24",
+      "unit": "EA",
+      "unit_price": "8.25",
+      "line_total": "198.00",
+      "confidence": 0.98
+    },
+    {
+      "line_number": 4,
+      "sku": "CUP-12",
+      "description": "12oz Paper Cups (1000ct)",
+      "quantity": "4",
+      "unit": "BOX",
+      "unit_price": "54.00",
+      "line_total": "216.00",
+      "confidence": 0.98
+    }
+  ],
+  "document_notes": "",
+  "injection_suspected": false,
+  "currency_inferred": true
+}
