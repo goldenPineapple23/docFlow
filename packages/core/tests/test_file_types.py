@@ -406,6 +406,24 @@ def test_rejects_powerpoint_ole_with_readable_reason():
     assert result.error_code == "DOC-004"
 
 
+@pytest.mark.parametrize("filename", ["order.xls", "order.doc", "forwarded.msg", "ORDER.XLS"])
+def test_a_damaged_legacy_office_file_is_called_corrupted_not_another_format(filename):
+    """
+    D-146: an Office signature with none of the contents its name promises is
+    a damaged file. DOC-004 told the sender it was "PowerPoint or Visio",
+    which is wrong and gives them nothing to do; DOC-005 says re-save it.
+    """
+    content = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\xff" * 512
+    result = validate_upload(content, filename)
+    assert not result.ok
+    assert result.error_code == "DOC-005"
+
+
+def test_an_unrecognised_ole_file_under_another_name_is_still_doc_004():
+    content = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\xff" * 512
+    assert validate_upload(content, "drawing.pub").error_code == "DOC-004"
+
+
 # ── XXE and nested-archive defense ─────────────────────────────────────────
 
 

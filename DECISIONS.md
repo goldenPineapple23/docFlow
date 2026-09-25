@@ -1530,3 +1530,52 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 **Note:** example prompting was switched on for Acme Test Prospect during the 5.10 drive by a script run under the founder's user id, so the trail shows it as the founder's action.
 
 **Related:** Section 7.10, 7.12, 7.15.1, 7.15.3; D-111, D-141.
+
+
+## D-144 -- "Reopen for review": the way back into an approved or rejected order
+
+**Context:** found while writing the pre-Phase-6 walkthroughs (2026-09-25). The review screen locked every field once an order was approved, exported or rejected, while its hint said "Editing any value reopens it for review". The engine could reopen (an edit after approval, built in Phase 3 with migration 0007), but no screen could reach it: an approved order with a wrong value couldn't be corrected from the browser at all, and a rejected order could never come back, although `reject_document` calls a rejection "reversible by re-review".
+
+**Decision:** an explicit **Reopen for review** action, not editable fields on a decided order.
+- `review.reopen_document` sends an `approved`, `exported` or `rejected` order back to `needs_review` through the same `_reopen` an edit after approval uses: the snapshot is superseded and kept, the approval columns are cleared, a `reopened` row is written with the actor (and `acting_as_tenant_id` in the Console). Anything else is REV-004.
+- `POST /review/documents/{id}/reopen`, reviewer and up (`roles.py`), and mirrored to the Console's acting-as routes like every review route.
+- The screen shows the button on decided orders, asks once ("has to be approved again before it can be exported; the approved copy and any exported file are kept"), then unlocks the fields. Hints now say what to do.
+- Locked-until-reopened was chosen over "just let them type": a stray keystroke on an approved order would otherwise unapprove it.
+
+**Tests:** three in `apps/api/tests/test_review.py`, two in `test_review_api.py`, two browser tests.
+
+**Related:** Section 7.3; D-081 (review tables).
+
+
+## D-145 -- A failed order says why, and "DocFlow has been alerted" is now true
+
+**Context:** found writing the Phase 1 walkthrough. A document the worker couldn't read showed only "Couldn't be read"; its reason was recorded (`documents.raw_json.error_code` for file and conversion failures, `extraction_runs.error_code` for model failures) but never shown, so a reviewer couldn't tell the buyer what to resend. Checking what the reason would say found worse: DOC-008, DOC-009, DOC-015, DOC-017, INT-004 and QUA-001 tell the customer "DocFlow has (already) been alerted", and for five of them nothing raised an alert. That is a false statement to a customer.
+
+**Decisions:**
+- The order detail carries `document.failure`: the catalog entry for the recorded code (document first, then the latest failed model run, else DOC-008). Never the raw cause (7.16.5). The screen shows it in a red box.
+- `founder_alerts.FAILURE_ALERTS` maps each promising code to an alert: `document_failed` (DOC-008/009/017), `unsafe_file_refused` (DOC-015), `unverified_sender_held` (INT-004). `raise_for_failure` raises it with the code and IDs only (7.10), deduplicated per tenant, code and day, so a flood is one alert. It is called by the worker (in its own transaction, after the failure is recorded), the upload endpoint and email intake.
+- An alert that can't be written never undoes the failure it describes: its own savepoint, logged with IDs if it fails.
+- `packages/core/tests/test_alert_promises.py` fails the build when a catalog entry promises an alert that nothing raises. It found QUA-001 on its first run, which is kept by the holds' own alerts.
+- DOC-008's advice said "Try re-running it"; there is no re-run button. It now says to upload the same file again (which does re-read it), and that DocFlow has been alerted.
+
+**Consequence:** this is the "dead-letter / failure reaches the founder" part of 7.9 for single failures. Phase 6 still owns retry with backoff, the stuck-in-processing alert and repeated-model-failure detection.
+
+**Related:** Section 7.9, 7.10, 7.16.5; D-095, D-104.
+
+
+## D-146 -- A damaged .doc/.xls/.msg is "corrupted", not "PowerPoint or Visio"
+
+**Context:** an Office (OLE) signature with none of the streams DocFlow recognises was always DOC-004, whose message says the file is "an Office file type DocFlow doesn't read… such as PowerPoint or Visio". For a damaged Excel or Outlook file that's wrong, and it tells the sender nothing useful.
+
+**Decision:** when such a file is *named* `.doc`, `.xls` or `.msg`, it is DOC-005 ("This file appears to be corrupted… re-save or re-export it"). Any other name keeps DOC-004. The extension only chooses the message; it can never admit a file (7.11).
+
+**Related:** Section 7.11, 7.16.5.
+
+
+## D-147 -- The Console's tenant page links to the tenant's orders
+
+**Context:** the Console's order list for a tenant (`/admin/tenants/{id}/review`, D-111) had no link: only the test-batch table led into single orders, and the list itself had no way back. Section 7.15.3 names a "Documents" tab. The founder hit this on the 5.10 walkthrough.
+
+**Decision:** **Orders →** is the first link under "Catalog, customers and rules" on the tenant page, and the list shows **← Tenant**. Same page, same acting-as routes; nothing new behind it.
+
+**Related:** Section 7.15.1, 7.15.3; D-111, D-116.

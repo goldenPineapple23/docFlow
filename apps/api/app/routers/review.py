@@ -44,6 +44,7 @@ from docflow_core.review import (
     approve_document,
     document_version,
     reject_document,
+    reopen_document,
     review_trail,
     start_review,
     unacknowledged_warnings,
@@ -265,6 +266,9 @@ def get_document(
                 "is_possible_change_order, change_order_of_document_id, "
                 "approved_at, approved_by, approved_snapshot_hash, review_started_at, "
                 "field_schema_version, "
+                # Why a failed document failed, when the worker stopped before
+                # the model (a refused or unconvertible file, D-145).
+                "raw_json->>'error_code' AS worker_error_code, "
                 # How many approved past orders the model was shown (Section
                 # 7.13: a reviewer can see why a value may have been read the
                 # way it was). A count only; the examples themselves are
@@ -320,6 +324,7 @@ def get_document(
 
         trail = review_trail(session, document_id)
         version = document_version(session, document_id)
+        failure = _failure(session, document) if document["status"] == "failed" else None
         # The version this document was read under, not today's (D-120): the
         # screen shows what was asked of this order when it arrived.
         schema = field_schema.at_version(session, tenant_id, document["field_schema_version"])
@@ -342,6 +347,9 @@ def get_document(
             "is_possible_change_order": document["is_possible_change_order"],
             "change_order_of_document_id": _uuid(document["change_order_of_document_id"]),
             "examples_used": document["examples_used"] or 0,
+            # Why DocFlow couldn't read it, in the catalog's words (7.16.5,
+            # D-145); None unless the status is `failed`.
+            "failure": failure,
         },
         "header": _header_payload(header),
         "lines": [_line_payload(line) for line in lines],
@@ -357,6 +365,43 @@ def get_document(
 
 def _uuid(value) -> str | None:
     return str(value) if value else None
+
+
+# A failed document with no recorded code: the model call failed in a way
+# nothing wrote down. The catalog's general extraction failure.
+_FALLBACK_FAILURE = "DOC-008"
+
+
+def _failure(session, document) -> dict[str, str]:
+    """
+    Why a document is `failed`, as its catalog entry (D-145). A reviewer who
+    sees only "Couldn't be read" can't tell the buyer what to resend.
+
+    The worker records the code in one of two places: on the document when it
+    stopped before the model (a file it refused or couldn't convert), or on
+    the extraction run when the model call itself failed. Never the raw cause:
+    that stays in the log and Sentry (Section 7.16.5).
+    """
+    code = document["worker_error_code"]
+    if not code:
+        code = session.execute(
+            text(
+                "SELECT error_code FROM extraction_runs "
+                "WHERE document_id = :id AND succeeded = false AND error_code IS NOT NULL "
+                "ORDER BY created_at DESC LIMIT 1"
+            ),
+            {"id": str(document["id"])},
+        ).scalar()
+    try:
+        entry = get_error(code or _FALLBACK_FAILURE)
+    except KeyError:
+        entry = get_error(_FALLBACK_FAILURE)
+    return {
+        "code": entry.code,
+        "title": entry.title,
+        "message": entry.message,
+        "action": entry.action,
+    }
 
 
 def _header_payload(header) -> dict[str, Any]:
@@ -523,6 +568,28 @@ def reject(
             raise _review_error(exc) from exc
 
     return {"review_action_id": str(action_id), "status": "rejected"}
+
+
+@router.post("/documents/{document_id}/reopen")
+def reopen(
+    document_id: UUID,
+    actor: Actor = Depends(current_actor),
+) -> dict:
+    """Back to Needs review, on purpose (D-144). The approved copy is kept."""
+    tenant_id = actor.require_reviewer()
+    with tenant_session(tenant_id) as session:
+        try:
+            action_id = reopen_document(
+                session,
+                tenant_id,
+                document_id,
+                user_id=actor.require_user_id(),
+                acting_as_tenant_id=actor.acting_as_tenant_id,
+            )
+        except ReviewError as exc:
+            raise _review_error(exc) from exc
+
+    return {"review_action_id": str(action_id), "status": "needs_review"}
 
 
 @router.get("/documents/{document_id}/warnings/open")

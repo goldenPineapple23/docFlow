@@ -1,0 +1,22 @@
+PURCHASE ORDER
+
+Bella's Coffee House
+1442 Oak Street, Portland, OR 97204
+orders@bellascoffee.com
+
+PO Number: BCH-2291
+Date: March 14, 2026
+Requested Delivery: 03/21/2026
+Terms: Net 30
+
+Ship To: Bella's Coffee House, 1442 Oak Street, Portland, OR 97204
+
+ITEM        DESCRIPTION                     QTY   UOM   UNIT PRICE   TOTAL
+CF-1001     Colombian Whole Bean 5lb         12    CS      $47.50    $570.00
+CF-2210     Ethiopian Yirgacheffe 5lb         6    CS      $62.00    $372.00
+SY-0045     Vanilla Syrup 750ml              24    EA       $8.25    $198.00
+CUP-12      12oz Paper Cups (1000ct)          4    BOX     $54.00    $216.00
+
+                                             ORDER TOTAL:         $1,356.00
+
+Note: Please deliver before 10am. Back door access only.

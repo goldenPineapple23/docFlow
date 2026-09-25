@@ -118,7 +118,8 @@ def _auth_user(email: str, password: str | None) -> tuple[str, str | None]:
 def _tenant_and_reviewer(email: str, auth_user_id: str) -> tuple[UUID, UUID]:
     with platform_session() as session:
         row = session.execute(
-            text("SELECT id FROM tenants WHERE name = :name AND deleted_at IS NULL"),
+            text("SELECT id FROM tenants WHERE name = :name AND deleted_at IS NULL "
+            "ORDER BY created_at LIMIT 1"),
             {"name": TENANT_NAME},
         ).mappings().first()
         if row:

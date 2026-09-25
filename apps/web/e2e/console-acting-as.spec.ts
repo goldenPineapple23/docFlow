@@ -80,6 +80,8 @@ test("the Console opens a tenant's order in the normal review screen, as DocFlow
 
   await page.goto(`/admin/tenants/${TENANT}/review`);
   await expect(page.getByTestId("support-banner")).toContainText("Acme Test Prospect");
+  // The order list leads back to the tenant it belongs to (D-147).
+  await expect(page.getByRole("link", { name: "← Tenant" })).toHaveAttribute("href", `/admin/tenants/${TENANT}`);
   await page.getByRole("link", { name: "BCH-2291" }).click();
 
   await expect(page).toHaveURL(new RegExp(`/admin/tenants/${TENANT}/review/${DOCUMENT_ID}$`));

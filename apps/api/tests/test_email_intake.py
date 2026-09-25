@@ -134,6 +134,10 @@ class _TestIntakeTenant:
             session.execute(text("DELETE FROM documents WHERE tenant_id = :tid"), {"tid": tid})
             session.execute(text("DELETE FROM intake_rejections WHERE tenant_id = :tid"), {"tid": tid})
             session.execute(text("DELETE FROM intake_addresses WHERE tenant_id = :tid"), {"tid": tid})
+            # D-145: a held unverified sender raises a founder alert, which
+            # names its email; both point at the tenant.
+            session.execute(text("DELETE FROM founder_alerts WHERE tenant_id = :tid"), {"tid": tid})
+            session.execute(text("DELETE FROM email_outbox WHERE tenant_id = :tid"), {"tid": tid})
             session.execute(text("DELETE FROM tenants WHERE id = :tid"), {"tid": tid})
 
 
@@ -247,6 +251,18 @@ def test_dmarc_fail_quarantines_attachment(client, monkeypatch):
         assert docs[0]["status"] == "quarantined"
         assert docs[0]["quarantine_reason"] == "auth_fail"
         assert fake_celery.sent == []
+
+        # INT-004 tells the sender DocFlow has been alerted (D-145).
+        with platform_session() as session:
+            alerts = session.execute(
+                text(
+                    "SELECT severity, payload FROM founder_alerts "
+                    "WHERE tenant_id = :t AND type = 'unverified_sender_held'"
+                ),
+                {"t": str(tenant.tenant_id)},
+            ).mappings().all()
+        assert len(alerts) == 1
+        assert alerts[0]["payload"]["error_code"] == "INT-004"
 
 
 @requires_email_intake_schema

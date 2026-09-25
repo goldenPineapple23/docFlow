@@ -836,6 +836,43 @@ def reject_document(
     return action_id
 
 
+REOPENABLE_STATUSES: frozenset[str] = frozenset({"approved", "exported", "rejected"})
+
+
+def reopen_document(
+    session: Session,
+    tenant_id: UUID,
+    document_id: UUID,
+    *,
+    user_id: UUID,
+    acting_as_tenant_id: UUID | None = None,
+) -> UUID:
+    """
+    Send an approved, exported or rejected document back to `needs_review`
+    because a person asked to (Section 7.3; D-144).
+
+    The review screen keeps a decided order read-only, so a stray keystroke
+    can never unapprove it. This is the deliberate way back in: an explicit,
+    attributed action, recorded as `reopened`, after which the reviewer edits
+    and approves as usual. It goes through the same `_reopen` as an edit
+    after approval, so the old snapshot is superseded and kept, and any file
+    already exported stays explicable. A rejection is "reversible by
+    re-review" (reject_document); this is that re-review.
+    """
+    document = _load_document(session, document_id)
+    if document is None:
+        raise ReviewError(CODE_NOT_REVIEWABLE, {"document_id": str(document_id)})
+    if document["status"] not in REOPENABLE_STATUSES:
+        raise ReviewError(CODE_NOT_REVIEWABLE, {"status": document["status"]})
+    return _reopen(
+        session,
+        tenant_id=tenant_id,
+        document_id=document_id,
+        user_id=user_id,
+        acting_as_tenant_id=acting_as_tenant_id,
+    )
+
+
 def _reopen(
     session: Session,
     *,

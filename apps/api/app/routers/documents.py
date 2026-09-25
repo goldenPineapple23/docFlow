@@ -14,7 +14,7 @@ import hashlib
 from typing import Any
 from uuid import UUID, uuid4
 
-from docflow_core import allowance, file_types, intake_gate, quarantine
+from docflow_core import allowance, file_types, founder_alerts, intake_gate, quarantine
 from docflow_core.db import tenant_session
 from docflow_core.duplicates import find_content_duplicate_at_ingest
 from docflow_core.errors import get_error
@@ -90,6 +90,10 @@ def ingest_upload(
                     "detected_type": validation.file_type.name.value if validation.file_type else None,
                     "error_code": validation.error_code,
                 },
+            )
+            # DOC-015 tells the sender DocFlow has been alerted (D-145).
+            founder_alerts.raise_for_failure(
+                session, tenant_id=tenant_id, error_code=validation.error_code
             )
         error = get_error(validation.error_code)
         raise HTTPException(

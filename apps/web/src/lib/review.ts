@@ -129,6 +129,9 @@ export type DocumentDetail = {
     // Approved past orders from this customer shown to the model as examples
     // (Section 7.13). 0 when the feature is off or none qualified.
     examples_used: number;
+    // Why DocFlow couldn't read it, as its catalog entry (D-145). Only set
+    // when the status is `failed`.
+    failure: CatalogError | null;
   };
   header: DocumentHeader;
   lines: DocumentLine[];
@@ -281,6 +284,12 @@ export function rejectDocument(id: string, note: string): Promise<{ status: stri
     method: "POST",
     body: JSON.stringify({ note }),
   });
+}
+
+// Back to Needs review, on purpose (D-144). The approved copy, and any file
+// already exported from it, is kept.
+export function reopenDocument(id: string): Promise<{ status: string }> {
+  return request(`${reviewApiBase()}/documents/${id}/reopen`, { method: "POST" });
 }
 
 export function searchItems(q: string): Promise<{ items: CatalogItem[] }> {

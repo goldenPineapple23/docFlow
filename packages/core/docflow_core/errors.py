@@ -117,8 +117,8 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         title="Extraction failed",
         message="DocFlow could not get a valid response from the extraction service for this document.",
         action=(
-            "This document has been held as failed. Try re-running it; if it fails "
-            "again, DocFlow has already been alerted."
+            "DocFlow has already been alerted. To have it read again, upload the same "
+            "file again; if it fails a second time, DocFlow will look into it."
         ),
         severity="high",
         audience="both",

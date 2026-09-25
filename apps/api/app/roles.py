@@ -53,6 +53,7 @@ ROUTE_ACCESS: dict[tuple[str, str], Access] = {
     ("PATCH", "/review/documents/{document_id}"): "reviewer",
     ("POST", "/review/documents/{document_id}/approve"): "reviewer",
     ("POST", "/review/documents/{document_id}/reject"): "reviewer",
+    ("POST", "/review/documents/{document_id}/reopen"): "reviewer",
     ("GET", "/review/documents/{document_id}/warnings/open"): "member",
     ("POST", "/review/documents/{document_id}/mapping"): "reviewer",
     ("GET", "/review/items"): "member",

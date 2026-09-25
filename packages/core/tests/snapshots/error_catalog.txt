@@ -160,7 +160,7 @@ DOC-007 [warning/tenant] This scan is too low-quality to trust
 
 DOC-008 [high/both] Extraction failed
   what+why: DocFlow could not get a valid response from the extraction service for this document.
-  next:     This document has been held as failed. Try re-running it; if it fails again, DocFlow has already been alerted.
+  next:     DocFlow has already been alerted. To have it read again, upload the same file again; if it fails a second time, DocFlow will look into it.
 
 DOC-009 [critical/both] Extraction response was invalid
   what+why: The extraction service's response for this document didn't match the expected structure.

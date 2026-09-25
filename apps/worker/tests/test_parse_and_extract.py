@@ -158,6 +158,42 @@ def test_conversion_failure_marks_the_document_failed_and_keeps_the_worker_alive
     assert failures[-1]["raw_json"]["error_code"].startswith("DOC-")
 
 
+def test_a_failure_that_promises_an_alert_raises_it_without_risking_the_failed_status(monkeypatch):
+    """
+    D-145: DOC-017 tells the customer "DocFlow has already been alerted", so
+    the worker must raise that alert -- after the failed status is written,
+    and never at its expense: an alert that can't be written is logged.
+    """
+    import contextlib
+    from uuid import uuid4
+
+    import app.tasks.parse_and_extract as mod
+
+    session = _FakeSession({"storage_path": "tenants/x/uploads/y.tif", "original_filename": "fax.tif"})
+
+    @contextlib.contextmanager
+    def fake_tenant_session(tenant_id):
+        yield session
+
+    calls: list[dict] = []
+
+    def broken_alert(session, **kwargs):
+        calls.append(kwargs)
+        raise RuntimeError("the alert table is unreachable")
+
+    monkeypatch.setattr(mod, "tenant_session", fake_tenant_session)
+    monkeypatch.setattr(mod, "read_file", lambda path: b"II\x2a\x00" + b"\xff" * 512)
+    monkeypatch.setattr(mod.founder_alerts, "raise_for_failure", broken_alert)
+
+    tenant_id, document_id = uuid4(), uuid4()
+    mod.parse_and_extract(str(tenant_id), str(document_id))
+
+    assert calls, "no alert was attempted"
+    assert calls[0]["error_code"].startswith("DOC-")
+    assert calls[0]["document_id"] == document_id
+    assert [sql for sql, _ in session.statements if "status='failed'" in sql.replace(" ", "")]
+
+
 def test_provenance_records_extracted_for_every_present_field():
     from app.tasks.parse_and_extract import _PROVENANCE_HEADER_FIELDS, _extracted_provenance
 

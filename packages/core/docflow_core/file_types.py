@@ -523,6 +523,11 @@ _OLE_MARKERS: list[tuple[str, FileTypeName | None, str | None, str]] = [
     ("Visio", None, "DOC-004", "Visio drawing"),
 ]
 
+# The names an OLE file DocFlow reads may carry. With the signature but none
+# of the markers above, such a file is damaged rather than another format
+# (D-146). The extension only chooses the message: it can never admit a file.
+_OLE_EXTENSIONS = frozenset({".doc", ".xls", ".msg"})
+
 
 def _classify_ole(content: bytes) -> FileTypeName | None:
     """
@@ -584,6 +589,14 @@ def detect_file_type(content: bytes, claimed_extension: str = "") -> FileType | 
         ole_type = _classify_ole(content)
         if ole_type is not None:
             return ALL_TYPES[ole_type]
+        if claimed_extension in _OLE_EXTENSIONS:
+            # Named as a format DocFlow reads, with an Office signature, but
+            # none of that format's contents: a damaged file, not another
+            # Office type. DOC-004 would tell the sender it's "PowerPoint or
+            # Visio", which is wrong and gives them nothing to do (D-146).
+            raise FileRejection(
+                "DOC-005", f"OLE compound file named '{claimed_extension}' has none of its streams."
+            )
         raise FileRejection(
             "DOC-004", "File is a legacy Microsoft OLE compound file DocFlow doesn't read."
         )

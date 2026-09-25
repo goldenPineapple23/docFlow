@@ -108,6 +108,16 @@ export default function TenantPage({ params }: { params: Promise<{ id: string }>
         <h2 className="text-sm font-semibold">Catalog, customers and rules</h2>
         <ul className="mt-2 space-y-1 text-sm">
           <li>
+            <Link
+              href={`/admin/tenants/${id}/review`}
+              data-testid="tenant-orders-link"
+              className="font-medium text-blue-700 hover:underline"
+            >
+              Orders →
+            </Link>{" "}
+            <span className="text-gray-600">every order on this account, opened as DocFlow support</span>
+          </li>
+          <li>
             <Link href={`/admin/tenants/${id}/catalog`} className="font-medium text-blue-700 hover:underline">
               Catalog →
             </Link>{" "}

@@ -9,6 +9,7 @@ import {
   fieldStates,
   getDocument,
   rejectDocument,
+  reopenDocument,
   saveEdits,
   type DocumentDetail,
   type ExportFormat,
@@ -73,6 +74,8 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
   const [acknowledged, setAcknowledged] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState(false);
+  // The one-step confirmation before a decided order goes back to review.
+  const [reopening, setReopening] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
 
   const dirty = Object.keys(headerEdits).length > 0 || Object.keys(lineEdits).length > 0;
@@ -190,6 +193,31 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
     }
   }, [detail, busy, dirty, id, openWarnings, acknowledged, load, scope.tenantId, back.href, back.long]);
 
+  // Back to Needs review, on purpose (D-144). Fields stay locked on a decided
+  // order so a stray keystroke can never unapprove it; this is the way in.
+  const reopen = useCallback(async () => {
+    if (!detail || busy) return;
+    const wasRejected = detail.document.status === "rejected";
+    setBusy(true);
+    try {
+      await reopenDocument(id);
+      setReopening(false);
+      await load();
+      setBanner({
+        kind: "success",
+        title: "Reopened for review",
+        message: wasRejected
+          ? "The rejection stays in the order's history."
+          : "The approved copy is kept, and so is any file already exported from it.",
+        action: "Change what you need, then approve it again.",
+      });
+    } catch (e) {
+      showError(e, setBanner);
+    } finally {
+      setBusy(false);
+    }
+  }, [detail, busy, id, load]);
+
   // One click for the common case: approve, then download in the format
   // this browser last chose. Approval stays a separate, explicit action
   // underneath (Section 7.3) -- this only saves the second click, and an
@@ -233,6 +261,7 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
   }
 
   const readOnly = !detail.can_edit || detail.document.status !== "needs_review";
+  const canReopen = detail.can_edit && REOPENABLE.has(detail.document.status);
 
   return (
     <>
@@ -254,6 +283,17 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
 
         <div className="flex flex-col items-end gap-1">
           <div className="flex flex-wrap items-center gap-2">
+            {canReopen ? (
+              <button
+                type="button"
+                onClick={() => setReopening((r) => !r)}
+                disabled={busy}
+                data-testid="reopen-button"
+                className="rounded border border-slate-400 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Reopen for review
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void save()}
@@ -330,10 +370,55 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
               canEdit: detail.can_edit,
               dirty,
               remaining: openWarnings.filter((w) => !acknowledged.has(w.id)).length,
+              canReopen,
             })}
           </p>
         </div>
       </div>
+
+      {detail.document.failure ? (
+        <div
+          data-testid="failure-banner"
+          role="alert"
+          className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900"
+        >
+          <p className="font-medium">{detail.document.failure.title}</p>
+          <p className="mt-1">{detail.document.failure.message}</p>
+          <p className="mt-1 text-red-900/80">{detail.document.failure.action}</p>
+        </div>
+      ) : null}
+
+      {reopening ? (
+        <div
+          data-testid="reopen-confirm"
+          className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm"
+        >
+          <p>
+            {detail.document.status === "rejected"
+              ? "Reopen this order? It goes back to Needs review, to be checked and approved or rejected again. The rejection stays in its history."
+              : "Reopen this order? It goes back to Needs review and has to be approved again before it can be exported. The approved copy, and any file already exported from it, is kept."}
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => void reopen()}
+              disabled={busy}
+              data-testid="reopen-confirm-button"
+              className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+            >
+              Reopen
+            </button>
+            <button
+              type="button"
+              onClick={() => setReopening(false)}
+              disabled={busy}
+              className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {detail.document.injection_suspected ? (
         <div
@@ -465,6 +550,18 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
   );
 }
 
+// Decided orders a reviewer may send back to Needs review (D-144).
+const REOPENABLE = new Set(["approved", "exported", "rejected"]);
+
+// A status in words, for the "can't be reviewed yet" hint -- never the raw
+// column value.
+const NOT_READY: Record<string, string> = {
+  staged: "uploaded but not run yet",
+  pending: "waiting to be read",
+  processing: "being read",
+  quarantined: "held for review",
+};
+
 /**
  * Why the buttons are in the state they are in, in one sentence.
  *
@@ -477,24 +574,31 @@ function actionHint({
   canEdit,
   dirty,
   remaining,
+  canReopen,
 }: {
   readOnly: boolean;
   status: string;
   canEdit: boolean;
   dirty: boolean;
   remaining: number;
+  canReopen: boolean;
 }): string {
   if (!canEdit) {
     return "Your account can view orders but not change them.";
   }
-  if (status === "approved" || status === "exported") {
-    return "Already approved. Editing any value reopens it for review.";
+  // The hint used to say "Editing any value reopens it" while every field was
+  // locked -- a promise the screen couldn't keep (D-144).
+  if ((status === "approved" || status === "exported") && canReopen) {
+    return "Already approved. To change a value, reopen it for review first.";
   }
-  if (status === "rejected") {
-    return "This order was rejected. Editing any value reopens it for review.";
+  if (status === "rejected" && canReopen) {
+    return "This order was rejected. Reopen it to review it again.";
+  }
+  if (status === "failed") {
+    return "DocFlow couldn't read this order, so there's nothing to review. The reason is above.";
   }
   if (readOnly) {
-    return `This order is ${status}, so it can't be reviewed yet.`;
+    return `This order is ${NOT_READY[status] ?? status}, so it can't be reviewed yet.`;
   }
   if (remaining > 0) {
     return `${remaining} check${remaining === 1 ? "" : "s"} still to tick below before you can approve.`;

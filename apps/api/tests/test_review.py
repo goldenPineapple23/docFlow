@@ -48,6 +48,7 @@ from docflow_core.review import (
     current_snapshot,
     document_version,
     reject_document,
+    reopen_document,
     review_trail,
     snapshot_sha256,
     start_review,
@@ -569,6 +570,74 @@ def test_rejecting_records_a_reason_and_destroys_nothing():
         action = review_trail_for(tenant, document)[0]
         assert action["action"] == ACTION_REJECTED
         assert action["note"] == "Duplicate of the order received yesterday."
+
+
+@requires_review_schema
+def test_reopening_an_approved_document_keeps_its_snapshot_and_needs_a_fresh_approval():
+    """
+    D-144: the review screen keeps a decided order locked, and "Reopen for
+    review" is the deliberate way back. It must do exactly what an edit after
+    approval does (Section 7.3): back to needs_review, the approval cleared,
+    the old snapshot superseded and kept, and a `reopened` row in the trail.
+    """
+    with _TestValidationTenant("Acme Test Distributor -- explicit reopen") as tenant:
+        document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        with tenant_session(tenant.tenant_id) as session:
+            approve_document(session, tenant.tenant_id, document, user_id=tenant.user_id)
+        first_hash = _document_row(document)["approved_snapshot_hash"]
+        header_before = tenant.header(document)
+
+        with tenant_session(tenant.tenant_id) as session:
+            reopen_document(session, tenant.tenant_id, document, user_id=tenant.user_id)
+
+        row = _document_row(document)
+        assert row["status"] == "needs_review"
+        assert row["approved_at"] is None
+        assert row["approved_json"] is None
+        assert row["approved_snapshot_hash"] is None
+        snapshots = _snapshots(document)
+        assert len(snapshots) == 1
+        assert snapshots[0]["superseded_at"] is not None
+        assert snapshots[0]["snapshot_sha256"] == first_hash
+        # Reopening changes no value.
+        assert tenant.header(document) == header_before
+
+        actions = [r["action"] for r in review_trail_for(tenant, document)]
+        assert actions == [ACTION_APPROVED, ACTION_REOPENED]
+
+        # And it can be approved again, as a new snapshot.
+        with tenant_session(tenant.tenant_id) as session:
+            approve_document(session, tenant.tenant_id, document, user_id=tenant.user_id)
+        assert _document_row(document)["status"] == "approved"
+        assert len(_snapshots(document)) == 2
+
+
+@requires_review_schema
+def test_reopening_a_rejected_document_sends_it_back_to_review():
+    """A rejection is "reversible by re-review" (reject_document); D-144 is
+    that re-review. The rejection stays in the trail."""
+    with _TestValidationTenant("Acme Test Distributor -- reopen rejected") as tenant:
+        document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        with tenant_session(tenant.tenant_id) as session:
+            reject_document(
+                session, tenant.tenant_id, document, user_id=tenant.user_id, note="Wrong buyer."
+            )
+            reopen_document(session, tenant.tenant_id, document, user_id=tenant.user_id)
+
+        assert _document_row(document)["status"] == "needs_review"
+        actions = [r["action"] for r in review_trail_for(tenant, document)]
+        assert actions == [ACTION_REJECTED, ACTION_REOPENED]
+
+
+@requires_review_schema
+def test_only_a_decided_document_can_be_reopened():
+    with _TestValidationTenant("Acme Test Distributor -- reopen refused") as tenant:
+        document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        with tenant_session(tenant.tenant_id) as session:
+            with pytest.raises(ReviewError) as excinfo:
+                reopen_document(session, tenant.tenant_id, document, user_id=tenant.user_id)
+        assert excinfo.value.code == CODE_NOT_REVIEWABLE
+        assert review_trail_for(tenant, document) == []
 
 
 # -- concurrency -------------------------------------------------------------

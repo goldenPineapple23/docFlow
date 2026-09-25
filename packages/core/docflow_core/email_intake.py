@@ -37,7 +37,7 @@ from celery import Celery
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from docflow_core import allowance, file_types, intake_gate
+from docflow_core import allowance, file_types, founder_alerts, intake_gate
 from docflow_core.config import get_settings
 
 # Named constants (Section 7.15.4) are defined once, in docflow_core.constants.
@@ -574,6 +574,9 @@ def _accept_attachment(
             detected_type=validation.file_type.name.value if validation.file_type else None,
             error_code=validation.error_code,
         )
+        founder_alerts.raise_for_failure(
+            session, tenant_id=tenant_id, error_code=validation.error_code
+        )
         return AttachmentOutcome(
             filename=attachment.filename,
             accepted=False,
@@ -758,6 +761,13 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
                     )
                 )
             result_outcome = "quarantined"
+            if decision.quarantine_reason == "auth_fail":
+                # INT-004 says DocFlow has been alerted; only the founder can
+                # release these (7.16.4), so the founder must hear of them (D-145).
+                founder_alerts.raise_for_failure(
+                    session, tenant_id=tenant_id, error_code="INT-004",
+                    document_id=attachment_outcomes[0].document_id if attachment_outcomes else None,
+                )
             if decision.quarantine_reason in ("abuse_ceiling", "cost_breaker"):
                 # "The intake address auto-replies 'received and held'" (7.16.2).
                 # The rejection row is what limits this to one reply a day per

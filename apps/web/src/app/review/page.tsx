@@ -116,6 +116,12 @@ function ReviewQueue() {
     <>
       <ReviewChrome />
       <main className="mx-auto max-w-6xl p-6">
+      {/* In the Console, the way back to the tenant this list belongs to. */}
+      {scope.tenantId ? (
+        <Link href={`/admin/tenants/${scope.tenantId}`} className="text-sm text-blue-700 underline">
+          ← Tenant
+        </Link>
+      ) : null}
       <h1 className="text-xl font-semibold">Purchase orders</h1>
       <p className="mt-1 max-w-3xl text-sm text-gray-600">
         Every purchase order that arrives — by email or upload — is read by DocFlow and then

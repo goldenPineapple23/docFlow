@@ -357,6 +357,88 @@ def test_rejecting_requires_a_note(client):
         assert _status(document) == "rejected"
 
 
+@requires_review_schema
+def test_reopening_over_http_sends_a_decided_order_back_to_review(client):
+    """D-144: the screen's "Reopen for review" button, through the API."""
+    with _ReviewTenant("Acme Test Distributor -- reopen api") as tenant:
+        document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        with tenant_session(tenant.tenant_id) as session:
+            approve_document(session, tenant.tenant_id, document, user_id=tenant.user_id)
+
+        ok = client.post(f"/review/documents/{document}/reopen", headers=tenant.headers())
+        assert ok.status_code == 200
+        assert _status(document) == "needs_review"
+
+        # An order already in review has nothing to reopen: a catalog code.
+        again = client.post(f"/review/documents/{document}/reopen", headers=tenant.headers())
+        assert again.status_code >= 400
+        assert again.json()["detail"]["code"] == "REV-004"
+
+
+@requires_review_schema
+def test_a_viewer_cannot_reopen(client):
+    with _ReviewTenant("Acme Test Distributor -- reopen viewer", role="viewer") as tenant:
+        document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        with tenant_session(tenant.tenant_id) as session:
+            approve_document(session, tenant.tenant_id, document, user_id=tenant.user_id)
+
+        response = client.post(f"/review/documents/{document}/reopen", headers=tenant.headers())
+        assert response.status_code == 403
+        assert _status(document) == "approved"
+
+
+def _fail(document_id: UUID, raw_json: str | None) -> None:
+    with platform_session() as session:
+        session.execute(
+            text("UPDATE documents SET status = 'failed', raw_json = CAST(:raw AS jsonb) WHERE id = :id"),
+            {"id": str(document_id), "raw": raw_json},
+        )
+
+
+@requires_review_schema
+def test_a_failed_order_says_why_in_the_catalogs_words(client):
+    """
+    D-145: a reviewer used to see only "Couldn't be read". The reason is the
+    code the worker recorded -- on the document when it stopped before the
+    model, on the extraction run when the model call failed -- rendered from
+    the catalog, never the raw cause.
+    """
+    with _ReviewTenant("Acme Test Distributor -- failure reason") as tenant:
+        converted = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        _fail(converted, '{"error_code": "DOC-017", "detail": "LibreOffice exited 1"}')
+
+        model = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        _fail(model, None)
+        with platform_session() as session:
+            session.execute(
+                text(
+                    "INSERT INTO extraction_runs (tenant_id, document_id, succeeded, error_code) "
+                    "VALUES (:t, :d, false, 'DOC-009')"
+                ),
+                {"t": str(tenant.tenant_id), "d": str(model)},
+            )
+
+        unknown = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        _fail(unknown, None)
+
+        fine = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+
+        def failure(document_id):
+            response = client.get(f"/review/documents/{document_id}", headers=tenant.headers())
+            assert response.status_code == 200
+            return response.json()["document"]["failure"]
+
+        got = failure(converted)
+        assert got["code"] == "DOC-017"
+        assert got["title"] and got["message"] and got["action"]
+        # The raw cause stays in the log (Section 7.16.5).
+        assert "LibreOffice" not in str(got)
+
+        assert failure(model)["code"] == "DOC-009"
+        assert failure(unknown)["code"] == "DOC-008"
+        assert failure(fine) is None
+
+
 # -- roles are enforced at the API, not in the UI (Section 3) ----------------
 
 

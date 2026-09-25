@@ -405,3 +405,74 @@ test("approve & export is blocked by unticked warnings, like approve", async ({ 
   await expect(page.getByTestId("approve-export-button")).toBeDisabled();
   expect(state.approved).toBeUndefined();
 });
+
+test("an approved order is locked, and Reopen for review brings it back after a confirmation", async ({ page }) => {
+  // D-144: the hint used to promise that editing reopens an approved order
+  // while every field was locked. Reopening is now its own explicit action.
+  const state = { detail: detail() };
+  state.detail.document.status = "approved";
+  await stubApi(page, state);
+  await stubExports(page, { status: "ready", sha256: "abc", byte_size: 812, format_label: "CSV" });
+  const reopened: string[] = [];
+  await page.route("**/review/documents/*/reopen", async (route) => {
+    reopened.push(route.request().method());
+    state.detail.document.status = "needs_review";
+    await route.fulfill({ json: { review_action_id: "r2", status: "needs_review" } });
+  });
+
+  await page.goto(`/review/${DOCUMENT_ID}`);
+  await expect(page.getByTestId("header-input-po_number")).toBeDisabled();
+  await expect(page.getByTestId("action-hint")).toHaveText(
+    "Already approved. To change a value, reopen it for review first.",
+  );
+
+  // One click only asks; nothing is sent until the confirmation.
+  await page.getByTestId("reopen-button").click();
+  await expect(page.getByTestId("reopen-confirm")).toContainText("has to be approved again");
+  expect(reopened).toEqual([]);
+
+  await page.getByTestId("reopen-confirm-button").click();
+  await expect(page.getByText("Reopened for review")).toBeVisible();
+  expect(reopened).toEqual(["POST"]);
+  await expect(page.getByTestId("header-input-po_number")).toBeEnabled();
+  await expect(page.getByTestId("reopen-button")).toHaveCount(0);
+});
+
+test("a rejected order can be reopened, and one still in review offers no reopen", async ({ page }) => {
+  const state = { detail: detail() };
+  state.detail.document.status = "rejected";
+  await stubApi(page, state);
+  await page.goto(`/review/${DOCUMENT_ID}`);
+  await expect(page.getByTestId("action-hint")).toHaveText(
+    "This order was rejected. Reopen it to review it again.",
+  );
+  await page.getByTestId("reopen-button").click();
+  await expect(page.getByTestId("reopen-confirm")).toContainText("The rejection stays in its history");
+
+  state.detail = detail();
+  await page.reload();
+  await expect(page.getByTestId("approve-button")).toBeVisible();
+  await expect(page.getByTestId("reopen-button")).toHaveCount(0);
+});
+
+test("an order DocFlow couldn't read says why, in the catalog's words", async ({ page }) => {
+  // D-145: "Couldn't be read" alone gives the reviewer nothing to tell the buyer.
+  const state = { detail: detail() };
+  state.detail.document.status = "failed";
+  state.detail.document.failure = {
+    code: "DOC-017",
+    title: "We couldn't convert this older file",
+    message: "This is a legacy Word (.doc) file, which DocFlow converts before reading.",
+    action: "Re-save or export it as PDF, .docx or .xlsx and send it again.",
+  };
+  await stubApi(page, state);
+  await page.goto(`/review/${DOCUMENT_ID}`);
+
+  const banner = page.getByTestId("failure-banner");
+  await expect(banner).toContainText("We couldn't convert this older file");
+  await expect(banner).toContainText("Re-save or export it as PDF");
+  await expect(page.getByTestId("action-hint")).toHaveText(
+    "DocFlow couldn't read this order, so there's nothing to review. The reason is above.",
+  );
+  await expect(page.getByTestId("reopen-button")).toHaveCount(0);
+});

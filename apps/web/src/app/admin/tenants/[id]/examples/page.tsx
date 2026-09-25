@@ -156,20 +156,20 @@ export default function ExamplesPage({ params }: { params: Promise<{ id: string 
                 <thead className="text-xs uppercase tracking-wide text-gray-500">
                   <tr>
                     <th className="py-1">Customer</th>
-                    <th className="py-1 pl-3 text-right">Approved</th>
-                    <th className="py-1 pl-3 text-right" title="Orders DocFlow read as text; scans and photos can't be examples">
+                    <th className="py-1 pl-3 text-center">Approved</th>
+                    <th className="py-1 pl-3 text-center" title="Orders DocFlow read as text; scans and photos can't be examples">
                       Usable as examples
                     </th>
-                    <th className="py-1 pl-3">Gets examples</th>
+                    <th className="py-1 pl-3 text-center">Gets examples</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {data.buyers.map((b) => (
                     <tr key={b.buyer_id} data-testid={`examples-buyer-${b.buyer_id}`}>
                       <td className="py-2">{b.name}</td>
-                      <td className="py-2 pl-3 text-right tabular-nums">{b.approved}</td>
-                      <td className="py-2 pl-3 text-right tabular-nums">{b.with_text}</td>
-                      <td className="py-2 pl-3">
+                      <td className="py-2 pl-3 text-center tabular-nums">{b.approved}</td>
+                      <td className="py-2 pl-3 text-center tabular-nums">{b.with_text}</td>
+                      <td className="py-2 pl-3 text-center">
                         {b.qualifies
                           ? "Yes"
                           : b.approved < data.min_approved

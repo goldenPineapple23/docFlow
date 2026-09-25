@@ -32,6 +32,7 @@ from docflow_core import (
     example_prompting,
     field_schema,
     file_types,
+    founder_alerts,
     model_runs,
     previews,
     review_digest,
@@ -463,6 +464,28 @@ def _mark_failed(tenant_id: UUID, document_id: UUID, *, raw_response: dict | Non
             ),
             {"id": str(document_id), "raw_json": raw_response},
         )
+    # A code whose catalog message says "DocFlow has been alerted" (a failed
+    # conversion, DOC-017) raises that alert (D-145).
+    _alert_failure(tenant_id, document_id, (raw_response or {}).get("error_code"))
+
+
+def _alert_failure(tenant_id: UUID, document_id: UUID, error_code: str | None) -> None:
+    """
+    Raise the founder alert a failure's catalog message promises (D-145).
+
+    Its own transaction, after the document is already marked failed: an
+    alert that can't be written must never roll back the record of what
+    happened to the document. It is logged instead, with IDs only.
+    """
+    try:
+        with tenant_session(tenant_id) as session:
+            founder_alerts.raise_for_failure(
+                session, tenant_id=tenant_id, error_code=error_code, document_id=document_id
+            )
+    except Exception:
+        logger.exception(
+            "founder_alert_not_raised document_id=%s error_code=%s", document_id, error_code
+        )
 
 
 _PROVENANCE_HEADER_FIELDS = (
@@ -604,6 +627,8 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                     "est_cost_usd": _money(_total_cost(plan, result)),
                 },
             )
+        # DOC-008 / DOC-009 tell the reader DocFlow has been alerted (D-145).
+        _alert_failure(tid, did, result.error_code or "DOC-008")
         return
 
     header = result.header

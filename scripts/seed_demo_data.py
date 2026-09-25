@@ -137,7 +137,8 @@ TERMS = ["Net 30", "Net 15", "Net 45", "Due on receipt"]
 def _tenant_id() -> UUID:
     with platform_session() as session:
         row = session.execute(
-            text("SELECT id FROM tenants WHERE name = :name AND deleted_at IS NULL"),
+            text("SELECT id FROM tenants WHERE name = :name AND deleted_at IS NULL "
+            "ORDER BY created_at LIMIT 1"),
             {"name": TENANT_NAME},
         ).mappings().first()
     if row is None:
