@@ -9,6 +9,7 @@ prices DocFlow actually offers. All data is fictional (CLAUDE.md Section 0 rule 
 from __future__ import annotations
 
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from docflow_core import tiers
@@ -23,11 +24,22 @@ class _Rollback(Exception):
 
 
 def _founder_id(session) -> str:
-    return str(
-        session.execute(
-            text("SELECT user_id FROM platform_admins WHERE revoked_at IS NULL LIMIT 1")
-        ).scalar_one()
+    """A fictional platform admin, created inside the caller's transaction, which
+    every test here rolls back. It used to borrow whichever real platform admin
+    the database happened to hold, so it only passed on staging and failed on a
+    fresh database (found when CI got one, Phase 5.5 Stage 0)."""
+    user_id = str(uuid4())
+    session.execute(
+        text(
+            "INSERT INTO users (id, tenant_id, auth_user_id, email, role, is_active) "
+            "VALUES (:id, NULL, :auth, :email, 'owner', true)"
+        ),
+        {"id": user_id, "auth": str(uuid4()), "email": f"tier-test-{user_id}@example.test"},
     )
+    session.execute(
+        text("INSERT INTO platform_admins (user_id, granted_by) VALUES (:id, :id)"), {"id": user_id}
+    )
+    return user_id
 
 
 @requires_console_schema
