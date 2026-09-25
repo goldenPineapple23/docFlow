@@ -199,6 +199,12 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 - `RUNBOOK.md` does not exist yet (Phase 6); several constants and the
   parser-upgrade process must be documented there.
 - The worker's local venv was missing `httpx` (declared by core); installed 2026-09-23, worker suite is now 74 of 74. Run it with the worker's own venv, not the API's (which lacks `xlwt`, `pillow_heif`).
+  That fix was local only: `httpx` never reached `apps/worker/requirements.lock.txt`
+  (anthropic 1.6 switched to `httpx2`, so it stopped arriving transitively), and CI
+  installs core with `--no-deps` -- the worker CI job was red from then on
+  (`test_celery_app`, `No module named 'httpx'`). Fixed 2026-09-25: `httpx` declared
+  in the worker's `requirements.txt` and pinned in its lock (same pins as the API).
+  Verified in a clean venv built exactly as CI builds it: worker 81 passed.
 - Browser walkthroughs: `docs/walkthroughs/README.md` is the index, one file
   per phase or slice from Phase 0 to 5.10, to walk in order before Phase 6
   (QA/UAT). Files for Phases 0–4, 5.1–5.5 and 5.8a–c were added 2026-09-25;

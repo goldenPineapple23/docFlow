@@ -1,6 +1,10 @@
 -e ../../packages/core
 
 celery[redis]>=5.4
+# docflow_core.external_services (imported by the lifecycle sweep) needs it.
+# Listed here explicitly because CI installs core with --no-deps, and
+# anthropic>=1.6 no longer pulls httpx in transitively (it uses httpx2).
+httpx>=0.27
 
 # Phase 1: Tier 1 text/image extraction inside the isolated parsing worker
 # (CLAUDE.md Section 7.11 -- parsing never runs in the web process).
