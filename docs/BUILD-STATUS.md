@@ -38,7 +38,8 @@ the golden fixture with its recorded model response.
 - **Exit:** founder creates a tenant from the Console and a customer logs in via
   invite; `/signup` is 404; cross-tenant read fails for a tenant user and
   succeeds (with an `admin_actions` row) for a platform admin; CI blocks a
-  failing test.
+  failing test. (CI ran from Phase 0, but nothing made it block a merge until
+  `main` was protected on 2026-09-25 -- see "CI and branch protection" below.)
 
 ## Phase 1 — Intake + extraction · DONE
 
@@ -205,6 +206,17 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   (`test_celery_app`, `No module named 'httpx'`). Fixed 2026-09-25: `httpx` declared
   in the worker's `requirements.txt` and pinned in its lock (same pins as the API).
   Verified in a clean venv built exactly as CI builds it: worker 81 passed.
+- CI and branch protection (2026-09-25, review `docs/REVIEW-PHASE5.md` H7 part 1):
+  GitHub CI is green on `main` again -- run #39 (`4755eeb`, the httpx fix) and
+  run #40 (`07f2912`) passed all four jobs; it had been red since 2026-09-19.
+  `main` is now protected: pull request required (no approval count, so the
+  founder can merge their own), all four jobs required -- `api (lint, typecheck,
+  test, audit)`, `core (lint, test, audit)`, `web (lint, typecheck, test, build,
+  e2e, audit)`, `worker (lint, typecheck, test, audit)` -- branch must be up to
+  date, no bypass for administrators, no force pushes or deletions. Every change
+  now goes through a branch and a pull request. Still open (H7 part 2): CI has no
+  database, so most API tests (the RLS and tenant-isolation ones included) skip
+  there and run only locally.
 - Browser walkthroughs: `docs/walkthroughs/README.md` is the index, one file
   per phase or slice from Phase 0 to 5.10, to walk in order before Phase 6
   (QA/UAT). Files for Phases 0–4, 5.1–5.5 and 5.8a–c were added 2026-09-25;
