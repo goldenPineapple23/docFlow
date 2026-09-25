@@ -61,12 +61,6 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 
-# Type-checked in CI since Phase 5.5 Stage 0 (review H7: core was never
-# type-checked; it had 24 errors). Same settings as the api and worker.
-[tool.mypy]
-python_version = "3.11"
-ignore_missing_imports = true
-
 # This lint config is new as of Phase 1 (packages/core had no [tool.ruff]
 # section before -- see DECISIONS.md). admin_data_access.py and db.py are
 # pre-existing Phase 0 files with long SQL-literal lines that predate this
@@ -82,6 +76,8 @@ ignore_missing_imports = true
 # real edit to review, not a mechanical lint fix.
 "docflow_core/extraction.py" = ["E501"]
 
+# Type-checked in CI since Phase 5.5 Stage 0 (review H7: CI never ran mypy on
+# core, which had 24 errors).
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
