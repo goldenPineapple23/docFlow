@@ -487,6 +487,30 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="high",
         audience="tenant",
     ),
+    "VAL-014": ErrorCatalogEntry(
+        code="VAL-014",
+        title="We couldn't read this number",
+        message=(
+            "The order prints something here that isn't a plain number -- for example it has a "
+            "comma, a currency sign or a word in it -- so DocFlow left the field empty rather than "
+            "guess what it means. What was printed is shown with this warning."
+        ),
+        action="Type the number as digits and a decimal point only (for example 1356.00), then approve.",
+        severity="high",
+        audience="tenant",
+    ),
+    "VAL-015": ErrorCatalogEntry(
+        code="VAL-015",
+        title="Unusually precise number, please confirm",
+        message=(
+            "This number has more than six digits after the decimal point. DocFlow keeps every "
+            "digit exactly as printed and never rounds it, but that much precision is unusual "
+            "on a purchase order, so it may be a misread."
+        ),
+        action="Check it against the document. If it's right, acknowledge this warning and approve.",
+        severity="warning",
+        audience="tenant",
+    ),
     "AUTH-002": ErrorCatalogEntry(
         code="AUTH-002",
         title="Your account can view this, not change it",
@@ -762,6 +786,18 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         ),
         action="Go back to Purchase orders and open the order from the list.",
         severity="info",
+        audience="tenant",
+    ),
+    "REV-007": ErrorCatalogEntry(
+        code="REV-007",
+        title="That isn't a number DocFlow can save",
+        message=(
+            "Prices, quantities and totals are saved exactly as typed, so they have to be typed "
+            "as a plain number: digits and a decimal point only, with no commas, currency signs "
+            "or words."
+        ),
+        action="Retype it like 4750 or 47.50, then save again.",
+        severity="warning",
         audience="tenant",
     ),
     # ── CON-0xx · the founder Console (Section 7.15, Phase 5) ────────────────
@@ -1354,6 +1390,21 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         action="Try the export again in a minute.",
         severity="high",
         audience="both",
+    ),
+    "EXP-008": ErrorCatalogEntry(
+        code="EXP-008",
+        title="QuickBooks may not keep every decimal",
+        message=(
+            "This order has a number with more decimal places than QuickBooks Desktop is known to "
+            "accept (two on an amount, five on a quantity or price). The file has every digit, "
+            "exactly as approved; QuickBooks may round it or refuse it when you import."
+        ),
+        action=(
+            "Check those lines in QuickBooks after importing, or download the order as CSV or "
+            "Excel, which keep every digit."
+        ),
+        severity="warning",
+        audience="tenant",
     ),
     # ── INT-006 · email intake (Section 7.14, slice 5.6) ────────────────────
     "INT-006": ErrorCatalogEntry(

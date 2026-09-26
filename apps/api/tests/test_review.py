@@ -189,7 +189,9 @@ def test_the_audit_trail_shows_exactly_what_changed():
         assert changes["po_number"]["after"] == "BCH-2292"
         assert changes["payment_terms"]["before"] is None
         assert changes["payment_terms"]["after"] == "Net 30"
-        assert changes["quantity"]["before"] == "12.0000"
+        # Exactly as it was entered (Decimal("12")): since C1 (D-154) the column
+        # no longer pads it to "12.0000".
+        assert changes["quantity"]["before"] == "12"
         assert changes["quantity"]["after"] == "13"
         assert changes["quantity"]["line_number"] == 1
 

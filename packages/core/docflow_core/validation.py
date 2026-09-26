@@ -49,7 +49,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -57,6 +57,14 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from docflow_core.errors import Severity, get_error
+from docflow_core.numbers import (
+    UNUSUAL_DECIMAL_PLACES,
+    decimal_places,
+    exact_context_precision,
+    is_document_number,
+    plain,
+    plain_or_none,
+)
 
 # ── Tolerances (CLAUDE.md Section 7.7's "within a stated tolerance") ─────────
 #
@@ -165,6 +173,12 @@ CODE_LOW_CONFIDENCE = "VAL-010"
 CODE_CURRENCY_INFERRED = "VAL-011"
 CODE_POSSIBLE_DUPLICATE = "VAL-012"
 CODE_POSSIBLE_CHANGE_ORDER = "VAL-013"
+CODE_UNREADABLE_NUMBER = "VAL-014"
+CODE_UNUSUAL_PRECISION = "VAL-015"
+
+# The document number fields, as a field name and where it lives.
+NUMERIC_HEADER_FIELDS = ("order_total",)
+NUMERIC_LINE_FIELDS = ("quantity", "unit_price", "line_total")
 
 # ── ISO 4217 ────────────────────────────────────────────────────────────────
 #
@@ -268,7 +282,7 @@ def _money(value: Decimal | None) -> str | None:
     comparing the payload against the document must see the same digits the
     document printed (Section 7.1).
     """
-    return str(value) if value is not None else None
+    return plain_or_none(value)
 
 
 def _derived_money(value: Decimal | None) -> str | None:
@@ -289,7 +303,9 @@ def _derived_money(value: Decimal | None) -> str | None:
     """
     if value is None:
         return None
-    return str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    with localcontext() as ctx:
+        ctx.prec = exact_context_precision(value)
+        return plain(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 # ── Pure rules ──────────────────────────────────────────────────────────────
@@ -317,8 +333,11 @@ def unit_price_half_step(unit_price: Decimal) -> Decimal:
     the most a correctly rounded printed price can differ from the true one.
     "0.1235" -> 0.00005; "47.50" (stored 47.5000) -> 0.005.
     """
-    exponent = unit_price.normalize().as_tuple().exponent
-    places = max(MIN_PRICE_DECIMAL_PLACES, -exponent if isinstance(exponent, int) else 0)
+    # The stored scale IS the printed precision now that nothing rounds or
+    # pads on the way in (C1, D-154): "47.50" is stored as 47.50, "0.1235" as
+    # 0.1235. The normalize() this used to need, to undo the old column's
+    # padding, also rounded to 28 significant digits.
+    places = max(MIN_PRICE_DECIMAL_PLACES, decimal_places(unit_price))
     return Decimal(1).scaleb(-places) / 2
 
 
@@ -343,11 +362,16 @@ def check_line_total(
     """
     if quantity is None or unit_price is None or line_total is None:
         return None
-    expected = quantity * unit_price
-    delta = line_total - expected
-    if abs(delta) <= line_total_tolerance(quantity, unit_price):
-        return None
-    return expected, delta
+    # Exact arithmetic: the default 28 significant digits would round the
+    # product of two long numbers, and a rule that rounds can hide a real
+    # discrepancy or invent one (C1, D-154).
+    with localcontext() as ctx:
+        ctx.prec = exact_context_precision(quantity, unit_price, line_total)
+        expected = quantity * unit_price
+        delta = line_total - expected
+        if abs(delta) <= line_total_tolerance(quantity, unit_price):
+            return None
+        return expected, delta
 
 
 def header_total_tolerance(line_count: int) -> Decimal:
@@ -380,11 +404,13 @@ def check_header_total(
         return None
     if any(value is None for value in line_totals):
         return None
-    expected_sum = sum((value for value in line_totals if value is not None), Decimal("0"))
-    delta = order_total - expected_sum
-    if abs(delta) <= header_total_tolerance(len(line_totals)):
-        return None
-    return expected_sum, delta
+    with localcontext() as ctx:
+        ctx.prec = exact_context_precision(order_total, *line_totals)
+        expected_sum = sum((value for value in line_totals if value is not None), Decimal("0"))
+        delta = order_total - expected_sum
+        if abs(delta) <= header_total_tolerance(len(line_totals)):
+            return None
+        return expected_sum, delta
 
 
 def check_quantity(quantity: Decimal | None) -> bool:
@@ -495,6 +521,11 @@ class DocumentSnapshot:
     duplicate_of_document_id: UUID | None = None
     is_possible_change_order: bool = False
     change_order_of_document_id: UUID | None = None
+    # (field, line_number or None for the header, the printed text): numbers
+    # the model returned in a form that isn't one, so the working value is
+    # empty. Only while the field is still as extracted -- once a person has
+    # typed a value there is nothing left to warn about.
+    unreadable_numbers: tuple[tuple[str, int | None, str], ...] = ()
 
 
 # ── The whole-document evaluation (pure) ────────────────────────────────────
@@ -758,6 +789,61 @@ def _line_warnings(line: LineSnapshot, rules: FieldRules) -> list[DocumentWarnin
     return warnings
 
 
+def _number_warnings(snapshot: DocumentSnapshot) -> list[DocumentWarning]:
+    """VAL-014 and VAL-015 (C1, M2; D-149, D-154). Neither changes a value:
+    one says a printed number couldn't be read and was left empty, the other
+    asks a person to confirm a number carrying more than six decimal places."""
+    warnings: list[DocumentWarning] = []
+    line_ids = {line.line_number: line.line_id for line in snapshot.lines}
+    for name, line_number, printed in snapshot.unreadable_numbers:
+        detail: dict[str, Any] = {
+            "scope": "line" if line_number is not None else "header",
+            "field": name,
+            "printed": printed,
+        }
+        if line_number is not None:
+            detail["line_number"] = str(line_number)
+        warnings.append(
+            DocumentWarning(
+                code=CODE_UNREADABLE_NUMBER,
+                severity=_catalog_severity(CODE_UNREADABLE_NUMBER),
+                field_name=name,
+                line_number=line_number,
+                document_line_id=line_ids.get(line_number) if line_number is not None else None,
+                detail=detail,
+            )
+        )
+
+    def precision(name: str, value: Decimal | None, line: LineSnapshot | None) -> None:
+        if value is None or decimal_places(value) <= UNUSUAL_DECIMAL_PLACES:
+            return
+        detail: dict[str, Any] = {
+            "scope": "line" if line else "header",
+            "field": name,
+            "value": plain(value),
+            "decimal_places": str(decimal_places(value)),
+        }
+        if line is not None:
+            detail["line_number"] = str(line.line_number)
+        warnings.append(
+            DocumentWarning(
+                code=CODE_UNUSUAL_PRECISION,
+                severity=_catalog_severity(CODE_UNUSUAL_PRECISION),
+                field_name=name,
+                line_number=line.line_number if line else None,
+                document_line_id=line.line_id if line else None,
+                detail=detail,
+            )
+        )
+
+    for name in NUMERIC_HEADER_FIELDS:
+        precision(name, snapshot.header.get(name), None)
+    for line in sorted(snapshot.lines, key=lambda item: item.line_number):
+        for name in NUMERIC_LINE_FIELDS:
+            precision(name, getattr(line, name), line)
+    return warnings
+
+
 def evaluate_document(
     snapshot: DocumentSnapshot, rules: FieldRules = DEFAULT_FIELD_RULES
 ) -> list[DocumentWarning]:
@@ -771,6 +857,7 @@ def evaluate_document(
     warnings.extend(_header_warnings(snapshot, rules))
     for line in sorted(snapshot.lines, key=lambda item: item.line_number):
         warnings.extend(_line_warnings(line, rules))
+    warnings.extend(_number_warnings(snapshot))
     return warnings
 
 
@@ -795,7 +882,8 @@ def load_snapshot(session: Session, document_id: UUID) -> DocumentSnapshot | Non
     row = session.execute(
         text(
             """
-            SELECT d.id, d.created_at, d.injection_suspected,
+            SELECT d.id, d.created_at, d.injection_suspected, d.raw_json,
+                   h.field_provenance AS header_provenance,
                    d.is_possible_duplicate, d.duplicate_of_document_id,
                    d.is_possible_change_order, d.change_order_of_document_id,
                    h.po_number, h.order_date, h.requested_delivery_date, h.buyer_name,
@@ -817,7 +905,7 @@ def load_snapshot(session: Session, document_id: UUID) -> DocumentSnapshot | Non
             """
             SELECT l.id, l.line_number, l.sku, l.description, l.quantity, l.unit,
                    l.unit_price, l.line_total, l.confidence, l.uom_mismatch, l.matched_uom,
-                   i.unit_of_measure AS matched_item_uom
+                   l.field_provenance, i.unit_of_measure AS matched_item_uom
             FROM document_lines l
             LEFT JOIN items i ON i.id = l.matched_item_id
             WHERE l.document_id = :document_id AND l.deleted_at IS NULL
@@ -875,7 +963,49 @@ def load_snapshot(session: Session, document_id: UUID) -> DocumentSnapshot | Non
         change_order_of_document_id=(
             UUID(str(row["change_order_of_document_id"])) if row["change_order_of_document_id"] else None
         ),
+        unreadable_numbers=_unreadable_numbers(row, line_rows),
     )
+
+
+def _still_extracted(provenance: Any, name: str) -> bool:
+    """True unless a person has edited this field (Section 7.3's provenance)."""
+    if isinstance(provenance, str):
+        provenance = json.loads(provenance)
+    value = (provenance or {}).get(name)
+    return not (isinstance(value, str) and value.startswith("human_edit"))
+
+
+def _unreadable_numbers(row: Any, line_rows: Any) -> tuple[tuple[str, int | None, str], ...]:
+    """Fields whose printed value (in the immutable raw_json) is not a number,
+    left empty in the working copy and not yet filled in by a person."""
+    raw = row["raw_json"]
+    if isinstance(raw, str):
+        raw = json.loads(raw)
+    if not isinstance(raw, dict) or not isinstance(raw.get("header"), dict):
+        return ()
+    found: list[tuple[str, int | None, str]] = []
+
+    def unreadable(printed: Any) -> bool:
+        return isinstance(printed, str) and printed != "" and not is_document_number(printed)
+
+    for name in NUMERIC_HEADER_FIELDS:
+        printed = raw["header"].get(name)
+        if row[name] is None and unreadable(printed) and _still_extracted(row["header_provenance"], name):
+            found.append((name, None, str(printed)))
+    raw_lines = {
+        item.get("line_number"): item for item in raw.get("line_items") or [] if isinstance(item, dict)
+    }
+    for line in line_rows:
+        item = raw_lines.get(line["line_number"]) or {}
+        for name in NUMERIC_LINE_FIELDS:
+            printed = item.get(name)
+            if (
+                line[name] is None
+                and unreadable(printed)
+                and _still_extracted(line["field_provenance"], name)
+            ):
+                found.append((name, line["line_number"], str(printed)))
+    return tuple(found)
 
 
 def sync_warnings(

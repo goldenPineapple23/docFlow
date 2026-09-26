@@ -262,6 +262,7 @@ function exportRecord(overrides: Record<string, unknown> = {}) {
     format_label: "CSV",
     status: "pending",
     error: null,
+    warnings: [],
     sha256: null,
     byte_size: null,
     snapshot_hash: "h",
@@ -345,6 +346,50 @@ test("an export QuickBooks would reject says why, from the catalog", async ({ pa
   const error = page.getByTestId("export-error");
   await expect(error).toContainText("QuickBooks can't import this order yet");
   await expect(error).toContainText("download the order as CSV or Excel instead");
+});
+
+test("C1: a QuickBooks file with more decimals than QuickBooks keeps says so, from the catalog", async ({
+  page,
+}) => {
+  const state = { detail: detail() };
+  state.detail.document.status = "approved";
+  await stubApi(page, state);
+  await stubExports(page, {
+    status: "ready",
+    sha256: "abc",
+    byte_size: 400,
+    format_label: "QuickBooks Desktop (IIF)",
+    warnings: [
+      {
+        code: "EXP-008",
+        title: "QuickBooks may not keep every decimal",
+        message: "This order has a number with more decimal places than QuickBooks Desktop is known to accept.",
+        action: "Check those lines in QuickBooks after importing, or download the order as CSV or Excel.",
+        field: "unit_price",
+        line_number: 1,
+      },
+    ],
+  });
+
+  await page.goto(`/review/${DOCUMENT_ID}`);
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByTestId("export-iif").click();
+  await downloadPromise;
+
+  const warnings = page.getByTestId("export-warnings");
+  await expect(warnings).toContainText("QuickBooks may not keep every decimal");
+  await expect(warnings).toContainText("line 1 unit price");
+});
+
+test("C1: a tiny price is shown exactly as the API sent it, never reformatted", async ({ page }) => {
+  const state = { detail: detail() };
+  state.detail.lines[0].unit_price = "0.0000001";
+  state.detail.lines[0].quantity = "123456789012345678901234.5";
+  await stubApi(page, state);
+
+  await page.goto(`/review/${DOCUMENT_ID}`);
+  await expect(page.getByTestId("line-1-unit_price")).toHaveValue("0.0000001");
+  await expect(page.getByTestId("line-1-quantity")).toHaveValue("123456789012345678901234.5");
 });
 
 test("an order still in review offers no export", async ({ page }) => {

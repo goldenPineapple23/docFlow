@@ -64,6 +64,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from docflow_core.errors import get_error
+from docflow_core.numbers import is_document_number, plain
 
 # ── Catalog codes this module can raise ─────────────────────────────────────
 CODE_UNACKNOWLEDGED_WARNINGS = "REV-001"
@@ -71,6 +72,7 @@ CODE_ALREADY_APPROVED = "REV-002"
 CODE_FIELD_NOT_EDITABLE = "REV-003"
 CODE_NOT_REVIEWABLE = "REV-004"
 CODE_STALE_EDIT = "REV-005"
+CODE_NOT_A_NUMBER = "REV-007"
 
 # ── Review action types (0007's CHECK constraint, mirrored) ─────────────────
 ACTION_EDITED = "edited"
@@ -230,6 +232,43 @@ def validate_editable(request: EditRequest) -> None:
                     CODE_FIELD_NOT_EDITABLE,
                     {"field": name, "scope": "line", "line_id": str(line_id)},
                 )
+    _check_typed_numbers(request.header, _NUMERIC_HEADER_FIELDS, scope="header")
+    for line_id, fields in request.lines.items():
+        _check_typed_numbers(fields, _NUMERIC_LINE_FIELDS, scope="line", line_id=line_id)
+
+
+def _check_typed_numbers(
+    values: dict[str, str | None],
+    numeric_fields: frozenset[str],
+    *,
+    scope: str,
+    line_id: UUID | None = None,
+) -> None:
+    """A typed price, quantity or total is digits and a decimal point only --
+    the same rule the model is held to (Section 8.1). It is stored exactly as
+    typed, never rounded (C1), so it has to be a number exactly as typed: no
+    "4,750", "$47.50" or "12 cases". A cleared field (empty) is no value.
+
+    Without this, such a value reached Postgres and failed there (a server
+    error, not a catalog message)."""
+    for name, value in values.items():
+        if name not in numeric_fields or value is None or value == "":
+            continue
+        if not is_document_number(value):
+            detail: dict[str, Any] = {"field": name, "scope": scope}
+            if line_id is not None:
+                detail["line_id"] = str(line_id)
+            raise ReviewError(CODE_NOT_A_NUMBER, detail)
+
+
+def _cleared_numbers_as_null(
+    values: dict[str, str | None], numeric_fields: frozenset[str]
+) -> dict[str, str | None]:
+    """An emptied number field means "no value": NULL, not an empty string a
+    numeric column can't hold."""
+    return {
+        name: (None if name in numeric_fields and value == "" else value) for name, value in values.items()
+    }
 
 
 def _as_text(value: Any) -> str | None:
@@ -243,7 +282,8 @@ def _as_text(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, Decimal):
-        return str(value)
+        # Never str(): Decimal('1E-7') would reach the snapshot as "1E-7" (C1).
+        return plain(value)
     return str(value)
 
 
@@ -448,6 +488,13 @@ def apply_edits(
         if current != expected_version:
             raise ReviewError(CODE_STALE_EDIT, {"expected": expected_version, "actual": current})
 
+    request = EditRequest(
+        header=_cleared_numbers_as_null(request.header, _NUMERIC_HEADER_FIELDS),
+        lines={
+            line_id: _cleared_numbers_as_null(fields, _NUMERIC_LINE_FIELDS)
+            for line_id, fields in request.lines.items()
+        },
+    )
     header_changes = diff_fields(header_before, request.header)
 
     # Keyed by line id, not by line number. Two rows sharing a line number

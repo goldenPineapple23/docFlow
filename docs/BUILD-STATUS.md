@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-09-25** (Phase 5.5 remediation started: Stage 0).
+commit as the slice. Statuses below are as of **2026-09-25** (Phase 5.5: Stage 0 done, Stage 1 in progress).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -183,8 +183,8 @@ are D-149 – D-153.
 
 | Stage | What | Status | Decisions |
 |---|---|---|---|
-| 0 | Safety net: push, CI green, `main` protected (done before 5.5 began); **CI database and the unapproved-skip check** (H7 part 2); core type-checked and pinned in CI | BUILT, in review (branch `phase55/stage0-ci-database`) | D-148 |
-| 1 | Data integrity: C1 numeric fidelity end to end, H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents | PLANNED | D-149 |
+| 0 | Safety net: push, CI green, `main` protected (done before 5.5 began); **CI database and the unapproved-skip check** (H7 part 2); core type-checked and pinned in CI | DONE (PR #3, merged 2026-09-25) | D-148 |
+| 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents | IN PROGRESS: 1a numeric fidelity BUILT (branch `phase55/stage1a-numeric-fidelity`, migration `0026` awaiting the founder on staging) | D-149, D-154, D-155 |
 | 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events | PLANNED | D-151 |
 | 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation, H4 per-tenant fairness (propose, then stop for approval) | PLANNED | D-150 |
 | 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items | PLANNED | D-152 |

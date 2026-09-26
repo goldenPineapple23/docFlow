@@ -131,7 +131,7 @@ def request_export(
 
 
 _EXPORT_COLUMNS = """
-    e.id, e.document_id, e.format, e.status, e.error_code, e.sha256, e.byte_size,
+    e.id, e.document_id, e.format, e.status, e.error_code, e.warnings, e.sha256, e.byte_size,
     e.snapshot_hash, e.requested_at, e.generated_at, e.acting_as_tenant_id,
     u.email AS generated_by_email,
     (e.snapshot_id = cur.id) AS is_current_snapshot
@@ -267,12 +267,13 @@ def run_export(tenant_id: UUID, export_id: UUID) -> ExportOutcome:
                 """
                 UPDATE exports
                 SET status = 'ready', storage_path = :storage_path, sha256 = :sha256,
-                    byte_size = :byte_size, generated_at = now()
+                    byte_size = :byte_size, warnings = :warnings, generated_at = now()
                 WHERE id = :id AND status = 'pending'
                 """
             ),
             {
                 "id": str(export_id),
+                "warnings": exports.format_warnings(row["snapshot"], row["format"]),
                 "storage_path": storage_path,
                 "sha256": hashlib.sha256(built.content).hexdigest(),
                 "byte_size": len(built.content),

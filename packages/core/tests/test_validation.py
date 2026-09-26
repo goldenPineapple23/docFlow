@@ -121,9 +121,12 @@ def test_line_tolerance_is_the_rounding_room_of_the_printed_numbers():
     assert check_line_total(Decimal("10"), Decimal("10.00"), Decimal("100.07")) is not None
 
 
-def test_a_price_stored_at_four_places_is_read_as_printed_to_the_cent():
-    """unit_price is numeric(14,4): "47.50" comes back as 47.5000."""
-    assert unit_price_half_step(Decimal("47.5000")) == Decimal("0.005")
+def test_C1_a_price_is_read_at_the_precision_it_was_printed():
+    """Since C1 (D-154) the stored scale is the printed one: "47.50" is stored
+    as 47.50, not padded to 47.5000, so its rounding room is half a cent; a
+    price printed as "47.5000" really was printed to four places."""
+    assert unit_price_half_step(Decimal("47.50")) == Decimal("0.005")
+    assert unit_price_half_step(Decimal("47.5000")) == Decimal("0.00005")
     assert unit_price_half_step(Decimal("50")) == Decimal("0.005")
     assert unit_price_half_step(Decimal("0.1235")) == Decimal("0.00005")
 
