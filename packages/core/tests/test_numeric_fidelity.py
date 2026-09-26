@@ -251,3 +251,14 @@ def test_C1_every_format_writes_the_exact_digits_even_when_it_warns(fmt):
     parsed = PARSERS[fmt](built.content)
     assert parsed["header"]["order_total"] == "0.00345"
     assert parsed["lines"][0]["unit_price"] == "0.00115"
+
+
+def test_C1_iif_balance_check_is_exact_for_long_totals():
+    """Found by the C1 property test in CI: the default 28 significant digits
+    rounded this sum and refused a balanced order with EXP-006."""
+    from docflow_core.exports import PARSERS, build_export
+
+    snapshot = _approved("123456789012345678901234.5678901", line_total="123456789012345678901234.5678901")
+    snapshot["lines"].append(dict(snapshot["lines"][0], line_number="2", line_total="0"))
+    parsed = PARSERS["iif"](build_export(snapshot, "hash", "iif").content)
+    assert parsed["header"]["order_total"] == "123456789012345678901234.5678901"

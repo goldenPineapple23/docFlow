@@ -38,8 +38,10 @@ import re
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 from typing import Any, Callable
+
+from docflow_core.numbers import exact_context_precision
 
 FORMATS: tuple[str, ...] = ("csv", "xlsx", "json", "iif")
 
@@ -475,7 +477,12 @@ def _check_iif_balances(view: dict[str, Any]) -> None:
         raise ExportError("EXP-006", "a total is not a number") from exc
     if total is None or len(line_totals) != len(view["lines"]) or not view["lines"]:
         raise ExportError("EXP-006", "order total or a line total is missing")
-    if sum(line_totals, Decimal("0")) != total:
+    # Exact: the default 28 significant digits rounds a sum of long totals and
+    # refused a balanced order (found by the C1 property test, D-154).
+    with localcontext() as ctx:
+        ctx.prec = exact_context_precision(total, *line_totals)
+        balanced = sum(line_totals, Decimal("0")) == total
+    if not balanced:
         raise ExportError("EXP-006", "line totals do not add up to the order total")
 
 
