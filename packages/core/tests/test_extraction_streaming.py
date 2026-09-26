@@ -299,3 +299,59 @@ def test_cost_a_call_refused_before_it_started_records_no_tokens():
     result = _extract(_Refused(_Stream(_message(), events=1)))
     assert result.error_code == "DOC-008"
     assert result.input_tokens is None and result.est_cost_usd is None
+
+
+# ── Failure kinds the founder named: timeout, 5xx, parse error ─────────────
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        {**ANSWER, "header_confidence": "not an object"},  # AttributeError on .items()
+        {**ANSWER, "line_items": [["not", "a", "line"]]},  # ValueError from dict()
+        [ANSWER],  # a list, not an object
+    ],
+)
+def test_cost_a_wrong_shaped_answer_is_DOC_009_with_its_tokens_never_an_exception(shape):
+    """Structured outputs make this very unlikely; Section 7.1 still requires
+    the defence. An exception here would escape after a paid call: no cost
+    record, and the stuck sweep would pay for the same order again."""
+    result = _extract(_Client(_Stream(_message(text=json.dumps(shape)), events=1)))
+    assert not result.ok
+    assert result.error_code == "DOC-009"
+    assert (result.input_tokens, result.output_tokens) == (1200, 340)
+    assert result.est_cost_usd is not None
+
+
+def test_cost_a_5xx_in_the_middle_of_the_answer_keeps_its_billed_input():
+    import anthropic
+
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    overloaded = anthropic.APIStatusError(
+        "overloaded", response=httpx2.Response(529, request=request), body=None
+    )
+
+    class _Overloaded(_Stream):
+        def __iter__(self):
+            yield SimpleNamespace(type="message_start")
+            raise overloaded
+
+    stream = _Overloaded(_message(), events=0)
+    result = _extract(_Client(stream))
+    assert result.error_code == "DOC-008"
+    assert result.input_tokens == 1200 and result.est_cost_usd > 0
+    assert result.raw_response["cost_complete"] is False
+
+
+def test_cost_a_timeout_before_the_answer_starts_records_a_failed_run_without_tokens():
+    import anthropic
+
+    class _TimedOut(_Client):
+        def stream(self, **kwargs):
+            raise anthropic.APITimeoutError(
+                request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+            )
+
+    result = _extract(_TimedOut(_Stream(_message(), events=1)))
+    assert not result.ok and result.error_code == "DOC-008"
+    assert result.input_tokens is None and result.est_cost_usd is None

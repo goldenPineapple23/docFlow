@@ -2068,3 +2068,17 @@ Remaining limits, named rather than hidden:
 - Results: core 533 passed; worker (staging) 107 passed; golden replays 8 passed; live golden, golden with examples and contamination 3 passed.
 
 **Related:** Sections 3, 7.9, 7.13; review M1, H3, M5; D-142, D-158, D-161, D-162.
+
+**Follow-up (2026-09-26, the founder's second round of pre-merge questions):**
+- **One more cost gap, closed.** A malformed-JSON answer was already DOC-009 with its tokens. But a well-formed answer of the wrong shape raised `AttributeError` (a string where an object belongs) or `ValueError` (`dict()` of a list), and it escaped `extract_document` after the paid call: no cost record, and the stuck sweep would pay for the order again. `extraction.py` now catches `ValueError, KeyError, TypeError, AttributeError` there, and such an answer is DOC-009 with its tokens.
+- Tests (+5 in `test_extraction_streaming.py`):
+  - three wrong shapes (`header_confidence` a string, a line item a list, a top-level list); the first two failed before the fix;
+  - a 5xx in the middle of the answer keeps its billed input, marked incomplete;
+  - a timeout before the answer starts records a failed run with no tokens.
+- **Warnings triage (for Stage 5):** the 1c API run printed 439 warnings, main's baseline 425. The whole +14 is `tests/test_review_integrity.py`. All 439 are test-only:
+  - 438 are PyJWT's `InsecureKeyLengthWarning` from the short test signing keys;
+  - 1 is a starlette/anyio deprecation.
+  - Stage 5 (founder): use a test JWT secret of at least 32 bytes.
+- **Main-branch failure found by the baseline run:** `test_tenant_audit_api.py::test_changes_are_listed_newest_first_and_views_only_when_asked` failed on `main` (`1 failed, 390 passed, 3 deselected, 425 warnings`).
+  - Cause: the Console Audit tab merges two tables with two clocks. `admin_actions.created_at` is the application server's `datetime.now()`; `tenant_lifecycle_events.created_at` is the database's `clock_timestamp()`. When the server clock lags the database's, events appear out of order.
+  - Decision (founder): fixed in the named-system-actors PR. Console actions are stamped by the database clock, and the tab orders by timestamp, then id, so ties are stable.

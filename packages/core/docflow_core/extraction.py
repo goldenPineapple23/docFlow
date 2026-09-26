@@ -574,7 +574,10 @@ def extract_document(
     try:
         payload = json.loads(raw_text)
         parsed = _parse_response_payload(payload)
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+    # ValueError covers JSONDecodeError and a wrongly shaped object (dict() of a
+    # list); AttributeError a field of the wrong type. Nothing may escape after
+    # a paid call: it would leave no cost record and the order stuck (D-163).
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
         logger.error("extraction_malformed_response model_id=%s error=%s", EXTRACTION_MODEL, type(exc).__name__)
         return ExtractionResult(
             ok=False,
