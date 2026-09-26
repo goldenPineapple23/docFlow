@@ -97,6 +97,15 @@ IIF_OMITTED_LINE: frozenset[str] = frozenset({"line_number", "sku", "unit"})
 # non-posting account QuickBooks Desktop keeps for them; the line account is
 # the income account a line would post to if the estimate became an invoice.
 # Constants, in one place, pending UAT TC-26 against a real QuickBooks file.
+# How many decimal places QuickBooks Desktop keeps, for EXP-008 (D-149, D-154).
+# PROVISIONAL: Intuit's own IIF Import Kit (the manual and the !SPL/!TRNS
+# field reference) states no limit at all. These two numbers come only from
+# Intuit's community forum (2 places on an amount; the Rate column holds 5)
+# and await the founder's decision and a real QuickBooks file (UAT TC-26).
+# The file always carries every digit; these only decide when to warn.
+IIF_AMOUNT_DECIMAL_PLACES = 2
+IIF_QUANTITY_PRICE_DECIMAL_PLACES = 5
+
 IIF_ESTIMATE_ACCOUNT = "Estimates"
 IIF_LINE_ACCOUNT = "Sales"
 IIF_ADDRESS_LINES = 5
@@ -570,6 +579,41 @@ def parse_iif(content: bytes) -> dict[str, Any]:
             for line in lines
         ],
     }
+
+
+# ── Warnings a finished file carries ────────────────────────────────────────
+
+
+def _places(value: str | None) -> int:
+    if value is None or "." not in value:
+        return 0
+    return len(value.split(".", 1)[1])
+
+
+def format_warnings(snapshot: dict[str, Any], fmt: str) -> list[dict[str, Any]]:
+    """
+    Catalog-coded warnings about what the target program may do with an
+    exact number (C1: never round silently -- say so instead). Today only IIF
+    has any: EXP-008 for a number with more decimal places than QuickBooks
+    Desktop is known to accept. The file itself is unchanged; the warning
+    names the field and line, never the value.
+    """
+    if fmt != "iif":
+        return []
+    view = order_view(snapshot)
+    found: list[dict[str, Any]] = []
+    if _places(view["header"]["order_total"]) > IIF_AMOUNT_DECIMAL_PLACES:
+        found.append({"code": "EXP-008", "field": "order_total", "line_number": None})
+    for line in view["lines"]:
+        limits = {
+            "line_total": IIF_AMOUNT_DECIMAL_PLACES,
+            "quantity": IIF_QUANTITY_PRICE_DECIMAL_PLACES,
+            "unit_price": IIF_QUANTITY_PRICE_DECIMAL_PLACES,
+        }
+        for name, limit in limits.items():
+            if _places(line[name]) > limit:
+                found.append({"code": "EXP-008", "field": name, "line_number": line["line_number"]})
+    return found
 
 
 # ── The one entry point ─────────────────────────────────────────────────────

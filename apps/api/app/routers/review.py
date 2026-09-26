@@ -28,6 +28,7 @@ ever visible to the client (Section 7.4 / 7.12).
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -36,6 +37,7 @@ from docflow_core.config import get_settings
 from docflow_core.db import tenant_session
 from docflow_core.errors import get_error
 from docflow_core.matching import confirm_sku_mapping
+from docflow_core.numbers import plain
 from docflow_core.review import (
     EditRequest,
     ReviewError,
@@ -236,7 +238,11 @@ def _queue_row(row) -> dict[str, Any]:
 
 
 def _money(value) -> str | None:
-    return str(value) if value is not None else None
+    """Numbers go to the browser as strings, every digit, never an exponent:
+    str(Decimal('1E-7')) would show a reviewer "1E-7" (C1, D-149)."""
+    if value is None:
+        return None
+    return plain(value) if isinstance(value, Decimal) else str(value)
 
 
 # ── One document ────────────────────────────────────────────────────────────

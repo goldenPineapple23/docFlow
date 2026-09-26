@@ -24,10 +24,12 @@ import re
 import time
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any
 
 import anthropic
+
+from docflow_core.numbers import parse_document_number
 
 logger = logging.getLogger(__name__)
 
@@ -336,12 +338,23 @@ def build_pdf_document_content(pdf_bytes_b64: str) -> list[dict[str, Any]]:
 
 
 def _to_decimal(value: str | None) -> Decimal | None:
-    if value is None:
-        return None
-    try:
-        return Decimal(value)
-    except (InvalidOperation, ValueError):
-        return None
+    """Digits and a decimal point only (Section 8.1), parsed exactly. Anything
+    else is None here and stays verbatim in `raw_json`; validation raises
+    VAL-014 so a person reads what was printed (review M2, D-154)."""
+    return parse_document_number(value) if isinstance(value, str) else None
+
+
+def _bounded_confidence(value: Any) -> Any:
+    """A confidence is a number from 0 to 1. Anything else -- 95, -0.2, a
+    string, NaN -- is treated as no confidence at all (0), which flags the
+    field for review; it is never scaled or clamped into something that looks
+    trustworthy. The model's answer stays verbatim in `raw_json` (review M3:
+    95 used to overflow numeric(4,3) and strand the document)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    if value != value or value < 0 or value > 1:  # value != value: NaN
+        return 0
+    return value
 
 
 def _apply_currency_confidence_cap(header_confidence: dict[str, Any], currency_inferred: bool) -> dict[str, Any]:
@@ -366,7 +379,8 @@ def _parse_response_payload(payload: dict[str, Any]) -> dict[str, Any]:
         header[field] = _to_decimal(header.get(field))
 
     header_confidence = _apply_currency_confidence_cap(
-        dict(payload["header_confidence"]), bool(payload["currency_inferred"])
+        {name: _bounded_confidence(value) for name, value in payload["header_confidence"].items()},
+        bool(payload["currency_inferred"]),
     )
 
     lines = []
@@ -374,6 +388,7 @@ def _parse_response_payload(payload: dict[str, Any]) -> dict[str, Any]:
         line = dict(item)
         for field in _DECIMAL_LINE_FIELDS:
             line[field] = _to_decimal(line.get(field))
+        line["confidence"] = _bounded_confidence(line.get("confidence"))
         lines.append(line)
 
     document_notes = payload["document_notes"] or None

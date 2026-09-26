@@ -328,6 +328,11 @@ export function originalDocumentUrl(id: string): Promise<{
 
 export type ExportFormat = "csv" | "xlsx" | "json" | "iif";
 
+export type ExportWarning = CatalogError & {
+  field: string | null;
+  line_number: number | null;
+};
+
 export type ExportRecord = {
   id: string;
   document_id: string;
@@ -336,6 +341,9 @@ export type ExportRecord = {
   status: "pending" | "ready" | "failed";
   // A catalog entry when the file could not be made. Rendered as given.
   error: CatalogError | null;
+  // Catalog-coded warnings a finished file carries (EXP-008). The file is
+  // exact; these say what the program importing it may do with a number.
+  warnings: ExportWarning[];
   sha256: string | null;
   byte_size: number | null;
   snapshot_hash: string;

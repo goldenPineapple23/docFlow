@@ -68,6 +68,18 @@ class ExportBody(BaseModel):
 
 
 
+def _export_warning_json(warning: dict[str, Any]) -> dict[str, Any]:
+    entry = get_error(warning["code"])
+    return {
+        "code": entry.code,
+        "title": entry.title,
+        "message": entry.message,
+        "action": entry.action,
+        "field": warning.get("field"),
+        "line_number": warning.get("line_number"),
+    }
+
+
 def _export_json(row: dict[str, Any]) -> dict[str, Any]:
     error = get_error(row["error_code"]) if row.get("error_code") else None
     return {
@@ -81,6 +93,10 @@ def _export_json(row: dict[str, Any]) -> dict[str, Any]:
             if error
             else None
         ),
+        # Catalog-coded warnings the finished file carries (EXP-008: more
+        # decimal places than QuickBooks Desktop is known to keep). The file
+        # itself is exact; this says what the program importing it may do.
+        "warnings": [_export_warning_json(w) for w in (row.get("warnings") or [])],
         "sha256": row["sha256"],
         "byte_size": row["byte_size"],
         "snapshot_hash": row["snapshot_hash"],

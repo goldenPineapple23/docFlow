@@ -50,6 +50,7 @@ from docflow_core.extraction import (
 )
 from docflow_core.field_schema import FieldSchema
 from docflow_core.matching import match_document_lines
+from docflow_core.numbers import plain_or_none
 from docflow_core.storage import read_file, save_file
 from docflow_core.validation import validate_document
 from sqlalchemy import text
@@ -697,7 +698,7 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                 "buyer_contact_email": header["buyer_contact_email"],
                 "ship_to_address": header["ship_to_address"],
                 "payment_terms": header["payment_terms"],
-                "order_total": str(header["order_total"]) if header["order_total"] is not None else None,
+                "order_total": plain_or_none(header["order_total"]),
                 "currency": header["currency"],
                 "notes": header["notes"],
                 "header_confidence": result.header_confidence,
@@ -725,10 +726,10 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                     "line_number": line["line_number"],
                     "sku": line["sku"],
                     "description": line["description"],
-                    "quantity": str(line["quantity"]) if line["quantity"] is not None else None,
+                    "quantity": plain_or_none(line["quantity"]),
                     "unit": line["unit"],
-                    "unit_price": str(line["unit_price"]) if line["unit_price"] is not None else None,
-                    "line_total": str(line["line_total"]) if line["line_total"] is not None else None,
+                    "unit_price": plain_or_none(line["unit_price"]),
+                    "line_total": plain_or_none(line["line_total"]),
                     "confidence": str(line["confidence"]) if line["confidence"] is not None else None,
                     "field_provenance": _extracted_provenance(line, _PROVENANCE_LINE_FIELDS),
                 },

@@ -9,6 +9,7 @@ import {
   type CatalogError,
   type ExportFormat,
   type ExportRecord,
+  type ExportWarning,
 } from "@/lib/review";
 
 /**
@@ -250,10 +251,37 @@ export function ExportPanel({ state, exportable }: { state: ExportState; exporta
               ) : (
                 <span className="text-gray-500">Preparing…</span>
               )}
+              {row.status === "ready" && row.warnings?.length ? (
+                <ExportWarnings warnings={row.warnings} />
+              ) : null}
             </li>
           ))}
         </ul>
       ) : null}
     </section>
+  );
+}
+
+// One catalog entry per code, with the fields it applies to. The file is
+// exact; this tells the reader what the importing program may do (EXP-008).
+function ExportWarnings({ warnings }: { warnings: ExportWarning[] }) {
+  const byCode = new Map<string, { entry: ExportWarning; places: string[] }>();
+  for (const w of warnings) {
+    const place = w.line_number !== null ? `line ${w.line_number} ${w.field ?? ""}` : (w.field ?? "");
+    const found = byCode.get(w.code);
+    if (found) found.places.push(place.trim());
+    else byCode.set(w.code, { entry: w, places: [place.trim()] });
+  }
+  return (
+    <div data-testid="export-warnings" className="w-full rounded border border-amber-300 bg-amber-50 p-2 text-xs">
+      {[...byCode.values()].map(({ entry, places }) => (
+        <div key={entry.code}>
+          <p className="font-medium text-amber-900">{entry.title}</p>
+          <p className="text-gray-700">{entry.message}</p>
+          <p className="text-gray-700">{entry.action}</p>
+          <p className="text-gray-500">Where: {places.join(", ").replaceAll("_", " ")}</p>
+        </div>
+      ))}
+    </div>
   );
 }
