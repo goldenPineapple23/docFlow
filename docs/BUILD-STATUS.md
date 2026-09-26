@@ -184,7 +184,7 @@ are D-149 – D-153.
 | Stage | What | Status | Decisions |
 |---|---|---|---|
 | 0 | Safety net: push, CI green, `main` protected (done before 5.5 began); **CI database and the unapproved-skip check** (H7 part 2); core type-checked and pinned in CI | DONE (PR #3, merged 2026-09-25) | D-148 |
-| 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents | IN PROGRESS: 1a numeric fidelity BUILT (branch `phase55/stage1a-numeric-fidelity`, migration `0026` awaiting the founder on staging) | D-149, D-154, D-155 |
+| 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents | IN PROGRESS: 1a numeric fidelity DONE (PR #4; migration `0026` applied to staging, backfill run, D-156); 1b pipeline next | D-149, D-154 – D-157 |
 | 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events | PLANNED | D-151 |
 | 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation, H4 per-tenant fairness (propose, then stop for approval) | PLANNED | D-150 |
 | 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items | PLANNED | D-152 |
@@ -217,7 +217,7 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 - Pending document updates recorded in `DECISIONS.md`: ToS-vs-offboarding
   notice period (D-009), pricing doc missing allowances, build-timeline Phase 5
   wording (D-008), features doc missing approved-example prompting.
-- `RUNBOOK.md` does not exist yet (Phase 6); several constants and the
+- `RUNBOOK.md` started in Phase 5.5 (migration backups); Phase 6 completes it -- several constants and the
   parser-upgrade process must be documented there.
 - The worker's local venv was missing `httpx` (declared by core); installed 2026-09-23, worker suite is now 74 of 74. Run it with the worker's own venv, not the API's (which lacks `xlwt`, `pillow_heif`).
   That fix was local only: `httpx` never reached `apps/worker/requirements.lock.txt`
@@ -267,9 +267,16 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 - Example prompting (D-141): orders approved before 2026-09-25 have no stored text, so they count towards a buyer's 10 but can't be shown as examples; `scripts/seed_example_history.py` builds a test buyer's history through the real pipeline. A second pass with examples for low-confidence orders was left out by founder decision.
 - **Before the first real customer:** an email provider (the founder is setting one up with the domain). Until then every invite, notice and digest waits in the Console Outbox and must be sent by hand, and the inbound intake address cannot receive real mail.
 - Digest opt-out per person: decided yes, but later (needs a settings page).
-- `RUNBOOK.md` does not exist, though CLAUDE.md 7.15.4 says constants are documented there; `constants.py` is the single home for now. Tier price changes (`scripts/new_tier_version.py`, D-137) belong there too.
+- `RUNBOOK.md` exists since Phase 5.5 with the migration backup procedure (section 1). Still to add in Phase 6: the constants (CLAUDE.md 7.15.4; `constants.py` is their single home until then), tier price changes (`scripts/new_tier_version.py`, D-137), the restore drill and the parser-upgrade process.
 - **Stripe setting, before the first real customer:** the account currently cancels a subscription after 90 days of an unpaid invoice (seen on Acme Test Prospect: "Auto-cancels Dec 18"). Policy is that the founder decides suspension (D-125), so set Settings → Billing → Subscriptions and emails → failed/past-due invoices to leave the subscription past due. Only the founder can change it.
 - Sandbox leftover: Acme Test Prospect's founding coupon was created before the invoice-count fix (D-138) and discounts one extra invoice (19 Dec). Test data only; correct it in Stripe or leave it.
+
+- **Phase 5.5 open items (2026-09-25):**
+  - `backup_0026` (document_headers, document_lines; RLS on, no policies) is kept on staging until the founder says to drop it (D-156).
+  - **Postmark IP allowlist: log-only until confirmed.** When the Stage 2 webhook authentication ships, the allowlist records source addresses but doesn't refuse. Trigger to switch to enforcing: the first real inbound mail after the Postmark account exists; confirm the observed addresses against Postmark's published list using the RUNBOOK procedure, then flip enforcement (D-155).
+  - RUNBOOK.md still needs, with Stage 2: the IP-confirmation-and-enforce procedure and the webhook credential rotation procedure.
+  - UAT TC-26 now requires a real QuickBooks Desktop import of high-precision amounts and rates; refuse-vs-warn (EXP-008) is decided on that evidence (D-157).
+  - `scripts/seed_demo_data.py` and `scripts/seed_merge_demo.py` create reviewable orders with no model answer (28 on staging, D-156); Stage 1b adds the database rule and fixes the scripts.
 
 ## Deferred by decision (Section 3 — do not build)
 
