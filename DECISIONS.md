@@ -1646,3 +1646,50 @@ Not left for Phase 6's load test to discover. Every performance claim carries it
 Target: zero API tests skipped in CI. Built as D-148.
 
 **Related:** review H7.
+
+
+## D-154 -- C1 as built: exact numbers end to end, one module for them, and what that changed
+
+**Context:** review C1 and the founder's rule D-149. Stage 1a of Phase 5.5.
+
+**Decisions:**
+- **Schema (migration 0026):** `document_headers.order_total` and `document_lines.quantity/unit_price/line_total` are unconstrained `numeric`. Postgres keeps both the digits and the scale it was given ("47.50" stays 47.50, "2" stays 2). `exports.warnings` (jsonb) records catalog-coded warnings on a finished file and is frozen with the row.
+- **One module, `docflow_core.numbers`:** a document number is digits and a decimal point only (`\d+(\.\d+)?`), and a Decimal is written with `plain()` (`format(d, "f")`). Two further traps closed:
+  - `str(Decimal)` writes "1E-7" for 0.0000001. It was used by the snapshot/audit text, the API payload, validation details and the worker's writes, so a tiny value would have reached every export as "1E-7".
+  - `Decimal()` accepts "NaN", "Infinity", "1E+3" and " 12 " (M2).
+- **Extraction (M2, M3):** a non-conforming number is stored as NULL, and the model's text stays in `raw_json`. **VAL-014** shows the reviewer what was printed until a person types a value. An out-of-range confidence (95, -0.2, NaN, a string) becomes 0, never scaled into something trustworthy. 95 used to overflow `numeric(4,3)` and strand the document.
+- **Validation:**
+  - **VAL-015** warns on more than 6 decimal places (`UNUSUAL_DECIMAL_PLACES`). It warns and never rounds.
+  - The line and header checks and the IIF balance check use exact arithmetic. At the default 28 digits, a real 0.87 discrepancy computed as -0.01 and went unreported. The IIF check refused a balanced order; the property test found that one in CI.
+  - **Behaviour change:** a price's rounding room now follows the precision actually printed, because nothing pads it any more. "47.50" still allows half a cent, but a price printed as "47.5000" now allows half of 0.0001. Previously every price looked like 4 places. On re-validation, a few existing warnings may resolve and re-raise under a new fingerprint.
+- **Review:** a typed price, quantity or total must be a plain number (**REV-007**) instead of reaching Postgres and failing as a server error. An emptied number field is NULL.
+- **IIF (EXP-008):** Intuit's IIF Import Kit (the manual and the `!SPL`/`!TRNS` field reference, downloaded from Intuit 2026-09-25) documents **no** decimal or size limit. The only figures anywhere are Intuit community-forum answers: amounts at 2 places, the Rate column at 5. Those are provisional constants (`IIF_AMOUNT_DECIMAL_PLACES`, `IIF_QUANTITY_PRICE_DECIMAL_PLACES`). The file always carries every digit, and EXP-008 tells the reader QuickBooks may round or refuse. **Open for the founder:** keep warning, refuse IIF above the limits, or change the limits once a real QuickBooks file has been tried (UAT TC-26).
+- **Leading zeros:** "007" is accepted as a number and stored as 7. That changes the text but not the value, so it isn't rounding. The model is told to return plain numbers.
+
+**Tests (all failed on the old code):**
+- `apps/worker/tests/test_numeric_fidelity_db.py` holds the worker's first real-database tests (M14): the worker write, a human edit, all four exports against `raw_json`, the schema, and a Hypothesis property test. The property test pushes random decimals from model output to every export, compared with the ORIGINAL strings.
+- Pure tests are in `packages/core/tests/test_numeric_fidelity.py`, plus two browser tests.
+
+**Why nothing caught it:**
+- Every fixture used values that fit the old scales (12, 47.50, 570.00).
+- The round-trip test compared each file with a snapshot that was already rounded.
+- The worker's SQL never ran against a real database in any test.
+
+**What now prevents it:** the property test compares with the original input, and the schema test fails if any of the four columns gets a typmod back. Both run in CI on every push (D-148).
+
+**Related:** Section 7.1, 7.4, 7.7, 10; review C1, M2, M3, M14; D-080, D-085, D-096, D-149.
+
+
+## D-155 -- The founder's Phase 5.5 decisions of 2026-09-25 (second round)
+
+1. **Stage 4's 2.5M-row catalog is seeded in the CI database, not staging.** Staging stays free tier, as the build prompt says. The CI seed is deleted after the benchmark is recorded; no per-action confirmation is needed, because the CI database is neither staging nor prod.
+2. **M7 and the three missing Phase 5 alerts** (review backlog, confidence drift, staging TTL) come into 5.5. Lows are fixed only when already in that file. The rest stays in Phase 6, as the review bucketed it.
+3. **Email stays on Postmark.** The founder asked whether anything stronger than credentials in the URL plus an IP allowlist exists. Findings (Postmark docs, 2026-09-25):
+   - "Postmark does not currently support HMAC webhook signature verification."
+   - Postmark builds the payload, so no secret of ours can be carried inside it. The only thing DocFlow controls is the URL, and a secret in the URL is exactly what Basic Auth credentials are. That is Postmark's strongest mechanism.
+   - Postmark's own pages disagree on IPs. The webhooks overview says inbound webhooks "use separate infrastructure and aren't verified this way". The firewall page lists four IPs that "apply for every webhook sent by Postmark (inbound, bounce, open, etc)". The allowlist is therefore built as a switch that is logged first and enforced once real inbound traffic confirms the addresses.
+   - **Limitation, recorded as asked:** anyone who obtains the webhook URL with its credentials (a leak from the Postmark dashboard, our environment or a log) can post forged mail that passes these checks. An IP allowlist narrows that only if Postmark's inbound source addresses really are the published ones. Spoofing a source IP over HTTPS is not practical, but a proxy header such as `X-Forwarded-For` can be forged if the app trusts it, so only the platform's real client address is used.
+4. **Approved and exported snapshots are left alone.** The C1 backfill lists them for the founder, who decides on any manual reopen and re-approval.
+5. **The parse worker, stuck-document detection and Stripe reconciliation are built in 5.5.** **Phase 6's versions of these items are therefore already satisfied and must not be redone:** the isolated parse worker (7.11), the stuck-in-processing alert (7.9) and Stripe status reconciliation.
+
+**Related:** D-149 – D-153; review H4, H5, H8, M7, H11.
