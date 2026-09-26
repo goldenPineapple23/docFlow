@@ -34,6 +34,7 @@ def test_a_worker_started_from_this_app_registers_the_extraction_task():
         "assert 'docflow.parse_import' in celery_app.tasks\n"
         "assert 'docflow.run_scheduled_jobs' in celery_app.tasks\n"
         "assert 'docflow.run_lifecycle_sweep' in celery_app.tasks\n"
+        "assert 'docflow.sweep_stuck_documents' in celery_app.tasks\n"
     )
     worker_root = Path(__file__).resolve().parents[1]
     result = subprocess.run([sys.executable, "-c", probe], cwd=worker_root, capture_output=True)
@@ -58,3 +59,26 @@ def test_beat_sweeps_the_tenant_lifecycle_regularly():
     entry = celery_app.conf.beat_schedule["run-lifecycle-sweep"]
     assert entry["task"] == "docflow.run_lifecycle_sweep"
     assert entry["schedule"] == LIFECYCLE_SWEEP_SECONDS <= 600
+
+
+def test_beat_sweeps_for_stuck_documents_regularly():
+    """Section 7.9 / H3 (D-158): a document a dead worker left in processing
+    is only found if the sweep runs, well inside the stuck timeout."""
+    from docflow_core.constants import STUCK_PROCESSING_TIMEOUT_MIN
+
+    from app.celery_app import STUCK_SWEEP_SECONDS, celery_app
+
+    entry = celery_app.conf.beat_schedule["sweep-stuck-documents"]
+    assert entry["task"] == "docflow.sweep_stuck_documents"
+    assert entry["schedule"] == STUCK_SWEEP_SECONDS < STUCK_PROCESSING_TIMEOUT_MIN * 60
+
+
+def test_a_redelivery_waits_longer_than_any_job_should_run():
+    """Tasks acknowledge late, so Redis redelivers a job whose worker died.
+    It must not redeliver one that is merely still running (H3)."""
+    from docflow_core.constants import STUCK_PROCESSING_TIMEOUT_MIN
+
+    from app.celery_app import celery_app
+
+    timeout = celery_app.conf.broker_transport_options["visibility_timeout"]
+    assert timeout > STUCK_PROCESSING_TIMEOUT_MIN * 60

@@ -38,6 +38,14 @@ logger = logging.getLogger(__name__)
 EXTRACTION_MODEL = "claude-sonnet-5"
 SCHEMA_VERSION = "1.0.0"
 
+# The most the model may write for one order (review M1). A line is ~60
+# tokens of JSON, so 4096 truncated any order past roughly 50-60 lines, every
+# time. 16000 holds ~250 lines and is the ceiling the Anthropic SDK advises
+# for a non-streaming request (above it, a request can outrun the SDK's HTTP
+# timeout). A longer order is caught by stop_reason and failed as DOC-020,
+# never kept half-read.
+EXTRACTION_MAX_TOKENS = 16000
+
 # The cheap routing pass (Section 7.13, "Identifying the buyer before
 # extraction"). CLAUDE.md Section 3 allows a cheaper model for the
 # classification/routing pass only -- this one never produces a value that is
@@ -444,7 +452,7 @@ def extract_document(
         # relies on; there is no dial left to set to "0" for this model.
         response = client.messages.create(
             model=EXTRACTION_MODEL,
-            max_tokens=4096,
+            max_tokens=EXTRACTION_MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": user_content}],
             output_config={"format": {"type": "json_schema", "schema": RESPONSE_SCHEMA}},
@@ -467,6 +475,26 @@ def extract_document(
 
     text_block = next((b for b in response.content if b.type == "text"), None)
     raw_text = text_block.text if text_block is not None else ""
+
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        # Cut off mid-answer: whatever parses is a partial order, and a
+        # partial order must never be written (Section 7.1). Paid for, so the
+        # tokens are recorded for the cost breaker.
+        logger.error("extraction_truncated model_id=%s output_tokens=%s", EXTRACTION_MODEL, usage.output_tokens)
+        return ExtractionResult(
+            ok=False,
+            model_id=EXTRACTION_MODEL,
+            prompt_hash=p_hash,
+            schema_version=SCHEMA_VERSION,
+            raw_response={"raw_text": raw_text, "stop_reason": "max_tokens"},
+            error="Extraction output reached the token limit.",
+            error_code="DOC-020",
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            est_cost_usd=_cost(usage.input_tokens, usage.output_tokens),
+            latency_ms=latency_ms,
+            examples_used=example_ids,
+        )
 
     try:
         payload = json.loads(raw_text)
