@@ -1865,3 +1865,23 @@ Today the application enforces who sets them (D-158 follow-up 2; `packages/core/
 - Also renamed in the same step: the example fixtures and recorded responses, the tests, and the two scripts that use `bellascoffee.com` as a sender address.
 
 **Related:** Sections 3, 7.5, 7.15.1, 8.3, 10; D-004, D-013, D-017, D-122, D-124, D-158.
+
+## D-160 -- Staging test runs are sequential; the deal7 failure was a whole-table count, not bad data
+
+**Context:** the full API suite against staging on 2026-09-26 (branch `phase55/stage1b-pipeline`, after 0027) ended `1 failed, 390 passed, 3 deselected`. The failure was `test_a_deal_outside_its_preset_is_refused_and_no_tenant_is_created[deal7-ONB-007]` (setup fee `"abc"`). It was first reported as a pass: the command piped pytest into `tail -15`, so the pipe's exit code (0) replaced pytest's, and the failure details were cut off.
+
+**What happened (reproduced, 2026-09-26):** the worker suite ran against staging while the deal-terms test group ran in a loop. 7 of 17 loops failed, 11 failures in total, across 9 of the group's 11 cases.
+- Every failure was at the third check, `SELECT count(*) FROM tenants` before and after the request.
+- The first two checks (status 422, code ONB-007 or the expected code) passed every time. No refused request created a tenant.
+- The count moved both ways (`12 == 11` eight times, `11 == 12` three times). A create request cannot lower it: the worker suite was creating and deleting its own test tenants on the same database.
+- The original run's own output was lost to `tail`, so it is matched to this reproduction, not proven identical. The API and worker runs overlapped from about 12:49 to 12:58.
+
+**Decision:**
+- The test now checks for its own request's data only: a unique tenant name and owner email per case, then no tenant with that name and no user with that email. The whole-table count is gone. What it protects is unchanged: refused deal data never creates a tenant or an owner.
+- Standing rule (RUNBOOK 1.4): test suites run against staging one at a time until every test uses data only it can see (a unique prefix it filters on, or a transaction it rolls back).
+- Runs are reported from the full saved output, quoting pytest's last line, never through `tail` or `head`.
+- Stage 5: audit every test that counts a whole table and move it to its own data; after that, staging suites may run concurrently again.
+- Stage 5 (founder, 2026-09-26): make test cleanup robust, so every test that creates data removes it in a fixture or `finally` and a failing test leaves nothing behind. A stopped run still can't clean up, because a killed process runs no `finally`. So Stage 5 also adds a staging sweep script: it lists tenants named "Acme Test ..." older than a day, with what each one holds, and deletes a tenant only on the founder's per-action OK (Section 0 rule 5). It refuses to run against any database but staging.
+- The three rows stranded on 2026-09-26 ("Acme Test Sweep A", "Acme Test Sweep B", "Acme Test Distributor -- acting edit" with its 1 document) stay until the end-of-build cleanup. They are the whole gap between backup_0027 (46 documents / 8 tenants) and the count after 0027 (47 / 11).
+
+**Related:** Section 0 rule 3; D-148, D-159.
