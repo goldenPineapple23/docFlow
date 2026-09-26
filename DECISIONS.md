@@ -1695,6 +1695,46 @@ Target: zero API tests skipped in CI. Built as D-148.
 **Related:** D-149 – D-153; review H4, H5, H8, M7, H11.
 
 
+## D-156 -- Migration 0026 on staging: applied without the stated backup; the backfill; no approved order reopened
+
+**What happened, recorded as it happened:**
+- The founder merged the Stage 1a PR and applied migration 0026 to `docflow-staging` **without running the stated backup step first**. That was the process gap: the backup steps came after the PR link in the message.
+- 0026 deletes nothing: it drops the fixed decimal places from four number columns and adds a column to `exports`. Every existing value already fitted the new type, so no data was at risk.
+- The founder then took `backup_0026` (`document_headers`, `document_lines`) **after** 0026 and **before** the backfill, so it covers the backfill. Row counts matched: `document_headers` 46 = 46, `document_lines` 142 = 142. RLS was enabled on both backup tables (no policies: owner-only) after Supabase's security advisor flagged them. Kept until the founder says to drop it.
+- **Process fix (founder, standing):** a PR that needs a staging migration puts the backup SQL (with RLS on every backup table) and the row-count check at the TOP of the message, with an explicit "do not merge until I've verified against staging". The standard procedure is RUNBOOK.md section 1.
+
+**Verification after 0026 (local, against staging):** core 504 passed; worker 86 passed (including the C1 real-database and property tests); api 391 passed, 3 live tests deselected.
+
+**Backfill (`scripts/c1_backfill.py --apply`, founder-approved for this one run):**
+- Restored 16 never-edited values in 2 orders still in review. Both are Acme Test Prospect, PO BCH-2291: `613e2d08-e218-4188-9d5c-b2c9d822777e` and `535f55e0-231c-45d5-918e-0e2dcb5fe12d`.
+- Every restored value was padding only (e.g. quantity stored 12.0000, printed 12; unit price 47.5000, printed 47.50). None changed value. Both orders were re-validated. A report run afterwards shows the restore list empty and nothing else changed.
+
+**Approved and exported orders: none reopened (founder decision).**
+- The report found 110 differences in the 16 orders below. All 110 are padding with no change of value: the snapshots are numerically correct. 11 exports were made from those snapshots. The snapshots stay frozen (Section 7.3).
+- Acme Test Distributor: `a1006dbc-4d09-43f2-93f8-37a7f653f030` (BCH-2291, exported), `a28b5573-6fb4-4a00-ba22-da46b3dc43dd` (BCH-2291, exported).
+- Acme Test Prospect: `a04312c2-84a2-46b2-8398-76d068ae7f7d` (ACME-TEST-0001), `03a9437a-1551-46b4-82c9-4724b1c5d76c` (BCH-2291), `02ceba67-3245-4a8d-9905-167a2d0e3e37` (BCH-2291, exported), `b0d96940-f50a-4564-a194-34554d39770b` (BCH-2301), `a9a274fb-8c10-4f8d-bb5a-7d690762dc21` (BCH-2302), `d6167230-2347-417d-beab-7aa720921646` (BCH-2303), `127198bc-a667-4e41-9a65-bf99092033ad` (BCH-2304), `8005ebfe-6124-479e-8a84-b3ef0229b8fb` (BCH-2305), `f002b1ba-aa60-4ee7-9a6f-797cf5c5c682` (BCH-2306), `87727b98-e20b-448c-bd88-e0be4e7beb4e` (BCH-2307), `86cc8d02-78a9-48cf-8921-3c419bf7c490` (BCH-2308), `90f9cd3b-a4d8-45b5-98ec-e596a9420949` (BCH-2309), `3f7fc392-1b3a-4716-a51e-ae6bf2e1bd08` (BCH-2310). All approved unless marked.
+- Bella's Coffee Haus: `002c0064-757a-4d99-a1bf-fd99eea10b05` (ACME-TEST-0001, exported).
+- Every human-typed value matched what was typed (0 differences).
+
+**The 28 orders with no model answer in `raw_json`:**
+- None was ever read by the model: no `model_id`, no `extraction_runs`, `raw_json` null.
+- They are seed data created outside the pipeline. `scripts/seed_demo_data.py` (22 in Acme Test Distributor, 9–17 Sept) and `scripts/seed_merge_demo.py` (6 in Bella's Coffee Haus, 19 Sept) insert finished `needs_review`/`approved` rows directly.
+- The worker writes `raw_json` on every path that ends in `needs_review` or `failed`, so this is not a gap in the pipeline.
+- **But nothing enforces it:** the database accepts a reviewable order with no model answer. Stage 1b adds a database rule and a test, and the two seed scripts are changed to record a model answer (test data, clearly labelled) instead of bypassing Section 7.1.
+
+**Related:** Section 5 (backup before a migration), 7.1, 7.3; D-149, D-154, D-155.
+
+
+## D-157 -- IIF keeps the EXP-008 warning until a real QuickBooks import decides
+
+Founder decision: keep warning. `docs/docflow-uat-plan.docx` TC-26 gains a required step:
+- import, into a real QuickBooks Desktop company file, an approved order whose amounts carry more than 2 decimal places and whose quantities and rates carry more than 5;
+- record exactly what QuickBooks does with each value.
+
+Refusing versus warning is decided after that, on the evidence.
+
+**Related:** D-154; UAT TC-26.
+
 ## D-158 -- One guarded state machine; jobs that can be redelivered; review only once checked (H1, H3, M1, M3)
 
 **Context:** review H1, H3, M1, M3; Stage 1b of Phase 5.5.
@@ -1771,3 +1811,57 @@ Target: zero API tests skipped in CI. Built as D-148.
   - Add an onboarding step: count the lines on the prospect's largest sample order during setup.
 
 **Related:** Section 7.1, 7.3, 7.7, 7.9, 10; review H1, H3, M1, M3, M14; D-058, D-095, D-145, D-155, D-156.
+
+## D-159 -- Finding F-1 (session-flag policies are enforced by code, not the database); named system actors; the golden fixture rename
+
+**Context:** the founder's follow-ups of 2026-09-26, after migration 0027 was applied to staging.
+
+### F-1 -- Session-flag RLS policies: database-level isolation (scheduled for Stage 3)
+
+**The finding.** About 50 RLS policies open a table when the transaction carries an `app.*` setting that any connection can set:
+- `platform_admin_access` on 32 tables (35 uses of `app.is_platform_admin`, from 0001 onward, 0018 included);
+- the narrow sweeps: `rollup_*` (0017), `lifecycle_read` (0019), `scheduler_access`, `stripe_webhook_lookup` / `webhook_access` (0019), `pipeline_sweep_read` (0027);
+- the lookups by intake token (`token_lookup`) and by sign-in id (`self_lookup`).
+
+Today the application enforces who sets them (D-158 follow-up 2; `packages/core/tests/test_rls_flags.py`), not the database. A future code change in a tenant request that sets a flag would be refused by nothing in Postgres.
+
+**Target.**
+- Separate database logins for the API, the worker and the admin path.
+- The cross-tenant policies are granted `TO` those roles, instead of being keyed on a setting:
+  - `platform_admin_access` → admin role;
+  - rollup, lifecycle, scheduler and pipeline sweeps → worker role;
+  - the Stripe webhook and the token and identity lookups → API role.
+- `tenant_isolation` stays keyed on `app.tenant_id`. One API login serves every tenant, so which tenant a request belongs to remains the application's job (Section 7.5's single data-access layer).
+
+**Cost and effort (estimate for the Stage 3 proposal):**
+- Money: $0. Custom Postgres roles are free on Supabase. Three logins share the pooler's client-connection limit, which must be checked against the compute size chosen in Stage 3.
+- Effort: about 2–3 working days.
+  - One migration creates the roles as NOLOGIN (no secret in the file) and rewrites about 50 policies. The login passwords are set by a documented SQL Editor step, as with `docflow_app` (D-013).
+  - One engine per login in `docflow_core.db`, each session helper bound to its login.
+  - Three database URLs in each environment's secrets, CI creating the roles, and a RUNBOOK rotation procedure.
+  - Tests: each login sees only its policies, and a tenant connection that sets any flag still sees nothing extra.
+  - The usual backup-first migration cycle, staging before production.
+- Limit: the Console lives in the API process (Section 3: one codebase, one deploy). So the admin login's secret is held by the same process as the tenant path. The database then refuses a tenant connection that sets a flag, but code that deliberately picks the admin engine is still stopped only by the import guard. Full separation of the admin path would need a separate deploy, which Section 3 rules out. It is named here, not proposed.
+
+### Named system actors (founder instruction; built in Stage 1c)
+
+- An audit row must never have a blank actor: a blank actor reads the same as an unknown one. Changes made by scripts are attributed to a named system actor such as `maintenance-script`, and so are scheduled jobs (`lifecycle-sweep`, and the others).
+- **Found while checking:** staging has 7 `tenant_lifecycle_events` with no actor.
+  - 6 were written by the lifecycle sweep (3 `suspended`, 3 `pending_deletion_entered`).
+  - 1 is the 2026-09-26 rename of "Bella's Coffee Haus" (D-158 follow-up 2).
+  - Every nullable-actor audit column will be listed and covered in 1c.
+- **Plan for 1c:**
+  - One migration seeds the system actors as `users` rows with fixed ids, `tenant_id` null, no sign-in id and inactive, so they can never sign in or be invited. A marker column tells a system actor from a person.
+  - Every script and job passes its named actor.
+  - The existing blank rows get their actor. That is a correction to audit rows, so it is written up with the backup SQL first.
+  - A check makes the actor required for new rows (`NOT VALID`, then validated after the backfill).
+
+### The golden fixture rename (Stage 1c, its own step before streaming)
+
+- Section 8.3 of the build prompt names `docs/sample_po.txt` ("Bella's Coffee House, PO# BCH-2291") as the golden fixture. The founder keeps `docs/` unchanged, so the golden test will read a renamed copy under `apps/api/tests/fixtures/golden/`. The build prompt's wording is recorded as a pending document update.
+- **What changes:** only the buyer's identity (name, street address, email and domain), to unmistakably fake values.
+- **What Section 8.3 asserts:** the four lines (SKUs, descriptions, quantities, units, prices, totals), reconciliation, and `injection_suspected = false`. None of them contains the name. The planned rename changes none of them, and the PO number `BCH-2291` stays.
+- The expected-output file's buyer fields change. The old-to-new mapping of every changed value is recorded here when the answer is re-recorded, followed by a live golden run and a live contamination run.
+- Also renamed in the same step: the example fixtures and recorded responses, the tests, and the two scripts that use `bellascoffee.com` as a sender address.
+
+**Related:** Sections 3, 7.5, 7.15.1, 8.3, 10; D-004, D-013, D-017, D-122, D-124, D-158.
