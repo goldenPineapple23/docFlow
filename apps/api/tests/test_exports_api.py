@@ -28,8 +28,15 @@ import pytest
 from docflow_core import exports
 from docflow_core.db import platform_session, tenant_session
 from docflow_core.export_jobs import run_export
-from docflow_core.review import EditRequest, apply_edits, approve_document
+from docflow_core.review import (
+    Acknowledgement,
+    EditRequest,
+    apply_edits,
+    approve_document,
+    unacknowledged_warnings,
+)
 from docflow_core.signed_urls import mint_document_token
+from docflow_core.validation import validate_document
 from sqlalchemy import text
 
 from tests.conftest import requires_console_schema, requires_exports_schema
@@ -272,8 +279,16 @@ def test_a_file_quickbooks_would_reject_fails_with_a_reason_not_a_file(client):
         document = tenant.create_document(
             header={**HEADER, "order_total": Decimal("600.00")}, lines=CLEAN_LINES
         )
+        # A reviewer approving it acknowledges VAL-002 first (approval re-checks, H2).
         with tenant_session(tenant.tenant_id) as session:
-            approve_document(session, tenant.tenant_id, document, user_id=tenant.user_id)
+            validate_document(session, tenant.tenant_id, document)
+        with tenant_session(tenant.tenant_id) as session:
+            (warning,) = unacknowledged_warnings(session, document)
+            assert warning["code"] == "VAL-002"
+            approve_document(
+                session, tenant.tenant_id, document, user_id=tenant.user_id,
+                acknowledgements=[Acknowledgement(warning_id=warning["id"], note="Freight.")],
+            )
         status = _export(client, tenant, document, "iif")
         assert status["export"]["status"] == "failed"
         assert status["export"]["error"]["code"] == "EXP-006"

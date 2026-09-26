@@ -14,7 +14,8 @@ CLAUDE.md Section 8.3 golden fixture, wired to the real extraction pipeline
     at every phase checkpoint, per CLAUDE.md Section 7.1 and Section 5.
 
 The recorded response was captured from one real call to claude-sonnet-5
-against docs/sample_po.txt (see DECISIONS.md) -- it is not hand-built.
+against fixtures/golden/sample_po.txt (see DECISIONS.md D-159) -- it is not
+hand-built.
 """
 
 from __future__ import annotations
@@ -29,8 +30,10 @@ import pytest
 from docflow_core.extraction import build_text_content, extract_document
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SAMPLE_PO_PATH = REPO_ROOT / "docs" / "sample_po.txt"
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "golden"
+# D-159: a renamed copy of docs/sample_po.txt (Section 8.3). Only the buyer's
+# identity differs; every value Section 8.3 asserts is unchanged.
+SAMPLE_PO_PATH = FIXTURES_DIR / "sample_po.txt"
 EXPECTED_OUTPUT_PATH = FIXTURES_DIR / "expected_output.json"
 RECORDED_RESPONSE_PATH = FIXTURES_DIR / "recorded_response.json"
 
@@ -53,14 +56,36 @@ class _FakeMessage:
     usage: _FakeUsage
 
 
+class _FakeStream:
+    """What `client.messages.stream(...)` returns (M1, D-161): no events, then
+    the finished message."""
+
+    def __init__(self, message):
+        self._message = message
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return None
+
+    def __iter__(self):
+        return iter(())
+
+    def get_final_message(self):
+        return self._message
+
+
 class _FakeMessagesResource:
     def __init__(self, response_payload: dict[str, Any]):
         self._response_payload = response_payload
 
-    def create(self, **kwargs) -> _FakeMessage:
-        return _FakeMessage(
-            content=[_FakeTextBlock(type="text", text=json.dumps(self._response_payload))],
-            usage=_FakeUsage(input_tokens=2617, output_tokens=813),
+    def stream(self, **kwargs) -> _FakeStream:
+        return _FakeStream(
+            _FakeMessage(
+                content=[_FakeTextBlock(type="text", text=json.dumps(self._response_payload))],
+                usage=_FakeUsage(input_tokens=2617, output_tokens=813),
+            )
         )
 
 
@@ -75,9 +100,9 @@ def _assert_matches_section_8_3(result) -> None:
     assert header["po_number"] == "BCH-2291"
     assert header["order_date"] == "2026-03-14"
     assert header["requested_delivery_date"] == "2026-03-21"
-    assert header["buyer_name"] == "Bella's Coffee House"
-    assert header["buyer_contact_email"] == "orders@bellascoffee.com"
-    assert header["ship_to_address"] == "Bella's Coffee House, 1442 Oak Street, Portland, OR 97204"
+    assert header["buyer_name"] == "Acme's Test Coffee House"
+    assert header["buyer_contact_email"] == "orders@acmetestcoffee.example"
+    assert header["ship_to_address"] == "Acme's Test Coffee House, 1442 Test Street, Portland, OR 97204"
     assert header["payment_terms"] == "Net 30"
     assert header["order_total"] == Decimal("1356.00")
     assert header["currency"] == "USD"
@@ -116,7 +141,7 @@ def test_sample_po_fixture_exists_and_is_readable():
     assert SAMPLE_PO_PATH.exists(), f"Golden fixture input missing: {SAMPLE_PO_PATH}"
     text = SAMPLE_PO_PATH.read_text(encoding="utf-8")
     assert "BCH-2291" in text
-    assert "Bella's Coffee House" in text
+    assert "Acme's Test Coffee House" in text
 
 
 def test_expected_output_matches_section_8_3():
@@ -127,8 +152,8 @@ def test_expected_output_matches_section_8_3():
     assert header["po_number"] == "BCH-2291"
     assert header["order_date"] == "2026-03-14"
     assert header["requested_delivery_date"] == "2026-03-21"
-    assert header["buyer_name"] == "Bella's Coffee House"
-    assert header["buyer_contact_email"] == "orders@bellascoffee.com"
+    assert header["buyer_name"] == "Acme's Test Coffee House"
+    assert header["buyer_contact_email"] == "orders@acmetestcoffee.example"
     assert header["payment_terms"] == "Net 30"
     assert header["order_total"] == "1356.00"
     assert header["currency"] == "USD"

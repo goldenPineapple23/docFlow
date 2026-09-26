@@ -4,8 +4,8 @@ Programmatic fixture builders for the Section 7.11 required tests.
 Everything here is generated at test time rather than committed as a binary
 blob, so the repository carries no opaque files and every fixture's exact
 content is readable. All sample content is unmistakably fake (CLAUDE.md
-Section 0 rule 4): the same fictional "Bella's Coffee House" buyer the
-golden fixture in docs/sample_po.txt already uses.
+Section 0 rule 4): the same fictional "Acme's Test Coffee House" buyer the
+golden fixture (apps/api/tests/fixtures/golden/sample_po.txt) uses.
 
 The OLE compound-file writer exists because no Python library writes
 `.msg`: without it there would be no way to exercise the `.msg` unwrapping
@@ -34,8 +34,8 @@ PO_TEXT = (
     "PURCHASE ORDER\n"
     "PO Number: BCH-2291\n"
     "Order Date: 2026-03-14\n"
-    "Buyer: Bella's Coffee House\n"
-    "Contact: orders@bellascoffee.com\n"
+    "Buyer: Acme's Test Coffee House\n"
+    "Contact: orders@acmetestcoffee.example\n"
     "Payment Terms: Net 30\n"
     "\n"
     "SKU, Description, Qty, Unit, Unit Price, Line Total\n"
@@ -50,7 +50,7 @@ PO_TEXT = (
 PO_ROWS = [
     ["PURCHASE ORDER", "", "", "", "", ""],
     ["PO Number", "BCH-2291", "", "", "", ""],
-    ["Buyer", "Bella's Coffee House", "", "", "", ""],
+    ["Buyer", "Acme's Test Coffee House", "", "", "", ""],
     ["SKU", "Description", "Qty", "Unit", "Unit Price", "Line Total"],
     ["CF-1001", "Colombian Whole Bean 5lb", 12, "CS", 47.50, 570.00],
     ["CF-2210", "Ethiopian Yirgacheffe 5lb", 6, "CS", 62.00, 372.00],
@@ -221,8 +221,8 @@ def _msg_text_stream(prop_id: str, value: str) -> _Entry:
 
 def build_msg(
     *,
-    subject: str = "PO BCH-2291 from Bella's Coffee House",
-    sender: str = "orders@bellascoffee.com",
+    subject: str = "PO BCH-2291 from Acme's Test Coffee House",
+    sender: str = "orders@acmetestcoffee.example",
     body: str = PO_TEXT,
     attachments: list[tuple[str, bytes]] | None = None,
 ) -> bytes:
@@ -339,7 +339,7 @@ _ODT_CONTENT = """<?xml version="1.0" encoding="UTF-8"?>
   <office:body><office:text>
     <text:p>PURCHASE ORDER</text:p>
     <text:p>PO Number: BCH-2291</text:p>
-    <text:p>Buyer: Bella's Coffee House</text:p>
+    <text:p>Buyer: Acme's Test Coffee House</text:p>
     <table:table>
       {rows}
     </table:table>
@@ -432,7 +432,7 @@ def build_docx() -> bytes:
     document = docx.Document()
     document.add_paragraph("PURCHASE ORDER")
     document.add_paragraph("PO Number: BCH-2291")
-    document.add_paragraph("Buyer: Bella's Coffee House")
+    document.add_paragraph("Buyer: Acme's Test Coffee House")
     table = document.add_table(rows=0, cols=6)
     for row in PO_ROWS[3:]:
         cells = table.add_row().cells
@@ -468,7 +468,7 @@ def build_eml(attachments: list[tuple[str, str, bytes]] | None = None) -> bytes:
 
     message = EmailMessage()
     message["Subject"] = "PO BCH-2291"
-    message["From"] = "orders@bellascoffee.com"
+    message["From"] = "orders@acmetestcoffee.example"
     message["To"] = "orders@acmetestdistributor.example"
     message["Date"] = "Sat, 14 Mar 2026 09:00:00 -0700"
     message.set_content(PO_TEXT)

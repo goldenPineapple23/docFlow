@@ -17,7 +17,7 @@ async function stubIdentity(page: Page, role: string) {
       json: {
         email: "person@example.test",
         tenant_id: "t1",
-        tenant_name: "Bella's Test Coffee",
+        tenant_name: "Acme's Test Coffee",
         role,
         is_platform_admin: false,
       },
@@ -377,7 +377,7 @@ test("moving between pages keeps the company name and links in place", async ({ 
     // Slow on every page after the first, to prove the header doesn't wait.
     if (calls > 1) await new Promise((r) => setTimeout(r, 1500));
     await route.fulfill({
-      json: { email: "person@example.test", tenant_id: "t1", tenant_name: "Bella's Test Coffee", role: "owner", is_platform_admin: false },
+      json: { email: "person@example.test", tenant_id: "t1", tenant_name: "Acme's Test Coffee", role: "owner", is_platform_admin: false },
     });
   });
   await page.route(`${API}/allowance`, (route) =>
@@ -391,11 +391,11 @@ test("moving between pages keeps the company name and links in place", async ({ 
   );
 
   await page.goto("/review");
-  await expect(page.getByTestId("tenant-name")).toHaveText("Bella's Test Coffee");
+  await expect(page.getByTestId("tenant-name")).toHaveText("Acme's Test Coffee");
 
   await page.getByRole("navigation").getByRole("link", { name: "Held for review" }).click();
   await expect(page).toHaveURL(/\/held/);
   // Straight away -- well inside the 1.5 s the slow answer takes.
-  await expect(page.getByTestId("tenant-name")).toHaveText("Bella's Test Coffee", { timeout: 700 });
+  await expect(page.getByTestId("tenant-name")).toHaveText("Acme's Test Coffee", { timeout: 700 });
   await expect(page.getByRole("navigation").getByRole("link", { name: "Team" })).toBeVisible({ timeout: 700 });
 });

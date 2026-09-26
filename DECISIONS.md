@@ -1864,6 +1864,24 @@ Today the application enforces who sets them (D-158 follow-up 2; `packages/core/
 - The expected-output file's buyer fields change. The old-to-new mapping of every changed value is recorded here when the answer is re-recorded, followed by a live golden run and a live contamination run.
 - Also renamed in the same step: the example fixtures and recorded responses, the tests, and the two scripts that use `bellascoffee.com` as a sender address.
 
+**Done (Stage 1c, 2026-09-26).** The golden test now reads `apps/api/tests/fixtures/golden/sample_po.txt`; `docs/sample_po.txt` is unchanged.
+
+| Old value | New value |
+|---|---|
+| `Bella's Coffee House` (buyer name, ship-to) | `Acme's Test Coffee House` |
+| `1442 Oak Street` | `1442 Test Street` |
+| `orders@bellascoffee.com` | `orders@acmetestcoffee.example` |
+| `accounts@bellascoffee.com` (a past-order note in the example fixtures) | `accounts@acmetestcoffee.example` |
+
+- Unchanged: PO number `BCH-2291`, the dates, `Portland, OR 97204`, the terms, the note, and every line value Section 8.3 asserts.
+- The possessive is kept on purpose: the buyer-name tests check that "Acme's" and "Acmes" normalize to the same buyer, as they did for the old name.
+- The same substitution ("Bella's" → "Acme's Test", "Bellas" → "Acmes Test", the `bellas*` test domains → `acmes*` / `acmetestcoffee.example`) was applied to 30 files: the example fixtures, API/core/worker tests, six browser specs and one component test, and four scripts (`make_walkthrough_files.py`, `seed_demo_data.py`, `seed_example_history.py`, `seed_review_walkthrough.py`, which now reads the renamed copy). A comment in `docflow_core/buyers.py` changed; no code did.
+- **Re-recorded from real calls** (`scripts/record_example_fixtures.py`, which now records the plain golden answer too; each answer is refused unless it passes its own test's assertions): `recorded_response.json` (2,621 in / 798 out tokens, $0.0132), `recorded_golden_with_examples.json` ($0.0179), `recorded_contamination.json` ($0.0191). Model `claude-sonnet-5`.
+- **Live runs:** `pytest -m live_api` on the golden test, the golden-with-examples test and the contamination test: 3 passed. Replays: 8 passed.
+- New guard `packages/core/tests/test_fake_names.py`: fails the build if the old name appears anywhere under `apps/`, `packages/`, `scripts/` or `supabase/` (proven by planting it in a scratch file).
+- Pending document update: Section 8.3 of the build prompt still names `docs/sample_po.txt` and "Bella's Coffee House".
+- Not changed (history, or data that is immutable): `docs/`, `DECISIONS.md`, `CHECKPOINTS.md`, and the staging rows whose stored model answers contain the old name (end-of-build cleanup).
+
 **Related:** Sections 3, 7.5, 7.15.1, 8.3, 10; D-004, D-013, D-017, D-122, D-124, D-158.
 
 ## D-160 -- Staging test runs are sequential; the deal7 failure was a whole-table count, not bad data
@@ -1882,6 +1900,208 @@ Today the application enforces who sets them (D-158 follow-up 2; `packages/core/
 - Runs are reported from the full saved output, quoting pytest's last line, never through `tail` or `head`.
 - Stage 5: audit every test that counts a whole table and move it to its own data; after that, staging suites may run concurrently again.
 - Stage 5 (founder, 2026-09-26): make test cleanup robust, so every test that creates data removes it in a fixture or `finally` and a failing test leaves nothing behind. A stopped run still can't clean up, because a killed process runs no `finally`. So Stage 5 also adds a staging sweep script: it lists tenants named "Acme Test ..." older than a day, with what each one holds, and deletes a tenant only on the founder's per-action OK (Section 0 rule 5). It refuses to run against any database but staging.
+- Stage 5 (founder, 2026-09-26, after 1b merged): the API suite prints 425 warnings. Triage them: list every kind with its count and source, and mark each as harmless (a deprecation inside a library) or as pointing at a real problem in DocFlow's own code. List them; do not fix them in that step.
 - The three rows stranded on 2026-09-26 ("Acme Test Sweep A", "Acme Test Sweep B", "Acme Test Distributor -- acting edit" with its 1 document) stay until the end-of-build cleanup. They are the whole gap between backup_0027 (46 documents / 8 tenants) and the count after 0027 (47 / 11).
 
 **Related:** Section 0 rule 3; D-148, D-159.
+
+## D-161 -- Long orders (M1): the ceiling measured, the extraction call streamed
+
+**Context:** the founder's Stage 1c decisions (D-158 follow-up 2): measure the real ceiling with a fake order of 300+ lines, stream the extraction call, measure again, and run the live golden and contamination tests before merge. Chunking stays deferred.
+
+**How it was measured:** `scripts/measure_long_order.py` builds a deterministic fake order of N lines (buyer "Acme Test Long Order Cafe", SKUs `TST-0001`…), sends it through the real `extract_document` exactly as the worker does, and checks every returned line against the printed order (SKU, description, quantity, unit, unit price, line total) plus the order total. One call per size, no retries, model `claude-sonnet-5`, from the development machine, 2026-09-26.
+
+**Before (non-streaming, `max_tokens` 16,000):**
+
+| Lines | Outcome | Output tokens | Seconds | Lines exact | Cost |
+|---|---|---|---|---|---|
+| 25 | read | 3,290 | 24.3 | 25 / 25 | $0.0398 |
+| 50 | read | 4,781 | 32.0 | 50 / 50 | $0.0567 |
+| 65 | read | 7,496 | 52.2 | 65 / 65 | $0.0851 |
+| 80 | **DOC-008**, connection dropped | – | 60.0 | – | unknown |
+| 110 | **DOC-008**, connection dropped | – | 60.1 | – | unknown |
+| 150 | **DOC-008** (3 attempts) | – | 181.6 | – | unknown |
+| 300 | **DOC-008** (3 attempts) | – | 181.7 | – | unknown |
+
+- **The real ceiling was time, not tokens.** A non-streaming call sends nothing until the whole answer is ready. Something on the network path drops a connection that is idle for 60 seconds (the SDK's own read timeout is 600 s). Every order that took the model more than about a minute to write failed, between 65 and 80 lines, far below the 16,000-token cap. D-158's "about 250 lines", and its follow-up's "150–250", were both wrong.
+- **It failed as DOC-008, not DOC-020.** The SDK retried each drop twice, so the worker waited three minutes and made three attempts. The server may well have finished and billed each one. Nothing was recorded, so the cost breaker never saw it. Staging's largest real order has 4 lines, so no customer order has hit this.
+- Whether the 60-second drop is this machine's network or something on the route to the API is not known. Production will run somewhere else (Stage 3). Streaming removes the question either way.
+
+**Decision -- stream the call (`docflow_core.extraction.extract_document`):**
+- `client.messages.stream(...)` with the same model, system prompt, schema (`output_config`), content and all-or-nothing rule. The answer is used only once the stream is complete (`get_final_message()`), so a partial answer is never kept.
+- `EXTRACTION_MAX_TOKENS = 128000`, the pinned model's output maximum.
+- **A deadline, because of H3.** The stuck-document sweep takes over a claim older than 30 minutes (`STUCK_PROCESSING_TIMEOUT_MIN`). If an extraction outlived that, a second worker would pay for the same order again, and both would try to save it.
+  - So the stream is stopped at `EXTRACTION_DEADLINE_SECONDS` (20 minutes). That is DOC-020: the order was too long to read in time. Nothing is kept.
+  - A stream that sends nothing for `EXTRACTION_STREAM_IDLE_SECONDS` (120) fails as DOC-008.
+  - A test holds deadline + silence timeout ≤ 80% of the stuck timeout.
+  - On a stop at the deadline, the input tokens are recorded. The output tokens written so far are reported only at the end of a stream, so the cost logged for that one case is an undercount. It is logged as `extraction_deadline`.
+- A connection dropped mid-answer surfaces from the SDK's transport (`httpx2.TransportError`), not as an `APIError`. It is now caught and failed as DOC-008 instead of escaping the call. `httpx2` is declared in `packages/core` for this.
+- The routing pass (Haiku, 256 tokens, D-141) stays a plain call.
+
+**After (streaming, `max_tokens` 128,000):**
+
+| Lines | Outcome | Output tokens | Seconds | Tokens/s | Lines exact | Order total | Cost |
+|---|---|---|---|---|---|---|---|
+| 80 | read | 11,245 | 72.1 | 156 | 80 / 80 | exact | $0.1238 |
+| 300 | read | 38,502 | 248.9 | 155 | 300 / 300 | exact | $0.4145 |
+| 600 | read | 75,664 | 482.2 | 157 | 600 / 600 | exact | $0.8108 |
+
+- About 126–128 output tokens per line, including adaptive thinking, steady from 80 to 600 lines. 128,000 tokens is therefore **about 1,000 lines**, taking about 14 minutes at the measured rate, inside the 20-minute deadline.
+- Cost grows linearly: about $0.14 per 100 lines. The per-tenant $50/day breaker (D-142) is unchanged.
+- **Live runs after the change:** golden, golden with examples, contamination: 3 passed. The system prompt, schema and model are unchanged (same prompt hash), so the recorded answers from the rename step still apply.
+
+**Tests (written first; 6 failed before the change):** `packages/core/tests/test_extraction_streaming.py`.
+- The call streams, at the large ceiling, with the silence timeout. Its fake client has no working `create`, so a return to a non-streaming call fails the test.
+- A truncated answer is DOC-020, keeps nothing, and records its tokens.
+- A stream past the deadline is stopped (not read to the end), closed, and fails DOC-020.
+- The deadline fits inside the stuck timeout.
+- A connection dropped mid-answer is DOC-008, not an exception.
+
+The worker, golden and conversion fakes now serve `stream()`. Worker suite against staging: 105 passed.
+
+**Still open:**
+- DOC-020's wording (next, this stage).
+- The onboarding step to count the lines on the prospect's largest sample order (D-158 follow-up 2). The ceiling is now about 1,000 lines, so the step matters less, but it is still the only way to know before go-live.
+- Chunking stays deferred. It is needed only past about 1,000 lines, or for a document too large for the model's input.
+
+**Related:** Sections 7.1, 7.9; review M1, H3; D-142, D-158, D-159.
+
+## D-162 -- Review integrity: every edit re-checked, the server writes what was acknowledged, approval is of what the reviewer saw (H2, M4, M5); DOC-020 reworded
+
+**Context:** review findings H2, M4 and M5 (`docs/REVIEW-PHASE5.md`), Stage 1c of Phase 5.5. D-115's open item ("edits don't re-validate") is closed here.
+
+**H2 -- a human edit was never re-validated.**
+- **Before:** `apply_edits` wrote the values and nothing else. A reviewer who typed `4750` for `47.50` got no math warning and could approve and export it. A warning stayed open after the value behind it was fixed.
+- **Now:**
+  - `apply_edits` runs `validate_document` in the same transaction, after the edit (and after the reopen, when an approved order is edited). A wrong value raises its warning. A fixed value resolves its warning. Warnings on unchanged values keep their acknowledgements, by fingerprint (D-074).
+  - `approve_document` checks again before it counts what is still open.
+  - A warning found at approval would be lost if the refusal rolled it back: the reviewer would return to a screen that doesn't show what blocked them. So the approve route first runs `recheck_before_approval` in its own committed transaction, and only then approves in a second one. A document past review is never re-checked by this.
+- It is in the shared core functions, so the Console's acting-as review (same routes, D-111) gets it too.
+
+**M4 -- the acknowledgement text came from the browser.**
+- **Before:** the approve body carried `code` and `text` per acknowledgement. The screen sent `code (key: value, …)`, not the catalog wording the reviewer read, and any caller could send nothing or a forgery.
+- **Now:**
+  - The body carries only `warning_id` and an optional `note` (`Acknowledgement` in core). Anything else a client sends is ignored.
+  - `approve_document` reads each warning from `document_warnings` and writes the text with `acknowledgement_text`: where the warning is (line, field), the catalog code, title and message, and the occurrence's own values. These are the parts the review screen renders.
+  - An acknowledgement naming a warning this order doesn't have open is refused with REV-005 ("someone else changed this order first"), and nothing is recorded against it.
+  - The recorded text is still a copy, not a pointer (Section 7.3), so a later catalog change never rewrites what someone agreed to.
+
+**M5 -- approval wasn't tied to what the reviewer saw.**
+- **Before:** approve had no version token and took no row lock. Reviewer A could approve values that reviewer B changed after A's page loaded.
+- **Now:**
+  - The approve route requires `expected_version`, the same token edits already carry (REV-005 on mismatch). A body without it is a 422: only a hand-built request can omit it, since the screen always sends it.
+  - `approve_document` and `apply_edits` lock the document row (`SELECT … FOR UPDATE`) before checking. An edit and an approval of the same order run one after the other, so nothing can slip between the check and the write. `approve_document`'s own `expected_version` stays optional for scripts that approve seeded data.
+- The web screen sends the version it is showing, and only warning ids and notes. Its own `describeWarning` text builder is gone.
+
+**DOC-020 reworded (founder's wording, D-158 follow-up 2):** the advice is now "Enter this order by hand for now. DocFlow has been alerted and will follow up on this order." The old advice, to split the order into two files, would have left two half-orders to approve and export. The message is unchanged. The catalog snapshot was updated with it.
+
+**Tests (written first; the new file failed to import before the change):**
+- `apps/api/tests/test_review_integrity.py` (11, real database, through the HTTP routes and the core functions):
+  - H2: a mistyped price raises VAL-001 and blocks approval; fixing a total resolves VAL-002; approval re-checks and saves the warning it finds while refusing; the core function re-checks for every caller.
+  - M4: the recorded text is the catalog's plus the stored values, never the client's; an acknowledgement of a warning not on the order is REV-005; the core API takes only an id and a note.
+  - M5: approving values changed since they were loaded is REV-005; the route requires the token; the core function refuses a stale version; an approval in progress holds the row, so a concurrent edit times out on the lock (`55P03`).
+- `packages/core/tests/test_review.py`: the text builder, as a pure function.
+- Callers updated to the new shapes: API review tests, acting-as, worker approval helpers, `scripts/seed_example_history.py`. The browser test's stub now refuses an approval that lacks the screen's version or that sends warning text.
+
+**Three existing tests had been approving orders that don't reconcile.** The first full API run after the change ended `3 failed, 399 passed, 3 deselected`. All three failed with REV-001 at approval, and all three were H2 doing its job. The audit-trail test edits quantity 12 → 13 at 47.50 against a printed 570.00 line total (VAL-001). The re-approval test edits the total to 600.00 against 570.00 of lines (VAL-002). The IIF export test creates an order with a 600.00 total (freight) and approves it unchecked (VAL-002). Each now acknowledges its warning before approving, as a reviewer must, and asserts which warning it is. Rerun: `test_review.py`, `test_exports_api.py`, `test_review_api.py`, `test_review_integrity.py`, `test_acting_as.py` → 83 passed; worker `test_numeric_fidelity_db.py` + `test_pipeline_integrity_db.py` → 22 passed. The full API suite was not rerun end to end locally after that fix; CI runs it.
+
+**Incident during the run:** the first run of the lock test lost its pooled connection mid-approval ("server closed the connection unexpectedly", before the test's locking step). The dead backend held the row lock, so the test's cleanup timed out. The test passed on its next two runs, the second connection's `55P03` included. It left one test tenant on staging: "Acme Test M5 Lock" (`c0f43325…`, 1 document). Added to the stranded list for the Stage 5 sweep; not deleted.
+
+**Related:** Sections 7.3, 7.7, 7.16.5; review H2, M4, M5; D-074, D-111, D-115, D-145, D-158, D-160.
+
+## D-163 -- One read budget from the claim; every paid call on the cost record; fail-fast past ~1,000 lines not built (founder's pre-merge questions on 1c)
+
+**Context:** the founder's questions before merging Stage 1c (2026-09-26).
+
+**The read deadline covers the whole read, retries included.**
+- **Before:** the 20-minute deadline was per extraction call. It already counted the SDK's own retries inside that call, because the clock started before the call (a test now proves it). But the routing call before it ran on the SDK's 10-minute default timeout with 2 retries, and so did the example token count after it. So a whole read was not bounded below the 30-minute stuck timeout.
+- **Now:**
+  - The worker sets `read_deadline` the moment it claims the document. Parsing, conversion, the routing call and the streamed answer all spend that one 20-minute budget, and each call's clock is read before the call, so SDK retries spend it too.
+  - The stream's silence timeout never reaches past the deadline.
+  - The routing call has `ROUTING_TIMEOUT_SECONDS` = 30 and the token count has `COUNT_TOKENS_TIMEOUT_SECONDS` = 15, each per attempt.
+  - `max_retries=2` is stated on the worker's client.
+- **Worst case from the claim:** 20 min + one 120 s silence + three 15 s token-count attempts = 22 min 45 s. A test holds it at or below 80% of `STUCK_PROCESSING_TIMEOUT_MIN` (24 min). The worker has no task-level retries.
+
+**Fail fast past ~1,000 lines: not built. Measured why.**
+- The idea was a cheap pre-count by the routing model (Haiku 4.5; Section 3 allows it for routing only), with DOC-020 before any paid read if the count exceeded the ceiling.
+- Fake orders with sequential SKUs came back exact (600, 1,000, 1,200), but the model can read the last number off those. With random SKUs and no numbering it guessed round numbers:
+
+  | Printed | Haiku's count |
+  |---|---|
+  | 600 | 1,000 |
+  | 950 | 1,000 |
+  | 1,000 | 1,000 |
+  | 1,050 | 1,000 |
+  | 1,200 | 2,000 |
+
+  Used as a gate, it would have refused a 600-line order DocFlow reads exactly.
+- No deterministic count exists either. Scans, photos and faxes have no text, and a text line count or the token count doesn't map to item rows reliably enough to refuse an order on it.
+- **So an order over ~1,000 lines still runs a paid read** to the 128,000-token cap (about 14 minutes at the measured rate, about $1.35), or to the deadline, then fails DOC-020 with a founder alert, keeping nothing. Its cost is recorded.
+- The founder's decision: no product feature. The onboarding checklist in `RUNBOOK.md` section 3 now says to check the largest sample order's line count. Real options, if wanted later: chunking (deferred, D-158), or a pre-count validated on real long orders first.
+
+**Every paid model call writes a cost record, succeeded or failed.** Three gaps found and closed:
+1. **The routing call** was recorded only together with the extraction. If a planning step after it failed, the worker dropped the plan, and the routing cost with it. `example_prompting.plan` now records the routing run in its own transaction the moment the call returns.
+2. **DOC-021 (saving the answer failed):** the run record was in the transaction that rolled back, so a paid, complete answer was never costed. The worker now writes the run and the document's cost again in a separate transaction before failing the document.
+3. **A stream dropped mid-answer** recorded no tokens. The input tokens (reported when the answer starts) are now recorded with their cost, and the run is marked `cost_complete: false`. A call refused before it started records a run with no tokens, which is correct: nothing was billed.
+
+Remaining limits, named rather than hidden:
+- **Stopped at the deadline, or dropped mid-answer:** the output tokens written so far are reported only at the end of a stream, so the output part of the cost is unknown (`cost_complete: false`) and the logged cost is an undercount.
+- **A worker killed during the call** (process killed, machine lost) writes nothing: no run was started in the database first. Closing that needs a run row written before the call and updated after, offered for Stage 3 (worker hardening).
+- The token-count call is free (Anthropic's token counting has no charge).
+
+**The M5 lock.**
+- It is a Postgres row lock (`SELECT … FOR UPDATE`) inside the one request's transaction. Nothing is stored. It is released at commit or rollback, so it is held for the milliseconds of one save or approval. The reviewer's page holds only the version token, so a reviewer who disconnects holds no lock.
+- **Exposure:** a database connection that dies mid-transaction. On staging, `idle_in_transaction_session_timeout` = 0 (off), `statement_timeout` = 2 min (covers running statements only), and `tcp_keepalives_idle` = 1,800 s. So a half-dead connection can hold that row until Postgres notices, as in D-162's incident.
+- **Recommended (not applied):** `ALTER ROLE docflow_app SET idle_in_transaction_session_timeout = '60s';`, run by the founder in the SQL Editor. It can be bundled with the actors PR.
+
+**Tests (written first; 4 core tests failed before the change, and a fifth passed, proving the per-call deadline already counted SDK retries):**
+- `packages/core/tests/test_extraction_streaming.py` (+6):
+  - Time before the first event counts against the deadline.
+  - A caller's deadline bounds the silence timeout.
+  - The routing call and the token count carry short timeouts.
+  - The whole read fits inside the stuck timeout.
+  - A dropped stream keeps its billed input.
+  - A refused call records no tokens.
+- `packages/core/tests/test_example_prompting.py` (+3): the routing run is recorded at once, stays recorded when planning fails later, and is absent when no routing call was made.
+- `apps/worker/tests/test_pipeline_integrity_db.py` (+2, real database): a DOC-021 answer is on the cost record with its cost; the read deadline is set at the claim.
+- Nine worker unit tests had replaced `anthropic.Anthropic` with a stub that took no `max_retries`, and one asserted the old place the routing run was written. Both were updated.
+- Results: core 533 passed; worker (staging) 107 passed; golden replays 8 passed; live golden, golden with examples and contamination 3 passed.
+
+**Related:** Sections 3, 7.9, 7.13; review M1, H3, M5; D-142, D-158, D-161, D-162.
+
+**Follow-up (2026-09-26, the founder's second round of pre-merge questions):**
+- **One more cost gap, closed.** A malformed-JSON answer was already DOC-009 with its tokens. But a well-formed answer of the wrong shape raised `AttributeError` (a string where an object belongs) or `ValueError` (`dict()` of a list), and it escaped `extract_document` after the paid call: no cost record, and the stuck sweep would pay for the order again. `extraction.py` now catches `ValueError, KeyError, TypeError, AttributeError` there, and such an answer is DOC-009 with its tokens.
+- Tests (+5 in `test_extraction_streaming.py`):
+  - three wrong shapes (`header_confidence` a string, a line item a list, a top-level list); the first two failed before the fix;
+  - a 5xx in the middle of the answer keeps its billed input, marked incomplete;
+  - a timeout before the answer starts records a failed run with no tokens.
+- **Warnings triage (for Stage 5):** the 1c API run printed 439 warnings, main's baseline 425. The whole +14 is `tests/test_review_integrity.py`. All 439 are test-only:
+  - 438 are PyJWT's `InsecureKeyLengthWarning` from the short test signing keys;
+  - 1 is a starlette/anyio deprecation.
+  - Stage 5 (founder): use a test JWT secret of at least 32 bytes.
+- **Main-branch failure found by the baseline run:** `test_tenant_audit_api.py::test_changes_are_listed_newest_first_and_views_only_when_asked` failed on `main` (`1 failed, 390 passed, 3 deselected, 425 warnings`).
+  - Cause: the Console Audit tab merges two tables with two clocks. `admin_actions.created_at` is the application server's `datetime.now()`; `tenant_lifecycle_events.created_at` is the database's `clock_timestamp()`. When the server clock lags the database's, events appear out of order.
+  - Decision (founder): fixed in the named-system-actors PR. Console actions are stamped by the database clock, and the tab orders by timestamp, then id, so ties are stable.
+
+## D-164 -- The Audit tab runs on one clock: Console actions are stamped by the database; ties ordered by id
+
+**Context:** the full API suite on staging at `ba8fe20` ended `1 failed, 401 passed, 3 deselected, 439 warnings`. The failure was `test_tenant_audit_api.py::test_changes_are_listed_newest_first_and_views_only_when_asked`, the same one main's baseline run failed (D-163 follow-up). The founder moved the fix from the actors PR into 1c, so the merge line can read clean.
+
+**Cause (measured):**
+- `admin_actions.created_at` was the application server's `datetime.now()`. `tenant_lifecycle_events.created_at` is the database's `clock_timestamp()`. The Console's Audit tab (D-143) merges both tables by timestamp.
+- The development machine's clock runs **662 ms behind** the staging database's: three readings, 19–20 ms round trip. When the test's two requests landed less than about 0.66 s apart, the second Console action was listed before the first lifecycle event.
+- That is why the test passed in some runs and failed in others. It was a real ordering defect in the audit trail, not a flaky test. A production server whose clock drifted would show the founder events out of order.
+
+**Decision:**
+- Both writers of `admin_actions` stamp `created_at` with the database's `clock_timestamp()`: `admin_data_access._record_admin_action` and `tiers.py`'s tier-version record. It is `clock_timestamp()`, not `now()`, so several actions in one transaction stay distinct (the D-123 trap).
+- The Audit tab orders by timestamp, then id. Rows with the same timestamp keep one order, so a page never shuffles between two reads. Each entry now carries its row `id`.
+- No migration: the column is unchanged, only who fills it. Existing rows keep the application time they were written with.
+
+**Tests (written first; all three failed before the fix):**
+- `apps/api/tests/test_tenant_audit_api.py::test_the_order_holds_when_the_app_clock_runs_behind_the_database`. The app clock is simulated an hour behind, so the test is deterministic, whatever the machine's real skew. Before the fix it failed with exactly the staging signature ("At index 1 diff").
+- `…::test_rows_with_the_same_timestamp_come_back_in_the_same_order_every_time`: three rows with one timestamp come back ordered by id, the same on two reads.
+- `packages/core/tests/test_audit_clock.py`: every `INSERT INTO admin_actions` in core uses `clock_timestamp()`.
+
+**The actors PR keeps:** the named system actors and the `idle_in_transaction_session_timeout` migration (D-159, D-163).
+
+**Related:** Sections 7.15.1, 7.15.3; D-123, D-143, D-159, D-163.

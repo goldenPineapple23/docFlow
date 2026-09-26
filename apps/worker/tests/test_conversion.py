@@ -72,16 +72,38 @@ class _FakeMessage:
     usage: _FakeUsage
 
 
+class _FakeStream:
+    """What `client.messages.stream(...)` returns (M1, D-161): no events, then
+    the finished message."""
+
+    def __init__(self, message):
+        self._message = message
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return None
+
+    def __iter__(self):
+        return iter(())
+
+    def get_final_message(self):
+        return self._message
+
+
 class _FakeMessagesResource:
     def __init__(self, payload: dict[str, Any]):
         self._payload = payload
         self.last_content: list[dict] | None = None
 
-    def create(self, **kwargs) -> _FakeMessage:
+    def stream(self, **kwargs) -> _FakeStream:
         self.last_content = kwargs["messages"][0]["content"]
-        return _FakeMessage(
-            content=[_FakeTextBlock(type="text", text=json.dumps(self._payload))],
-            usage=_FakeUsage(input_tokens=100, output_tokens=50),
+        return _FakeStream(
+            _FakeMessage(
+                content=[_FakeTextBlock(type="text", text=json.dumps(self._payload))],
+                usage=_FakeUsage(input_tokens=100, output_tokens=50),
+            )
         )
 
 
@@ -95,8 +117,8 @@ _MINIMAL_RESPONSE: dict[str, Any] = {
         "po_number": "BCH-2291",
         "order_date": "2026-03-14",
         "requested_delivery_date": None,
-        "buyer_name": "Bella's Coffee House",
-        "buyer_contact_email": "orders@bellascoffee.com",
+        "buyer_name": "Acme's Test Coffee House",
+        "buyer_contact_email": "orders@acmetestcoffee.example",
         "ship_to_address": None,
         "payment_terms": "Net 30",
         "order_total": "1356.00",
@@ -467,7 +489,7 @@ def test_xls_text_has_no_scientific_notation():
 def test_rtf_reader_drops_metadata_groups_and_keeps_text():
     rtf = (
         rb"{\rtf1\ansi{\fonttbl{\f0 Helvetica;}}{\*\generator Riched;}"
-        rb"PO Number: BCH-2291\par Buyer: Bella\'92s Coffee House\par}"
+        rb"PO Number: BCH-2291\par Buyer: Acme\'92s Test Coffee House\par}"
     )
     text = _extract_rtf_text(rtf)
     assert "BCH-2291" in text

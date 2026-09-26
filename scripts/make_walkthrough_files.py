@@ -22,7 +22,7 @@ through the real web page and watch what happens.
 
 Everything is built by the same builders the tests use
 (apps/worker/tests/fixture_builders.py, scripts/po_formats.py). All content is
-fictional: the golden fixture's "Bella's Coffee House" (CLAUDE.md Section 0
+fictional: the golden fixture's "Acme's Test Coffee House" (CLAUDE.md Section 0
 rule 4).
 
 Run with the WORKER's venv (it has LibreOffice access for .doc, pillow_heif
@@ -94,7 +94,7 @@ def _image(text: str, fmt: str) -> bytes:
 def _eml(text: str, po: str) -> bytes:
     message = EmailMessage()
     message["Subject"] = f"PO {po}"
-    message["From"] = "orders@bellascoffee.example"
+    message["From"] = "orders@acmetestcoffee.example"
     message["To"] = "orders@acme-test-distributor.example"
     message["Date"] = "Sat, 14 Mar 2026 09:00:00 -0700"
     message.set_content(text)
@@ -216,7 +216,7 @@ def main() -> int:
     _use_po_number(GOLDEN_PO)
     customers = (
         b"Customer Name,Account No,Email\n"
-        b"Bella's Coffee House,TEST-C-001,orders@bellascoffee.example\n"
+        b"Acme's Test Coffee House,TEST-C-001,orders@acmetestcoffee.example\n"
         b"Northwind Test Bakery,TEST-C-002,purchasing@northwind.example\n"
         b"Harborview Test Cafe,TEST-C-003,\n"
         b"Cedar Lane Test Diner,TEST-C-004,buying@cedarlane.example\n"

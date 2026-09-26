@@ -231,3 +231,22 @@ def test_non_ascii_survives_the_canonical_rendering():
     assert snapshot_sha256({"buyer_name": "Café Test Roasters"}) == snapshot_sha256(
         {"buyer_name": "Café Test Roasters"}
     )
+
+
+def test_M4_the_acknowledgement_text_is_the_catalog_wording_with_the_occurrence():
+    """Review M4: the text recorded with an acknowledgement is built on the
+    server -- where the warning is, the catalog's code, title and message, and
+    the occurrence's own values -- never taken from the client."""
+    from docflow_core.errors import get_error
+    from docflow_core.review import acknowledgement_text
+
+    entry = get_error("VAL-001")
+    recorded = acknowledgement_text(
+        "VAL-001", "line_total", 3, {"expected": "570.00", "printed": "5700.00", "empty": ""}
+    )
+    assert recorded.startswith("Line 3 / line total: VAL-001 ")
+    assert entry.title in recorded and entry.message in recorded
+    assert recorded.endswith("(expected: 570.00, printed: 5700.00)")
+
+    bare = acknowledgement_text("VAL-002", None, None, {})
+    assert bare == f"VAL-002 {get_error('VAL-002').title}. {get_error('VAL-002').message}"

@@ -22,8 +22,8 @@ from uuid import UUID, uuid4
 from docflow_core import exports
 from docflow_core.db import platform_session, tenant_session
 from docflow_core.review import (
+    Acknowledgement,
     EditRequest,
-    WarningAcknowledgement,
     apply_edits,
     approve_document,
     current_snapshot,
@@ -62,7 +62,7 @@ def _approve(tenant: WorkerTestTenant, document_id: UUID) -> dict:
     with tenant_session(tenant.tenant_id) as session:
         validate_document(session, tenant.tenant_id, document_id)
         acknowledgements = [
-            WarningAcknowledgement(warning_id=w["id"], code=w["code"], text=w["code"])
+            Acknowledgement(warning_id=w["id"])
             for w in open_warnings(session, document_id)
             if w["status"] == "open"
         ]

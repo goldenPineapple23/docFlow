@@ -275,9 +275,11 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
             "The order has more lines than DocFlow can read in a single pass, so the reading "
             "stopped part-way. Rather than keep a partial order, DocFlow kept none of it."
         ),
+        # Founder's wording (D-158 follow-up 2): splitting a purchase order
+        # into two files would leave two half-orders to approve and export.
         action=(
-            "DocFlow has already been alerted. Until it's fixed, split the order into two "
-            "files of fewer lines each and upload them separately."
+            "Enter this order by hand for now. DocFlow has been alerted and will follow up "
+            "on this order."
         ),
         severity="high",
         audience="both",

@@ -25,9 +25,11 @@ import time
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 import anthropic
+import httpx2
 
 from docflow_core.numbers import parse_document_number
 
@@ -38,14 +40,32 @@ logger = logging.getLogger(__name__)
 EXTRACTION_MODEL = "claude-sonnet-5"
 SCHEMA_VERSION = "1.0.0"
 
-# The most the model may write for one order (review M1). A line is ~60
-# tokens of JSON, so 4096 truncated any order past roughly 50-60 lines, every
-# time. 16000 holds an estimated 150-250 lines (unmeasured; adaptive thinking
-# counts against it too -- D-158 follow-up) and is the ceiling the Anthropic SDK advises
-# for a non-streaming request (above it, a request can outrun the SDK's HTTP
-# timeout). A longer order is caught by stop_reason and failed as DOC-020,
-# never kept half-read.
-EXTRACTION_MAX_TOKENS = 16000
+# The most the model may write for one order (review M1; D-158, D-161): the
+# pinned model's own output maximum. The call is streamed, which is what makes
+# this ceiling usable -- measured on 2026-09-26, a non-streaming call is silent
+# until the whole answer is ready and a connection idle for 60 seconds is
+# dropped on the way, so every order that took longer than about a minute to
+# write (80 lines did) failed as DOC-008, far below the old 16,000 cap. At the
+# measured ~140 output tokens a second (roughly 100-130 tokens per line,
+# adaptive thinking included) this is on the order of 1,000 lines. A longer
+# answer is caught by stop_reason and failed as DOC-020, never kept half-read.
+EXTRACTION_MAX_TOKENS = 128000
+
+# A read must always end before the stuck-document sweep may hand its claim
+# to another worker (STUCK_PROCESSING_TIMEOUT_MIN, H3) -- or two workers would
+# pay for, and try to save, the same order. So one budget covers the whole
+# read, counted from the worker's claim: parsing and conversion, the routing
+# call, the streamed answer and every retry the SDK makes inside those calls
+# (the clock is read before each call, so a retry spends the same budget).
+# The stream is stopped at the deadline (DOC-020: the order was too long to
+# read in time); a stream silent for EXTRACTION_STREAM_IDLE_SECONDS fails as
+# DOC-008. The routing call and the example token count get short timeouts of
+# their own. A test holds the worst case well inside the stuck timeout.
+# 128,000 tokens at the measured rate take about 15 minutes.
+EXTRACTION_DEADLINE_SECONDS = 20 * 60
+EXTRACTION_STREAM_IDLE_SECONDS = 120
+ROUTING_TIMEOUT_SECONDS = 30
+COUNT_TOKENS_TIMEOUT_SECONDS = 15
 
 # The cheap routing pass (Section 7.13, "Identifying the buyer before
 # extraction"). CLAUDE.md Section 3 allows a cheaper model for the
@@ -297,6 +317,7 @@ def _count_example_tokens(client: Any, examples: list[PromptExample]) -> int | N
             model=EXTRACTION_MODEL,
             system=EXAMPLES_PROMPT_ADDENDUM,
             messages=[{"role": "user", "content": build_example_content(examples)}],
+            timeout=COUNT_TOKENS_TIMEOUT_SECONDS,
         )
         return int(counted.input_tokens)
     except Exception as exc:  # noqa: BLE001 -- see the docstring
@@ -417,6 +438,7 @@ def extract_document(
     content: list[dict[str, Any]],
     *,
     examples: list[PromptExample] | None = None,
+    deadline: float | None = None,
 ) -> ExtractionResult:
     """
     Runs one extraction call against the pinned model with structured
@@ -429,6 +451,10 @@ def extract_document(
     They go before the document, each in its own fence, and switch on the
     system-prompt addendum; without them the request is exactly the
     no-example one. Never more than three, whatever the caller passes.
+
+    `deadline` is a `time.monotonic()` value: the worker passes the one it
+    set when it claimed the document, so the whole read shares one budget.
+    Without it, the budget starts now.
     """
     examples = list(examples or [])[:3]
     system = system_prompt_for(examples)
@@ -444,6 +470,10 @@ def extract_document(
     user_content = [*build_example_content(examples), *content] if examples else content
 
     started = time.monotonic()
+    if deadline is None:
+        deadline = started + EXTRACTION_DEADLINE_SECONDS
+    stopped_at_deadline = False
+    stream_ref: Any = None
     try:
         # No `temperature` param: the current API generation (see DECISIONS.md
         # on EXTRACTION_MODEL) removed sampling controls for this model family
@@ -451,28 +481,72 @@ def extract_document(
         # returning a 400. Structured outputs plus a strict schema is the
         # determinism/no-invention mechanism CLAUDE.md Section 7.1 actually
         # relies on; there is no dial left to set to "0" for this model.
-        response = client.messages.create(
+        #
+        # Streamed (M1, D-161): the same single request, schema and
+        # all-or-nothing rule; the answer is only used once it is complete.
+        with client.messages.stream(
             model=EXTRACTION_MODEL,
             max_tokens=EXTRACTION_MAX_TOKENS,
             system=system,
-            messages=[{"role": "user", "content": user_content}],
+            # Content blocks are plain dicts, not the SDK TypedDicts.
+            messages=[{"role": "user", "content": user_content}],  # type: ignore[typeddict-item]
             output_config={"format": {"type": "json_schema", "schema": RESPONSE_SCHEMA}},
-        )  # type: ignore[call-overload]  # content blocks are plain dicts, not the SDK TypedDicts
-    except anthropic.APIError as exc:
+            # Never waits past the deadline for a silent stream either.
+            timeout=min(EXTRACTION_STREAM_IDLE_SECONDS, max(1.0, deadline - time.monotonic())),
+        ) as stream:
+            stream_ref = stream
+            for _event in stream:
+                if time.monotonic() > deadline:
+                    stopped_at_deadline = True
+                    break
+            response = stream.current_message_snapshot if stopped_at_deadline else stream.get_final_message()
+    except (anthropic.APIError, httpx2.TransportError) as exc:
+        # httpx2.TransportError: a connection dropped or gone silent in the
+        # middle of the stream surfaces from the transport, not as an APIError.
         logger.error("extraction_api_error model_id=%s error_type=%s", EXTRACTION_MODEL, type(exc).__name__)
+        # If the answer had started, its input was billed: record what is
+        # known (the output written so far is only reported at the end).
+        partial = _usage_so_far(stream_ref)
         return ExtractionResult(
             ok=False,
             model_id=EXTRACTION_MODEL,
             prompt_hash=p_hash,
             schema_version=SCHEMA_VERSION,
-            raw_response={"error_type": type(exc).__name__, "error_message": str(exc)},
+            raw_response={
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+                **({"cost_complete": False} if partial is not None else {}),
+            },
             error="Extraction API call failed.",
             error_code="DOC-008",
+            input_tokens=partial.input_tokens if partial is not None else None,
+            output_tokens=partial.output_tokens if partial is not None else None,
+            est_cost_usd=_cost(partial.input_tokens, partial.output_tokens) if partial is not None else None,
             latency_ms=_elapsed_ms(started),
             examples_used=example_ids,
         )
     latency_ms = _elapsed_ms(started)
     usage = response.usage
+
+    if stopped_at_deadline:
+        # Stopped before the answer was complete: nothing of it is kept. The
+        # input was paid for and is recorded; the output tokens written so far
+        # are only reported at the end of a stream, so they are not known here.
+        logger.error("extraction_deadline model_id=%s seconds=%s", EXTRACTION_MODEL, latency_ms // 1000)
+        return ExtractionResult(
+            ok=False,
+            model_id=EXTRACTION_MODEL,
+            prompt_hash=p_hash,
+            schema_version=SCHEMA_VERSION,
+            raw_response={"stopped": "deadline", "seconds": latency_ms // 1000, "cost_complete": False},
+            error="Extraction did not finish within its deadline.",
+            error_code="DOC-020",
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            est_cost_usd=_cost(usage.input_tokens, usage.output_tokens),
+            latency_ms=latency_ms,
+            examples_used=example_ids,
+        )
 
     text_block = next((b for b in response.content if b.type == "text"), None)
     raw_text = text_block.text if text_block is not None else ""
@@ -500,7 +574,10 @@ def extract_document(
     try:
         payload = json.loads(raw_text)
         parsed = _parse_response_payload(payload)
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+    # ValueError covers JSONDecodeError and a wrongly shaped object (dict() of a
+    # list); AttributeError a field of the wrong type. Nothing may escape after
+    # a paid call: it would leave no cost record and the order stuck (D-163).
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
         logger.error("extraction_malformed_response model_id=%s error=%s", EXTRACTION_MODEL, type(exc).__name__)
         return ExtractionResult(
             ok=False,
@@ -538,6 +615,20 @@ def extract_document(
         examples_used=example_ids,
         example_input_tokens=_count_example_tokens(client, examples) if examples else None,
     )
+
+
+def _usage_so_far(stream: Any) -> Any:
+    """The usage a stream had reported before it broke off, or None if it
+    never started (nothing was billed then)."""
+    if stream is None:
+        return None
+    try:
+        usage = stream.current_message_snapshot.usage
+    except (AssertionError, AttributeError):
+        return None
+    if getattr(usage, "input_tokens", None) is None:
+        return None
+    return SimpleNamespace(input_tokens=usage.input_tokens, output_tokens=usage.output_tokens or 0)
 
 
 def _elapsed_ms(started: float) -> int:
@@ -591,6 +682,7 @@ def read_buyer_header(client: anthropic.Anthropic, content: list[dict[str, Any]]
             system=ROUTING_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": content}],
             output_config={"format": {"type": "json_schema", "schema": ROUTING_SCHEMA}},
+            timeout=ROUTING_TIMEOUT_SECONDS,
         )  # type: ignore[call-overload]  # content blocks are plain dicts, not the SDK TypedDicts
     except anthropic.APIError as exc:
         logger.error("routing_api_error model_id=%s error_type=%s", ROUTING_MODEL, type(exc).__name__)

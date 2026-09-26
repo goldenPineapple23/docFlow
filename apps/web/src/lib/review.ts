@@ -269,13 +269,17 @@ export function saveEdits(
   return request(`${reviewApiBase()}/documents/${id}`, { method: "PATCH", body: JSON.stringify(body) });
 }
 
+// Which warnings were ticked, and the version the screen was showing (M5).
+// The text recorded with each acknowledgement is written by the server from
+// the stored warning and the catalog (M4), never sent from here.
 export function approveDocument(
   id: string,
-  acknowledgements: Array<{ warning_id: string; code: string; text: string; note: string | null }>,
+  acknowledgements: Array<{ warning_id: string; note: string | null }>,
+  expectedVersion: string,
 ): Promise<{ review_action_id: string; status: string }> {
   return request(`${reviewApiBase()}/documents/${id}/approve`, {
     method: "POST",
-    body: JSON.stringify({ acknowledgements }),
+    body: JSON.stringify({ acknowledgements, expected_version: expectedVersion }),
   });
 }
 

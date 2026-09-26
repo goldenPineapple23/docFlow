@@ -61,13 +61,19 @@ def _record_admin_action(
     target_id: UUID | None = None,
     payload: dict[str, Any] | None = None,
 ) -> None:
+    # created_at is the database's clock_timestamp(), never the app server's
+    # clock: the Audit tab merges these rows with tenant_lifecycle_events,
+    # which the database stamps, and two clocks in one timeline listed events
+    # out of order (D-164). clock_timestamp(), not now(): two actions in one
+    # transaction stay distinct (the D-123 trap).
     session.execute(
         text(
             """
             INSERT INTO admin_actions
                 (id, platform_admin_user_id, action, target_tenant_id, target_type, target_id, payload, created_at)
             VALUES
-                (:id, :platform_admin_user_id, :action, :target_tenant_id, :target_type, :target_id, :payload, :created_at)
+                (:id, :platform_admin_user_id, :action, :target_tenant_id, :target_type, :target_id, :payload,
+                 clock_timestamp())
             """
         ),
         {
@@ -78,7 +84,6 @@ def _record_admin_action(
             "target_type": target_type,
             "target_id": str(target_id) if target_id else None,
             "payload": payload,
-            "created_at": datetime.now(timezone.utc),
         },
     )
 
@@ -1567,12 +1572,12 @@ def tenant_audit(
             payload={"include_views": include_views, "offset": offset},
         )
         trail = f"""
-            SELECT e.created_at AS at, 'lifecycle' AS source, e.event_type AS event,
+            SELECT e.id, e.created_at AS at, 'lifecycle' AS source, e.event_type AS event,
                    e.actor_user_id AS actor_id, e.payload, e.constants_in_effect AS constants
             FROM tenant_lifecycle_events e
             WHERE e.tenant_id = :t
             UNION ALL
-            SELECT a.created_at, 'console', a.action, a.platform_admin_user_id, a.payload, NULL
+            SELECT a.id, a.created_at, 'console', a.action, a.platform_admin_user_id, a.payload, NULL
             FROM admin_actions a
             WHERE a.target_tenant_id = :t
               AND (:include_views OR a.action NOT IN {_VIEW_ACTIONS})
@@ -1588,7 +1593,9 @@ def tenant_audit(
                     FROM ({trail}) x
                     LEFT JOIN users u ON u.id = x.actor_id
                     LEFT JOIN platform_admins p ON p.user_id = x.actor_id
-                    ORDER BY x.at DESC
+                    -- Then by id: rows with the same timestamp keep one order,
+                    -- so a page never shuffles between two reads (D-164).
+                    ORDER BY x.at DESC, x.id DESC
                     LIMIT :limit OFFSET :offset
                     """
                 ),
@@ -1601,6 +1608,7 @@ def tenant_audit(
         "total": int(total),
         "entries": [
             {
+                "id": str(row["id"]),
                 "at": row["at"].isoformat(),
                 "source": row["source"],
                 "event": row["event"],

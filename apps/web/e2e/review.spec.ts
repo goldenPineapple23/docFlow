@@ -35,6 +35,16 @@ async function stubApi(page: Page, state: { detail: ReturnType<typeof detail>; a
       });
       return;
     }
+    // M5: approval names the version the screen was showing; M4: it never
+    // sends the warning text (the server writes it).
+    if (body.expected_version !== state.detail.version) {
+      await route.fulfill({ status: 409, json: { detail: { code: "REV-005", title: "stale" } } });
+      return;
+    }
+    if ((body.acknowledgements ?? []).some((a: Record<string, unknown>) => "text" in a || "code" in a)) {
+      await route.fulfill({ status: 422, json: { detail: "client-supplied warning text" } });
+      return;
+    }
     state.approved = true;
     state.detail.document.status = "approved";
     await route.fulfill({ json: { review_action_id: "r1", status: "approved" } });

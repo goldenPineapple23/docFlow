@@ -46,7 +46,7 @@ async function stubConsole(page: Page) {
             review_started_at: null,
             approved_at: null,
             po_number: "BCH-2291",
-            buyer_name: "Bella's Test Coffee House",
+            buyer_name: "Acme's Test Coffee House",
             order_total: "570.00",
             currency: "USD",
             open_warnings: 0,

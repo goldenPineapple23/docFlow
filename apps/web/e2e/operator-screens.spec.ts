@@ -49,7 +49,7 @@ test("merging asks which customer to keep, confirms, then reports what moved", a
                 similarity_score: "0.9412",
                 created_at: "2026-09-19T10:00:00Z",
                 detected_from_document_id: null,
-                buyers: [side(OLD, "Bella's Test Coffee", 4, null), side(NEW, "Bellas Test Coffee LLC", 1, "orders@bellas.example")],
+                buyers: [side(OLD, "Acme's Test Coffee", 4, null), side(NEW, "Acmes Test Coffee LLC", 1, "orders@acmes.example")],
               },
             ],
             history: [],
@@ -72,13 +72,13 @@ test("merging asks which customer to keep, confirms, then reports what moved", a
 
   await page.getByTestId("merge-start").click();
   await expect(page.getByTestId("merge-confirm-box")).toContainText(
-    "Merge “Bella's Test Coffee” into “Bellas Test Coffee LLC”? 4 orders and 0 rules move",
+    "Merge “Acme's Test Coffee” into “Acmes Test Coffee LLC”? 4 orders and 0 rules move",
   );
   expect(merged).toBeNull(); // nothing sent before confirming
   await page.getByTestId("merge-confirm").click();
 
   await expect(page.getByTestId("merge-notice")).toHaveText(
-    "Merged “Bella's Test Coffee” into “Bellas Test Coffee LLC”: 4 orders and 0 rules moved.",
+    "Merged “Acme's Test Coffee” into “Acmes Test Coffee LLC”: 4 orders and 0 rules moved.",
   );
   expect(merged).toEqual({ keep_buyer_id: NEW });
   await expect(page.getByTestId("merge-empty")).toBeVisible();

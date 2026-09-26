@@ -102,3 +102,21 @@ founder asked for both, D-155; tracked in `docs/BUILD-STATUS.md`):
 - confirming the addresses Postmark's inbound webhook really comes from, then
   switching the IP allowlist from log-only to enforcing;
 - rotating the webhook's credentials.
+
+---
+
+## 3. Onboarding a new tenant — checklist
+
+The Console walks you through the nine setup steps (Intake → Go live). This
+list is the checks that sit around them. Phase 6 completes it.
+
+- [ ] **Check the line count of the prospect's largest sample order.** Open
+  the biggest purchase order in their intake files and count its line items
+  (or look at the line number of the last item).
+  - Up to about 1,000 lines: DocFlow reads it in one pass. Measured on
+    2026-09-26 (D-161): 600 lines read exactly in 8 minutes, about $0.81.
+  - Over about 1,000 lines: DocFlow can't read it yet. It fails as DOC-020
+    ("enter this order by hand for now") after a paid read of up to about
+    15 minutes and about $1.40. Tell the prospect before go-live that orders
+    this long must be keyed by hand for now, and record it in your onboarding
+    notes. Splitting long orders across several reads is deferred (D-158).

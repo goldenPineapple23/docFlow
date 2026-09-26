@@ -14,7 +14,7 @@ approved documents, the golden fixture still extracts exactly, and the
 contamination test passes live."
 
 Two documents, the same three past examples
-(`fixtures/examples/past_orders.json`, earlier Bella's Coffee House orders):
+(`fixtures/examples/past_orders.json`, earlier Acme's Test Coffee House orders):
 
   * the golden fixture itself (same buyer as the examples) must extract to
     exactly the Section 8.3 values, and no value that exists only in an
@@ -49,7 +49,7 @@ from docflow_core.extraction import (
 from tests.test_golden_fixture import _assert_matches_section_8_3
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SAMPLE_PO_PATH = REPO_ROOT / "docs" / "sample_po.txt"
+SAMPLE_PO_PATH = Path(__file__).parent / "fixtures" / "golden" / "sample_po.txt"
 EXAMPLES_DIR = Path(__file__).parent / "fixtures" / "examples"
 CONTAMINATION_PO_PATH = EXAMPLES_DIR / "contamination_po.txt"
 EXPECTED_GOLDEN_PATH = Path(__file__).parent / "fixtures" / "golden" / "expected_output.json"
@@ -175,14 +175,34 @@ class _Count:
     input_tokens: int
 
 
+class _FakeStream:
+    """What `client.messages.stream(...)` returns (M1, D-161): no events, then
+    the finished message."""
+
+    def __init__(self, message):
+        self._message = message
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return None
+
+    def __iter__(self):
+        return iter(())
+
+    def get_final_message(self):
+        return self._message
+
+
 class _RecordingMessages:
     def __init__(self, payload: dict[str, Any]):
         self._payload = payload
         self.requests: list[dict[str, Any]] = []
 
-    def create(self, **kwargs) -> _Message:
+    def stream(self, **kwargs) -> _FakeStream:
         self.requests.append(kwargs)
-        return _Message([_Block("text", json.dumps(self._payload))], _Usage(6100, 820))
+        return _FakeStream(_Message([_Block("text", json.dumps(self._payload))], _Usage(6100, 820)))
 
     def count_tokens(self, **kwargs) -> _Count:
         return _Count(3400)

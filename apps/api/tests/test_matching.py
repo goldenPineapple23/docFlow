@@ -309,7 +309,7 @@ def test_load_sku_rules_prefers_the_buyer_scoped_rule_and_skips_inactive_ones():
     with _TestMatchingTenant("Acme Test Distributor") as tenant:
         general_item = tenant.seed_item("CF-1001", "Colombian Whole Bean 5lb")
         specific_item = tenant.seed_item("CF-2210", "Ethiopian Yirgacheffe 5lb")
-        buyer = tenant.seed_buyer("Bella's Coffee House")
+        buyer = tenant.seed_buyer("Acme's Test Coffee House")
         other_buyer = tenant.seed_buyer("Riverbend Test Hardware")
 
         tenant.seed_rule(
@@ -399,7 +399,7 @@ def test_the_rule_upsert_refreshes_one_row_rather_than_shadowing_it():
     with _TestMatchingTenant("Acme Test Distributor") as tenant:
         first_item = tenant.seed_item("CF-1001", "Colombian Whole Bean 5lb")
         second_item = tenant.seed_item("CF-2210", "Ethiopian Yirgacheffe 5lb")
-        buyer = tenant.seed_buyer("Bella's Coffee House")
+        buyer = tenant.seed_buyer("Acme's Test Coffee House")
         document = tenant.create_document(buyer_id=buyer)
         key = normalize_description("House Blend Beans")
 
@@ -457,7 +457,7 @@ def test_a_learned_rule_wins_over_an_exact_sku_match():
     with _TestMatchingTenant("Acme Test Distributor") as tenant:
         colombian = tenant.seed_item("CF-1001", "Colombian Whole Bean 5lb")
         ethiopian = tenant.seed_item("CF-2210", "Ethiopian Yirgacheffe 5lb")
-        buyer = tenant.seed_buyer("Bella's Coffee House")
+        buyer = tenant.seed_buyer("Acme's Test Coffee House")
         rule_id = tenant.seed_rule(
             rule_type="sku_mapping",
             match_key="House Blend Beans",
@@ -591,7 +591,7 @@ def test_a_correction_on_document_one_auto_matches_document_two_from_the_same_bu
     """
     with _TestMatchingTenant("Acme Test Distributor") as tenant:
         colombian = tenant.seed_item("CF-1001", "Colombian Whole Bean 5lb")
-        buyer = tenant.seed_buyer("Bella's Coffee House")
+        buyer = tenant.seed_buyer("Acme's Test Coffee House")
 
         # Document 1: the buyer's own wording, which matches nothing.
         first = tenant.create_document(
@@ -687,7 +687,7 @@ def test_a_buyer_scoped_rule_beats_a_tenant_wide_rule_for_the_same_key():
     with _TestMatchingTenant("Acme Test Distributor") as tenant:
         general = tenant.seed_item("CF-1001", "Colombian Whole Bean 5lb")
         specific = tenant.seed_item("CF-2210", "Ethiopian Yirgacheffe 5lb")
-        buyer = tenant.seed_buyer("Bella's Coffee House")
+        buyer = tenant.seed_buyer("Acme's Test Coffee House")
         tenant.seed_rule(
             rule_type="sku_mapping",
             match_key="House Blend Beans",
@@ -739,7 +739,7 @@ def test_a_tenant_wide_rule_still_fires_for_a_buyer_with_no_rule_of_their_own():
 def test_a_rule_scoped_to_buyer_x_does_not_fire_for_buyer_y():
     with _TestMatchingTenant("Acme Test Distributor") as tenant:
         item = tenant.seed_item("CF-1001", "Colombian Whole Bean 5lb")
-        buyer_x = tenant.seed_buyer("Bella's Coffee House")
+        buyer_x = tenant.seed_buyer("Acme's Test Coffee House")
         buyer_y = tenant.seed_buyer("Riverbend Test Hardware")
         tenant.seed_rule(
             rule_type="sku_mapping",
@@ -764,7 +764,7 @@ def test_a_disabled_rule_does_not_fire():
     effect."""
     with _TestMatchingTenant("Acme Test Distributor") as tenant:
         item = tenant.seed_item("CF-1001", "Colombian Whole Bean 5lb")
-        buyer = tenant.seed_buyer("Bella's Coffee House")
+        buyer = tenant.seed_buyer("Acme's Test Coffee House")
         tenant.seed_rule(
             rule_type="sku_mapping",
             match_key="House Blend Beans",
@@ -1017,7 +1017,7 @@ def test_re_confirming_the_same_wording_updates_the_rule_instead_of_shadowing_it
     with _TestMatchingTenant("Acme Test Distributor") as tenant:
         first_item = tenant.seed_item("CF-1001", "Colombian Whole Bean 5lb")
         second_item = tenant.seed_item("CF-2210", "Ethiopian Yirgacheffe 5lb")
-        buyer = tenant.seed_buyer("Bella's Coffee House")
+        buyer = tenant.seed_buyer("Acme's Test Coffee House")
         document = tenant.create_document(
             buyer_id=buyer, lines=[{"description": "House Blend Beans"}]
         )

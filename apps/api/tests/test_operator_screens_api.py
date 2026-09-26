@@ -111,10 +111,10 @@ class _Tenant(_TestBuyerTenant):
 
 def _flagged_pair(tenant: _Tenant):
     """Two orders from what may be one customer; the second is flagged."""
-    first = tenant.create_document(buyer_name="Bella's Test Coffee House")
-    second = tenant.create_document(buyer_name="Bellas Test Coffee House LLC")
-    kept = tenant.link(first, "Bella's Test Coffee House").buyer_id
-    other = tenant.link(second, "Bellas Test Coffee House LLC", email="orders@bellas.example").buyer_id
+    first = tenant.create_document(buyer_name="Acme's Test Coffee House")
+    second = tenant.create_document(buyer_name="Acmes Test Coffee House LLC")
+    kept = tenant.link(first, "Acme's Test Coffee House").buyer_id
+    other = tenant.link(second, "Acmes Test Coffee House LLC", email="orders@acmes.example").buyer_id
     candidate = tenant.one("SELECT id FROM buyer_merge_candidates WHERE tenant_id = :t AND status = 'open'")[
         "id"
     ]
@@ -166,7 +166,7 @@ def test_a_merge_moves_everything_leaves_an_alias_and_is_logged(client):
         gone = tenant.one("SELECT deleted_at, merged_into_buyer_id FROM buyers WHERE id = :b", b=str(merged))
         assert gone["deleted_at"] is not None and str(gone["merged_into_buyer_id"]) == str(kept)
         keep = tenant.one("SELECT name, contact_email FROM buyers WHERE id = :b", b=str(kept))
-        assert (keep["name"], keep["contact_email"]) == ("Bella's Test Coffee House", "orders@bellas.example")
+        assert (keep["name"], keep["contact_email"]) == ("Acme's Test Coffee House", "orders@acmes.example")
         assert str(
             tenant.one("SELECT buyer_id FROM learned_rules WHERE id = :r", r=str(moved_rule))["buyer_id"]
         ) == str(kept)
@@ -179,7 +179,7 @@ def test_a_merge_moves_everything_leaves_an_alias_and_is_logged(client):
             "SELECT id, buyer_id, match_key, confirmed_by, acting_as_tenant_id FROM learned_rules "
             "WHERE tenant_id = :t AND rule_type = 'buyer_alias'"
         )
-        assert alias["match_key"] == "bellas test coffee house llc"
+        assert alias["match_key"] == "acmes test coffee house llc"
         assert str(alias["confirmed_by"]) == str(console.user_id)  # the founder, as themselves
         assert str(alias["acting_as_tenant_id"]) == str(tenant.tenant_id)
         log = tenant.one("SELECT * FROM buyer_merges WHERE tenant_id = :t")
@@ -195,13 +195,13 @@ def test_a_merge_moves_everything_leaves_an_alias_and_is_logged(client):
 
         history = client.get(f"{_base(tenant)}/buyer-merges", headers=console.headers()).json()
         assert history["candidates"] == []
-        assert history["history"][0]["merged_name"] == "Bellas Test Coffee House LLC"
+        assert history["history"][0]["merged_name"] == "Acmes Test Coffee House LLC"
         assert history["history"][0]["by_docflow_support"] is True
 
         # The next order under the merged-away name links to the kept buyer,
         # through the alias, with the rule as provenance -- and creates nothing.
-        third = tenant.create_document(buyer_name="BELLAS TEST COFFEE HOUSE, LLC")
-        result = tenant.link(third, "BELLAS TEST COFFEE HOUSE, LLC")
+        third = tenant.create_document(buyer_name="ACMES TEST COFFEE HOUSE, LLC")
+        result = tenant.link(third, "ACMES TEST COFFEE HOUSE, LLC")
         assert (result.buyer_id, result.created, result.matched_on) == (kept, False, "buyer_alias")
         provenance = tenant.one(
             "SELECT field_provenance FROM document_headers WHERE document_id = :d", d=str(third)

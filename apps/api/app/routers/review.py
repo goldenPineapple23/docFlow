@@ -39,12 +39,13 @@ from docflow_core.errors import get_error
 from docflow_core.matching import confirm_sku_mapping
 from docflow_core.numbers import plain
 from docflow_core.review import (
+    Acknowledgement,
     EditRequest,
     ReviewError,
-    WarningAcknowledgement,
     apply_edits,
     approve_document,
     document_version,
+    recheck_before_approval,
     reject_document,
     reopen_document,
     review_trail,
@@ -129,14 +130,18 @@ class EditBody(BaseModel):
 
 
 class AcknowledgementBody(BaseModel):
+    """Which warning, and optionally why. The code and the text recorded are
+    the server's (M4): anything else a client sends is ignored."""
+
     warning_id: UUID
-    code: str
-    text: str
     note: str | None = None
 
 
 class ApproveBody(BaseModel):
     acknowledgements: list[AcknowledgementBody] = Field(default_factory=list)
+    # The version the reviewer's screen was showing (M5). Required: approval
+    # is of what the reviewer saw, never of whatever the row holds by then.
+    expected_version: str
 
 
 class RejectBody(BaseModel):
@@ -533,12 +538,13 @@ def approve(
     actor: Actor = Depends(current_actor),
 ) -> dict:
     tenant_id = actor.require_reviewer()
-    acknowledgements = [
-        WarningAcknowledgement(
-            warning_id=a.warning_id, code=a.code, text=a.text, note=a.note
-        )
-        for a in body.acknowledgements
-    ]
+    acknowledgements = [Acknowledgement(warning_id=a.warning_id, note=a.note) for a in body.acknowledgements]
+
+    # H2: the checks are brought up to date in their own transaction first,
+    # so a warning found now is saved -- and shown -- even though the approval
+    # below will then refuse it as unacknowledged.
+    with tenant_session(tenant_id) as session:
+        recheck_before_approval(session, tenant_id, document_id)
 
     with tenant_session(tenant_id) as session:
         try:
@@ -549,6 +555,7 @@ def approve(
                 user_id=actor.require_user_id(),
                 acting_as_tenant_id=actor.acting_as_tenant_id,
                 acknowledgements=acknowledgements,
+                expected_version=body.expected_version,
             )
         except ReviewError as exc:
             raise _review_error(exc) from exc

@@ -39,9 +39,9 @@ from docflow_core.review import (
     CODE_NOT_REVIEWABLE,
     CODE_STALE_EDIT,
     CODE_UNACKNOWLEDGED_WARNINGS,
+    Acknowledgement,
     EditRequest,
     ReviewError,
-    WarningAcknowledgement,
     apply_edits,
     approve_document,
     build_snapshot,
@@ -52,6 +52,7 @@ from docflow_core.review import (
     review_trail,
     snapshot_sha256,
     start_review,
+    unacknowledged_warnings,
 )
 from docflow_core.validation import validate_document
 from sqlalchemy import text
@@ -157,6 +158,23 @@ def _detail(value) -> list | dict:
     return json.loads(value) if isinstance(value, str) else value
 
 
+def _approve_acknowledging(
+    tenant: _TestValidationTenant, document_id: UUID, expected_codes: list[str]
+) -> None:
+    """Approve as a reviewer must once the order no longer reconciles (H2,
+    D-162): the edit raised its warning, so it is acknowledged first."""
+    with tenant_session(tenant.tenant_id) as session:
+        open_now = unacknowledged_warnings(session, document_id)
+        assert sorted(w["code"] for w in open_now) == expected_codes
+        approve_document(
+            session,
+            tenant.tenant_id,
+            document_id,
+            user_id=tenant.user_id,
+            acknowledgements=[Acknowledgement(warning_id=w["id"], note="Checked.") for w in open_now],
+        )
+
+
 # -- the Phase 3 exit criterion ---------------------------------------------
 
 
@@ -178,8 +196,8 @@ def test_the_audit_trail_shows_exactly_what_changed():
                 lines={line_id: {"quantity": "13"}},
             ),
         )
-        with tenant_session(tenant.tenant_id) as session:
-            approve_document(session, tenant.tenant_id, document, user_id=tenant.user_id)
+        # 13 x 47.50 is not the printed 570.00: the edit raised VAL-001 (H2).
+        _approve_acknowledging(tenant, document, ["VAL-001"])
 
         trail = review_trail_for(tenant, document)
         assert [row["action"] for row in trail] == [ACTION_EDITED, ACTION_APPROVED]
@@ -340,10 +358,8 @@ def test_acknowledging_a_warning_records_its_text_and_allows_approval():
             validate_document(session, tenant.tenant_id, document)
 
         warning = tenant.live_warnings(document)[0]
-        ack = WarningAcknowledgement(
+        ack = Acknowledgement(
             warning_id=warning["id"],
-            code=warning["code"],
-            text="The order total doesn't equal the sum of the line totals.",
             note="Freight is invoiced separately for this buyer.",
         )
 
@@ -506,8 +522,8 @@ def test_re_approving_supersedes_the_first_snapshot_and_keeps_both():
 
         _edit(tenant, document, EditRequest(header={"order_total": "600.00"}))
 
-        with tenant_session(tenant.tenant_id) as session:
-            approve_document(session, tenant.tenant_id, document, user_id=tenant.user_id)
+        # 600.00 against 570.00 of lines: the edit raised VAL-002 (H2).
+        _approve_acknowledging(tenant, document, ["VAL-002"])
 
         snapshots = _snapshots(document)
         assert len(snapshots) == 2

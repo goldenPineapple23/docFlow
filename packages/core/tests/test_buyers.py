@@ -29,7 +29,7 @@ from docflow_core.buyers import (
 
 
 def test_normalize_lowercases_and_strips_punctuation():
-    assert normalize_buyer_name("Bella's Coffee House, LLC.") == "bellas coffee house llc"
+    assert normalize_buyer_name("Acme's Test Coffee House, LLC.") == "acmes test coffee house llc"
 
 
 def test_normalize_collapses_whitespace_and_trims():
@@ -82,16 +82,16 @@ def test_similarity_is_a_decimal_never_a_float():
 
 
 def test_suffix_only_difference_is_flagged():
-    assert is_near_duplicate("Bella's Coffee House", "Bella's Coffee House, LLC")
+    assert is_near_duplicate("Acme's Test Coffee House", "Acme's Test Coffee House, LLC")
 
 
 def test_spelling_variant_is_flagged():
-    assert is_near_duplicate("Bella's Coffee House", "Bellas Coffee House Inc")
+    assert is_near_duplicate("Acme's Test Coffee House", "Acmes Test Coffee House Inc")
     assert is_near_duplicate("Acme Test Distributor", "Acme Test Distributors")
 
 
 def test_word_order_difference_is_flagged():
-    assert is_near_duplicate("Bella's Coffee House", "Coffee House Bella's")
+    assert is_near_duplicate("Acme's Test Coffee House", "Test Coffee House Acme's")
 
 
 def test_two_genuinely_different_companies_are_not_flagged():
@@ -103,8 +103,8 @@ def test_two_genuinely_different_companies_are_not_flagged():
     """
     assert not is_near_duplicate("Acme Test Distributor", "Acme Test Manufacturing")
     assert not is_near_duplicate("Northwind Test Supply Co", "Northstar Test Supply Co")
-    assert not is_near_duplicate("Bella's Coffee House", "Bella's Tea House")
-    assert not is_near_duplicate("Bella's Coffee House", "Riverbend Test Hardware")
+    assert not is_near_duplicate("Acme's Test Coffee House", "Acme's Test Tea House")
+    assert not is_near_duplicate("Acme's Test Coffee House", "Riverbend Test Hardware")
 
 
 def test_missing_name_never_scores_as_similar():
@@ -120,11 +120,11 @@ def test_candidates_are_only_those_at_or_above_threshold_highest_first():
     existing = [
         # A typo'd variant: flagged, but a little further away than the
         # suffix-only variant below.
-        (close_id, "Bellas Coffee Housse Inc"),
+        (close_id, "Acmes Test Coffee Housse Inc"),
         (unrelated_id, "Riverbend Test Hardware"),
-        (closer_id, "Bella's Coffee House LLC"),
+        (closer_id, "Acme's Test Coffee House LLC"),
     ]
-    candidates = find_near_duplicate_candidates("Bella's Coffee House", existing)
+    candidates = find_near_duplicate_candidates("Acme's Test Coffee House", existing)
 
     assert [c.existing_buyer_id for c in candidates] == [closer_id, close_id]
     assert all(c.similarity_score >= NEAR_DUPLICATE_THRESHOLD for c in candidates)

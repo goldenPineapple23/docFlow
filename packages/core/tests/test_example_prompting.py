@@ -105,14 +105,14 @@ class _RoutingClient:
 
 def test_the_routing_call_uses_the_cheap_model_and_prices_it_as_such():
     client = _RoutingClient(
-        {"buyer_name": "Bella's Coffee House", "buyer_contact_email": None,
+        {"buyer_name": "Acme's Test Coffee House", "buyer_contact_email": None,
          "buyer_confidence": 0.93, "injection_suspected": False}
     )
     result = read_buyer_header(client, [{"type": "text", "text": "<document>x</document>"}])
 
     assert client.calls[0]["model"] == ROUTING_MODEL
     assert "json_schema" in json.dumps(client.calls[0]["output_config"])
-    assert result.ok and result.buyer_name == "Bella's Coffee House"
+    assert result.ok and result.buyer_name == "Acme's Test Coffee House"
     # $1/M in + $5/M out
     assert result.est_cost_usd == Decimal("0.0012")
 
@@ -140,7 +140,7 @@ def _factory(tenant_id):
 def _routing(**overrides) -> RoutingResult:
     base = dict(
         ok=True, model_id=ROUTING_MODEL, prompt_hash="h", schema_version="r", raw_response={},
-        buyer_name="Bella's Coffee House", buyer_confidence=0.95,
+        buyer_name="Acme's Test Coffee House", buyer_confidence=0.95,
     )
     base.update(overrides)
     return RoutingResult(**base)
@@ -171,6 +171,12 @@ def world(monkeypatch):
         return _routing()
 
     monkeypatch.setattr(ep, "read_buyer_header", fake_read)
+    state["recorded_routing"] = 0
+
+    def fake_record(session, tenant_id, document_id, routing):
+        state["recorded_routing"] += 1
+
+    monkeypatch.setattr(ep.model_runs, "record_routing", fake_record)
     return state
 
 
@@ -244,3 +250,31 @@ def test_a_free_mail_domain_never_identifies_a_buyer(monkeypatch):
 
     assert ep.buyer_from_sender(_Explodes(), uuid4(), "someone@gmail.com") is None
     assert ep.buyer_from_sender(_Explodes(), uuid4(), None) is None
+
+
+# ── Every paid call leaves a cost record (founder, 2026-09-26) ─────────────
+
+
+def test_cost_the_routing_call_is_recorded_as_soon_as_it_returns(world):
+    plan = _plan()
+    assert world["routing_calls"] == 1 and world["recorded_routing"] == 1
+    assert plan.routing is not None
+
+
+def test_cost_the_routing_call_stays_recorded_when_a_later_planning_step_fails(world, monkeypatch):
+    """The worker treats a planning failure as "no examples" and drops the
+    plan -- the routing call it paid for must already be on record."""
+
+    def broken(session, tenant_id, routing):
+        raise RuntimeError("database went away")
+
+    monkeypatch.setattr(ep, "buyer_from_routing", broken)
+    with pytest.raises(RuntimeError):
+        _plan()
+    assert world["routing_calls"] == 1 and world["recorded_routing"] == 1
+
+
+def test_cost_no_routing_call_means_no_routing_record(world):
+    world["any_qualifies"] = False
+    _plan()
+    assert world["recorded_routing"] == 0

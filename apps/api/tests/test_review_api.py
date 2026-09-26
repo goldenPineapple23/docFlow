@@ -92,6 +92,13 @@ class _ReviewTenant(_TestValidationTenant):
         return {"Authorization": f"Bearer {jwt.encode(claims, JWT_SECRET, algorithm='HS256')}"}
 
 
+def _version(client, tenant, document_id: UUID) -> str:
+    """The version token the review screen holds (M5)."""
+    response = client.get(f"/review/documents/{document_id}", headers=tenant.headers())
+    assert response.status_code == 200
+    return response.json()["version"]
+
+
 def _status(document_id: UUID) -> str:
     with platform_session() as session:
         return session.execute(
@@ -286,7 +293,7 @@ def test_approving_a_clean_document_succeeds(client):
         response = client.post(
             f"/review/documents/{document}/approve",
             headers=tenant.headers(),
-            json={"acknowledgements": []},
+            json={"acknowledgements": [], "expected_version": _version(client, tenant, document)},
         )
 
         assert response.status_code == 200
@@ -312,7 +319,7 @@ def test_approving_with_an_open_warning_is_refused_with_rev_001(client):
         response = client.post(
             f"/review/documents/{document}/approve",
             headers=tenant.headers(),
-            json={"acknowledgements": []},
+            json={"acknowledgements": [], "expected_version": _version(client, tenant, document)},
         )
 
         assert response.status_code == 409
@@ -326,13 +333,9 @@ def test_approving_with_an_open_warning_is_refused_with_rev_001(client):
             headers=tenant.headers(),
             json={
                 "acknowledgements": [
-                    {
-                        "warning_id": warning["id"],
-                        "code": warning["code"],
-                        "text": "The order total doesn't equal the sum of the line totals.",
-                        "note": "Freight billed separately.",
-                    }
-                ]
+                    {"warning_id": warning["id"], "note": "Freight billed separately."}
+                ],
+                "expected_version": _version(client, tenant, document),
             },
         )
         assert ok.status_code == 200
@@ -458,7 +461,7 @@ def test_a_viewer_can_read_but_cannot_edit_or_approve(client):
         approve = client.post(
             f"/review/documents/{document}/approve",
             headers=tenant.headers(),
-            json={"acknowledgements": []},
+            json={"acknowledgements": [], "expected_version": "not-read-before-the-role-check"},
         )
         assert approve.status_code == 403
 
@@ -649,7 +652,7 @@ def test_approving_twice_over_http_is_rev_002(client):
         response = client.post(
             f"/review/documents/{document}/approve",
             headers=tenant.headers(),
-            json={"acknowledgements": []},
+            json={"acknowledgements": [], "expected_version": "refused-as-already-approved-first"},
         )
 
         assert response.status_code == 409

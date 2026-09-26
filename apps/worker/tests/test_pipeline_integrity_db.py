@@ -27,7 +27,7 @@ from uuid import UUID, uuid4
 import pytest
 from docflow_core import db, document_status, stuck_documents
 from docflow_core.db import platform_session, tenant_session
-from docflow_core.review import WarningAcknowledgement, approve_document
+from docflow_core.review import Acknowledgement, approve_document
 from docflow_core.validation import open_warnings, validate_document
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
@@ -87,7 +87,7 @@ def _approve(tenant: WorkerTestTenant, document_id: UUID) -> None:
             document_id,
             user_id=tenant.user_id,
             acknowledgements=[
-                WarningAcknowledgement(warning_id=w["id"], code=w["code"], text=w["code"])
+                Acknowledgement(warning_id=w["id"])
                 for w in open_warnings(session, document_id)
                 if w["status"] == "open"
             ],
@@ -420,6 +420,68 @@ def test_M1_a_100_line_order_is_stored_whole(monkeypatch):
         assert fake.calls[0]["max_tokens"] >= 16000
         assert _lines(document_id) == 100
         assert _document(document_id)["status"] == "needs_review"
+
+
+@requires_documents_schema
+def test_cost_a_paid_answer_that_could_not_be_saved_is_still_on_the_cost_record(monkeypatch):
+    """Founder, 2026-09-26: every paid model call writes a cost record,
+    succeeded or failed. The save transaction that fails (DOC-021) also held
+    the run record; it is written again on its own, with the cost, so the
+    daily breaker (Section 7.9) and the dashboard see the money spent."""
+    import app.tasks.parse_and_extract as task_module
+
+    def broken_provenance(*args, **kwargs):
+        raise RuntimeError("could not save the header")
+
+    monkeypatch.setattr(task_module, "_extracted_provenance", broken_provenance)
+    with WorkerTestTenant("Acme Test Cost Save") as tenant:
+        document_id = tenant.create_pending_document()
+        run_extraction(monkeypatch, tenant, document_id, CLEAN)
+        document = _document(document_id)
+        assert (document["status"], document["failure_code"]) == ("failed", "DOC-021")
+        with tenant_session(tenant.tenant_id) as session:
+            runs = session.execute(
+                text(
+                    "SELECT run_kind, succeeded, input_tokens, est_cost_usd FROM extraction_runs "
+                    "WHERE document_id = :id"
+                ),
+                {"id": str(document_id)},
+            ).mappings().all()
+            cost = session.execute(
+                text("SELECT est_cost_usd FROM documents WHERE id = :id"), {"id": str(document_id)}
+            ).scalar_one()
+        assert [(r["run_kind"], r["input_tokens"]) for r in runs] == [("extraction", 1000)]
+        assert runs[0]["est_cost_usd"] is not None and runs[0]["est_cost_usd"] > 0
+        assert cost == runs[0]["est_cost_usd"]
+
+
+@requires_documents_schema
+def test_M1_the_read_deadline_is_set_at_the_claim(monkeypatch):
+    """The whole read -- parsing, conversion, the routing call and the
+    streamed answer -- spends one budget, counted from the claim."""
+    import time as time_module
+
+    from docflow_core.extraction import EXTRACTION_DEADLINE_SECONDS
+
+    import app.tasks.parse_and_extract as task_module
+
+    seen = {}
+    real_extract = task_module.extract_document
+
+    def spy(client, content, **kwargs):
+        seen["deadline"] = kwargs.get("deadline")
+        seen["at"] = time_module.monotonic()
+        return real_extract(client, content, **kwargs)
+
+    monkeypatch.setattr(task_module, "extract_document", spy)
+    with WorkerTestTenant("Acme Test Read Budget") as tenant:
+        document_id = tenant.create_pending_document()
+        started = time_module.monotonic()
+        run_extraction(monkeypatch, tenant, document_id, CLEAN)
+        assert seen["deadline"] is not None
+        # Set at the claim: after the test began, before extraction was called.
+        assert started + EXTRACTION_DEADLINE_SECONDS <= seen["deadline"]
+        assert seen["deadline"] <= seen["at"] + EXTRACTION_DEADLINE_SECONDS
 
 
 @requires_documents_schema

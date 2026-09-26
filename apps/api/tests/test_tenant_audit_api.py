@@ -77,3 +77,67 @@ def test_reading_the_audit_tab_is_itself_audited_and_pages(client):
                 {"t": str(t.tenant_id)},
             ).scalar_one()
         assert reads == 2
+
+
+# ── One clock for the whole trail (D-164) ───────────────────────────────────
+
+
+def test_the_order_holds_when_the_app_clock_runs_behind_the_database(client, monkeypatch):
+    """Console actions were stamped with the application server's clock and
+    lifecycle events with the database's. A server clock 0.66 s behind (as
+    measured on the development machine) was enough to list a Console action
+    before the lifecycle event it caused. Here the app clock is an hour
+    behind -- deterministic, whatever the real skew -- and the order must
+    still be exactly newest first."""
+    from datetime import datetime, timedelta, timezone
+
+    import docflow_core.admin_data_access as ada
+
+    class _AnHourBehind(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.now(tz or timezone.utc) - timedelta(hours=1)
+
+    monkeypatch.setattr(ada, "datetime", _AnHourBehind)
+
+    with _Console() as console, _Tenant("Acme Test Audit Clock") as t:
+        url = f"/admin/tenants/{t.tenant_id}/example-prompting"
+        client.put(url, headers=console.headers(), json={"enabled": True, "golden_run_confirmed": True})
+        client.put(url, headers=console.headers(), json={"enabled": False})
+
+        entries = client.get(_url(t), headers=console.headers()).json()["entries"]
+        assert [(e["source"], e["event"]) for e in entries[:4]] == [
+            ("lifecycle", "example_prompting_disabled"),
+            ("console", "example_prompting_set"),
+            ("lifecycle", "example_prompting_enabled"),
+            ("console", "example_prompting_set"),
+        ]
+        # Both kinds of row carry the database's time: no hour between them.
+        from datetime import datetime as real_datetime
+
+        stamps = [real_datetime.fromisoformat(e["at"]) for e in entries[:4]]
+        assert max(stamps) - min(stamps) < timedelta(minutes=5)
+
+
+def test_rows_with_the_same_timestamp_come_back_in_the_same_order_every_time(client):
+    """Ties are ordered by id, so a page never shuffles between two reads."""
+    with _Console() as console, _Tenant("Acme Test Audit Ties") as t:
+        ids = sorted(str(uuid4()) for _ in range(3))
+        with platform_session() as session:
+            for action_id in ids:
+                session.execute(
+                    text(
+                        "INSERT INTO admin_actions (id, platform_admin_user_id, action, target_tenant_id, "
+                        "target_type, payload, created_at) VALUES (:id, :by, 'tie_test', :t, 'tenant', "
+                        "'{}'::jsonb, '2026-01-01T00:00:00Z')"
+                    ),
+                    {"id": action_id, "by": str(console.user_id), "t": str(t.tenant_id)},
+                )
+
+        def ties():
+            entries = client.get(_url(t) + "?limit=200", headers=console.headers()).json()["entries"]
+            return [e["id"] for e in entries if e["event"] == "tie_test"]
+
+        first = ties()
+        assert first == sorted(ids, reverse=True)
+        assert ties() == first

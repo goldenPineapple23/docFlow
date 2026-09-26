@@ -152,11 +152,11 @@ class _TestBuyerTenant:
 @requires_matching_schema
 def test_first_sighting_creates_the_buyer_and_links_the_document():
     with _TestBuyerTenant("Acme Test Distributor") as tenant:
-        document_id = tenant.create_document(buyer_name="Bella's Coffee House")
+        document_id = tenant.create_document(buyer_name="Acme's Test Coffee House")
 
         with tenant_session(tenant.tenant_id) as session:
             result = identify_and_link_buyer(
-                session, tenant.tenant_id, document_id, buyer_name="Bella's Coffee House"
+                session, tenant.tenant_id, document_id, buyer_name="Acme's Test Coffee House"
             )
 
         assert result.created is True
@@ -166,8 +166,8 @@ def test_first_sighting_creates_the_buyer_and_links_the_document():
         assert len(rows) == 1
         # Stored exactly as the document had it -- normalization is a derived
         # key, never a rewrite of the extracted value.
-        assert rows[0]["name"] == "Bella's Coffee House"
-        assert rows[0]["normalized_name"] == "bellas coffee house"
+        assert rows[0]["name"] == "Acme's Test Coffee House"
+        assert rows[0]["normalized_name"] == "acmes test coffee house"
         assert UUID(str(rows[0]["created_from_document_id"])) == document_id
         assert tenant.header_buyer_id(document_id) == result.buyer_id
 
@@ -175,18 +175,18 @@ def test_first_sighting_creates_the_buyer_and_links_the_document():
 @requires_matching_schema
 def test_same_name_on_a_second_document_links_instead_of_creating_a_duplicate():
     with _TestBuyerTenant("Acme Test Distributor") as tenant:
-        first = tenant.create_document(buyer_name="Bella's Coffee House")
+        first = tenant.create_document(buyer_name="Acme's Test Coffee House")
         # Same company, written differently: punctuation, case and a trailing
         # period are noise, not a different buyer.
-        second = tenant.create_document(buyer_name="BELLA'S COFFEE HOUSE.")
+        second = tenant.create_document(buyer_name="ACME'S TEST COFFEE HOUSE.")
 
         with tenant_session(tenant.tenant_id) as session:
             first_result = identify_and_link_buyer(
-                session, tenant.tenant_id, first, buyer_name="Bella's Coffee House"
+                session, tenant.tenant_id, first, buyer_name="Acme's Test Coffee House"
             )
         with tenant_session(tenant.tenant_id) as session:
             second_result = identify_and_link_buyer(
-                session, tenant.tenant_id, second, buyer_name="BELLA'S COFFEE HOUSE."
+                session, tenant.tenant_id, second, buyer_name="ACME'S TEST COFFEE HOUSE."
             )
 
         assert second_result.created is False
@@ -204,16 +204,16 @@ def test_near_duplicate_name_is_flagged_for_merge_and_never_merged():
     buyer, and the only thing that happened is a flag with a score.
     """
     with _TestBuyerTenant("Acme Test Distributor") as tenant:
-        first = tenant.create_document(buyer_name="Bella's Coffee House")
-        second = tenant.create_document(buyer_name="Bellas Coffee House LLC")
+        first = tenant.create_document(buyer_name="Acme's Test Coffee House")
+        second = tenant.create_document(buyer_name="Acmes Test Coffee House LLC")
 
         with tenant_session(tenant.tenant_id) as session:
             first_result = identify_and_link_buyer(
-                session, tenant.tenant_id, first, buyer_name="Bella's Coffee House"
+                session, tenant.tenant_id, first, buyer_name="Acme's Test Coffee House"
             )
         with tenant_session(tenant.tenant_id) as session:
             second_result = identify_and_link_buyer(
-                session, tenant.tenant_id, second, buyer_name="Bellas Coffee House LLC"
+                session, tenant.tenant_id, second, buyer_name="Acmes Test Coffee House LLC"
             )
 
         assert second_result.created is True
@@ -244,11 +244,11 @@ def test_exact_email_match_links_even_when_the_name_differs():
     """
     with _TestBuyerTenant("Acme Test Distributor") as tenant:
         existing_id = tenant.seed_buyer(
-            "Bella's Coffee House", contact_email="orders@bellastest.example"
+            "Acme's Test Coffee House", contact_email="orders@acmestest.example"
         )
         document_id = tenant.create_document(
-            buyer_name="Bellas Coffee Roasting Co",
-            buyer_contact_email="ORDERS@BellasTest.example",
+            buyer_name="Acmes Test Coffee Roasting Co",
+            buyer_contact_email="ORDERS@AcmesTest.example",
         )
 
         with tenant_session(tenant.tenant_id) as session:
@@ -256,8 +256,8 @@ def test_exact_email_match_links_even_when_the_name_differs():
                 session,
                 tenant.tenant_id,
                 document_id,
-                buyer_name="Bellas Coffee Roasting Co",
-                buyer_contact_email="ORDERS@BellasTest.example",
+                buyer_name="Acmes Test Coffee Roasting Co",
+                buyer_contact_email="ORDERS@AcmesTest.example",
             )
 
         assert result.buyer_id == existing_id
@@ -313,16 +313,16 @@ def test_tenant_a_buyer_is_never_a_match_candidate_for_tenant_b():
     """
     with _TestBuyerTenant("Acme Test Distributor") as tenant_a:
         with _TestBuyerTenant("Northwind Test Supply") as tenant_b:
-            a_document = tenant_a.create_document(buyer_name="Bella's Coffee House")
-            b_document = tenant_b.create_document(buyer_name="Bella's Coffee House")
+            a_document = tenant_a.create_document(buyer_name="Acme's Test Coffee House")
+            b_document = tenant_b.create_document(buyer_name="Acme's Test Coffee House")
 
             with tenant_session(tenant_a.tenant_id) as session:
                 a_result = identify_and_link_buyer(
-                    session, tenant_a.tenant_id, a_document, buyer_name="Bella's Coffee House"
+                    session, tenant_a.tenant_id, a_document, buyer_name="Acme's Test Coffee House"
                 )
             with tenant_session(tenant_b.tenant_id) as session:
                 b_result = identify_and_link_buyer(
-                    session, tenant_b.tenant_id, b_document, buyer_name="Bella's Coffee House"
+                    session, tenant_b.tenant_id, b_document, buyer_name="Acme's Test Coffee House"
                 )
 
             assert b_result.created is True

@@ -167,15 +167,8 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
     try {
       await approveDocument(
         id,
-        openWarnings
-          .filter((w) => acknowledged.has(w.id))
-          .map((w) => ({
-            warning_id: w.id,
-            code: w.code,
-            // The text recorded is what the reviewer saw on screen.
-            text: describeWarning(w.code, w.detail),
-            note: null,
-          })),
+        openWarnings.filter((w) => acknowledged.has(w.id)).map((w) => ({ warning_id: w.id, note: null })),
+        detail.version,
       );
       await load();
       setBanner({
@@ -645,15 +638,3 @@ function showError(e: unknown, setBanner: (b: Banner) => void) {
   });
 }
 
-/**
- * The text recorded alongside an acknowledgement (Section 7.3 requires the
- * warning text, not just its id). Built from the code and the occurrence's
- * own numbers, which is what the reviewer was looking at when they ticked it.
- */
-function describeWarning(code: string, detail: Record<string, string>): string {
-  const specifics = Object.entries(detail ?? {})
-    .filter(([, v]) => v !== null && v !== "")
-    .map(([k, v]) => `${k}: ${v}`)
-    .join(", ");
-  return specifics ? `${code} (${specifics})` : code;
-}
