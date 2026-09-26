@@ -379,9 +379,12 @@ def test_pipeline_sweep_read_a_flag_left_on_a_pooled_connection_never_reaches_a_
             leaked = {UUID(str(r[0])) for r in connection.execute(text("SELECT id FROM tenants"))}
             assert {a.tenant_id, b.tenant_id} <= leaked  # the flag really is on
 
-            monkeypatch.setattr(db, "get_session_factory", lambda: sessionmaker(bind=connection))
-            with tenant_session(a.tenant_id) as session:
-                assert _tenant_ids(session) == {a.tenant_id}
+            # Only tenant_session() gets this connection; the tenants' own
+            # cleanup afterwards must use the normal pool.
+            with monkeypatch.context() as patch:
+                patch.setattr(db, "get_session_factory", lambda: sessionmaker(bind=connection))
+                with tenant_session(a.tenant_id) as session:
+                    assert _tenant_ids(session) == {a.tenant_id}
         finally:
             connection.rollback()  # also undoes the SET
             connection.close()
