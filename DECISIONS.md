@@ -1904,3 +1904,64 @@ Today the application enforces who sets them (D-158 follow-up 2; `packages/core/
 - The three rows stranded on 2026-09-26 ("Acme Test Sweep A", "Acme Test Sweep B", "Acme Test Distributor -- acting edit" with its 1 document) stay until the end-of-build cleanup. They are the whole gap between backup_0027 (46 documents / 8 tenants) and the count after 0027 (47 / 11).
 
 **Related:** Section 0 rule 3; D-148, D-159.
+
+## D-161 -- Long orders (M1): the ceiling measured, the extraction call streamed
+
+**Context:** the founder's Stage 1c decisions (D-158 follow-up 2): measure the real ceiling with a fake order of 300+ lines, stream the extraction call, measure again, and run the live golden and contamination tests before merge. Chunking stays deferred.
+
+**How it was measured:** `scripts/measure_long_order.py` builds a deterministic fake order of N lines (buyer "Acme Test Long Order Cafe", SKUs `TST-0001`…), sends it through the real `extract_document` exactly as the worker does, and checks every returned line against the printed order (SKU, description, quantity, unit, unit price, line total) plus the order total. One call per size, no retries, model `claude-sonnet-5`, from the development machine, 2026-09-26.
+
+**Before (non-streaming, `max_tokens` 16,000):**
+
+| Lines | Outcome | Output tokens | Seconds | Lines exact | Cost |
+|---|---|---|---|---|---|
+| 25 | read | 3,290 | 24.3 | 25 / 25 | $0.0398 |
+| 50 | read | 4,781 | 32.0 | 50 / 50 | $0.0567 |
+| 65 | read | 7,496 | 52.2 | 65 / 65 | $0.0851 |
+| 80 | **DOC-008**, connection dropped | – | 60.0 | – | unknown |
+| 110 | **DOC-008**, connection dropped | – | 60.1 | – | unknown |
+| 150 | **DOC-008** (3 attempts) | – | 181.6 | – | unknown |
+| 300 | **DOC-008** (3 attempts) | – | 181.7 | – | unknown |
+
+- **The real ceiling was time, not tokens.** A non-streaming call sends nothing until the whole answer is ready. Something on the network path drops a connection that is idle for 60 seconds (the SDK's own read timeout is 600 s). Every order that took the model more than about a minute to write failed, between 65 and 80 lines, far below the 16,000-token cap. D-158's "about 250 lines", and its follow-up's "150–250", were both wrong.
+- **It failed as DOC-008, not DOC-020.** The SDK retried each drop twice, so the worker waited three minutes and made three attempts. The server may well have finished and billed each one. Nothing was recorded, so the cost breaker never saw it. Staging's largest real order has 4 lines, so no customer order has hit this.
+- Whether the 60-second drop is this machine's network or something on the route to the API is not known. Production will run somewhere else (Stage 3). Streaming removes the question either way.
+
+**Decision -- stream the call (`docflow_core.extraction.extract_document`):**
+- `client.messages.stream(...)` with the same model, system prompt, schema (`output_config`), content and all-or-nothing rule. The answer is used only once the stream is complete (`get_final_message()`), so a partial answer is never kept.
+- `EXTRACTION_MAX_TOKENS = 128000`, the pinned model's output maximum.
+- **A deadline, because of H3.** The stuck-document sweep takes over a claim older than 30 minutes (`STUCK_PROCESSING_TIMEOUT_MIN`). If an extraction outlived that, a second worker would pay for the same order again, and both would try to save it.
+  - So the stream is stopped at `EXTRACTION_DEADLINE_SECONDS` (20 minutes). That is DOC-020: the order was too long to read in time. Nothing is kept.
+  - A stream that sends nothing for `EXTRACTION_STREAM_IDLE_SECONDS` (120) fails as DOC-008.
+  - A test holds deadline + silence timeout ≤ 80% of the stuck timeout.
+  - On a stop at the deadline, the input tokens are recorded. The output tokens written so far are reported only at the end of a stream, so the cost logged for that one case is an undercount. It is logged as `extraction_deadline`.
+- A connection dropped mid-answer surfaces from the SDK's transport (`httpx2.TransportError`), not as an `APIError`. It is now caught and failed as DOC-008 instead of escaping the call. `httpx2` is declared in `packages/core` for this.
+- The routing pass (Haiku, 256 tokens, D-141) stays a plain call.
+
+**After (streaming, `max_tokens` 128,000):**
+
+| Lines | Outcome | Output tokens | Seconds | Tokens/s | Lines exact | Order total | Cost |
+|---|---|---|---|---|---|---|---|
+| 80 | read | 11,245 | 72.1 | 156 | 80 / 80 | exact | $0.1238 |
+| 300 | read | 38,502 | 248.9 | 155 | 300 / 300 | exact | $0.4145 |
+| 600 | read | 75,664 | 482.2 | 157 | 600 / 600 | exact | $0.8108 |
+
+- About 126–128 output tokens per line, including adaptive thinking, steady from 80 to 600 lines. 128,000 tokens is therefore **about 1,000 lines**, taking about 14 minutes at the measured rate, inside the 20-minute deadline.
+- Cost grows linearly: about $0.14 per 100 lines. The per-tenant $50/day breaker (D-142) is unchanged.
+- **Live runs after the change:** golden, golden with examples, contamination: 3 passed. The system prompt, schema and model are unchanged (same prompt hash), so the recorded answers from the rename step still apply.
+
+**Tests (written first; 6 failed before the change):** `packages/core/tests/test_extraction_streaming.py`.
+- The call streams, at the large ceiling, with the silence timeout. Its fake client has no working `create`, so a return to a non-streaming call fails the test.
+- A truncated answer is DOC-020, keeps nothing, and records its tokens.
+- A stream past the deadline is stopped (not read to the end), closed, and fails DOC-020.
+- The deadline fits inside the stuck timeout.
+- A connection dropped mid-answer is DOC-008, not an exception.
+
+The worker, golden and conversion fakes now serve `stream()`. Worker suite against staging: 105 passed.
+
+**Still open:**
+- DOC-020's wording (next, this stage).
+- The onboarding step to count the lines on the prospect's largest sample order (D-158 follow-up 2). The ceiling is now about 1,000 lines, so the step matters less, but it is still the only way to know before go-live.
+- Chunking stays deferred. It is needed only past about 1,000 lines, or for a document too large for the model's input.
+
+**Related:** Sections 7.1, 7.9; review M1, H3; D-142, D-158, D-159.

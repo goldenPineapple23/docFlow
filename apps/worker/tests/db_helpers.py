@@ -88,13 +88,42 @@ class FakeAnthropic:
     def messages(self) -> "FakeAnthropic":
         return self
 
-    def create(self, **kwargs: Any) -> SimpleNamespace:
-        self.calls.append(kwargs)
+    def _message(self) -> SimpleNamespace:
         return SimpleNamespace(
             content=[SimpleNamespace(type="text", text=json.dumps(self.payload))],
             usage=SimpleNamespace(input_tokens=1000, output_tokens=200),
             stop_reason=self.stop_reason,
         )
+
+    def stream(self, **kwargs: Any) -> "_FakeStream":
+        """The extraction call (streamed since M1, D-161)."""
+        self.calls.append(kwargs)
+        return _FakeStream(self._message())
+
+    def create(self, **kwargs: Any) -> SimpleNamespace:
+        """The routing pass only; extraction never calls `create`."""
+        self.calls.append(kwargs)
+        return self._message()
+
+
+class _FakeStream:
+    """What `client.messages.stream(...)` returns (M1, D-161): no events, then
+    the finished message."""
+
+    def __init__(self, message):
+        self._message = message
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return None
+
+    def __iter__(self):
+        return iter(())
+
+    def get_final_message(self):
+        return self._message
 
 
 class WorkerTestTenant:

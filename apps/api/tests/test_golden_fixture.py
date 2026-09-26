@@ -56,14 +56,36 @@ class _FakeMessage:
     usage: _FakeUsage
 
 
+class _FakeStream:
+    """What `client.messages.stream(...)` returns (M1, D-161): no events, then
+    the finished message."""
+
+    def __init__(self, message):
+        self._message = message
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return None
+
+    def __iter__(self):
+        return iter(())
+
+    def get_final_message(self):
+        return self._message
+
+
 class _FakeMessagesResource:
     def __init__(self, response_payload: dict[str, Any]):
         self._response_payload = response_payload
 
-    def create(self, **kwargs) -> _FakeMessage:
-        return _FakeMessage(
-            content=[_FakeTextBlock(type="text", text=json.dumps(self._response_payload))],
-            usage=_FakeUsage(input_tokens=2617, output_tokens=813),
+    def stream(self, **kwargs) -> _FakeStream:
+        return _FakeStream(
+            _FakeMessage(
+                content=[_FakeTextBlock(type="text", text=json.dumps(self._response_payload))],
+                usage=_FakeUsage(input_tokens=2617, output_tokens=813),
+            )
         )
 
 

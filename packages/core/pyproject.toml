@@ -14,7 +14,10 @@ dependencies = [
     "psycopg[binary]>=3.1",
     "httpx>=0.27",
     "pyjwt[crypto]>=2.8",
-    "anthropic>=0.69",
+    "anthropic>=1.6",
+    # docflow_core.extraction catches a stream dropped mid-answer, which
+    # surfaces from the SDK's own transport (httpx2), not as an APIError (D-161).
+    "httpx2>=2.13",
     # docflow_core.email_intake enqueues parse_and_extract directly, so the
     # producer side of Celery is a real dependency of this package, not just
     # of the api/worker apps that happen to install it too.

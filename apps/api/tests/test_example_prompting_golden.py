@@ -175,14 +175,34 @@ class _Count:
     input_tokens: int
 
 
+class _FakeStream:
+    """What `client.messages.stream(...)` returns (M1, D-161): no events, then
+    the finished message."""
+
+    def __init__(self, message):
+        self._message = message
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return None
+
+    def __iter__(self):
+        return iter(())
+
+    def get_final_message(self):
+        return self._message
+
+
 class _RecordingMessages:
     def __init__(self, payload: dict[str, Any]):
         self._payload = payload
         self.requests: list[dict[str, Any]] = []
 
-    def create(self, **kwargs) -> _Message:
+    def stream(self, **kwargs) -> _FakeStream:
         self.requests.append(kwargs)
-        return _Message([_Block("text", json.dumps(self._payload))], _Usage(6100, 820))
+        return _FakeStream(_Message([_Block("text", json.dumps(self._payload))], _Usage(6100, 820)))
 
     def count_tokens(self, **kwargs) -> _Count:
         return _Count(3400)

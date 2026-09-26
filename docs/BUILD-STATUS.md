@@ -211,13 +211,11 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 - IIF export not yet validated against real QuickBooks Desktop (Phase 4).
 - Stuck-in-processing alert (7.9): built in Phase 5.5 Stage 1b, watching
   `pending` too (D-095, D-158).
-- **Very long orders (D-158 follow-ups):** an order past the model's single-read
-  ceiling (estimated 150–250 lines, not yet measured) fails as DOC-020, which
-  does raise a founder alert. **Decided for Stage 1c:** measure the ceiling with
-  a fake 300+ line order, before and after; stream the extraction call (live
-  golden + contamination before merge); reword DOC-020's advice to "enter by
-  hand, DocFlow has been alerted"; add an onboarding step to count the lines on
-  the prospect's largest sample order. Chunking stays deferred.
+- **Very long orders (D-161):** measured and streamed in Stage 1c. Before, a non-streaming
+  call failed as DOC-008 past 65-80 lines (a 60-second idle connection drop, not the token
+  cap). Now streamed at 128,000 tokens with a 20-minute deadline inside the stuck timeout:
+  300 and 600 lines read exactly (249 s / $0.41, 482 s / $0.81); ceiling about 1,000 lines.
+  Still open: DOC-020 rewording (this stage), the onboarding line-count step. Chunking deferred.
 - ~~Golden fixture uses a possibly real business name~~ DONE in Stage 1c (2026-09-26):
   renamed to "Acme's Test Coffee House" / `acmetestcoffee.example` in a copy under
   `apps/api/tests/fixtures/golden/`; answers re-recorded, live golden + contamination pass;
