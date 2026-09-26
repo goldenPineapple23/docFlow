@@ -141,7 +141,17 @@ def _approve_all_test_documents(tenant_id, approver) -> None:
     """Stands in for Step 8's reviews, which run through the normal review
     routes (proven in test_acting_as.py and test_review_api.py). Fills every
     field the approval constraint demands, so it is a well-formed approval."""
+    # Along the legal path (migration 0027): processing, into review with a
+    # (labelled stand-in) model answer, then approved.
     with platform_session() as session:
+        for step in (
+            "UPDATE documents SET status = 'processing' "
+            "WHERE tenant_id = :t AND is_test_batch AND status = 'pending'",
+            "UPDATE documents SET status = 'needs_review', raw_json = "
+            """'{"header": {}, "line_items": [], "test_fixture": true}'::jsonb """
+            "WHERE tenant_id = :t AND is_test_batch AND status = 'processing'",
+        ):
+            session.execute(text(step), {"t": tenant_id})
         session.execute(
             text(
                 "UPDATE documents SET status = 'approved', approved_at = now(), approved_by = :u, "

@@ -205,13 +205,14 @@ class _Tenant:
                     INSERT INTO documents
                         (id, tenant_id, original_filename, storage_path, source, status,
                          content_sha256, sender_email, is_test_batch, quarantine_reason,
-                         quarantined_at, duplicate_of_document_id, deleted_at, created_at)
+                         quarantined_at, duplicate_of_document_id, deleted_at, raw_json, created_at)
                     SELECT gen_random_uuid(), :t, 'seed-' || g || '.txt', 'tenants/seed/seed.txt',
                            :source, :status, md5(random()::text || g::text), :sender, :test,
                            CAST(:reason AS text),
                            CASE WHEN :status = 'quarantined' THEN {created_at} END,
                            CAST(:dup AS uuid),
                            CASE WHEN :deleted THEN now() END,
+                           '{{"header": {{}}, "line_items": [], "test_fixture": true}}'::jsonb,
                            {created_at} + (g || ' milliseconds')::interval
                     FROM generate_series(1, :n) g
                     RETURNING id

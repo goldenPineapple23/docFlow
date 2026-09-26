@@ -52,6 +52,12 @@ from tests.conftest import (
     review_schema_available,
 )
 
+# What a fixture document carries in raw_json. Since migration 0027 a
+# document can only be reviewable with the model's answer on it (Section 7.1),
+# so a fixture inserted straight into review carries this clearly labelled
+# stand-in -- never a made-up answer (D-158).
+FIXTURE_MODEL_ANSWER = '{"header": {}, "line_items": [], "test_fixture": true}'
+
 
 class _TestValidationTenant:
     """A throwaway tenant with documents, headers and lines."""
@@ -133,6 +139,8 @@ class _TestValidationTenant:
         currency_inferred: bool = False,
         created_at_offset_days: int = 0,
         content_sha256: str | None = None,
+        status: str = "needs_review",
+        raw_json: str | None = FIXTURE_MODEL_ANSWER,
     ) -> UUID:
         document_id = uuid4()
         header_values = {
@@ -155,15 +163,18 @@ class _TestValidationTenant:
                     """
                     INSERT INTO documents
                         (id, tenant_id, original_filename, storage_path, source, status,
-                         content_sha256, injection_suspected, created_at)
+                         content_sha256, injection_suspected, raw_json, created_at)
                     VALUES
-                        (:id, :tenant_id, 'po.txt', 'tenants/seed/po.txt', 'upload', 'needs_review',
-                         :sha, :injection_suspected, now() + make_interval(days => :offset))
+                        (:id, :tenant_id, 'po.txt', 'tenants/seed/po.txt', 'upload', :status,
+                         :sha, :injection_suspected, CAST(:raw_json AS jsonb),
+                         now() + make_interval(days => :offset))
                     """
                 ),
                 {
                     "id": str(document_id),
                     "tenant_id": str(self.tenant_id),
+                    "status": status,
+                    "raw_json": raw_json,
                     "sha": content_sha256 or uuid4().hex,
                     "injection_suspected": injection_suspected,
                     "offset": created_at_offset_days,

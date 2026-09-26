@@ -39,6 +39,7 @@ celery_app = Celery(
         "app.tasks.daily_rollup",
         "app.tasks.scheduled_jobs",
         "app.tasks.lifecycle_sweep",
+        "app.tasks.stuck_sweep",
     ],
 )
 
@@ -54,6 +55,15 @@ DAILY_ROLLUP_MINUTE_UTC = 15
 # ready-to-delete alert. Same cadence as the scheduled-jobs sweep -- neither
 # needs to be tighter than a few minutes for a solo-founder's tenant count.
 LIFECYCLE_SWEEP_SECONDS = 300
+# The stuck-document sweep (Section 7.9, D-158): finds documents a dead worker
+# left in `processing`, or whose job was lost while `pending`, and re-queues
+# or fails them. Well inside STUCK_PROCESSING_TIMEOUT_MIN.
+STUCK_SWEEP_SECONDS = 300
+# How long Redis waits before handing an unacknowledged job to another worker
+# (tasks acknowledge late, so a worker that dies mid-job has its job
+# redelivered). Longer than any task should run; a redelivery that arrives
+# anyway is a no-op, because the task claims its document first (H3, D-158).
+BROKER_VISIBILITY_TIMEOUT_SECONDS = 2 * 60 * 60
 
 celery_app.conf.update(
     task_default_queue="interactive",
@@ -63,6 +73,7 @@ celery_app.conf.update(
     },
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    broker_transport_options={"visibility_timeout": BROKER_VISIBILITY_TIMEOUT_SECONDS},
     beat_schedule={
         "run-scheduled-jobs": {
             "task": "docflow.run_scheduled_jobs",
@@ -77,6 +88,11 @@ celery_app.conf.update(
         "run-lifecycle-sweep": {
             "task": "docflow.run_lifecycle_sweep",
             "schedule": LIFECYCLE_SWEEP_SECONDS,
+            "options": {"queue": "bulk"},
+        },
+        "sweep-stuck-documents": {
+            "task": "docflow.sweep_stuck_documents",
+            "schedule": STUCK_SWEEP_SECONDS,
             "options": {"queue": "bulk"},
         },
     },

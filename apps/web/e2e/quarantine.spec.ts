@@ -356,14 +356,14 @@ async function stubQueue(page: Page, tenantName: string | null) {
 }
 
 test("the portal header carries the customer's own company name", async ({ page }) => {
-  await stubQueue(page, "Bella's Test Coffee Haus");
+  await stubQueue(page, "Acme Test Coffee Supply");
   await page.goto("/review");
-  await expect(page.getByTestId("tenant-name")).toHaveText("Bella's Test Coffee Haus");
+  await expect(page.getByTestId("tenant-name")).toHaveText("Acme Test Coffee Supply");
   // "Powered by" with DocFlow's logo underneath the customer's name.
   const poweredBy = page.getByTestId("powered-by");
   await expect(poweredBy).toContainText("Powered by");
   await expect(poweredBy.getByRole("img", { name: "DocFlow" })).toBeVisible();
-  await expect(page).toHaveTitle("Bella's Test Coffee Haus — DocFlow");
+  await expect(page).toHaveTitle("Acme Test Coffee Supply — DocFlow");
 });
 
 test("a company name is text, never markup", async ({ page }) => {

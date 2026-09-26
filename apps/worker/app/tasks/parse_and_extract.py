@@ -29,6 +29,7 @@ from uuid import UUID, uuid4
 
 import anthropic
 from docflow_core import (
+    document_status,
     example_prompting,
     field_schema,
     file_types,
@@ -458,16 +459,36 @@ def _money(value: Decimal | None) -> str | None:
 
 
 def _mark_failed(tenant_id: UUID, document_id: UUID, *, raw_response: dict | None = None) -> None:
+    """A failure before the model was asked (an unsafe or unconvertible file).
+    Its code lives in raw_json, as since D-145, and in failure_code."""
+    code = (raw_response or {}).get("error_code")
     with tenant_session(tenant_id) as session:
-        session.execute(
-            text(
-                "UPDATE documents SET status='failed', raw_json=:raw_json, processed_at=now() WHERE id=:id"
-            ),
-            {"id": str(document_id), "raw_json": raw_response},
+        document_status.transition(
+            session,
+            document_id,
+            from_statuses=["processing"],
+            to="failed",
+            values={"raw_json": raw_response, "failure_code": code, "processed_at": document_status.NOW},
         )
     # A code whose catalog message says "DocFlow has been alerted" (a failed
     # conversion, DOC-017) raises that alert (D-145).
-    _alert_failure(tenant_id, document_id, (raw_response or {}).get("error_code"))
+    _alert_failure(tenant_id, document_id, code)
+
+
+def _fail_after_extraction(
+    tenant_id: UUID, document_id: UUID, code: str, *, raw_response: dict | None = None
+) -> None:
+    """A failure after the model answered (saving it, or checking it: DOC-021).
+    The answer already on the document stays; `raw_response` is written only
+    when saving it was what failed. Then the promised alert (D-145)."""
+    values: dict = {"failure_code": code, "processed_at": document_status.NOW}
+    if raw_response is not None:
+        values["raw_json"] = raw_response
+    with tenant_session(tenant_id) as session:
+        document_status.transition(
+            session, document_id, from_statuses=["processing"], to="failed", values=values
+        )
+    _alert_failure(tenant_id, document_id, code)
 
 
 def _alert_failure(tenant_id: UUID, document_id: UUID, error_code: str | None) -> None:
@@ -529,33 +550,62 @@ def _overall_confidence(header_confidence: dict, schema: FieldSchema) -> Decimal
 
 @celery_app.task(name="docflow.parse_and_extract")
 def parse_and_extract(tenant_id: str, document_id: str) -> None:
+    """
+    Read one document and put it in front of a reviewer -- once, and only
+    when it has been fully checked (review findings H1, H3; D-158).
+
+    * **Claim first.** The document moves to `processing` by compare-and-set
+      (`document_status.claim_for_processing`). A redelivered or duplicated
+      job, or one for a document that has since been approved, finds nothing
+      to claim and does nothing -- the queue acknowledges late, so a worker
+      restart redelivers, and an approved order must never be knocked back.
+    * **The model's answer is saved while still `processing`**, in one
+      transaction with the header, the lines and the run record. If the
+      worker dies after that, the next claim resumes from the saved answer
+      and never pays for a second extraction.
+    * **`needs_review` only with the checks.** Buyer identification, matching
+      and duplicate detection each run in their own transaction (a failure
+      there must never cost the paid-for extraction, D-058) and a step that
+      fails is recorded, not just logged. Validation then runs, and its
+      warnings -- including VAL-016 for any step that didn't finish -- are
+      committed in the SAME transaction as the move to `needs_review`. If
+      validation itself fails, the document is `failed` with DOC-021 and the
+      founder is alerted: never in review with zero warnings.
+    """
     tid = UUID(tenant_id)
     did = UUID(document_id)
 
     with tenant_session(tid) as session:
         row = session.execute(
             text(
-                "SELECT storage_path, original_filename, status, sender_email "
-                "FROM documents WHERE id = :id"
+                "SELECT storage_path, original_filename, status, sender_email, "
+                "current_extraction_run_id FROM documents WHERE id = :id"
             ),
             {"id": str(did)},
         ).mappings().first()
         if row is None:
             logger.error("parse_and_extract_missing_document document_id=%s", did)
             return
-        if row.get("status") == "staged":
-            # A test-batch file waits for the founder's "Run extraction"
-            # (Section 7.15.2 Step 7, D-112), which moves it to 'pending'
-            # first. Anything that enqueues it earlier is a bug; it must not
-            # reach the model.
-            logger.error("parse_and_extract_staged_document document_id=%s", did)
+        # A test-batch file (`staged`) waits for the founder's "Run
+        # extraction" (D-112), a held one (`quarantined`) for its release,
+        # and anything already processed is done: none of them is claimable,
+        # so none of them reaches the model from here.
+        if not document_status.claim_for_processing(session, did):
+            logger.info(
+                "parse_and_extract_not_claimed document_id=%s status=%s", did, row["status"]
+            )
             return
-        session.execute(
-            text("UPDATE documents SET status = 'processing' WHERE id = :id"), {"id": str(did)}
-        )
         storage_path = row["storage_path"]
         original_filename = row["original_filename"]
         sender_email = row.get("sender_email")
+        already_extracted = row.get("current_extraction_run_id") is not None
+
+    if already_extracted:
+        # An earlier attempt saved the model's answer and then stopped (a
+        # restart, a crash, a timeout). Resume from it: no second model call.
+        logger.info("parse_and_extract_resuming document_id=%s", did)
+        _finish(tid, did)
+        return
 
     content = read_file(storage_path)
 
@@ -609,52 +659,60 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
     if not result.ok:
         with tenant_session(tid) as session:
             _record_runs(session, tid, did, plan, result)
-            session.execute(
-                text(
-                    """
-                    UPDATE documents
-                    SET status = 'failed', model_id = :model_id, prompt_hash = :prompt_hash,
-                        schema_version = :schema_version, raw_json = :raw_json,
-                        est_cost_usd = :est_cost_usd, processed_at = now()
-                    WHERE id = :id
-                    """
-                ),
-                {
-                    "id": str(did),
+            document_status.transition(
+                session,
+                did,
+                from_statuses=["processing"],
+                to="failed",
+                values={
                     "model_id": result.model_id,
                     "prompt_hash": result.prompt_hash,
                     "schema_version": result.schema_version,
                     "raw_json": result.raw_response,
                     "est_cost_usd": _money(_total_cost(plan, result)),
+                    "failure_code": result.error_code or "DOC-008",
+                    "processed_at": document_status.NOW,
                 },
             )
-        # DOC-008 / DOC-009 tell the reader DocFlow has been alerted (D-145).
+        # DOC-008 / DOC-009 / DOC-020 tell the reader DocFlow has been alerted (D-145).
         _alert_failure(tid, did, result.error_code or "DOC-008")
         return
 
-    header = result.header
-    # The tenant's field schema decides which fields count towards the
-    # document's confidence and which are checked (D-120). Read once here and
-    # recorded on the document, so a later change never makes this
-    # document's numbers unexplainable (Section 7.13: versioned).
-    with tenant_session(tid) as session:
-        schema = field_schema.current(session, tid)
-    overall_confidence = _overall_confidence(result.header_confidence, schema)
+    try:
+        _save_extraction(tid, did, plan, result)
+    except Exception as exc:  # noqa: BLE001 -- the document must not be stranded (M3)
+        # Nothing of the answer was written (one transaction). Keep the paid
+        # answer on the failed document, with a code, and tell the founder.
+        logger.error("extraction_save_failed document_id=%s error_type=%s", did, type(exc).__name__)
+        _fail_after_extraction(tid, did, "DOC-021", raw_response=result.raw_response)
+        return
 
+    _finish(tid, did)
+
+
+def _save_extraction(tid: UUID, did: UUID, plan: ExamplePlan, result: ExtractionResult) -> None:
+    """The model's answer, the header, the lines and the run record, in one
+    transaction. The status stays `processing`: nothing is reviewable yet."""
+    header = result.header
     with tenant_session(tid) as session:
+        # The tenant's field schema decides which fields count towards the
+        # document's confidence and which are checked (D-120). Recorded on the
+        # document, so a later change never makes its numbers unexplainable.
+        schema = field_schema.current(session, tid)
+        overall_confidence = _overall_confidence(result.header_confidence, schema)
         run_id = _record_runs(session, tid, did, plan, result)
         session.execute(
             text(
                 """
                 UPDATE documents
-                SET status = 'needs_review', model_id = :model_id, prompt_hash = :prompt_hash,
+                SET model_id = :model_id, prompt_hash = :prompt_hash,
                     schema_version = :schema_version, input_tokens = :input_tokens,
                     output_tokens = :output_tokens, est_cost_usd = :est_cost_usd,
                     injection_suspected = :injection_suspected,
                     overall_confidence = :overall_confidence, raw_json = :raw_json,
                     field_schema_version = :field_schema_version,
-                    current_extraction_run_id = :run_id, processed_at = now()
-                WHERE id = :id
+                    current_extraction_run_id = :run_id
+                WHERE id = :id AND status = 'processing'
                 """
             ),
             {
@@ -735,13 +793,30 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                 },
             )
 
-    # Buyer identification runs in its own transaction, after the extraction
-    # above has committed (CLAUDE.md Section 7.6). Deliberately not part of
-    # the same transaction: a failure here must never roll back a successful
-    # extraction and cost the document its header and lines. The document is
-    # already `needs_review` and simply has no buyer link, which is the same
-    # state a document with no extracted buyer name legitimately has; a
-    # re-run links it.
+
+def _finish(tid: UUID, did: UUID) -> None:
+    """Post-processing, then validation and the move to `needs_review` in one
+    transaction. Runs after a fresh extraction and when resuming one."""
+    with tenant_session(tid) as session:
+        header = session.execute(
+            text(
+                "SELECT buyer_name, buyer_contact_email FROM document_headers WHERE document_id = :id"
+            ),
+            {"id": str(did)},
+        ).mappings().first()
+        field_schema_version = session.execute(
+            text("SELECT field_schema_version FROM documents WHERE id = :id"), {"id": str(did)}
+        ).scalar_one_or_none()
+        # The same schema version the confidence was computed with, so one
+        # document is never half-checked under two versions (D-120).
+        schema = field_schema.at_version(session, tid, field_schema_version)
+
+    issues: list[str] = []
+
+    # Buyer identification runs first, because Section 7.6's learned mappings
+    # are scoped to a buyer. Own transaction (D-058): a failure here must never
+    # roll back the paid-for extraction -- but it is recorded and shown now
+    # (VAL-016), not only logged.
     buyer_id: UUID | None = None
     try:
         with tenant_session(tid) as session:
@@ -749,90 +824,102 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                 session,
                 tid,
                 did,
-                buyer_name=header["buyer_name"],
-                buyer_contact_email=header["buyer_contact_email"],
+                buyer_name=header.get("buyer_name") if header else None,
+                buyer_contact_email=header.get("buyer_contact_email") if header else None,
             ).buyer_id
-    except Exception as exc:  # noqa: BLE001 -- see the comment above
-        # No exception message is logged: a database error's text can contain
-        # the bound parameters, which here are customer data (Section 7.10).
-        logger.error(
-            "buyer_identification_failed document_id=%s error_type=%s", did, type(exc).__name__
-        )
+    except Exception as exc:  # noqa: BLE001 -- recorded as a pipeline issue
+        # No exception message: a database error's text can carry bound
+        # parameters, which here are customer data (Section 7.10).
+        logger.error("buyer_identification_failed document_id=%s error_type=%s", did, type(exc).__name__)
+        issues.append("buyer_identification")
 
-    # Catalog matching runs after buyer identification, because Section 7.6's
-    # learned mappings are scoped to a buyer -- and in its own transaction for
-    # the same reason buyer identification is (D-058): a matching failure must
-    # never roll back the paid-for model call. A document whose matching
-    # failed is `needs_review` with unmatched lines, which is exactly the
-    # state a document with no catalog hits legitimately has; a re-run matches
-    # it, and re-running is idempotent (it never overwrites a human's answer).
-    #
-    # `buyer_id` being None is not a failure path: matching simply runs with
-    # the tenant-wide rules only, and never with another buyer's.
+    # Matching. `buyer_id` None is not a failure: matching then uses the
+    # tenant-wide rules only, never another buyer's.
     try:
         with tenant_session(tid) as session:
             summary = match_document_lines(session, tid, did, buyer_id=buyer_id)
-        # Counts and IDs only -- never a SKU, a description or a score, which
-        # are customer/document data (Section 7.10).
         logger.info(
             "matching_complete document_id=%s considered=%d matched=%d",
             did,
             summary.lines_considered,
             summary.lines_matched,
         )
-    except Exception as exc:  # noqa: BLE001 -- see the comment above
+    except Exception as exc:  # noqa: BLE001 -- recorded as a pipeline issue
         logger.error("matching_failed document_id=%s error_type=%s", did, type(exc).__name__)
+        issues.append("matching")
 
-    # Duplicate / change-order detection (CLAUDE.md Section 7.8). It runs here
-    # rather than only at ingest because the PO number the change-order case
-    # needs does not exist until extraction has run. The exact-content half
-    # already ran at ingest, where the hash was final; re-running it is
-    # idempotent and reaches the same answer, and running both halves in one
-    # place is what keeps a document uploaded by any path consistently
-    # flagged. Own transaction, same reason as above (D-058): nothing here is
-    # worth losing a paid-for model call over, and a document with no
-    # relationship flags is the state the overwhelming majority of documents
-    # are legitimately in.
+    # Duplicate / change-order detection (Section 7.8). Here as well as at
+    # ingest because the PO number the change-order case needs only exists
+    # after extraction; re-running the content-hash half is idempotent.
     try:
         with tenant_session(tid) as session:
             relationships = detect_document_relationships(session, tid, did)
-        # Booleans and IDs only -- never a PO number or a hash (Section 7.10).
         logger.info(
             "duplicate_detection_complete document_id=%s duplicate=%s change_order=%s",
             did,
             relationships.is_possible_duplicate,
             relationships.is_possible_change_order,
         )
-    except Exception as exc:  # noqa: BLE001 -- see the comment above
+    except Exception as exc:  # noqa: BLE001 -- recorded as a pipeline issue
         logger.error("duplicate_detection_failed document_id=%s error_type=%s", did, type(exc).__name__)
+        issues.append("duplicate_detection")
 
-    # Validation runs last (CLAUDE.md Section 7.7), because it reports on
-    # everything the steps before it concluded: the extracted values, the
-    # matching slice's `uom_mismatch`, and the duplicate/change-order flags
-    # just written. It changes no value -- it only writes `document_warnings`.
+    # Validation and the move into review: one transaction. Validation reports
+    # on everything above -- values, matches, duplicate flags and any step
+    # that didn't finish -- and changes no value (Section 7.7).
     try:
         with tenant_session(tid) as session:
-            # The same schema the confidence above was computed with, so one
-            # document is never half-checked under two versions.
-            validation = validate_document(session, tid, did, schema.rules())
-        # Counts only -- never a field name's value, a total or a date
-        # (Section 7.10).
+            session.execute(
+                text("UPDATE documents SET pipeline_issues = :issues WHERE id = :id"),
+                {"id": str(did), "issues": issues},
+            )
+            checked = validate_document(session, tid, did, schema.rules())
+            moved = document_status.transition(
+                session,
+                did,
+                from_statuses=["processing"],
+                to="needs_review",
+                values={"processed_at": document_status.NOW, "failure_code": document_status.NULL},
+            )
+            if not moved:
+                # Someone else moved it while we worked (the stuck sweep gave
+                # up on it, say). Their decision stands; undo ours.
+                raise _AlreadyMovedOn()
+            if issues:
+                founder_alerts.raise_alert(
+                    session,
+                    alert_type="pipeline_step_failed",
+                    severity="high",
+                    tenant_id=tid,
+                    payload={"document_id": str(did), "steps": issues},
+                    dedupe_key=f"pipeline_step_failed:{did}",
+                )
+        # Counts only -- never a value (Section 7.10).
         logger.info(
-            "validation_complete document_id=%s warnings=%d created=%d resolved=%d",
+            "validation_complete document_id=%s warnings=%d created=%d resolved=%d issues=%d",
             did,
-            validation.evaluated,
-            validation.created,
-            validation.resolved,
+            checked.evaluated,
+            checked.created,
+            checked.resolved,
+            len(issues),
         )
-    except Exception as exc:  # noqa: BLE001 -- see the comment above
+    except _AlreadyMovedOn:
+        logger.info("parse_and_extract_moved_on document_id=%s", did)
+        return
+    except Exception as exc:  # noqa: BLE001 -- never silent: failed + DOC-021 + alert
         logger.error("validation_failed document_id=%s error_type=%s", did, type(exc).__name__)
+        _fail_after_extraction(tid, did, "DOC-021")
+        return
 
-    # The "needs review" digest (slice 5.8c, D-131): add this order to the
-    # tenant's pending digest email. Last, and in its own transaction, for the
-    # same reason as every step above: a document that is ready for review
-    # must never lose its extraction over a notification.
+    # The "needs review" digest (slice 5.8c, D-131). Last, in its own
+    # transaction: a document in review must never lose its checks over a
+    # notification.
     try:
         with tenant_session(tid) as session:
             review_digest.note_needs_review(session, tid, did)
-    except Exception as exc:  # noqa: BLE001 -- see the comment above
+    except Exception as exc:  # noqa: BLE001 -- a notification, not the document
         logger.error("review_digest_failed document_id=%s error_type=%s", did, type(exc).__name__)
+
+
+class _AlreadyMovedOn(Exception):
+    """The document left `processing` under us; roll back and leave it be."""

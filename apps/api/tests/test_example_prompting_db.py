@@ -127,11 +127,12 @@ def _orders(
                     INSERT INTO documents
                         (id, tenant_id, original_filename, storage_path, source, status, content_sha256,
                          approved_json, approved_snapshot_hash, approved_at, approved_by,
-                         extracted_text_path, deleted_at, created_at)
+                         extracted_text_path, deleted_at, raw_json, created_at)
                     VALUES (:id, :t, 'po.txt', 'tenants/seed/po.txt', 'upload', :status, :sha,
                             CAST(:snap AS jsonb), :snap_hash,
                             CASE WHEN :approved THEN now() - make_interval(mins => :ago) END,
                             CAST(:approver AS uuid), :path, CASE WHEN :deleted THEN now() END,
+                            '{"header": {}, "line_items": [], "test_fixture": true}'::jsonb,
                             now() - make_interval(mins => :ago))
                     """
                 ),

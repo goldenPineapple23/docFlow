@@ -63,6 +63,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from docflow_core import document_status
 from docflow_core.errors import get_error
 from docflow_core.numbers import is_document_number, plain
 
@@ -827,20 +828,22 @@ def approve_document(
         },
     )
 
-    session.execute(
-        text(
-            "UPDATE documents "
-            "SET status = 'approved', approved_at = now(), approved_by = :user_id, "
-            "    approved_json = :snapshot, approved_snapshot_hash = :snapshot_sha256 "
-            "WHERE id = :document_id"
-        ),
-        {
-            "document_id": str(document_id),
-            "user_id": str(user_id),
-            "snapshot": snapshot,
-            "snapshot_sha256": digest,
+    # Compare-and-set (D-158): if the document left needs_review since it was
+    # read -- a second approval racing this one -- nothing here is kept.
+    moved = document_status.transition(
+        session,
+        document_id,
+        from_statuses=REVIEWABLE_STATUSES,
+        to="approved",
+        values={
+            "approved_at": document_status.NOW,
+            "approved_by": str(user_id),
+            "approved_json": snapshot,
+            "approved_snapshot_hash": digest,
         },
     )
+    if not moved:
+        raise ReviewError(CODE_ALREADY_APPROVED, {"document_id": str(document_id)})
     return action_id
 
 
@@ -876,10 +879,10 @@ def reject_document(
         note=note,
         acting_as_tenant_id=acting_as_tenant_id,
     )
-    session.execute(
-        text("UPDATE documents SET status = 'rejected' WHERE id = :document_id"),
-        {"document_id": str(document_id)},
-    )
+    if not document_status.transition(
+        session, document_id, from_statuses=REVIEWABLE_STATUSES, to="rejected"
+    ):
+        raise ReviewError(CODE_NOT_REVIEWABLE, {"document_id": str(document_id)})
     return action_id
 
 
@@ -954,15 +957,20 @@ def _reopen(
         ),
         {"document_id": str(document_id)},
     )
-    session.execute(
-        text(
-            "UPDATE documents "
-            "SET status = 'needs_review', approved_at = NULL, approved_by = NULL, "
-            "    approved_json = NULL, approved_snapshot_hash = NULL "
-            "WHERE id = :document_id"
-        ),
-        {"document_id": str(document_id)},
+    moved = document_status.transition(
+        session,
+        document_id,
+        from_statuses=REOPENABLE_STATUSES,
+        to="needs_review",
+        values={
+            "approved_at": document_status.NULL,
+            "approved_by": document_status.NULL,
+            "approved_json": document_status.NULL,
+            "approved_snapshot_hash": document_status.NULL,
+        },
     )
+    if not moved:
+        raise ReviewError(CODE_NOT_REVIEWABLE, {"document_id": str(document_id)})
     return action_id
 
 

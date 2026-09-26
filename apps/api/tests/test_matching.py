@@ -157,10 +157,10 @@ class _TestMatchingTenant:
                     """
                     INSERT INTO documents
                         (id, tenant_id, original_filename, storage_path, source, status,
-                         content_sha256, created_at)
+                         content_sha256, raw_json, created_at)
                     VALUES
                         (:id, :tenant_id, 'po.txt', 'tenants/seed/po.txt', 'upload', 'needs_review',
-                         :sha, now())
+                         :sha, '{"header": {}, "line_items": [], "test_fixture": true}'::jsonb, now())
                     """
                 ),
                 {"id": str(document_id), "tenant_id": str(self.tenant_id), "sha": uuid4().hex},

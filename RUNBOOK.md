@@ -69,6 +69,29 @@ protects is still being checked:
 drop schema backup_NNNN cascade;
 ```
 
+### 1.4 Running the test suites against staging
+
+**Standing rule: one suite at a time.** Run core, worker, API and web against
+`docflow-staging` one after another, never at the same time. The suites share
+one database. Several tests create and delete their own tenants, and some
+check a count across the whole table, so one suite's test data can fail
+another suite's test. This happened on 2026-09-26: the API suite's `deal7`
+case failed while the worker suite was running (DECISIONS.md D-160).
+
+The rule stays until every test uses data only it can see: rows with a unique
+prefix that the test filters on, or a transaction the test rolls back. The
+audit of the "count everything" tests is a Phase 5.5 Stage 5 item
+(`docs/BUILD-STATUS.md`).
+
+How a run is reported:
+
+- Save each suite's full output to a file. Never cut it with `tail` or
+  `head`: the exit code of the pipe replaces pytest's, so a failed run looks
+  like it passed, and the failure details are lost.
+- Quote pytest's last line as printed. The API suite should read `391 passed,
+  3 deselected` with nothing failed or skipped. The 3 deselected are the
+  `live_api` tests, which only run at checkpoints (`apps/api/pyproject.toml`).
+
 ---
 
 ## 2. Inbound email (Postmark) — arrives with Phase 5.5 Stage 2

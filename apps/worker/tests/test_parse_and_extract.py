@@ -105,6 +105,12 @@ class _FakeResult:
     def first(self):
         return self._row
 
+    def scalar_one_or_none(self):
+        return None
+
+    def all(self):
+        return []
+
 
 class _FakeSession:
     """Just enough SQLAlchemy surface to drive the task without a database."""
@@ -122,7 +128,16 @@ class _FakeSession:
             return _FakeResult(None)
         if sql.strip().upper().startswith("SELECT"):
             return _FakeResult(self._row)
+        if "RETURNING" in sql.upper():
+            # The claim and every status change are compare-and-set UPDATEs
+            # (D-158); here the row is always where the task expects it.
+            return _FakeResult({"id": "claimed"})
         return _FakeResult(None)
+
+
+def _to(session, status):
+    """The status changes the task asked for (document_status.transition)."""
+    return [params for _sql, params in session.statements if params.get("to") == status]
 
 
 def test_conversion_failure_marks_the_document_failed_and_keeps_the_worker_alive(monkeypatch):
@@ -149,13 +164,10 @@ def test_conversion_failure_marks_the_document_failed_and_keeps_the_worker_alive
 
     mod.parse_and_extract(str(uuid4()), str(uuid4()))
 
-    failures = [
-        params
-        for sql, params in session.statements
-        if "status='failed'" in sql.replace(" ", "") or "status = 'failed'" in sql
-    ]
+    failures = _to(session, "failed")
     assert failures, "the document was not marked failed"
-    assert failures[-1]["raw_json"]["error_code"].startswith("DOC-")
+    assert failures[-1]["v_raw_json"]["error_code"].startswith("DOC-")
+    assert failures[-1]["v_failure_code"].startswith("DOC-")
 
 
 def test_a_failure_that_promises_an_alert_raises_it_without_risking_the_failed_status(monkeypatch):
@@ -191,7 +203,7 @@ def test_a_failure_that_promises_an_alert_raises_it_without_risking_the_failed_s
     assert calls, "no alert was attempted"
     assert calls[0]["error_code"].startswith("DOC-")
     assert calls[0]["document_id"] == document_id
-    assert [sql for sql, _ in session.statements if "status='failed'" in sql.replace(" ", "")]
+    assert _to(session, "failed")
 
 
 def test_provenance_records_extracted_for_every_present_field():
@@ -305,6 +317,22 @@ def _drive_successful_task(monkeypatch, *, buyer_id, matcher):
         lambda *args, **kwargs: BuyerIdentification(buyer_id=buyer_id, created=True),
     )
     monkeypatch.setattr(mod, "match_document_lines", matcher)
+    monkeypatch.setattr(
+        mod,
+        "detect_document_relationships",
+        lambda *args, **kwargs: type(
+            "Relationships", (), {"is_possible_duplicate": False, "is_possible_change_order": False}
+        )(),
+    )
+    # Validation and the alert writer need a real database (their own tests
+    # have one); here they only have to be called at the right moment.
+    from docflow_core.validation import ValidationSummary
+
+    monkeypatch.setattr(mod, "validate_document", lambda *args, **kwargs: ValidationSummary())
+    session.alerts = []  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        mod.founder_alerts, "raise_alert", lambda _session, **kwargs: session.alerts.append(kwargs)
+    )
 
     mod.parse_and_extract(str(uuid4()), str(uuid4()))
     return session
@@ -347,14 +375,13 @@ def test_a_matching_failure_leaves_the_extraction_intact(monkeypatch):
 
     session = _drive_successful_task(monkeypatch, buyer_id=uuid4(), matcher=matcher)
 
-    statuses = [
-        params
-        for sql, params in session.statements
-        if "status = 'needs_review'" in sql or "status='failed'" in sql.replace(" ", "")
-    ]
-    assert statuses, "the document was never given a final status"
-    assert all("raw_json" not in params or params.get("model_id") for params in statuses)
-    assert not [sql for sql, _ in session.statements if "status='failed'" in sql.replace(" ", "")]
+    # Still reviewable, but the step that didn't finish is said out loud
+    # (H1, D-158): recorded on the document and alerted, never only logged.
+    assert _to(session, "needs_review"), "the document never reached review"
+    assert not _to(session, "failed")
+    issues = [params["issues"] for _sql, params in session.statements if "pipeline_issues" in _sql]
+    assert issues == [["matching"]]
+    assert [a["alert_type"] for a in session.alerts] == ["pipeline_step_failed"]
 
 
 # ── previews for real intake (DECISIONS.md D-092) ────────────────────────────
@@ -566,7 +593,11 @@ def test_a_successful_extraction_records_its_run_and_points_the_document_at_it(m
 
     runs = [params for sql, params in session.statements if "INSERT INTO extraction_runs" in sql]
     assert len(runs) == 1 and runs[0]["succeeded"] is True and runs[0]["examples_used"] == "[]"
-    updates = [params for sql, params in session.statements if "current_extraction_run_id" in sql]
+    updates = [
+        params
+        for sql, params in session.statements
+        if "current_extraction_run_id" in sql and sql.lstrip().upper().startswith("UPDATE")
+    ]
     assert updates and updates[0]["run_id"] == runs[0]["id"]
 
 
@@ -607,7 +638,7 @@ def test_the_routing_read_is_its_own_run_and_its_cost_is_part_of_the_document(mo
     runs = [params for sql, params in session.statements if "INSERT INTO extraction_runs" in sql]
     assert [r["run_kind"] for r in runs] == ["buyer_routing", "extraction"]
     assert captured["examples"] == []
-    costs = [params["est_cost_usd"] for sql, params in session.statements if "status = 'failed'" in sql]
+    costs = [params["v_est_cost_usd"] for params in _to(session, "failed")]
     assert costs == ["0.0111"]
 
 

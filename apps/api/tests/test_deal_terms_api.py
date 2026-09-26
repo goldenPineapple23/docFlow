@@ -18,7 +18,7 @@ Stripe and Supabase are replaced at their boundaries. All data is fictional
 
 from __future__ import annotations
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from docflow_core.db import platform_session
@@ -103,12 +103,17 @@ def test_create_tenant_records_the_deal(client, stripe, deal, expected_fee):
 @requires_deal_terms_schema
 @requires_console_schema
 def test_a_deal_outside_its_preset_is_refused_and_no_tenant_is_created(client, stripe, deal, code):
+    # Filter on this request's own name and email, not a whole-table count:
+    # other suites create and delete tenants on the same database (D-160).
+    marker = uuid4().hex[:8]
+    name = f"Acme Test Refused Deal {marker}"
+    owner_email = f"refused-{marker}@example.com"
     with _Console() as console:
-        before = _scalar("SELECT count(*) FROM tenants")
-        response = console.create_tenant(client, deal=deal)
+        response = console.create_tenant(client, name=name, owner_email=owner_email, deal=deal)
         assert response.status_code == 422, response.text
         assert response.json()["detail"]["code"] == code
-        assert _scalar("SELECT count(*) FROM tenants") == before
+        assert _scalar("SELECT count(*) FROM tenants WHERE name = :n", n=name) == 0
+        assert _scalar("SELECT count(*) FROM users WHERE email = :e", e=owner_email) == 0
 
 
 @requires_deal_terms_schema

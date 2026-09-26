@@ -402,14 +402,17 @@ def _insert(tenant_id: UUID, order: dict, *, content_sha: str | None = None) -> 
         session.execute(
             text(
                 """
+                -- Seeded outside the pipeline: raw_json is a labelled stand-in, not a model
+                -- answer. Migration 0027 requires one on every reviewable document (D-156, D-158).
                 INSERT INTO documents
                     (id, tenant_id, original_filename, storage_path, source, status,
                      content_sha256, injection_suspected, overall_confidence, created_at,
-                     preview_storage_path, preview_media_type, preview_kind)
+                     preview_storage_path, preview_media_type, preview_kind, raw_json)
                 VALUES
                     (:id, :tenant_id, :filename, :storage_path, :source, 'needs_review',
                      :sha, false, :confidence, :created_at,
-                     :preview_path, :preview_media_type, :preview_kind)
+                     :preview_path, :preview_media_type, :preview_kind,
+                     '{"header": {}, "line_items": [], "seeded_demo": true}'::jsonb)
                 """
             ),
             {

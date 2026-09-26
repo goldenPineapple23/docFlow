@@ -83,10 +83,12 @@ class _TestIntakeTenant:
                     """
                     INSERT INTO documents
                         (id, tenant_id, original_filename, storage_path, source, status,
-                         content_sha256, sender_email, created_at)
+                         content_sha256, sender_email, raw_json, created_at)
                     VALUES
                         (:id, :tenant_id, 'seed.txt', 'tenants/seed/seed.txt', 'email', :status,
-                         :sha, :sender_email, now())
+                         :sha, :sender_email,
+                         '{"header": {}, "line_items": [], "test_fixture": true}'::jsonb,
+                         now())
                     """
                 ),
                 {

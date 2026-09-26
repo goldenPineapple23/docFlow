@@ -175,6 +175,7 @@ CODE_POSSIBLE_DUPLICATE = "VAL-012"
 CODE_POSSIBLE_CHANGE_ORDER = "VAL-013"
 CODE_UNREADABLE_NUMBER = "VAL-014"
 CODE_UNUSUAL_PRECISION = "VAL-015"
+CODE_PIPELINE_STEP_FAILED = "VAL-016"
 
 # The document number fields, as a field name and where it lives.
 NUMERIC_HEADER_FIELDS = ("order_total",)
@@ -526,6 +527,9 @@ class DocumentSnapshot:
     # empty. Only while the field is still as extracted -- once a person has
     # typed a value there is nothing left to warn about.
     unreadable_numbers: tuple[tuple[str, int | None, str], ...] = ()
+    # Post-processing steps that didn't finish (documents.pipeline_issues,
+    # H1/D-158): "buyer_identification", "matching", "duplicate_detection".
+    pipeline_issues: tuple[str, ...] = ()
 
 
 # ── The whole-document evaluation (pure) ────────────────────────────────────
@@ -671,6 +675,17 @@ def _document_warnings(snapshot: DocumentSnapshot) -> list[DocumentWarning]:
                 code=CODE_INJECTION_SUSPECTED,
                 severity=_catalog_severity(CODE_INJECTION_SUSPECTED),
                 detail={"injection_suspected": "true"},
+            )
+        )
+
+    # H1 (D-158): a step that didn't finish is said out loud, never left to
+    # look like "nothing matched" or "no duplicate".
+    if snapshot.pipeline_issues:
+        warnings.append(
+            DocumentWarning(
+                code=CODE_PIPELINE_STEP_FAILED,
+                severity=_catalog_severity(CODE_PIPELINE_STEP_FAILED),
+                detail={"steps": ",".join(sorted(set(snapshot.pipeline_issues)))},
             )
         )
 
@@ -882,7 +897,7 @@ def load_snapshot(session: Session, document_id: UUID) -> DocumentSnapshot | Non
     row = session.execute(
         text(
             """
-            SELECT d.id, d.created_at, d.injection_suspected, d.raw_json,
+            SELECT d.id, d.created_at, d.injection_suspected, d.raw_json, d.pipeline_issues,
                    h.field_provenance AS header_provenance,
                    d.is_possible_duplicate, d.duplicate_of_document_id,
                    d.is_possible_change_order, d.change_order_of_document_id,
@@ -964,7 +979,12 @@ def load_snapshot(session: Session, document_id: UUID) -> DocumentSnapshot | Non
             UUID(str(row["change_order_of_document_id"])) if row["change_order_of_document_id"] else None
         ),
         unreadable_numbers=_unreadable_numbers(row, line_rows),
+        pipeline_issues=tuple(str(step) for step in (_json_value(row["pipeline_issues"]) or [])),
     )
+
+
+def _json_value(value: Any) -> Any:
+    return json.loads(value) if isinstance(value, str) else value
 
 
 def _still_extracted(provenance: Any, name: str) -> bool:
@@ -1189,6 +1209,9 @@ _ALL_CODES = (
     CODE_CURRENCY_INFERRED,
     CODE_POSSIBLE_DUPLICATE,
     CODE_POSSIBLE_CHANGE_ORDER,
+    CODE_UNREADABLE_NUMBER,
+    CODE_UNUSUAL_PRECISION,
+    CODE_PIPELINE_STEP_FAILED,
 )
 for _code in _ALL_CODES:
     get_error(_code)

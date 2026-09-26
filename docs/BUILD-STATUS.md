@@ -184,11 +184,11 @@ are D-149 – D-153.
 | Stage | What | Status | Decisions |
 |---|---|---|---|
 | 0 | Safety net: push, CI green, `main` protected (done before 5.5 began); **CI database and the unapproved-skip check** (H7 part 2); core type-checked and pinned in CI | DONE (PR #3, merged 2026-09-25) | D-148 |
-| 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents | IN PROGRESS: 1a numeric fidelity DONE (PR #4; migration `0026` applied to staging, backfill run, D-156); 1b pipeline next | D-149, D-154 – D-157 |
+| 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents | IN PROGRESS: 1a numeric fidelity DONE (PR #4; migration `0026` applied to staging, backfill run, D-156); 1b pipeline BUILT (branch `phase55/stage1b-pipeline`; backup_0027 taken and migration `0027` applied to staging 2026-09-26; the staging API run's one failure, `deal7`, was a whole-table tenant count disturbed by the worker suite running at the same time, now fixed, D-160); 1c (H2 re-validation, M4, M5, plus M1 streaming, the measured ceiling, the golden fixture rename and named system actors) next | D-149, D-154 – D-160 |
 | 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events | PLANNED | D-151 |
-| 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation, H4 per-tenant fairness (propose, then stop for approval) | PLANNED | D-150 |
+| 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation, H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) | PLANNED | D-150, D-159 |
 | 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items | PLANNED | D-152 |
-| 5 | Remaining findings, doc/code contradictions, proposed CLAUDE.md additions | PLANNED | — |
+| 5 | Remaining findings, doc/code contradictions, proposed CLAUDE.md additions; **audit every test that counts a whole table** (the `deal7` pattern) and move each one to data only that test can see, after which staging suites may run concurrently again (RUNBOOK 1.4); **robust test cleanup** (every test that creates data cleans it up in a fixture or `finally`, so a failing test still leaves nothing); **a staging sweep script** that lists tenants named "Acme Test ..." older than a day, with what each holds, and deletes one only on the founder's per-action OK (a stopped run always strands something) | PLANNED | D-160 |
 
 ## Phase 6 — Hardening · NOT STARTED
 
@@ -209,8 +209,36 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 ## Known open items (across phases)
 
 - IIF export not yet validated against real QuickBooks Desktop (Phase 4).
-- Stuck-in-processing alert (7.9) not built; when built it must watch `pending`
-  too (D-095).
+- Stuck-in-processing alert (7.9): built in Phase 5.5 Stage 1b, watching
+  `pending` too (D-095, D-158).
+- **Very long orders (D-158 follow-ups):** an order past the model's single-read
+  ceiling (estimated 150–250 lines, not yet measured) fails as DOC-020, which
+  does raise a founder alert. **Decided for Stage 1c:** measure the ceiling with
+  a fake 300+ line order, before and after; stream the extraction call (live
+  golden + contamination before merge); reword DOC-020's advice to "enter by
+  hand, DocFlow has been alerted"; add an onboarding step to count the lines on
+  the prospect's largest sample order. Chunking stays deferred.
+- **Golden fixture uses a possibly real business name** ("Bella's Coffee House",
+  `bellascoffee.com`, from the proof of concept). Rename in Stage 1c with a
+  re-recorded answer and a live golden run; must happen before an email
+  provider is connected. The staging tenant "Bella's Coffee Haus" was already
+  renamed "Acme Test Coffee Supply" (2026-09-26). Section 8.3's asserted line
+  values don't change; the old-to-new mapping goes in D-159.
+- **F-1 (D-159): about 50 RLS policies are keyed on `app.*` settings any
+  connection can set** -- enforced by code and guard tests today, not by the
+  database. Stage 3: separate logins for API, worker and admin path, with
+  policies granted to those roles (about 2-3 days, $0).
+- **Blank audit actors (D-159):** 7 staging `tenant_lifecycle_events` have no
+  actor (6 from the lifecycle sweep, 1 from the 2026-09-26 rename script).
+  Stage 1c: named system actors (`maintenance-script`, `lifecycle-sweep`, ...),
+  backfill with a backup first, actor required on new rows.
+- Three stranded test tenants on staging, all 2026-09-26, left because a run
+  ended before its own cleanup: "Acme Test Sweep A" / "Acme Test Sweep B"
+  (worker suite, the pooled-connection test's cleanup bug fixed in `21550bd`)
+  and "Acme Test Distributor -- acting edit" with its 1 document (API suite,
+  `test_acting_as.py`, run stopped mid-test). They are the whole gap between
+  backup_0027 (46 documents / 8 tenants) and the post-0027 count (47 / 11).
+  Left for the end-of-build cleanup; delete only on the founder's OK.
 - Custom per-tenant fields deferred until a prospect needs one (D-120).
 - Error-catalog messages use ASCII " -- " instead of real dashes; a switch was
   offered.

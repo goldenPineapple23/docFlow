@@ -26,7 +26,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from docflow_core import email_outbox
+from docflow_core import document_status, email_outbox
 from docflow_core.constants import FIRST_WEEK_CHECKIN_DAYS, constants_in_effect
 from docflow_core.db import rowcount
 
@@ -156,20 +156,22 @@ def start_test_batch_run(session: Session, tenant_id: UUID, *, actor_user_id: UU
     status = _status(session, tenant_id, lock=True)
     if status not in ("test_batch_uploaded", "test_batch_running"):
         raise OnboardingError("ONB-002" if status in ("test_batch_complete", "live") else "ONB-003")
-    released = session.execute(
+    staged = session.execute(
         text(
             """
-            UPDATE documents SET status = 'pending'
-            WHERE id IN (
-                SELECT id FROM documents
-                WHERE is_test_batch AND status = 'staged' AND deleted_at IS NULL
-                ORDER BY created_at, id
-                FOR UPDATE
-            )
-            RETURNING id, created_at
+            SELECT id, created_at FROM documents
+            WHERE is_test_batch AND status = 'staged' AND deleted_at IS NULL
+            ORDER BY created_at, id
+            FOR UPDATE
             """
         )
     ).all()
+    moved = set(
+        document_status.transition_many(
+            session, tenant_id, [UUID(str(r[0])) for r in staged], from_statuses=["staged"], to="pending"
+        )
+    )
+    released = [r for r in staged if UUID(str(r[0])) in moved]
     if not released:
         raise OnboardingError("ONB-003")
     ids = [UUID(str(row[0])) for row in sorted(released, key=lambda r: (r[1], str(r[0])))]

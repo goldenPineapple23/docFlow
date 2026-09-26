@@ -268,6 +268,49 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         audience="tenant",
     ),
     # ── Phase 1 (email intake slice): CLAUDE.md Section 7.16.3 / 7.16.4 ──────
+    "DOC-020": ErrorCatalogEntry(
+        code="DOC-020",
+        title="This order is too long to read",
+        message=(
+            "The order has more lines than DocFlow can read in a single pass, so the reading "
+            "stopped part-way. Rather than keep a partial order, DocFlow kept none of it."
+        ),
+        action=(
+            "DocFlow has already been alerted. Until it's fixed, split the order into two "
+            "files of fewer lines each and upload them separately."
+        ),
+        severity="high",
+        audience="both",
+    ),
+    "DOC-021": ErrorCatalogEntry(
+        code="DOC-021",
+        title="We read this order but couldn't finish it",
+        message=(
+            "DocFlow read the order, but saving what it read or running its automatic checks "
+            "(totals, dates, required fields) failed. An order that hasn't been checked isn't "
+            "offered for approval."
+        ),
+        action=(
+            "DocFlow has already been alerted. Upload the same file again to have it read and "
+            "checked again."
+        ),
+        severity="high",
+        audience="both",
+    ),
+    "DOC-022": ErrorCatalogEntry(
+        code="DOC-022",
+        title="This order took too long to process",
+        message=(
+            "DocFlow tried to process this order several times and none of the tries finished, "
+            "so it stopped trying rather than leave the order waiting indefinitely."
+        ),
+        action=(
+            "DocFlow has already been alerted. Upload the same file again; if it fails a "
+            "second time, DocFlow will look into it."
+        ),
+        severity="high",
+        audience="both",
+    ),
     "INT-001": ErrorCatalogEntry(
         code="INT-001",
         title="No attachment to process",
@@ -509,6 +552,21 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         ),
         action="Check it against the document. If it's right, acknowledge this warning and approve.",
         severity="warning",
+        audience="tenant",
+    ),
+    "VAL-016": ErrorCatalogEntry(
+        code="VAL-016",
+        title="Some automatic steps didn't finish",
+        message=(
+            "DocFlow read this order, but one or more of its automatic steps -- recognising the "
+            "buyer, matching lines to the catalog, or spotting duplicates -- didn't finish. Those "
+            "parts of the screen may be empty for that reason, not because nothing matched."
+        ),
+        action=(
+            "DocFlow has already been alerted. Check the buyer, the catalog matches and any "
+            "duplicate by hand before approving."
+        ),
+        severity="high",
         audience="tenant",
     ),
     "AUTH-002": ErrorCatalogEntry(

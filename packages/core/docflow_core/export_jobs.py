@@ -33,6 +33,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from docflow_core import document_status
 from docflow_core.db import tenant_session
 from docflow_core.founder_alerts import raise_alert
 from docflow_core.review import snapshot_sha256
@@ -282,15 +283,13 @@ def run_export(tenant_id: UUID, export_id: UUID) -> ExportOutcome:
         # `exported` means "a file of THIS approval has been produced". Only
         # when the document is still approved on the same snapshot: a
         # document reopened since the click stays in needs_review.
-        session.execute(
-            text(
-                """
-                UPDATE documents SET status = 'exported'
-                WHERE id = :document_id AND status = 'approved'
-                  AND approved_snapshot_hash = :snapshot_hash
-                """
-            ),
-            {"document_id": str(row["document_id"]), "snapshot_hash": row["snapshot_hash"]},
-        )
+        current_hash = session.execute(
+            text("SELECT approved_snapshot_hash FROM documents WHERE id = :id"),
+            {"id": str(row["document_id"])},
+        ).scalar_one_or_none()
+        if current_hash == row["snapshot_hash"]:
+            document_status.transition(
+                session, UUID(str(row["document_id"])), from_statuses=["approved"], to="exported"
+            )
     logger.info("export_ready export_id=%s format=%s", export_id, row["format"])
     return ExportOutcome(status="ready")
