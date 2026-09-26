@@ -447,12 +447,6 @@ def check_currency(value: str | None) -> bool:
 
 
 def _is_blank(value: Any) -> bool:
-    if value is None:
-        return True
-    return isinstance(value, str) and not value.strip()
-
-
-def _is_blank(value: Any) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
 
 

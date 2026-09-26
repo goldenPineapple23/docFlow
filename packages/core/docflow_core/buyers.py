@@ -55,6 +55,8 @@ from rapidfuzz import fuzz
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from docflow_core.db import rowcount
+
 # Above this, two buyer names are flagged as a possible duplicate for the
 # founder to decide on. It is a *flagging* threshold, never an auto-merge
 # threshold -- there is no score at which this module merges anything.
@@ -333,7 +335,7 @@ def _create_buyer(
             "document_id": str(document_id) if document_id else None,
         },
     )
-    if result.rowcount == 1:
+    if rowcount(result) == 1:
         return buyer_id, True
 
     existing = find_buyer_by_normalized_name(session, tenant_id, normalized_name)
@@ -411,7 +413,7 @@ def identify_or_create_buyer(
         return BuyerIdentification(buyer_id=buyer_id, created=False, matched_on="normalized_name")
 
     candidates = find_near_duplicate_candidates(
-        buyer_name, _existing_buyer_names(session, tenant_id, buyer_id)
+        buyer_name or "", _existing_buyer_names(session, tenant_id, buyer_id)
     )
     _flag_merge_candidates(session, tenant_id, buyer_id, candidates, document_id=document_id)
     return BuyerIdentification(buyer_id=buyer_id, created=True, merge_candidates=candidates)

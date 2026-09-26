@@ -188,7 +188,7 @@ def _view_from_flat_rows(rows: list[list[str | None]]) -> dict[str, Any]:
 
     lines = []
     for row in rows:
-        values = dict(zip(LINE_COLUMNS, row[width:]))
+        values: dict[str, Any] = dict(zip(LINE_COLUMNS, row[width:]))
         if values["line_number"] is None:
             if len(rows) != 1 or any(v is not None for v in values.values()):
                 raise ExportError("EXP-004", "row without a line number")

@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-09-25** (slice 5.10 built; walkthrough fixes D-144 – D-147).
+commit as the slice. Statuses below are as of **2026-09-25** (Phase 5.5 remediation started: Stage 0).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -170,6 +170,26 @@ keeps received order and then counts against the allowance.
 Agreed split with 5.8: 5.7 builds the API, data and a minimal tenant banner;
 the fuller tenant dashboard stays in 5.8.
 
+## Phase 5.5 — Remediation of the end-of-Phase-5 review · IN PROGRESS
+
+Inserted by the founder on 2026-09-25 between Phase 5 and Phase 6. Scope:
+everything in bucket (a) of `docs/REVIEW-PHASE5.md`, restructuring the
+document worker and file storage, matching speed and per-tenant queue
+fairness, and the test gaps that let these defects through. Phase 6 does not
+start until the founder signs off on 5.5. Every change is a branch and a pull
+request; each stage ends with tests green locally and in CI, a checkpoint,
+and the founder's "go". The founder's answers to the review's five questions
+are D-149 – D-153.
+
+| Stage | What | Status | Decisions |
+|---|---|---|---|
+| 0 | Safety net: push, CI green, `main` protected (done before 5.5 began); **CI database and the unapproved-skip check** (H7 part 2); core type-checked and pinned in CI | BUILT, in review (branch `phase55/stage0-ci-database`) | D-148 |
+| 1 | Data integrity: C1 numeric fidelity end to end, H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents | PLANNED | D-149 |
+| 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events | PLANNED | D-151 |
+| 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation, H4 per-tenant fairness (propose, then stop for approval) | PLANNED | D-150 |
+| 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items | PLANNED | D-152 |
+| 5 | Remaining findings, doc/code contradictions, proposed CLAUDE.md additions | PLANNED | — |
+
 ## Phase 6 — Hardening · NOT STARTED
 
 Error catalog completed and enforced by tests; rate limiting; cost circuit
@@ -214,9 +234,10 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   test, audit)`, `core (lint, test, audit)`, `web (lint, typecheck, test, build,
   e2e, audit)`, `worker (lint, typecheck, test, audit)` -- branch must be up to
   date, no bypass for administrators, no force pushes or deletions. Every change
-  now goes through a branch and a pull request. Still open (H7 part 2): CI has no
-  database, so most API tests (the RLS and tenant-isolation ones included) skip
-  there and run only locally.
+  now goes through a branch and a pull request. H7 part 2 (Phase 5.5 Stage 0,
+  D-148): CI now runs the core, api and worker suites against a local Supabase
+  stack with every migration applied, as `docflow_app` (NOBYPASSRLS), and fails
+  on any skipped test not approved in `.github/approved-skips.txt` (none are).
 - Browser walkthroughs: `docs/walkthroughs/README.md` is the index, one file
   per phase or slice from Phase 0 to 5.10, to walk in order before Phase 6
   (QA/UAT). Files for Phases 0–4, 5.1–5.5 and 5.8a–c were added 2026-09-25;

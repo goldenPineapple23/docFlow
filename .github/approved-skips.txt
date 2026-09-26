@@ -1,0 +1,13 @@
+# Tests CI is allowed to skip. Read by scripts/ci/check_skips.py.
+#
+# Target (Phase 5.5, founder's answer 5): zero. Every line here needs the
+# founder's approval and a reason, and a matching entry in DECISIONS.md.
+#
+# Format:  <suite> <classname>::<name>  # reason
+#   suite = core | api | worker
+#
+# Not listed because they are not skips: the `live_api` tests (the golden
+# fixture and the contamination test against the real model) are DESELECTED
+# in CI by `-m "not live_api"` (apps/api/pyproject.toml), because Section 5
+# runs the golden fixture against its recorded response in CI and live at
+# every checkpoint and before any prompt/schema/model change.

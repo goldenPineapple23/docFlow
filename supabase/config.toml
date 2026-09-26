@@ -1,0 +1,62 @@
+# Supabase CLI local stack -- used by CI only (Phase 5.5 Stage 0, DECISIONS.md D-148).
+#
+# CI runs `supabase start`, which applies every file in supabase/migrations/
+# in order as the `postgres` role, exactly as the founder does by hand in the
+# staging SQL Editor. scripts/ci/create_app_role.py then creates `docflow_app`
+# (NOBYPASSRLS) the way SETUP.md Step 1.6 does, and the Python suites connect
+# as that role -- so RLS, the Supabase roles and the `auth` schema behave as
+# they do on docflow-staging.
+#
+# Staging and prod are configured in the Supabase dashboard, not here. Only
+# the services the test suites need are switched on.
+
+project_id = "docflow-ci"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+# docflow-staging runs PostgreSQL 17 (verified 2026-09-25: 17.6).
+major_version = 17
+
+[db.pooler]
+enabled = false
+
+[db.migrations]
+enabled = true
+
+[db.seed]
+enabled = false
+
+[realtime]
+enabled = false
+
+[studio]
+enabled = false
+
+[local_smtp]
+enabled = false
+
+[storage]
+enabled = false
+
+[edge_runtime]
+enabled = false
+
+[analytics]
+enabled = false
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3000"
+# No public signup (build prompt Section 3; staging has it switched off, M16).
+enable_signup = false
+
+[auth.email]
+enable_signup = false

@@ -4,6 +4,27 @@ on:
   push:
   pull_request:
 
+# The Python suites run against a real Supabase stack (Postgres 17 with the
+# auth schema and Supabase roles), started by the Supabase CLI from
+# supabase/config.toml, with every migration in supabase/migrations/ applied
+# in order. They connect as `docflow_app` (NOBYPASSRLS), exactly as the app
+# does on docflow-staging, so the RLS and tenant-isolation tests run on every
+# push. Phase 5.5 Stage 0, DECISIONS.md D-148; review docs/REVIEW-PHASE5.md H7.
+#
+# Every job then fails if any test was skipped without an approval in
+# .github/approved-skips.txt (scripts/ci/check_skips.py). Target: zero.
+#
+# Nothing below is a secret: these are throwaway values for a database that
+# exists only inside the CI runner.
+env:
+  SUPABASE_CLI_VERSION: "2.118.0"
+  SUPERUSER_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+  APP_ROLE_PASSWORD: ci-local-only
+  DATABASE_URL: postgresql://docflow_app:ci-local-only@127.0.0.1:54322/postgres
+  REDIS_URL: redis://127.0.0.1:6379/0
+  SUPABASE_JWT_SECRET: ci-local-only-jwt-secret-not-used-anywhere-else
+  DOCUMENT_URL_SIGNING_SECRET: ci-local-only-signing-secret
+
 jobs:
   web:
     name: web (lint, typecheck, test, build, e2e, audit)
@@ -46,31 +67,64 @@ jobs:
   core:
     name: core (lint, test, audit)
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
     defaults:
       run:
         working-directory: packages/core
     steps:
       - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v2.1.2
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Start the local Supabase stack (applies supabase/migrations/)
+        working-directory: ${{ github.workspace }}
+        run: supabase start
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: apps/worker/requirements.lock.txt
       - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[dev,files]"
+      # Pinned, not ranges (H7): the worker's lockfile holds every core
+      # dependency, the `files` extras and the lint/type/test tools.
+      - run: pip install -r ../../apps/worker/requirements.lock.txt
+      - run: pip install --no-deps -e .
       - run: pip install pip-audit
+      - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
+        run: python "${{ github.workspace }}/scripts/ci/create_app_role.py"
       - run: ruff check .
-      - name: Test (no DATABASE_URL -- DB-dependent tests skip cleanly)
-        run: pytest -v
+      - run: mypy docflow_core
+      - name: Test (against the local Supabase stack, as docflow_app)
+        run: pytest -v --junitxml=junit.xml
+      - name: No unapproved skipped tests
+        if: success() || failure()
+        run: python "${{ github.workspace }}/scripts/ci/check_skips.py" core junit.xml
       - name: Dependency audit (fail on known vulnerabilities)
         run: pip-audit
 
   api:
     name: api (lint, typecheck, test, audit)
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
     defaults:
       run:
         working-directory: apps/api
     steps:
       - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v2.1.2
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Start the local Supabase stack (applies supabase/migrations/)
+        working-directory: ${{ github.workspace }}
+        run: supabase start
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -80,21 +134,37 @@ jobs:
       - run: pip install -r requirements.lock.txt
       - run: pip install --no-deps -e ../../packages/core
       - run: pip install pip-audit
+      - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
+        run: python "${{ github.workspace }}/scripts/ci/create_app_role.py"
       - run: ruff check .
       - run: mypy app
-      - name: Test (recorded-fixture tests only -- DB-dependent tests skip cleanly without DATABASE_URL)
-        run: pytest -v
+      - name: Test (against the local Supabase stack, as docflow_app; live_api deselected)
+        run: pytest -v --junitxml=junit.xml
+      - name: No unapproved skipped tests
+        if: success() || failure()
+        run: python "${{ github.workspace }}/scripts/ci/check_skips.py" api junit.xml
       - name: Dependency audit (fail on known vulnerabilities)
         run: pip-audit
 
   worker:
     name: worker (lint, typecheck, test, audit)
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
     defaults:
       run:
         working-directory: apps/worker
     steps:
       - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v2.1.2
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Start the local Supabase stack (applies supabase/migrations/)
+        working-directory: ${{ github.workspace }}
+        run: supabase start
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -104,8 +174,16 @@ jobs:
       - run: pip install -r requirements.lock.txt
       - run: pip install --no-deps -e ../../packages/core
       - run: pip install pip-audit
+      - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
+        run: python "${{ github.workspace }}/scripts/ci/create_app_role.py"
+      - name: Install LibreOffice (the .doc converter, D-041), so its tests run
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer
       - run: ruff check .
       - run: mypy app
-      - run: pytest -v
+      - name: Test (against the local Supabase stack, as docflow_app)
+        run: pytest -v --junitxml=junit.xml
+      - name: No unapproved skipped tests
+        if: success() || failure()
+        run: python "${{ github.workspace }}/scripts/ci/check_skips.py" worker junit.xml
       - name: Dependency audit (fail on known vulnerabilities)
         run: pip-audit
