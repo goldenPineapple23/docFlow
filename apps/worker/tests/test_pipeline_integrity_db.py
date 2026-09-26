@@ -25,11 +25,12 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
-from docflow_core import document_status, stuck_documents
+from docflow_core import db, document_status, stuck_documents
 from docflow_core.db import platform_session, tenant_session
 from docflow_core.review import WarningAcknowledgement, approve_document
 from docflow_core.validation import open_warnings, validate_document
 from sqlalchemy import text
+from sqlalchemy.orm import sessionmaker
 
 from tests.conftest import requires_documents_schema
 from tests.db_helpers import FakeAnthropic, WorkerTestTenant, model_payload, run_extraction
@@ -343,6 +344,47 @@ def test_H3_a_document_waiting_in_pending_is_requeued_and_reported_never_failed(
         assert fresh not in queued
         assert _document(waiting)["status"] == "pending"
         assert _alerts(tenant, "document_stuck") == 1  # one per tenant per day
+
+
+# ── pipeline_sweep_read (migration 0027): no tenant can list other tenants ──
+# The code-side half (only db.py sets a flag; only stuck_documents uses the
+# sweep session) is packages/core/tests/test_rls_flags.py.
+
+
+def _tenant_ids(session) -> set[UUID]:
+    return {UUID(str(row[0])) for row in session.execute(text("SELECT id FROM tenants"))}
+
+
+@requires_documents_schema
+def test_pipeline_sweep_read_a_tenant_session_sees_only_its_own_tenant():
+    with WorkerTestTenant("Acme Test Sweep A") as a, WorkerTestTenant("Acme Test Sweep B") as b:
+        with tenant_session(a.tenant_id) as session:
+            assert _tenant_ids(session) == {a.tenant_id}
+        # The policy does open `tenants` to the sweep, so the line above is a
+        # real refusal, not an empty table.
+        with db.pipeline_sweep_session() as session:
+            assert {a.tenant_id, b.tenant_id} <= _tenant_ids(session)
+
+
+@requires_documents_schema
+def test_pipeline_sweep_read_a_flag_left_on_a_pooled_connection_never_reaches_a_tenant_request(monkeypatch):
+    """The worst case: a connection handed out by the pool still carries the
+    flag at session level. tenant_session() clears it before anything runs."""
+    with WorkerTestTenant("Acme Test Sweep A") as a, WorkerTestTenant("Acme Test Sweep B") as b:
+        connection = db.get_engine().connect()
+        try:
+            # One database transaction throughout, so the transaction-mode
+            # pooler can't swap the backend under the test.
+            connection.execute(text("SET app.pipeline_sweep = 'true'"))  # session level, not LOCAL
+            leaked = {UUID(str(r[0])) for r in connection.execute(text("SELECT id FROM tenants"))}
+            assert {a.tenant_id, b.tenant_id} <= leaked  # the flag really is on
+
+            monkeypatch.setattr(db, "get_session_factory", lambda: sessionmaker(bind=connection))
+            with tenant_session(a.tenant_id) as session:
+                assert _tenant_ids(session) == {a.tenant_id}
+        finally:
+            connection.rollback()  # also undoes the SET
+            connection.close()
 
 
 # ── M1: long orders; M3: a failed save never strands a document ─────────────

@@ -184,7 +184,7 @@ are D-149 – D-153.
 | Stage | What | Status | Decisions |
 |---|---|---|---|
 | 0 | Safety net: push, CI green, `main` protected (done before 5.5 began); **CI database and the unapproved-skip check** (H7 part 2); core type-checked and pinned in CI | DONE (PR #3, merged 2026-09-25) | D-148 |
-| 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents | IN PROGRESS: 1a numeric fidelity DONE (PR #4, migration `0026` applied); 1b pipeline BUILT (branch `phase55/stage1b-pipeline`, migration `0027` awaiting staging); 1c (H2 re-validation, M4, M5) next | D-149, D-154, D-155, D-158 |
+| 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents | IN PROGRESS: 1a numeric fidelity DONE (PR #4, migration `0026` applied); 1b pipeline BUILT (branch `phase55/stage1b-pipeline`, migration `0027` awaiting staging; backup_0027 taken 2026-09-26); 1c (H2 re-validation, M4, M5, plus M1 streaming, the measured ceiling and the golden fixture rename) next | D-149, D-154, D-155, D-158 |
 | 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events | PLANNED | D-151 |
 | 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation, H4 per-tenant fairness (propose, then stop for approval) | PLANNED | D-150 |
 | 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items | PLANNED | D-152 |
@@ -211,13 +211,18 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 - IIF export not yet validated against real QuickBooks Desktop (Phase 4).
 - Stuck-in-processing alert (7.9): built in Phase 5.5 Stage 1b, watching
   `pending` too (D-095, D-158).
-- **Very long orders (D-158 follow-up):** an order past the model's single-read
-  ceiling (estimated 150–250 lines, not yet measured) fails as DOC-020. For the
-  customer, that's an order DocFlow couldn't process. Planned fix, once the
-  founder says go: stream the extraction call (about 8× the room). Chunking
-  only past that. Before building: measure the real ceiling with one long test
-  order, and reword DOC-020's advice (splitting the file isn't practical for a
-  buyer's PDF).
+- **Very long orders (D-158 follow-ups):** an order past the model's single-read
+  ceiling (estimated 150–250 lines, not yet measured) fails as DOC-020, which
+  does raise a founder alert. **Decided for Stage 1c:** measure the ceiling with
+  a fake 300+ line order, before and after; stream the extraction call (live
+  golden + contamination before merge); reword DOC-020's advice to "enter by
+  hand, DocFlow has been alerted"; add an onboarding step to count the lines on
+  the prospect's largest sample order. Chunking stays deferred.
+- **Golden fixture uses a possibly real business name** ("Bella's Coffee House",
+  `bellascoffee.com`, from the proof of concept). Rename in Stage 1c with a
+  re-recorded answer and a live golden run; must happen before an email
+  provider is connected. The staging tenant "Bella's Coffee Haus" was already
+  renamed "Acme Test Coffee Supply" (2026-09-26).
 - Custom per-tenant fields deferred until a prospect needs one (D-120).
 - Error-catalog messages use ASCII " -- " instead of real dashes; a switch was
   offered.
