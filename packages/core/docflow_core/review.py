@@ -66,6 +66,7 @@ from sqlalchemy.orm import Session
 from docflow_core import document_status
 from docflow_core.errors import get_error
 from docflow_core.numbers import is_document_number, plain
+from docflow_core.validation import validate_document
 
 # ── Catalog codes this module can raise ─────────────────────────────────────
 CODE_UNACKNOWLEDGED_WARNINGS = "REV-001"
@@ -184,13 +185,52 @@ class FieldChange:
 
 
 @dataclass(frozen=True)
+class Acknowledgement:
+    """
+    What a reviewer supplies when approving: which warning, and optionally
+    why. Nothing else -- the code and the text are read from the stored
+    warning by `approve_document`, never taken from the caller (review M4:
+    the browser used to send its own "text", which could be empty or forged).
+    """
+
+    warning_id: UUID
+    note: str | None = None
+
+
+def acknowledgement_text(
+    code: str, field_name: str | None, line_number: int | None, detail: dict[str, Any] | None
+) -> str:
+    """
+    The warning as the reviewer read it, built on the server (M4): where it
+    is, the catalog's code, title and message, and the occurrence's own
+    values -- the same parts the review screen renders.
+    """
+    entry = get_error(code)
+    where = []
+    if line_number is not None:
+        where.append(f"Line {line_number}")
+    if field_name:
+        where.append(field_name.replace("_", " "))
+    specifics = ", ".join(
+        f"{key.replace('_', ' ')}: {value}"
+        for key, value in sorted((detail or {}).items())
+        if value is not None and value != ""
+    )
+    text_ = f"{code} {entry.title}. {entry.message}"
+    if where:
+        text_ = f"{' / '.join(where)}: {text_}"
+    return f"{text_} ({specifics})" if specifics else text_
+
+
+@dataclass(frozen=True)
 class WarningAcknowledgement:
     """
     Section 7.3: the acknowledgement is recorded "with the warning text".
 
     The text is copied in, not referenced. If the catalog's wording changes
     next year, this row must still say what the human actually agreed to at
-    the time -- a pointer would silently rewrite the past.
+    the time -- a pointer would silently rewrite the past. Built only by
+    `approve_document`, from the stored warning (M4).
     """
 
     warning_id: UUID
@@ -353,12 +393,18 @@ def start_review(session: Session, document_id: UUID) -> None:
     )
 
 
-def _load_document(session: Session, document_id: UUID) -> dict[str, Any] | None:
+def _load_document(
+    session: Session, document_id: UUID, *, for_update: bool = False
+) -> dict[str, Any] | None:
+    """`for_update` locks the row until the caller's transaction ends (M5):
+    an edit and an approval of the same document then run one after the
+    other, so a version check and the write it guards can't be split."""
     row = session.execute(
         text(
             "SELECT id, tenant_id, status, approved_json, approved_at, approved_by, "
             "approved_snapshot_hash, review_started_at "
             "FROM documents WHERE id = :document_id AND deleted_at IS NULL"
+            + (" FOR UPDATE" if for_update else "")
         ),
         {"document_id": str(document_id)},
     ).mappings().first()
@@ -466,13 +512,16 @@ def apply_edits(
         overwriting it;
       * editing an `approved` document reverts it to `needs_review` and
         writes a `reopened` action. The old snapshot is superseded, never
-        deleted.
+        deleted;
+      * the document is checked again (H2): a value typed wrong raises its
+        warning, and a warning whose value was fixed is resolved. Warnings
+        on values that didn't change keep their acknowledgements (D-074).
 
     `session` must already be tenant-scoped.
     """
     validate_editable(request)
 
-    document = _load_document(session, document_id)
+    document = _load_document(session, document_id, for_update=True)
     if document is None:
         raise ReviewError(CODE_NOT_REVIEWABLE, {"document_id": str(document_id)})
 
@@ -558,6 +607,9 @@ def apply_edits(
             acting_as_tenant_id=acting_as_tenant_id,
         )
 
+    # H2: in the same transaction as the edit, so the order is never in
+    # review with values its warnings don't describe.
+    validate_document(session, tenant_id, document_id)
     return action_id
 
 
@@ -727,14 +779,29 @@ def unacknowledged_warnings(session: Session, document_id: UUID) -> list[dict[st
     return [dict(row) for row in rows]
 
 
+def recheck_before_approval(session: Session, tenant_id: UUID, document_id: UUID) -> None:
+    """
+    Bring a reviewable document's warnings up to date (H2), for the API to
+    run in its OWN transaction before `approve_document`. Approval checks
+    again itself; this pass exists so that a warning found at approval time
+    is saved even when the approval is then refused -- otherwise the refusal
+    would roll it back and the reviewer would never see what blocked them.
+    A document past review is not touched.
+    """
+    document = _load_document(session, document_id)
+    if document is not None and document["status"] in REVIEWABLE_STATUSES:
+        validate_document(session, tenant_id, document_id)
+
+
 def approve_document(
     session: Session,
     tenant_id: UUID,
     document_id: UUID,
     *,
     user_id: UUID,
-    acknowledgements: list[WarningAcknowledgement] | None = None,
+    acknowledgements: list[Acknowledgement] | None = None,
     acting_as_tenant_id: UUID | None = None,
+    expected_version: str | None = None,
 ) -> UUID:
     """
     Approve a document and freeze its snapshot. Returns the review action id.
@@ -745,13 +812,19 @@ def approve_document(
     document unapproved rather than approved with no snapshot.
 
     Order matters and is deliberate:
-      1. refuse if the document is not reviewable, or is already approved;
-      2. refuse if any live warning is unacknowledged (Section 7.3);
-      3. write the `approved` action, carrying the acknowledgement text;
-      4. freeze the snapshot, superseding any previous one;
-      5. mark the document approved, pointing at that snapshot.
+      1. lock the row, and refuse if the document is not reviewable, or is
+         already approved;
+      2. refuse if its values are not the ones the reviewer saw
+         (`expected_version`, M5; the API always passes it);
+      3. check it again (H2) and refuse if any live warning is
+         unacknowledged (Section 7.3), or if an acknowledgement names a
+         warning this document doesn't have open;
+      4. write the `approved` action, carrying each acknowledged warning's
+         text as the server renders it (M4);
+      5. freeze the snapshot, superseding any previous one;
+      6. mark the document approved, pointing at that snapshot.
     """
-    document = _load_document(session, document_id)
+    document = _load_document(session, document_id, for_update=True)
     if document is None:
         raise ReviewError(CODE_NOT_REVIEWABLE, {"document_id": str(document_id)})
     if document["status"] in ("approved", "exported"):
@@ -759,8 +832,21 @@ def approve_document(
     if document["status"] not in REVIEWABLE_STATUSES:
         raise ReviewError(CODE_NOT_REVIEWABLE, {"status": document["status"]})
 
-    supplied = {a.warning_id for a in (acknowledgements or [])}
-    outstanding = [w for w in unacknowledged_warnings(session, document_id) if w["id"] not in supplied]
+    if expected_version is not None:
+        current = document_version(session, document_id)
+        if current != expected_version:
+            raise ReviewError(CODE_STALE_EDIT, {"expected": expected_version, "actual": current})
+
+    validate_document(session, tenant_id, document_id)
+    open_by_id = {w["id"]: w for w in unacknowledged_warnings(session, document_id)}
+
+    notes = {a.warning_id: a.note for a in (acknowledgements or [])}
+    unknown = [warning_id for warning_id in notes if warning_id not in open_by_id]
+    if unknown:
+        # The screen is out of date (or the caller named a warning that isn't
+        # this order's): nothing is recorded against it.
+        raise ReviewError(CODE_STALE_EDIT, {"warning_ids": [str(w) for w in unknown]})
+    outstanding = [w for warning_id, w in open_by_id.items() if warning_id not in notes]
     if outstanding:
         raise ReviewError(
             CODE_UNACKNOWLEDGED_WARNINGS,
@@ -768,17 +854,32 @@ def approve_document(
              "codes": sorted({w["code"] for w in outstanding})},
         )
 
+    recorded = [
+        WarningAcknowledgement(
+            warning_id=warning_id,
+            code=open_by_id[warning_id]["code"],
+            text=acknowledgement_text(
+                open_by_id[warning_id]["code"],
+                open_by_id[warning_id]["field_name"],
+                open_by_id[warning_id]["line_number"],
+                open_by_id[warning_id]["detail"],
+            ),
+            note=note,
+        )
+        for warning_id, note in notes.items()
+    ]
+
     action_id = _record_action(
         session,
         tenant_id=tenant_id,
         document_id=document_id,
         user_id=user_id,
         action=ACTION_APPROVED,
-        acknowledgements=acknowledgements,
+        acknowledgements=recorded,
         acting_as_tenant_id=acting_as_tenant_id,
     )
 
-    for ack in acknowledgements or []:
+    for ack in recorded:
         session.execute(
             text(
                 "UPDATE document_warnings "

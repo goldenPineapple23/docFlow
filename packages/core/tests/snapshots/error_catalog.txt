@@ -208,7 +208,7 @@ DOC-019 [warning/tenant] This attachment is buried too deep
 
 DOC-020 [high/both] This order is too long to read
   what+why: The order has more lines than DocFlow can read in a single pass, so the reading stopped part-way. Rather than keep a partial order, DocFlow kept none of it.
-  next:     DocFlow has already been alerted. Until it's fixed, split the order into two files of fewer lines each and upload them separately.
+  next:     Enter this order by hand for now. DocFlow has been alerted and will follow up on this order.
 
 DOC-021 [high/both] We read this order but couldn't finish it
   what+why: DocFlow read the order, but saving what it read or running its automatic checks (totals, dates, required fields) failed. An order that hasn't been checked isn't offered for approval.

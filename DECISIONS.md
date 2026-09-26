@@ -1965,3 +1965,46 @@ The worker, golden and conversion fakes now serve `stream()`. Worker suite again
 - Chunking stays deferred. It is needed only past about 1,000 lines, or for a document too large for the model's input.
 
 **Related:** Sections 7.1, 7.9; review M1, H3; D-142, D-158, D-159.
+
+## D-162 -- Review integrity: every edit re-checked, the server writes what was acknowledged, approval is of what the reviewer saw (H2, M4, M5); DOC-020 reworded
+
+**Context:** review findings H2, M4 and M5 (`docs/REVIEW-PHASE5.md`), Stage 1c of Phase 5.5. D-115's open item ("edits don't re-validate") is closed here.
+
+**H2 -- a human edit was never re-validated.**
+- **Before:** `apply_edits` wrote the values and nothing else. A reviewer who typed `4750` for `47.50` got no math warning and could approve and export it. A warning stayed open after the value behind it was fixed.
+- **Now:**
+  - `apply_edits` runs `validate_document` in the same transaction, after the edit (and after the reopen, when an approved order is edited). A wrong value raises its warning. A fixed value resolves its warning. Warnings on unchanged values keep their acknowledgements, by fingerprint (D-074).
+  - `approve_document` checks again before it counts what is still open.
+  - A warning found at approval would be lost if the refusal rolled it back: the reviewer would return to a screen that doesn't show what blocked them. So the approve route first runs `recheck_before_approval` in its own committed transaction, and only then approves in a second one. A document past review is never re-checked by this.
+- It is in the shared core functions, so the Console's acting-as review (same routes, D-111) gets it too.
+
+**M4 -- the acknowledgement text came from the browser.**
+- **Before:** the approve body carried `code` and `text` per acknowledgement. The screen sent `code (key: value, …)`, not the catalog wording the reviewer read, and any caller could send nothing or a forgery.
+- **Now:**
+  - The body carries only `warning_id` and an optional `note` (`Acknowledgement` in core). Anything else a client sends is ignored.
+  - `approve_document` reads each warning from `document_warnings` and writes the text with `acknowledgement_text`: where the warning is (line, field), the catalog code, title and message, and the occurrence's own values. These are the parts the review screen renders.
+  - An acknowledgement naming a warning this order doesn't have open is refused with REV-005 ("someone else changed this order first"), and nothing is recorded against it.
+  - The recorded text is still a copy, not a pointer (Section 7.3), so a later catalog change never rewrites what someone agreed to.
+
+**M5 -- approval wasn't tied to what the reviewer saw.**
+- **Before:** approve had no version token and took no row lock. Reviewer A could approve values that reviewer B changed after A's page loaded.
+- **Now:**
+  - The approve route requires `expected_version`, the same token edits already carry (REV-005 on mismatch). A body without it is a 422: only a hand-built request can omit it, since the screen always sends it.
+  - `approve_document` and `apply_edits` lock the document row (`SELECT … FOR UPDATE`) before checking. An edit and an approval of the same order run one after the other, so nothing can slip between the check and the write. `approve_document`'s own `expected_version` stays optional for scripts that approve seeded data.
+- The web screen sends the version it is showing, and only warning ids and notes. Its own `describeWarning` text builder is gone.
+
+**DOC-020 reworded (founder's wording, D-158 follow-up 2):** the advice is now "Enter this order by hand for now. DocFlow has been alerted and will follow up on this order." The old advice, to split the order into two files, would have left two half-orders to approve and export. The message is unchanged. The catalog snapshot was updated with it.
+
+**Tests (written first; the new file failed to import before the change):**
+- `apps/api/tests/test_review_integrity.py` (11, real database, through the HTTP routes and the core functions):
+  - H2: a mistyped price raises VAL-001 and blocks approval; fixing a total resolves VAL-002; approval re-checks and saves the warning it finds while refusing; the core function re-checks for every caller.
+  - M4: the recorded text is the catalog's plus the stored values, never the client's; an acknowledgement of a warning not on the order is REV-005; the core API takes only an id and a note.
+  - M5: approving values changed since they were loaded is REV-005; the route requires the token; the core function refuses a stale version; an approval in progress holds the row, so a concurrent edit times out on the lock (`55P03`).
+- `packages/core/tests/test_review.py`: the text builder, as a pure function.
+- Callers updated to the new shapes: API review tests, acting-as, worker approval helpers, `scripts/seed_example_history.py`. The browser test's stub now refuses an approval that lacks the screen's version or that sends warning text.
+
+**Three existing tests had been approving orders that don't reconcile.** The first full API run after the change ended `3 failed, 399 passed, 3 deselected`. All three failed with REV-001 at approval, and all three were H2 doing its job. The audit-trail test edits quantity 12 → 13 at 47.50 against a printed 570.00 line total (VAL-001). The re-approval test edits the total to 600.00 against 570.00 of lines (VAL-002). The IIF export test creates an order with a 600.00 total (freight) and approves it unchecked (VAL-002). Each now acknowledges its warning before approving, as a reviewer must, and asserts which warning it is. Rerun: `test_review.py`, `test_exports_api.py`, `test_review_api.py`, `test_review_integrity.py`, `test_acting_as.py` → 83 passed; worker `test_numeric_fidelity_db.py` + `test_pipeline_integrity_db.py` → 22 passed. The full API suite was not rerun end to end locally after that fix; CI runs it.
+
+**Incident during the run:** the first run of the lock test lost its pooled connection mid-approval ("server closed the connection unexpectedly", before the test's locking step). The dead backend held the row lock, so the test's cleanup timed out. The test passed on its next two runs, the second connection's `55P03` included. It left one test tenant on staging: "Acme Test M5 Lock" (`c0f43325…`, 1 document). Added to the stranded list for the Stage 5 sweep; not deleted.
+
+**Related:** Sections 7.3, 7.7, 7.16.5; review H2, M4, M5; D-074, D-111, D-115, D-145, D-158, D-160.

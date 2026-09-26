@@ -27,7 +27,7 @@ from uuid import UUID, uuid4
 import pytest
 from docflow_core import db, document_status, stuck_documents
 from docflow_core.db import platform_session, tenant_session
-from docflow_core.review import WarningAcknowledgement, approve_document
+from docflow_core.review import Acknowledgement, approve_document
 from docflow_core.validation import open_warnings, validate_document
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
@@ -87,7 +87,7 @@ def _approve(tenant: WorkerTestTenant, document_id: UUID) -> None:
             document_id,
             user_id=tenant.user_id,
             acknowledgements=[
-                WarningAcknowledgement(warning_id=w["id"], code=w["code"], text=w["code"])
+                Acknowledgement(warning_id=w["id"])
                 for w in open_warnings(session, document_id)
                 if w["status"] == "open"
             ],

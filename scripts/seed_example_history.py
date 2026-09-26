@@ -43,7 +43,7 @@ sys.path.insert(0, str(REPO_ROOT / "apps" / "worker"))
 from app.tasks.parse_and_extract import parse_and_extract
 from docflow_core.db import platform_session, tenant_session
 from docflow_core.review import (
-    WarningAcknowledgement,
+    Acknowledgement,
     approve_document,
     unacknowledged_warnings,
 )
@@ -139,8 +139,8 @@ def main() -> int:
                 print(f"{document_id}: {status} -- not approved")
                 continue
             acks = [
-                WarningAcknowledgement(
-                    warning_id=w["id"], code=w["code"], text=str(w["detail"] or w["code"]),
+                Acknowledgement(
+                    warning_id=w["id"],
                     note="Seeded example history (scripts/seed_example_history.py).",
                 )
                 for w in unacknowledged_warnings(session, document_id)

@@ -74,7 +74,7 @@ def test_the_acting_as_routes_are_404_to_anyone_but_a_platform_admin(client):
         assert client.post(
             f"{_act(tenant.tenant_id)}/documents/{document}/approve",
             headers=tenant.headers(),
-            json={"acknowledgements": []},
+            json={"acknowledgements": [], "expected_version": "never-reached"},
         ).status_code == 404
 
 
