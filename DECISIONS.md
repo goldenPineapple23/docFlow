@@ -1864,6 +1864,24 @@ Today the application enforces who sets them (D-158 follow-up 2; `packages/core/
 - The expected-output file's buyer fields change. The old-to-new mapping of every changed value is recorded here when the answer is re-recorded, followed by a live golden run and a live contamination run.
 - Also renamed in the same step: the example fixtures and recorded responses, the tests, and the two scripts that use `bellascoffee.com` as a sender address.
 
+**Done (Stage 1c, 2026-09-26).** The golden test now reads `apps/api/tests/fixtures/golden/sample_po.txt`; `docs/sample_po.txt` is unchanged.
+
+| Old value | New value |
+|---|---|
+| `Bella's Coffee House` (buyer name, ship-to) | `Acme's Test Coffee House` |
+| `1442 Oak Street` | `1442 Test Street` |
+| `orders@bellascoffee.com` | `orders@acmetestcoffee.example` |
+| `accounts@bellascoffee.com` (a past-order note in the example fixtures) | `accounts@acmetestcoffee.example` |
+
+- Unchanged: PO number `BCH-2291`, the dates, `Portland, OR 97204`, the terms, the note, and every line value Section 8.3 asserts.
+- The possessive is kept on purpose: the buyer-name tests check that "Acme's" and "Acmes" normalize to the same buyer, as they did for the old name.
+- The same substitution ("Bella's" → "Acme's Test", "Bellas" → "Acmes Test", the `bellas*` test domains → `acmes*` / `acmetestcoffee.example`) was applied to 30 files: the example fixtures, API/core/worker tests, six browser specs and one component test, and four scripts (`make_walkthrough_files.py`, `seed_demo_data.py`, `seed_example_history.py`, `seed_review_walkthrough.py`, which now reads the renamed copy). A comment in `docflow_core/buyers.py` changed; no code did.
+- **Re-recorded from real calls** (`scripts/record_example_fixtures.py`, which now records the plain golden answer too; each answer is refused unless it passes its own test's assertions): `recorded_response.json` (2,621 in / 798 out tokens, $0.0132), `recorded_golden_with_examples.json` ($0.0179), `recorded_contamination.json` ($0.0191). Model `claude-sonnet-5`.
+- **Live runs:** `pytest -m live_api` on the golden test, the golden-with-examples test and the contamination test: 3 passed. Replays: 8 passed.
+- New guard `packages/core/tests/test_fake_names.py`: fails the build if the old name appears anywhere under `apps/`, `packages/`, `scripts/` or `supabase/` (proven by planting it in a scratch file).
+- Pending document update: Section 8.3 of the build prompt still names `docs/sample_po.txt` and "Bella's Coffee House".
+- Not changed (history, or data that is immutable): `docs/`, `DECISIONS.md`, `CHECKPOINTS.md`, and the staging rows whose stored model answers contain the old name (end-of-build cleanup).
+
 **Related:** Sections 3, 7.5, 7.15.1, 8.3, 10; D-004, D-013, D-017, D-122, D-124, D-158.
 
 ## D-160 -- Staging test runs are sequential; the deal7 failure was a whole-table count, not bad data

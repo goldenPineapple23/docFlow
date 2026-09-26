@@ -27,7 +27,7 @@ const header: DocumentHeader = {
   po_number: "BCH-2291",
   order_date: "2025-05-28",
   requested_delivery_date: null,
-  buyer_name: "Bella's Test Coffee House",
+  buyer_name: "Acme's Test Coffee House",
   buyer_contact_email: null,
   ship_to_address: null,
   payment_terms: null,

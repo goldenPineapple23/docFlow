@@ -58,7 +58,7 @@ from sqlalchemy import text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOLDEN = REPO_ROOT / "apps" / "api" / "tests" / "fixtures" / "golden" / "recorded_response.json"
-SAMPLE_PO = REPO_ROOT / "docs" / "sample_po.txt"
+SAMPLE_PO = REPO_ROOT / "apps" / "api" / "tests" / "fixtures" / "golden" / "sample_po.txt"
 
 TENANT_NAME = "Acme Test Distributor"
 

@@ -218,12 +218,11 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   golden + contamination before merge); reword DOC-020's advice to "enter by
   hand, DocFlow has been alerted"; add an onboarding step to count the lines on
   the prospect's largest sample order. Chunking stays deferred.
-- **Golden fixture uses a possibly real business name** ("Bella's Coffee House",
-  `bellascoffee.com`, from the proof of concept). Rename in Stage 1c with a
-  re-recorded answer and a live golden run; must happen before an email
-  provider is connected. The staging tenant "Bella's Coffee Haus" was already
-  renamed "Acme Test Coffee Supply" (2026-09-26). Section 8.3's asserted line
-  values don't change; the old-to-new mapping goes in D-159.
+- ~~Golden fixture uses a possibly real business name~~ DONE in Stage 1c (2026-09-26):
+  renamed to "Acme's Test Coffee House" / `acmetestcoffee.example` in a copy under
+  `apps/api/tests/fixtures/golden/`; answers re-recorded, live golden + contamination pass;
+  a guard test keeps the old name out of the code (D-159). Staging rows holding the old name
+  in their stored model answers wait for the end-of-build cleanup.
 - **F-1 (D-159): about 50 RLS policies are keyed on `app.*` settings any
   connection can set** -- enforced by code and guard tests today, not by the
   database. Stage 3: separate logins for API, worker and admin path, with

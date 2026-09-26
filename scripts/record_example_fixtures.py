@@ -1,10 +1,12 @@
 """
-Capture the recorded responses the example-prompting tests replay in CI
-(apps/api/tests/test_example_prompting_golden.py; Section 7.13, D-141).
+Capture the recorded responses the golden-fixture tests replay in CI
+(apps/api/tests/test_golden_fixture.py, Section 8.3; and
+apps/api/tests/test_example_prompting_golden.py, Section 7.13, D-141).
 
-Makes two real calls to the pinned extraction model -- the golden fixture and
-the contamination document, each with the three past examples -- and writes
-the model's structured output, exactly as returned, next to the fixtures.
+Makes three real calls to the pinned extraction model -- the golden fixture
+alone, then the golden fixture and the contamination document each with the
+three past examples -- and writes the model's structured output, exactly as
+returned, next to the fixtures.
 Re-run it whenever the extraction prompt, the example addendum, the schema or
 the model ID changes (Section 7.1), then run the live tests too.
 
@@ -33,6 +35,7 @@ from docflow_core.extraction import (
     extract_document,
 )
 from tests import test_example_prompting_golden as t
+from tests import test_golden_fixture as g
 
 
 def main() -> int:
@@ -42,6 +45,15 @@ def main() -> int:
         return 1
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     examples = t.load_examples()
+
+    # The golden fixture alone, exactly as the plain golden test replays it.
+    alone = extract_document(client, build_text_content(g.SAMPLE_PO_PATH.read_text(encoding="utf-8")))
+    g._assert_matches_section_8_3(alone)
+    g.RECORDED_RESPONSE_PATH.write_text(json.dumps(alone.raw_response, indent=2) + "\n", encoding="utf-8")
+    print(
+        f"recorded {g.RECORDED_RESPONSE_PATH.name}: model={EXTRACTION_MODEL} input_tokens={alone.input_tokens} "
+        f"output_tokens={alone.output_tokens} cost=${alone.est_cost_usd:.4f}"
+    )
 
     jobs = [
         (t.SAMPLE_PO_PATH, t.RECORDED_GOLDEN_PATH, t._assert_matches_section_8_3, t.EXPECTED_GOLDEN_PATH),

@@ -82,7 +82,7 @@ CATALOG: list[tuple[str, str, str, str]] = [
 # Buyers. Fictional, and each says "Test" so no screenshot can be mistaken
 # for a real customer.
 BUYERS: list[tuple[str, str]] = [
-    ("Bella's Test Coffee House", "orders@bellas.test"),
+    ("Acme's Test Coffee House", "orders@acmes.test"),
     ("Northwind Test Bakery", "purchasing@northwind.test"),
     ("Southgate Test Grocers", "ap@southgate.test"),
     ("Harborview Test Cafe", "orders@harborview.test"),
@@ -123,7 +123,7 @@ ITEM        DESCRIPTION                          QTY   UOM   UNIT PRICE      TOT
 """
 
 ADDRESSES = [
-    "1442 Oak Street, Portland, OR 97204",
+    "1442 Test Street, Portland, OR 97204",
     "88 Harbor Road, Astoria, OR 97103",
     "512 Cedar Lane, Eugene, OR 97401",
     "7 Mill Street, Bend, OR 97701",

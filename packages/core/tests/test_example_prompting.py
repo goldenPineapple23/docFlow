@@ -105,14 +105,14 @@ class _RoutingClient:
 
 def test_the_routing_call_uses_the_cheap_model_and_prices_it_as_such():
     client = _RoutingClient(
-        {"buyer_name": "Bella's Coffee House", "buyer_contact_email": None,
+        {"buyer_name": "Acme's Test Coffee House", "buyer_contact_email": None,
          "buyer_confidence": 0.93, "injection_suspected": False}
     )
     result = read_buyer_header(client, [{"type": "text", "text": "<document>x</document>"}])
 
     assert client.calls[0]["model"] == ROUTING_MODEL
     assert "json_schema" in json.dumps(client.calls[0]["output_config"])
-    assert result.ok and result.buyer_name == "Bella's Coffee House"
+    assert result.ok and result.buyer_name == "Acme's Test Coffee House"
     # $1/M in + $5/M out
     assert result.est_cost_usd == Decimal("0.0012")
 
@@ -140,7 +140,7 @@ def _factory(tenant_id):
 def _routing(**overrides) -> RoutingResult:
     base = dict(
         ok=True, model_id=ROUTING_MODEL, prompt_hash="h", schema_version="r", raw_response={},
-        buyer_name="Bella's Coffee House", buyer_confidence=0.95,
+        buyer_name="Acme's Test Coffee House", buyer_confidence=0.95,
     )
     base.update(overrides)
     return RoutingResult(**base)

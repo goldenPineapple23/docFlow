@@ -367,9 +367,9 @@ test("the portal header carries the customer's own company name", async ({ page 
 });
 
 test("a company name is text, never markup", async ({ page }) => {
-  await stubQueue(page, "Bella <b>Bold</b> <img src=x onerror=alert(1)> Coffee");
+  await stubQueue(page, "Acme Test <b>Bold</b> <img src=x onerror=alert(1)> Coffee");
   await page.goto("/review");
-  await expect(page.getByTestId("tenant-name")).toHaveText("Bella <b>Bold</b> <img src=x onerror=alert(1)> Coffee");
+  await expect(page.getByTestId("tenant-name")).toHaveText("Acme Test <b>Bold</b> <img src=x onerror=alert(1)> Coffee");
   await expect(page.getByTestId("tenant-name").locator("b, img")).toHaveCount(0);
 });
 

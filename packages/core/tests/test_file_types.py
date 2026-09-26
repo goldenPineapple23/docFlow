@@ -307,7 +307,7 @@ def test_rtf_saved_with_a_doc_extension_is_still_accepted():
 
 def test_detects_eml():
     content = (
-        b"From: orders@bellascoffee.example\r\n"
+        b"From: orders@acmetestcoffee.example\r\n"
         b"Subject: PO BCH-2291\r\n"
         b"\r\nPlease see attached.\r\n"
     )

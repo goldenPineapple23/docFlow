@@ -211,7 +211,7 @@ def test_provenance_records_extracted_for_every_present_field():
 
     header = {
         "po_number": "BCH-9999",
-        "buyer_name": "Bella's Coffee House",
+        "buyer_name": "Acme's Test Coffee House",
         "order_date": None,
         "currency": "USD",
     }
@@ -280,7 +280,7 @@ def _drive_successful_task(monkeypatch, *, buyer_id, matcher):
 
     header = {key: None for key in mod._PROVENANCE_HEADER_FIELDS}
     header["po_number"] = "BCH-2291"
-    header["buyer_name"] = "Bella's Coffee House"
+    header["buyer_name"] = "Acme's Test Coffee House"
     result = ExtractionResult(
         ok=True,
         model_id="test-model",

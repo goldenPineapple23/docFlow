@@ -92,8 +92,8 @@ _LEGAL_SUFFIXES = frozenset(
 )
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
-# Apostrophes are removed rather than turned into a space: "Bella's" and
-# "Bellas" are the same word written two ways, while "bella s" is a
+# Apostrophes are removed rather than turned into a space: "Acme's" and
+# "Acmes" are the same word written two ways, while "acme s" is a
 # different token sequence that would score lower against both.
 _APOSTROPHES = re.compile(r"['’ʼ`]")
 
@@ -102,8 +102,8 @@ def normalize_buyer_name(name: str | None) -> str:
     """
     The match key: lowercase, apostrophes dropped, every run of remaining
     non-alphanumeric characters becomes a single space, leading/trailing
-    space removed. "Bella's Coffee House, LLC." and "BELLAS COFFEE HOUSE
-    LLC" both become "bellas coffee house llc" -- the same buyer written two
+    space removed. "Acme's Test Coffee House, LLC." and "ACMES TEST COFFEE HOUSE
+    LLC" both become "acmes test coffee house llc" -- the same buyer written two
     ways.
 
     Returns "" for a missing or whitespace-only name; callers treat that as
@@ -136,8 +136,8 @@ def name_similarity(left: str | None, right: str | None) -> Decimal:
     value is stored in a NUMERIC column and shown to the founder; no float
     reaches the database -- Section 7.1).
 
-    `token_sort_ratio` makes word order irrelevant ("Bella's Coffee House"
-    vs "Coffee House, Bella's") while still penalizing a changed word, which
+    `token_sort_ratio` makes word order irrelevant ("Acme's Test Coffee House"
+    vs "Coffee House, Acme's Test") while still penalizing a changed word, which
     is what distinguishes a spelling variant of one company from two
     different companies that share a word.
     """

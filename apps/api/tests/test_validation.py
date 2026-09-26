@@ -147,7 +147,7 @@ class _TestValidationTenant:
             "po_number": "BCH-2291",
             "order_date": "2025-05-28",
             "requested_delivery_date": None,
-            "buyer_name": "Bella's Test Coffee House",
+            "buyer_name": "Acme's Test Coffee House",
             "buyer_contact_email": None,
             "ship_to_address": None,
             "payment_terms": None,

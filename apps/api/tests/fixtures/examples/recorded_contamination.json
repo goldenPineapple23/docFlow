@@ -13,13 +13,13 @@
   },
   "header_confidence": {
     "po_number": 0.98,
-    "order_date": 0.98,
-    "requested_delivery_date": 0.95,
-    "buyer_name": 0.9,
-    "buyer_contact_email": 0.9,
+    "order_date": 0.97,
+    "requested_delivery_date": 0.97,
+    "buyer_name": 0.95,
+    "buyer_contact_email": 0.7,
     "ship_to_address": 0.95,
     "payment_terms": 0.0,
-    "order_total": 0.97,
+    "order_total": 0.95,
     "currency": 0.95,
     "notes": 0.0
   },
@@ -32,7 +32,7 @@
       "unit": "BAG",
       "unit_price": "31.20",
       "line_total": "312.00",
-      "confidence": 0.97
+      "confidence": 0.95
     },
     {
       "line_number": 2,
@@ -42,7 +42,7 @@
       "unit": "BAG",
       "unit_price": "18.75",
       "line_total": "150.00",
-      "confidence": 0.97
+      "confidence": 0.95
     },
     {
       "line_number": 3,
@@ -52,10 +52,10 @@
       "unit": "CS",
       "unit_price": "96.40",
       "line_total": "289.20",
-      "confidence": 0.97
+      "confidence": 0.95
     }
   ],
-  "document_notes": "",
+  "document_notes": "No payment terms or notes section present in the document. buyer_contact_email is a general purchasing address, not a named individual contact.",
   "injection_suspected": false,
   "currency_inferred": false
 }

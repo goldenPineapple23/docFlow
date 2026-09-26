@@ -7,7 +7,7 @@ For the Phase 5 exit criterion: "with example prompting on for a test buyer
 with 10+ approved documents, the golden fixture still extracts exactly".
 This makes the test buyer. Each order:
 
-  1. is a fictional Bella's Coffee House purchase order (the Section 8.3
+  1. is a fictional Acme's Test Coffee House purchase order (the Section 8.3
      golden fixture's buyer), numbered BCH-2301 upward -- never BCH-2291,
      the golden fixture itself, so the fixture can be uploaded afterwards
      and read WITH these as its examples;
@@ -23,7 +23,7 @@ repo root, after migration 0025 is applied:
     apps/worker/.venv/Scripts/python.exe scripts/seed_example_history.py <tenant-id> [count]
 
 Then, in the Console: Tenant -> Example prompting -> turn it on, and upload
-docs/sample_po.txt as that tenant. Its review screen should say it was read
+the golden fixture (apps/api/tests/fixtures/golden/sample_po.txt) as that tenant. Its review screen should say it was read
 with 3 earlier orders, and every value should still be the golden fixture's.
 
 All data is fictional (CLAUDE.md Section 0 rule 4). Logs nothing but IDs.
@@ -61,7 +61,7 @@ _MONTHS = ["April", "May", "June", "July", "August", "September"]
 
 
 def _po(n: int) -> bytes:
-    """A Bella's order laid out exactly like docs/sample_po.txt, with its own
+    """An Acme's Test order laid out exactly like the golden fixture, with its own
     number, dates, quantities and note."""
     month_index = n % len(_MONTHS)
     day = 3 + (n * 2) % 24
@@ -75,12 +75,12 @@ def _po(n: int) -> bytes:
         rows.append(f"{sku:<12}{desc:<33}{qty:>3}    {unit:<4}  {'$' + price:>8}   ${line_total:,.2f}")
     return (
         "PURCHASE ORDER\n\n"
-        "Bella's Coffee House\n1442 Oak Street, Portland, OR 97204\norders@bellascoffee.com\n\n"
+        "Acme's Test Coffee House\n1442 Test Street, Portland, OR 97204\norders@acmetestcoffee.example\n\n"
         f"PO Number: BCH-{2300 + n}\n"
         f"Date: {_MONTHS[month_index]} {day}, 2026\n"
         f"Requested Delivery: {month_number:02d}/{min(day + 7, 28):02d}/2026\n"
         "Terms: Net 30\n\n"
-        "Ship To: Bella's Coffee House, 1442 Oak Street, Portland, OR 97204\n\n"
+        "Ship To: Acme's Test Coffee House, 1442 Test Street, Portland, OR 97204\n\n"
         "ITEM        DESCRIPTION                     QTY   UOM   UNIT PRICE   TOTAL\n"
         + "\n".join(rows)
         + f"\n\n                                             ORDER TOTAL:         ${total:,.2f}\n\n"
@@ -124,7 +124,7 @@ def main() -> int:
                 {
                     "id": str(document_id),
                     "t": str(tenant_id),
-                    "name": f"bella-seed-{2300 + n}.txt",
+                    "name": f"acme-seed-{2300 + n}.txt",
                     "path": path,
                     "sha": hashlib.sha256(content).hexdigest(),
                 },

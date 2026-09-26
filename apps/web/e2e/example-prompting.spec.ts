@@ -17,7 +17,7 @@ const overview = (enabled: boolean) => ({
   min_approved: 10,
   max_examples: 3,
   buyers: [
-    { buyer_id: "b1", name: "Bella's Test Coffee", approved: 12, with_text: 11, qualifies: true },
+    { buyer_id: "b1", name: "Acme's Test Coffee", approved: 12, with_text: 11, qualifies: true },
     { buyer_id: "b2", name: "Acme Test Bakery", approved: 4, with_text: 4, qualifies: false },
   ],
   this_month: {

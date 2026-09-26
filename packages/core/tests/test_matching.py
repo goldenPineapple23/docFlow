@@ -11,7 +11,7 @@ these tests care much more that "Colombian Whole Bean 5lb" never resolves to
 an unmatched line is a question for a reviewer, a wrongly matched line is a
 wrong shipment.
 
-All catalog data below is fictional, built from docs/sample_po.txt's
+All catalog data below is fictional, built from the golden fixture's
 invented SKUs (CLAUDE.md Section 0 rule 4).
 """
 
@@ -43,7 +43,7 @@ from docflow_core.matching import (
     uom_mismatch,
 )
 
-# ── A small fictional catalog, straight from docs/sample_po.txt ─────────────
+# ── A small fictional catalog, straight from the golden fixture ─────────────
 
 CF_1001 = uuid4()
 CF_2210 = uuid4()
