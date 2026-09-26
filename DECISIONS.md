@@ -1693,3 +1693,44 @@ Target: zero API tests skipped in CI. Built as D-148.
 5. **The parse worker, stuck-document detection and Stripe reconciliation are built in 5.5.** **Phase 6's versions of these items are therefore already satisfied and must not be redone:** the isolated parse worker (7.11), the stuck-in-processing alert (7.9) and Stripe status reconciliation.
 
 **Related:** D-149 – D-153; review H4, H5, H8, M7, H11.
+
+
+## D-156 -- Migration 0026 on staging: applied without the stated backup; the backfill; no approved order reopened
+
+**What happened, recorded as it happened:**
+- The founder merged the Stage 1a PR and applied migration 0026 to `docflow-staging` **without running the stated backup step first**. That was the process gap: the backup steps came after the PR link in the message.
+- 0026 deletes nothing: it drops the fixed decimal places from four number columns and adds a column to `exports`. Every existing value already fitted the new type, so no data was at risk.
+- The founder then took `backup_0026` (`document_headers`, `document_lines`) **after** 0026 and **before** the backfill, so it covers the backfill. Row counts matched: `document_headers` 46 = 46, `document_lines` 142 = 142. RLS was enabled on both backup tables (no policies: owner-only) after Supabase's security advisor flagged them. Kept until the founder says to drop it.
+- **Process fix (founder, standing):** a PR that needs a staging migration puts the backup SQL (with RLS on every backup table) and the row-count check at the TOP of the message, with an explicit "do not merge until I've verified against staging". The standard procedure is RUNBOOK.md section 1.
+
+**Verification after 0026 (local, against staging):** core 504 passed; worker 86 passed (including the C1 real-database and property tests); api 391 passed, 3 live tests deselected.
+
+**Backfill (`scripts/c1_backfill.py --apply`, founder-approved for this one run):**
+- Restored 16 never-edited values in 2 orders still in review. Both are Acme Test Prospect, PO BCH-2291: `613e2d08-e218-4188-9d5c-b2c9d822777e` and `535f55e0-231c-45d5-918e-0e2dcb5fe12d`.
+- Every restored value was padding only (e.g. quantity stored 12.0000, printed 12; unit price 47.5000, printed 47.50). None changed value. Both orders were re-validated. A report run afterwards shows the restore list empty and nothing else changed.
+
+**Approved and exported orders: none reopened (founder decision).**
+- The report found 110 differences in the 16 orders below. All 110 are padding with no change of value: the snapshots are numerically correct. 11 exports were made from those snapshots. The snapshots stay frozen (Section 7.3).
+- Acme Test Distributor: `a1006dbc-4d09-43f2-93f8-37a7f653f030` (BCH-2291, exported), `a28b5573-6fb4-4a00-ba22-da46b3dc43dd` (BCH-2291, exported).
+- Acme Test Prospect: `a04312c2-84a2-46b2-8398-76d068ae7f7d` (ACME-TEST-0001), `03a9437a-1551-46b4-82c9-4724b1c5d76c` (BCH-2291), `02ceba67-3245-4a8d-9905-167a2d0e3e37` (BCH-2291, exported), `b0d96940-f50a-4564-a194-34554d39770b` (BCH-2301), `a9a274fb-8c10-4f8d-bb5a-7d690762dc21` (BCH-2302), `d6167230-2347-417d-beab-7aa720921646` (BCH-2303), `127198bc-a667-4e41-9a65-bf99092033ad` (BCH-2304), `8005ebfe-6124-479e-8a84-b3ef0229b8fb` (BCH-2305), `f002b1ba-aa60-4ee7-9a6f-797cf5c5c682` (BCH-2306), `87727b98-e20b-448c-bd88-e0be4e7beb4e` (BCH-2307), `86cc8d02-78a9-48cf-8921-3c419bf7c490` (BCH-2308), `90f9cd3b-a4d8-45b5-98ec-e596a9420949` (BCH-2309), `3f7fc392-1b3a-4716-a51e-ae6bf2e1bd08` (BCH-2310). All approved unless marked.
+- Bella's Coffee Haus: `002c0064-757a-4d99-a1bf-fd99eea10b05` (ACME-TEST-0001, exported).
+- Every human-typed value matched what was typed (0 differences).
+
+**The 28 orders with no model answer in `raw_json`:**
+- None was ever read by the model: no `model_id`, no `extraction_runs`, `raw_json` null.
+- They are seed data created outside the pipeline. `scripts/seed_demo_data.py` (22 in Acme Test Distributor, 9–17 Sept) and `scripts/seed_merge_demo.py` (6 in Bella's Coffee Haus, 19 Sept) insert finished `needs_review`/`approved` rows directly.
+- The worker writes `raw_json` on every path that ends in `needs_review` or `failed`, so this is not a gap in the pipeline.
+- **But nothing enforces it:** the database accepts a reviewable order with no model answer. Stage 1b adds a database rule and a test, and the two seed scripts are changed to record a model answer (test data, clearly labelled) instead of bypassing Section 7.1.
+
+**Related:** Section 5 (backup before a migration), 7.1, 7.3; D-149, D-154, D-155.
+
+
+## D-157 -- IIF keeps the EXP-008 warning until a real QuickBooks import decides
+
+Founder decision: keep warning. `docs/docflow-uat-plan.docx` TC-26 gains a required step:
+- import, into a real QuickBooks Desktop company file, an approved order whose amounts carry more than 2 decimal places and whose quantities and rates carry more than 5;
+- record exactly what QuickBooks does with each value.
+
+Refusing versus warning is decided after that, on the evidence.
+
+**Related:** D-154; UAT TC-26.
