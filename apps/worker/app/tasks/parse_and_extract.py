@@ -23,6 +23,7 @@ from __future__ import annotations
 import base64
 import logging
 import re
+import time
 from decimal import Decimal
 from io import BytesIO
 from uuid import UUID, uuid4
@@ -44,6 +45,7 @@ from docflow_core.db import tenant_session
 from docflow_core.duplicates import detect_document_relationships
 from docflow_core.example_prompting import ExamplePlan
 from docflow_core.extraction import (
+    EXTRACTION_DEADLINE_SECONDS,
     ExtractionResult,
     build_text_content,
     extract_document,
@@ -439,11 +441,30 @@ def _plan_examples(
 def _record_runs(
     session: Session, tenant_id: UUID, document_id: UUID, plan: ExamplePlan, result: ExtractionResult
 ) -> UUID:
-    """Every model call this document cost, one extraction_runs row each
-    (D-142) -- the routing read first, because it happened first."""
-    if plan.routing is not None:
-        model_runs.record_routing(session, tenant_id, document_id, plan.routing)
+    """The extraction call's extraction_runs row (D-142). The routing read,
+    when there was one, is already on record: `example_prompting.plan` writes
+    it the moment it returns (D-163), so a failure after it can't lose it."""
     return model_runs.record_extraction(session, tenant_id, document_id, result)
+
+
+def _record_unsaved_extraction(
+    tenant_id: UUID, document_id: UUID, plan: ExamplePlan, result: ExtractionResult
+) -> None:
+    """A paid answer whose save failed (DOC-021): that transaction held the
+    run record too, so it is written again on its own -- every paid call is
+    on the cost record, succeeded or failed (founder, 2026-09-26; D-163).
+    Logged, never raised: the document must still end `failed`."""
+    try:
+        with tenant_session(tenant_id) as session:
+            model_runs.record_extraction(session, tenant_id, document_id, result)
+            session.execute(
+                text("UPDATE documents SET est_cost_usd = :cost WHERE id = :id"),
+                {"id": str(document_id), "cost": _money(_total_cost(plan, result))},
+            )
+    except Exception as exc:  # noqa: BLE001 -- see the docstring
+        logger.error(
+            "extraction_run_not_recorded document_id=%s error_type=%s", document_id, type(exc).__name__
+        )
 
 
 def _total_cost(plan: ExamplePlan, result: ExtractionResult) -> Decimal | None:
@@ -595,6 +616,10 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                 "parse_and_extract_not_claimed document_id=%s status=%s", did, row["status"]
             )
             return
+        # One budget for the whole read, counted from the claim (D-163): the
+        # stuck-document sweep may take a claim over after
+        # STUCK_PROCESSING_TIMEOUT_MIN, and this read must be over by then.
+        read_deadline = time.monotonic() + EXTRACTION_DEADLINE_SECONDS
         storage_path = row["storage_path"]
         original_filename = row["original_filename"]
         sender_email = row.get("sender_email")
@@ -652,9 +677,11 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
     _store_extracted_text(tid, did, parts)
 
     settings = get_settings()
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    # Two retries is the SDK's default, stated here because the read budget
+    # above is sized with it in mind.
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=2)
     plan = _plan_examples(client, tid, did, sender_email, parts)
-    result = extract_document(client, content_blocks, examples=plan.examples)
+    result = extract_document(client, content_blocks, examples=plan.examples, deadline=read_deadline)
 
     if not result.ok:
         with tenant_session(tid) as session:
@@ -684,6 +711,7 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
         # Nothing of the answer was written (one transaction). Keep the paid
         # answer on the failed document, with a code, and tell the founder.
         logger.error("extraction_save_failed document_id=%s error_type=%s", did, type(exc).__name__)
+        _record_unsaved_extraction(tid, did, plan, result)
         _fail_after_extraction(tid, did, "DOC-021", raw_response=result.raw_response)
         return
 

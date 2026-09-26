@@ -307,7 +307,7 @@ def _drive_successful_task(monkeypatch, *, buyer_id, matcher):
 
     monkeypatch.setattr(mod, "tenant_session", fake_tenant_session)
     monkeypatch.setattr(mod, "read_file", lambda path: b"PURCHASE ORDER\nPO Number: BCH-2291\n")
-    monkeypatch.setattr(mod.anthropic, "Anthropic", lambda api_key=None: object())
+    monkeypatch.setattr(mod.anthropic, "Anthropic", lambda api_key=None, **kwargs: object())
     monkeypatch.setattr(mod, "extract_document", lambda client, content, **kwargs: result)
     _no_examples(monkeypatch, mod)
     monkeypatch.setattr(mod, "save_file", lambda tenant_id, name, data: f"tenants/{tenant_id}/uploads/x.txt")
@@ -486,7 +486,7 @@ def _drive_task_over(monkeypatch, filename: str, content: bytes, *, save_file):
     monkeypatch.setattr(mod, "tenant_session", fake_tenant_session)
     monkeypatch.setattr(mod, "read_file", lambda path: content)
     monkeypatch.setattr(mod, "save_file", save_file)
-    monkeypatch.setattr(mod.anthropic, "Anthropic", lambda api_key=None: object())
+    monkeypatch.setattr(mod.anthropic, "Anthropic", lambda api_key=None, **kwargs: object())
     monkeypatch.setattr(mod, "extract_document", lambda client, blocks, **kwargs: failed)
     _no_examples(monkeypatch, mod)
 
@@ -636,7 +636,10 @@ def test_the_routing_read_is_its_own_run_and_its_cost_is_part_of_the_document(mo
     mod.parse_and_extract(str(uuid4()), str(uuid4()))
 
     runs = [params for sql, params in session.statements if "INSERT INTO extraction_runs" in sql]
-    assert [r["run_kind"] for r in runs] == ["buyer_routing", "extraction"]
+    # The routing read is recorded by example_prompting.plan the moment it
+    # returns (D-163; test_example_prompting.py) -- stubbed out here -- so the
+    # worker writes only the extraction run. The document's cost still sums both.
+    assert [r["run_kind"] for r in runs] == ["extraction"]
     assert captured["examples"] == []
     costs = [params["v_est_cost_usd"] for params in _to(session, "failed")]
     assert costs == ["0.0111"]

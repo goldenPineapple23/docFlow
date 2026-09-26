@@ -184,7 +184,7 @@ are D-149 – D-153.
 | Stage | What | Status | Decisions |
 |---|---|---|---|
 | 0 | Safety net: push, CI green, `main` protected (done before 5.5 began); **CI database and the unapproved-skip check** (H7 part 2); core type-checked and pinned in CI | DONE (PR #3, merged 2026-09-25) | D-148 |
-| 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents | IN PROGRESS: 1a numeric fidelity DONE (PR #4; migration `0026` applied to staging, backfill run, D-156); 1b pipeline BUILT (branch `phase55/stage1b-pipeline`; backup_0027 taken and migration `0027` applied to staging 2026-09-26; the staging API run's one failure, `deal7`, was a whole-table tenant count disturbed by the worker suite running at the same time, now fixed, D-160); 1c BUILT on branch `phase55/stage1c-review-integrity`, no migration: golden fixture renamed with a live golden run (D-159), M1 measured and streamed (D-161), H2/M4/M5 and the DOC-020 rewording (D-162); open for the founder: named system actors (needs a migration) and the onboarding line-count step | D-149, D-154 – D-162 |
+| 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents | IN PROGRESS: 1a numeric fidelity DONE (PR #4; migration `0026` applied to staging, backfill run, D-156); 1b pipeline BUILT (branch `phase55/stage1b-pipeline`; backup_0027 taken and migration `0027` applied to staging 2026-09-26; the staging API run's one failure, `deal7`, was a whole-table tenant count disturbed by the worker suite running at the same time, now fixed, D-160); 1c BUILT on branch `phase55/stage1c-review-integrity`, no migration: golden fixture renamed with a live golden run (D-159), M1 measured and streamed (D-161), H2/M4/M5 and the DOC-020 rewording (D-162), one read budget from the claim and every paid call on the cost record (D-163). Next: named system actors in their own PR after 1c merges (founder), then the Stage 1 checkpoint | D-149, D-154 – D-163 |
 | 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events | PLANNED | D-151 |
 | 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation, H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) | PLANNED | D-150, D-159 |
 | 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items | PLANNED | D-152 |
@@ -215,8 +215,9 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   call failed as DOC-008 past 65-80 lines (a 60-second idle connection drop, not the token
   cap). Now streamed at 128,000 tokens with a 20-minute deadline inside the stuck timeout:
   300 and 600 lines read exactly (249 s / $0.41, 482 s / $0.81); ceiling about 1,000 lines.
-  DOC-020 reworded ("enter this order by hand for now", D-162). Still open: the onboarding
-  line-count step. Chunking deferred.
+  DOC-020 reworded ("enter this order by hand for now", D-162). No fail-fast past ~1,000
+  lines: a Haiku pre-count guessed round numbers (600 -> 1,000), D-163; the RUNBOOK onboarding
+  checklist covers it instead (founder). Chunking deferred.
 - ~~Golden fixture uses a possibly real business name~~ DONE in Stage 1c (2026-09-26):
   renamed to "Acme's Test Coffee House" / `acmetestcoffee.example` in a copy under
   `apps/api/tests/fixtures/golden/`; answers re-recorded, live golden + contamination pass;

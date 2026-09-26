@@ -203,3 +203,99 @@ def test_M1_an_answer_that_is_not_a_finished_reply_is_never_kept(stop_reason):
     result = _extract(client)
     assert not result.ok
     assert not result.lines
+
+
+# ── The read budget covers the whole read, retries included (founder, 2026-09-26) ──
+
+
+def test_M1_the_deadline_counts_time_spent_before_the_first_event(monkeypatch):
+    """The SDK's own retries (a refused connection, a 529) happen inside
+    `messages.stream(...)`, before any event. That time is part of the same
+    read: the clock started before the call, so the stream is stopped at
+    the first event past the deadline, not given a fresh 20 minutes."""
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(extraction.time, "monotonic", lambda: clock["now"])
+    stream = _Stream(_message(), events=5)
+
+    class _SlowToStart(_Client):
+        def stream(self, **kwargs):
+            clock["now"] += extraction.EXTRACTION_DEADLINE_SECONDS + 1  # retries ate the budget
+            return super().stream(**kwargs)
+
+    result = _extract(_SlowToStart(stream))
+    assert result.error_code == "DOC-020"
+    assert result.raw_response["stopped"] == "deadline"
+    assert stream.iterated == 1
+
+
+def test_M1_a_caller_deadline_is_the_one_used_and_bounds_the_silence_timeout(monkeypatch):
+    """The worker passes the deadline it set when it claimed the document, so
+    parsing, conversion and the routing call all spend the same budget."""
+    clock = {"now": 5000.0}
+    monkeypatch.setattr(extraction.time, "monotonic", lambda: clock["now"])
+    client = _Client(_Stream(_message(), events=2))
+    result = extract_document(client, build_text_content("PO TST-1"), deadline=clock["now"] + 45)
+    assert result.ok
+    # 45 s left: the silence timeout may not reach past the deadline.
+    assert client.calls[0]["timeout"] == 45
+
+
+def test_M1_the_routing_call_and_the_token_count_have_short_timeouts():
+    """Neither may run on the SDK's 10-minute default inside a claim."""
+    calls = []
+
+    class _Recording:
+        def __init__(self):
+            self.messages = self
+
+        def create(self, **kwargs):
+            calls.append(("routing", kwargs.get("timeout")))
+            return _message(text=json.dumps({"buyer_name": None, "buyer_contact_email": None,
+                                             "buyer_confidence": 0.0, "injection_suspected": False}))
+
+        def count_tokens(self, **kwargs):
+            calls.append(("count", kwargs.get("timeout")))
+            return SimpleNamespace(input_tokens=10)
+
+    extraction.read_buyer_header(_Recording(), build_text_content("PO TST-1"))
+    extraction._count_example_tokens(_Recording(), [])
+    assert calls == [
+        ("routing", extraction.ROUTING_TIMEOUT_SECONDS),
+        ("count", extraction.COUNT_TOKENS_TIMEOUT_SECONDS),
+    ]
+
+
+def test_M1_the_whole_read_ends_well_inside_the_stuck_timeout():
+    """From the claim: the read budget (parsing, conversion, routing, the
+    streamed answer, SDK retries), one last silence timeout, then the example
+    token count after the answer (three attempts). All of it must end before
+    the sweep may take the claim over (H3)."""
+    worst_case = (
+        extraction.EXTRACTION_DEADLINE_SECONDS
+        + extraction.EXTRACTION_STREAM_IDLE_SECONDS
+        + 3 * extraction.COUNT_TOKENS_TIMEOUT_SECONDS
+    )
+    assert worst_case <= 0.8 * STUCK_PROCESSING_TIMEOUT_MIN * 60
+
+
+# ── Every paid call leaves a cost record (founder, 2026-09-26) ─────────────
+
+
+def test_cost_a_stream_dropped_mid_answer_keeps_the_input_it_was_billed_for():
+    stream = _Stream(_message(), events=10, fail_after=4)
+    result = _extract(_Client(stream))
+    assert result.error_code == "DOC-008"
+    # message_start had arrived: the input was billed and is recorded.
+    assert result.input_tokens == 1200
+    assert result.est_cost_usd is not None and result.est_cost_usd > 0
+    assert result.raw_response["cost_complete"] is False
+
+
+def test_cost_a_call_refused_before_it_started_records_no_tokens():
+    class _Refused(_Client):
+        def stream(self, **kwargs):
+            raise httpx2.ConnectError("connection refused")
+
+    result = _extract(_Refused(_Stream(_message(), events=1)))
+    assert result.error_code == "DOC-008"
+    assert result.input_tokens is None and result.est_cost_usd is None

@@ -48,7 +48,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from docflow_core import buyers
+from docflow_core import buyers, model_runs
 from docflow_core.constants import (
     EXAMPLE_MAX_PER_PROMPT,
     EXAMPLE_MIN_APPROVED_DOCS,
@@ -348,6 +348,10 @@ def plan(
         buyer_id, identified_by = from_sender
     elif worth_routing:
         routing = read_buyer_header(client, routing_content(parts))
+        # Paid for: on the cost record now, in its own transaction, whatever
+        # happens to the rest of the plan (founder, 2026-09-26; D-163).
+        with session_factory(tenant_id) as session:
+            model_runs.record_routing(session, tenant_id, document_id, routing)
         with session_factory(tenant_id) as session:
             buyer_id = buyer_from_routing(session, tenant_id, routing)
         identified_by = "header_read" if buyer_id is not None else None
