@@ -209,8 +209,15 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 ## Known open items (across phases)
 
 - IIF export not yet validated against real QuickBooks Desktop (Phase 4).
-- Stuck-in-processing alert (7.9) not built; when built it must watch `pending`
-  too (D-095).
+- Stuck-in-processing alert (7.9): built in Phase 5.5 Stage 1b, watching
+  `pending` too (D-095, D-158).
+- **Very long orders (D-158 follow-up):** an order past the model's single-read
+  ceiling (estimated 150–250 lines, not yet measured) fails as DOC-020. For the
+  customer, that's an order DocFlow couldn't process. Planned fix, once the
+  founder says go: stream the extraction call (about 8× the room). Chunking
+  only past that. Before building: measure the real ceiling with one long test
+  order, and reword DOC-020's advice (splitting the file isn't practical for a
+  buyer's PDF).
 - Custom per-tenant fields deferred until a prospect needs one (D-120).
 - Error-catalog messages use ASCII " -- " instead of real dashes; a switch was
   offered.

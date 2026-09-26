@@ -40,7 +40,8 @@ SCHEMA_VERSION = "1.0.0"
 
 # The most the model may write for one order (review M1). A line is ~60
 # tokens of JSON, so 4096 truncated any order past roughly 50-60 lines, every
-# time. 16000 holds ~250 lines and is the ceiling the Anthropic SDK advises
+# time. 16000 holds an estimated 150-250 lines (unmeasured; adaptive thinking
+# counts against it too -- D-158 follow-up) and is the ceiling the Anthropic SDK advises
 # for a non-streaming request (above it, a request can outrun the SDK's HTTP
 # timeout). A longer order is caught by stop_reason and failed as DOC-020,
 # never kept half-read.
