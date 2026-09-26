@@ -274,7 +274,7 @@ def get_document(
                 "field_schema_version, "
                 # Why a failed document failed, when the worker stopped before
                 # the model (a refused or unconvertible file, D-145).
-                "raw_json->>'error_code' AS worker_error_code, "
+                "raw_json->>'error_code' AS worker_error_code, failure_code, "
                 # How many approved past orders the model was shown (Section
                 # 7.13: a reviewer can see why a value may have been read the
                 # way it was). A count only; the examples themselves are
@@ -388,7 +388,10 @@ def _failure(session, document) -> dict[str, str]:
     the extraction run when the model call itself failed. Never the raw cause:
     that stays in the log and Sentry (Section 7.16.5).
     """
-    code = document["worker_error_code"]
+    # Since D-158 every failure writes documents.failure_code (DOC-020 too
+    # long, DOC-021 couldn't be checked, DOC-022 stuck, and the earlier ones);
+    # the two older places are read for documents failed before that.
+    code = document["failure_code"] or document["worker_error_code"]
     if not code:
         code = session.execute(
             text(

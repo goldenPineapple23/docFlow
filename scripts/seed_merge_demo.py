@@ -42,12 +42,14 @@ def _create_document(tenant_id: UUID, buyer_name: str, email: str | None) -> UUI
         session.execute(
             text(
                 """
+                -- Seeded outside the pipeline: raw_json is a labelled stand-in, not a model
+                -- answer. Migration 0027 requires one on every reviewable document (D-156, D-158).
                 INSERT INTO documents
                     (id, tenant_id, original_filename, storage_path, source, status,
-                     content_sha256, is_test_batch, created_at)
+                     content_sha256, is_test_batch, raw_json, created_at)
                 VALUES
                     (:id, :tenant_id, :filename, :path, 'upload', 'needs_review',
-                     :sha, true, now())
+                     :sha, true, '{"header": {}, "line_items": [], "seeded_demo": true}'::jsonb, now())
                 """
             ),
             {

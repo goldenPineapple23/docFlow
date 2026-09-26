@@ -387,12 +387,10 @@ def test_a_viewer_cannot_reopen(client):
         assert _status(document) == "approved"
 
 
-def _fail(document_id: UUID, raw_json: str | None) -> None:
-    with platform_session() as session:
-        session.execute(
-            text("UPDATE documents SET status = 'failed', raw_json = CAST(:raw AS jsonb) WHERE id = :id"),
-            {"id": str(document_id), "raw": raw_json},
-        )
+def _failed(tenant, raw_json: str | None) -> UUID:
+    return tenant.create_document(
+        header=CLEAN_HEADER, lines=CLEAN_LINES, status="failed", raw_json=raw_json
+    )
 
 
 @requires_review_schema
@@ -404,11 +402,10 @@ def test_a_failed_order_says_why_in_the_catalogs_words(client):
     the catalog, never the raw cause.
     """
     with _ReviewTenant("Acme Test Distributor -- failure reason") as tenant:
-        converted = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
-        _fail(converted, '{"error_code": "DOC-017", "detail": "LibreOffice exited 1"}')
+        # Created failed: needs_review -> failed isn't a path (migration 0027).
+        converted = _failed(tenant, '{"error_code": "DOC-017", "detail": "LibreOffice exited 1"}')
 
-        model = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
-        _fail(model, None)
+        model = _failed(tenant, None)
         with platform_session() as session:
             session.execute(
                 text(
@@ -418,8 +415,7 @@ def test_a_failed_order_says_why_in_the_catalogs_words(client):
                 {"t": str(tenant.tenant_id), "d": str(model)},
             )
 
-        unknown = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
-        _fail(unknown, None)
+        unknown = _failed(tenant, None)
 
         fine = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
 

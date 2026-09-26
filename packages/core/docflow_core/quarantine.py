@@ -30,7 +30,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from docflow_core import allowance
+from docflow_core import allowance, document_status
 from docflow_core.constants import QUARANTINE_TTL_DAYS
 from docflow_core.errors import ErrorCatalogEntry, get_error
 
@@ -100,12 +100,13 @@ def hold(
 ) -> None:
     """Move an already-stored document into quarantine (used for holds that
     are decided after the row exists)."""
-    session.execute(
-        text(
-            "UPDATE documents SET status = 'quarantined', quarantine_reason = :reason, "
-            "quarantined_at = now() WHERE id = :id AND tenant_id = :t"
-        ),
-        {"id": str(document_id), "t": str(tenant_id), "reason": reason},
+    document_status.transition_many(
+        session,
+        tenant_id,
+        [document_id],
+        from_statuses=["pending"],
+        to="quarantined",
+        values={"quarantine_reason": reason, "quarantined_at": document_status.NOW},
     )
 
 
@@ -229,23 +230,24 @@ def release(
     if any(not can_release(role, reason) for reason in held.values()):
         raise QuarantineError("QUA-001")
 
-    ordered = [UUID(str(r["id"])) for r in rows]
-    session.execute(
-        text(
-            """
-            UPDATE documents
-               SET status = 'pending', released_at = now(),
-                   released_by_user_id = :actor, released_acting_as_tenant_id = :acting
-             WHERE tenant_id = :t AND id = ANY(CAST(string_to_array(:ids, ',') AS uuid[]))
-            """
-        ),
-        {
-            "t": str(tenant_id),
-            "ids": ",".join(str(i) for i in ordered),
-            "actor": str(actor_user_id),
-            "acting": str(acting_as_tenant_id) if acting_as_tenant_id else None,
-        },
+    candidates = [UUID(str(r["id"])) for r in rows]
+    moved = set(
+        document_status.transition_many(
+            session,
+            tenant_id,
+            candidates,
+            from_statuses=["quarantined"],
+            to="pending",
+            values={
+                "released_at": document_status.NOW,
+                "released_by_user_id": str(actor_user_id),
+                "released_acting_as_tenant_id": str(acting_as_tenant_id) if acting_as_tenant_id else None,
+            },
+        )
     )
+    # Received order, as selected above (Section 7.16.4), minus any that
+    # someone else released or cleared in the meantime.
+    ordered = [document_id for document_id in candidates if document_id in moved]
     # They count now, so the 80% / 100% notices may fire.
     allowance.record_thresholds(session, tenant_id)
     return ReleaseResult(

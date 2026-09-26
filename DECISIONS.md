@@ -1734,3 +1734,134 @@ Founder decision: keep warning. `docs/docflow-uat-plan.docx` TC-26 gains a requi
 Refusing versus warning is decided after that, on the evidence.
 
 **Related:** D-154; UAT TC-26.
+
+## D-158 -- One guarded state machine; jobs that can be redelivered; review only once checked (H1, H3, M1, M3)
+
+**Context:** review H1, H3, M1, M3; Stage 1b of Phase 5.5.
+- H1: an order was committed as `needs_review` before matching, duplicate detection and validation ran, and a failure in those steps was only logged. It could sit in review with zero warnings and be approved.
+- H3: the task set `processing` unconditionally. Late acknowledgement plus Redis redelivery could knock an approved order back, pay for a second extraction, fail on the header insert, and strand the order.
+- M1: `max_tokens=4096` truncated any order past roughly 50–60 lines.
+- M3: a failure while saving the model's answer left the document in `processing` with nothing recorded.
+
+**Decisions:**
+- **The state machine lives in the database** (migration 0027): `document_status_transition_allowed()` lists the legal moves, and a trigger refuses every other one, whoever sends it. `docflow_core.document_status.ALLOWED` mirrors the list, and a test asserts the two agree.
+  - Legal moves: pending→processing / quarantined / failed; staged→pending; quarantined→pending; processing→needs_review / failed; needs_review→approved / rejected; approved→exported; approved, exported or rejected→needs_review.
+  - Nothing goes back to `processing` except a stale claim being taken over.
+- **Every status change is a compare-and-set** through `document_status.transition`: approve, reject, reopen, export, hold, release, run extraction and the worker's changes. A guard test fails the build if any other code writes a document's status. A second approval racing the first now gets REV-002 instead of a double write.
+- **The worker claims first.** It claims a `pending` document, or one left in `processing` past `STUCK_PROCESSING_TIMEOUT_MIN` (30), incrementing `processing_attempts`. A redelivered or duplicate job, or one for an order already reviewed, finds nothing to claim and returns.
+- **Resumable.** The model's answer, header, lines and run record are saved in one transaction while still `processing`. A job that finds `current_extraction_run_id` already set resumes post-processing and never calls the model again. Proven by a test that SIGKILLs a real child process mid-job and redelivers.
+- **Into review only with the checks.**
+  - Buyer identification, matching and duplicate detection keep their own transactions (D-058: never lose a paid extraction).
+  - A step that fails is written to `documents.pipeline_issues`. That raises **VAL-016** on every later re-validation, plus a `pipeline_step_failed` founder alert.
+  - Validation and the move to `needs_review` are one transaction. If validation raises, the order is `failed` with **DOC-021** and a `document_failed` alert.
+  - A failure saving the answer is also DOC-021, with the answer kept in `raw_json` (M3).
+- **`documents.failure_code`** records why a document failed after the model answered, because `raw_json` holds the answer and is never overwritten. The API reads it first.
+- **M1:** `EXTRACTION_MAX_TOKENS = 16000`. That is the Anthropic SDK's advised ceiling for a non-streaming call (above it a request can outrun the HTTP timeout) and holds about 250 lines. `stop_reason == "max_tokens"` is **DOC-020**: nothing half-read is kept. Streaming for longer orders is left for when one is seen.
+- **Stuck documents (Section 7.9):** `docflow_core.stuck_documents`, run by celery beat every 5 minutes.
+  - A stale `processing` claim is re-queued up to `MAX_PROCESSING_ATTEMPTS` (3), then failed with **DOC-022** plus a `document_stuck` alert.
+  - A `pending` document waiting past the timeout is re-queued, because its job may have been lost. It raises one `document_stuck` alert per tenant per day and is never failed for waiting, since a 500-document backfill legitimately waits.
+  - Tenants are listed through a new narrow `pipeline_sweep_session` that can read `tenants` only.
+  - Redis `visibility_timeout` is 2 hours, longer than any job should run. A redelivery that happens anyway is a no-op.
+- **The model's answer on every reviewable document:** the trigger refuses a document entering review from `processing`, or inserted directly into a reviewable status, without `raw_json ? 'header'`.
+  - The 28 legacy seeded rows (D-156) are not rewritten; only changes from now on are checked.
+  - Fixtures and seed scripts that insert reviewable documents directly carry a labelled stand-in answer (`"test_fixture": true` / `"seeded_demo": true`), never an invented one.
+  - Tests that jumped `needs_review` → `failed` now create the document as failed.
+
+**Tests first:**
+- Commit `06e14c6` carried the new tests and migration with the old code. CI run 36212657836 failed exactly the new ones: 9 worker tests plus the core guard (six status writes outside `document_status`).
+- Commit `bba6d08` fixed them. CI run 36212861609: core 512, worker 103, api 391, web 65, 0 skipped.
+
+**Why nothing caught H1/H3 before:**
+- The worker's pipeline had no real-database test. Its unit tests patched the session and asserted on SQL text (M14).
+- No test ever redelivered a job, killed a worker, or made a post-processing step fail and then looked at what the reviewer would see.
+
+**What prevents a regression now:**
+- The database trigger.
+- The code-versus-database agreement test.
+- The guard against status writes outside `document_status`.
+- The kill and redelivery tests on every CI run.
+
+**Phase 6 overlap (D-155):** the stuck-in-processing alert (7.9) is built here; Phase 6 must not redo it.
+
+**Follow-up (2026-09-26, the founder's questions before applying 0027):**
+- **The 28 rows without a model answer.** 0027 adds a trigger, not a constraint, so it checks nothing that already exists and deletes nothing. The 28 are all script-inserted (no extraction run on any): Acme Test Distributor 20 `needs_review` + 2 `approved`, Acme Test Coffee Supply (renamed from "Bella's Coffee Haus" the same day, see below) 6 `needs_review` (the D-119 merge demo). Every move they can make is still allowed, because only `processing` → `needs_review` requires the answer. No marker is backfilled: `raw_json` is the model's untouched answer (7.1), and writing into it for 28 rows would break that for nothing. The rows are already told apart by having no answer, and they go in the end-of-build test-data cleanup.
+- **M1, corrected.** "Holds about 250 lines" was an estimate, never measured. On staging the largest real extraction is 4 lines (559–928 output tokens for 2–4 lines, so about 90 tokens a line, plus adaptive thinking, which Sonnet 5 runs by default and which counts against the same 16,000). The real ceiling is probably **150–250 lines**, depending on how long the descriptions are.
+- **Open item: orders past the ceiling.** From the customer's side a DOC-020 is an order DocFlow couldn't process. The first fix is **streaming**: Sonnet 5 accepts up to 128K output tokens on a streamed call, roughly 8× today's ceiling, with the same single request, schema and all-or-nothing rule. Page-by-page **chunking** is the fix only past that. It carries real integrity risk: lines split across a page break, lines read twice or missed at the joins, a header total on the last page only, and a partial order if one chunk fails. Built only on the founder's go; tracked in `docs/BUILD-STATUS.md`.
+
+**Follow-up 2 (2026-09-26, before the founder applies 0027):**
+- **Who can switch on `pipeline_sweep_read`.** The policy opens `tenants` for reading when the transaction carries `app.pipeline_sweep = 'true'`. Postgres lets any connected role set a custom `app.*` setting, so the database does not decide who carries it. The same is true of the four older flags on `tenants` (`is_platform_admin`, `rollup`, `lifecycle`, `stripe_webhook`). What decides:
+  - Only DocFlow's own server processes hold a database connection. A signed-in customer reaches the database only through the API, which opens `tenant_session()` for them. That session first clears every flag, then sets only their tenant.
+  - Only `db.pipeline_sweep_session()` sets the flag, and only `stuck_documents.py` uses it, which only the worker's beat task imports. No API route can reach it.
+  - Supabase's public API (the anon key, or a customer's own sign-in token) can't run SET, has no function exposed that sets a flag, and ignores a header of that name. Probed live on staging: `GET /rest/v1/tenants` → `[]`; `POST /rest/v1/rpc/set_config` → 404 `PGRST202`.
+- **Tests added.**
+  - `packages/core/tests/test_rls_flags.py` (4): only `db.py` sets a flag; each narrow session is used only by its one module; the sweep is reachable only from the worker; no migration defines a function that sets a flag.
+  - `apps/worker/tests/test_pipeline_integrity_db.py` (2, real database): a tenant session sees only its own tenant while the sweep session sees both; and a connection left carrying the flag at session level still gives a tenant request only its own tenant.
+  - Before this, none of the narrow sessions had an isolation test.
+- **Not done: true database-level separation.** That would mean a separate database login for the sweep, which the API process never holds. That is a deployment change (Stage 3, worker/API separation), offered rather than built.
+- **"Bella's Coffee Haus" renamed.** The name could belong to a real café, and CLAUDE.md Section 0 rule 4 requires test data to be unmistakably fake. On the founder's instruction, the staging tenant (`8dc9307c…`) is now **"Acme Test Coffee Supply"**. It was changed by script (not from the Console), with a `renamed` row in `tenant_lifecycle_events` (no actor, old and new name in the payload). The 5.7 walkthrough and one browser test were updated.
+  - Still open: the golden fixture from the founder's proof of concept (`docs/sample_po.txt`) uses "Bella's Coffee House", a street address and the domain `bellascoffee.com`. So do the recorded responses, the example fixtures, several tests, and two scripts that use it as a sender address. Renaming them changes the golden fixture, so it needs a re-recorded answer and a live golden run. Planned for Stage 1c, as its own step before the streaming change. `docs/` itself (the founder's source files) is left as is.
+  - Staging also holds three buyer rows named "Bella's Coffee House" and orders whose stored model answers contain it. Those answers are immutable (7.1), so they go in the end-of-build cleanup.
+  - No mail has been sent to `bellascoffee.com`: no email provider is connected. The fixture must be renamed before one is.
+- **DOC-020 really alerts.** A truncated answer fails the document and calls `_alert_failure`, which writes a `document_failed` row in `founder_alerts`. `test_M1_a_truncated_answer_fails_with_DOC_020_and_keeps_nothing` asserts exactly one row against the real database, and `test_alert_promises.py` (D-145) guards every catalog message that says "DocFlow has been alerted".
+- **Founder decisions for Stage 1c (M1):**
+  - Reword DOC-020's advice to "Enter this order by hand for now. DocFlow has been alerted and will follow up on this order."
+  - Stream the extraction call. It changes the extraction call, so a live golden and contamination run is needed before merge.
+  - Measure the real ceiling with a fake order of 300+ lines, before and after streaming, and record the numbers here.
+  - Chunking stays deferred.
+  - Add an onboarding step: count the lines on the prospect's largest sample order during setup.
+
+**Related:** Section 7.1, 7.3, 7.7, 7.9, 10; review H1, H3, M1, M3, M14; D-058, D-095, D-145, D-155, D-156.
+
+## D-159 -- Finding F-1 (session-flag policies are enforced by code, not the database); named system actors; the golden fixture rename
+
+**Context:** the founder's follow-ups of 2026-09-26, after migration 0027 was applied to staging.
+
+### F-1 -- Session-flag RLS policies: database-level isolation (scheduled for Stage 3)
+
+**The finding.** About 50 RLS policies open a table when the transaction carries an `app.*` setting that any connection can set:
+- `platform_admin_access` on 32 tables (35 uses of `app.is_platform_admin`, from 0001 onward, 0018 included);
+- the narrow sweeps: `rollup_*` (0017), `lifecycle_read` (0019), `scheduler_access`, `stripe_webhook_lookup` / `webhook_access` (0019), `pipeline_sweep_read` (0027);
+- the lookups by intake token (`token_lookup`) and by sign-in id (`self_lookup`).
+
+Today the application enforces who sets them (D-158 follow-up 2; `packages/core/tests/test_rls_flags.py`), not the database. A future code change in a tenant request that sets a flag would be refused by nothing in Postgres.
+
+**Target.**
+- Separate database logins for the API, the worker and the admin path.
+- The cross-tenant policies are granted `TO` those roles, instead of being keyed on a setting:
+  - `platform_admin_access` → admin role;
+  - rollup, lifecycle, scheduler and pipeline sweeps → worker role;
+  - the Stripe webhook and the token and identity lookups → API role.
+- `tenant_isolation` stays keyed on `app.tenant_id`. One API login serves every tenant, so which tenant a request belongs to remains the application's job (Section 7.5's single data-access layer).
+
+**Cost and effort (estimate for the Stage 3 proposal):**
+- Money: $0. Custom Postgres roles are free on Supabase. Three logins share the pooler's client-connection limit, which must be checked against the compute size chosen in Stage 3.
+- Effort: about 2–3 working days.
+  - One migration creates the roles as NOLOGIN (no secret in the file) and rewrites about 50 policies. The login passwords are set by a documented SQL Editor step, as with `docflow_app` (D-013).
+  - One engine per login in `docflow_core.db`, each session helper bound to its login.
+  - Three database URLs in each environment's secrets, CI creating the roles, and a RUNBOOK rotation procedure.
+  - Tests: each login sees only its policies, and a tenant connection that sets any flag still sees nothing extra.
+  - The usual backup-first migration cycle, staging before production.
+- Limit: the Console lives in the API process (Section 3: one codebase, one deploy). So the admin login's secret is held by the same process as the tenant path. The database then refuses a tenant connection that sets a flag, but code that deliberately picks the admin engine is still stopped only by the import guard. Full separation of the admin path would need a separate deploy, which Section 3 rules out. It is named here, not proposed.
+
+### Named system actors (founder instruction; built in Stage 1c)
+
+- An audit row must never have a blank actor: a blank actor reads the same as an unknown one. Changes made by scripts are attributed to a named system actor such as `maintenance-script`, and so are scheduled jobs (`lifecycle-sweep`, and the others).
+- **Found while checking:** staging has 7 `tenant_lifecycle_events` with no actor.
+  - 6 were written by the lifecycle sweep (3 `suspended`, 3 `pending_deletion_entered`).
+  - 1 is the 2026-09-26 rename of "Bella's Coffee Haus" (D-158 follow-up 2).
+  - Every nullable-actor audit column will be listed and covered in 1c.
+- **Plan for 1c:**
+  - One migration seeds the system actors as `users` rows with fixed ids, `tenant_id` null, no sign-in id and inactive, so they can never sign in or be invited. A marker column tells a system actor from a person.
+  - Every script and job passes its named actor.
+  - The existing blank rows get their actor. That is a correction to audit rows, so it is written up with the backup SQL first.
+  - A check makes the actor required for new rows (`NOT VALID`, then validated after the backfill).
+
+### The golden fixture rename (Stage 1c, its own step before streaming)
+
+- Section 8.3 of the build prompt names `docs/sample_po.txt` ("Bella's Coffee House, PO# BCH-2291") as the golden fixture. The founder keeps `docs/` unchanged, so the golden test will read a renamed copy under `apps/api/tests/fixtures/golden/`. The build prompt's wording is recorded as a pending document update.
+- **What changes:** only the buyer's identity (name, street address, email and domain), to unmistakably fake values.
+- **What Section 8.3 asserts:** the four lines (SKUs, descriptions, quantities, units, prices, totals), reconciliation, and `injection_suspected = false`. None of them contains the name. The planned rename changes none of them, and the PO number `BCH-2291` stays.
+- The expected-output file's buyer fields change. The old-to-new mapping of every changed value is recorded here when the answer is re-recorded, followed by a live golden run and a live contamination run.
+- Also renamed in the same step: the example fixtures and recorded responses, the tests, and the two scripts that use `bellascoffee.com` as a sender address.
+
+**Related:** Sections 3, 7.5, 7.15.1, 8.3, 10; D-004, D-013, D-017, D-122, D-124, D-158.

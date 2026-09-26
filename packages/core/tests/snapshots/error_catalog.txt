@@ -206,6 +206,18 @@ DOC-019 [warning/tenant] This attachment is buried too deep
   what+why: This purchase order arrived as an attachment inside an attachment inside another message. DocFlow opens one level of forwarding, not more.
   next:     Forward the purchase order with the file attached directly to the email.
 
+DOC-020 [high/both] This order is too long to read
+  what+why: The order has more lines than DocFlow can read in a single pass, so the reading stopped part-way. Rather than keep a partial order, DocFlow kept none of it.
+  next:     DocFlow has already been alerted. Until it's fixed, split the order into two files of fewer lines each and upload them separately.
+
+DOC-021 [high/both] We read this order but couldn't finish it
+  what+why: DocFlow read the order, but saving what it read or running its automatic checks (totals, dates, required fields) failed. An order that hasn't been checked isn't offered for approval.
+  next:     DocFlow has already been alerted. Upload the same file again to have it read and checked again.
+
+DOC-022 [high/both] This order took too long to process
+  what+why: DocFlow tried to process this order several times and none of the tries finished, so it stopped trying rather than leave the order waiting indefinitely.
+  next:     DocFlow has already been alerted. Upload the same file again; if it fails a second time, DocFlow will look into it.
+
 EXM-001 [warning/founder] Confirm the live golden check first
   what+why: Example prompting changes what the extraction model is sent, so it may only be switched on after a live golden-fixture run with examples has passed (Section 7.13). The confirmation wasn't ticked, so nothing was changed.
   next:     Run `pytest -m live_api tests/test_example_prompting_golden.py` in apps/api; when it passes, tick the confirmation and switch it on again.
@@ -561,3 +573,7 @@ VAL-014 [high/tenant] We couldn't read this number
 VAL-015 [warning/tenant] Unusually precise number, please confirm
   what+why: This number has more than six digits after the decimal point. DocFlow keeps every digit exactly as printed and never rounds it, but that much precision is unusual on a purchase order, so it may be a misread.
   next:     Check it against the document. If it's right, acknowledge this warning and approve.
+
+VAL-016 [high/tenant] Some automatic steps didn't finish
+  what+why: DocFlow read this order, but one or more of its automatic steps -- recognising the buyer, matching lines to the catalog, or spotting duplicates -- didn't finish. Those parts of the screen may be empty for that reason, not because nothing matched.
+  next:     DocFlow has already been alerted. Check the buyer, the catalog matches and any duplicate by hand before approving.

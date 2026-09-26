@@ -154,6 +154,7 @@ def _reset_rls_settings(session: Session) -> None:
     session.execute(text("RESET app.scheduler"))
     session.execute(text("RESET app.rollup"))
     session.execute(text("RESET app.lifecycle"))
+    session.execute(text("RESET app.pipeline_sweep"))
     session.execute(text("RESET app.stripe_webhook"))
 
 
@@ -328,6 +329,29 @@ def stripe_webhook_session() -> Iterator[Session]:
     try:
         _reset_rls_settings(session)
         session.execute(text("SET LOCAL app.stripe_webhook = 'true'"))
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@contextmanager
+def pipeline_sweep_session() -> Iterator[Session]:
+    """
+    Used only by the stuck-document sweep (`docflow_core.stuck_documents`,
+    Section 7.9) to list the tenants it must look at (migration 0027's
+    `pipeline_sweep_read` policy). It can SELECT `tenants` and nothing else;
+    each tenant's documents are then read and changed in that tenant's own
+    tenant_session(). Not the Section 7.15.1 admin bypass.
+    """
+    session_factory = get_session_factory()
+    session = session_factory()
+    try:
+        _reset_rls_settings(session)
+        session.execute(text("SET LOCAL app.pipeline_sweep = 'true'"))
         yield session
         session.commit()
     except Exception:
