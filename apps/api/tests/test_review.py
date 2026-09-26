@@ -292,12 +292,10 @@ def test_approving_twice_is_refused():
 @requires_review_schema
 def test_a_failed_document_cannot_be_approved():
     with _TestValidationTenant("Acme Test Distributor -- failed") as tenant:
-        document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
-        with platform_session() as session:
-            session.execute(
-                text("UPDATE documents SET status = 'failed' WHERE id = :id"),
-                {"id": str(document)},
-            )
+        # Created failed: needs_review -> failed isn't a path (migration 0027).
+        document = tenant.create_document(
+            header=CLEAN_HEADER, lines=CLEAN_LINES, status="failed", raw_json=None
+        )
 
         with pytest.raises(ReviewError) as excinfo:
             with tenant_session(tenant.tenant_id) as session:

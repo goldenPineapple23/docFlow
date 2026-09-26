@@ -223,9 +223,12 @@ def seed(
                 session.execute(
                     text(
                         "INSERT INTO documents (id, tenant_id, original_filename, storage_path, source, "
-                        "status, content_sha256, created_at) "
+                        "status, content_sha256, raw_json, created_at) "
                         "SELECT gen_random_uuid(), :t, :p || g || '.txt', 'tenants/seed/seed.txt', 'upload', "
-                        "'rejected', md5(random()::text || g::text), now() FROM generate_series(1, :n) g"
+                        "'rejected', md5(random()::text || g::text), "
+                        # Seeded outside the pipeline: a labelled stand-in answer (0027, D-158).
+                        "'{\"header\": {}, \"line_items\": [], \"seeded_demo\": true}'::jsonb, "
+                        "now() FROM generate_series(1, :n) g"
                     ),
                     {"t": str(tenant_id), "p": PREFIX + "count-", "n": extra},
                 )

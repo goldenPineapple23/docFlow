@@ -25,6 +25,9 @@ ALERTED_ELSEWHERE = {
     # hold raised its own alert when it happened: abuse_ceiling_tripped,
     # cost_breaker_tripped (intake_gate) or unverified_sender_held (D-145).
     "QUA-001": "abuse_ceiling_tripped",
+    # The worker raises it when buyer identification, matching or duplicate
+    # detection didn't finish on a document (Phase 5.5, D-158).
+    "VAL-016": "pipeline_step_failed",
 }
 
 PROMISE = re.compile(r"(has|have) (already )?been alerted", re.IGNORECASE)

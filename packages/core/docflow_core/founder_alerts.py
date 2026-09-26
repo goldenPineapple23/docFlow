@@ -55,6 +55,9 @@ ALERT_TYPES: dict[str, str] = {
     "document_failed": "A document couldn't be read",
     "unsafe_file_refused": "A file was refused as unsafe",
     "unverified_sender_held": "Mail from a sender that failed authentication is held",
+    # Phase 5.5 Stage 1b (Section 7.9, D-158).
+    "document_stuck": "A document was stuck in processing",
+    "pipeline_step_failed": "An automatic step didn't finish on a document",
 }
 
 # Failure codes whose catalog text promises the reader that DocFlow has been
@@ -66,6 +69,9 @@ FAILURE_ALERTS: dict[str, str] = {
     "DOC-008": "document_failed",
     "DOC-009": "document_failed",
     "DOC-017": "document_failed",
+    "DOC-020": "document_failed",
+    "DOC-021": "document_failed",
+    "DOC-022": "document_stuck",
     "DOC-015": "unsafe_file_refused",
     "INT-004": "unverified_sender_held",
 }
