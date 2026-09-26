@@ -1882,6 +1882,7 @@ Today the application enforces who sets them (D-158 follow-up 2; `packages/core/
 - Runs are reported from the full saved output, quoting pytest's last line, never through `tail` or `head`.
 - Stage 5: audit every test that counts a whole table and move it to its own data; after that, staging suites may run concurrently again.
 - Stage 5 (founder, 2026-09-26): make test cleanup robust, so every test that creates data removes it in a fixture or `finally` and a failing test leaves nothing behind. A stopped run still can't clean up, because a killed process runs no `finally`. So Stage 5 also adds a staging sweep script: it lists tenants named "Acme Test ..." older than a day, with what each one holds, and deletes a tenant only on the founder's per-action OK (Section 0 rule 5). It refuses to run against any database but staging.
+- Stage 5 (founder, 2026-09-26, after 1b merged): the API suite prints 425 warnings. Triage them: list every kind with its count and source, and mark each as harmless (a deprecation inside a library) or as pointing at a real problem in DocFlow's own code. List them; do not fix them in that step.
 - The three rows stranded on 2026-09-26 ("Acme Test Sweep A", "Acme Test Sweep B", "Acme Test Distributor -- acting edit" with its 1 document) stay until the end-of-build cleanup. They are the whole gap between backup_0027 (46 documents / 8 tenants) and the count after 0027 (47 / 11).
 
 **Related:** Section 0 rule 3; D-148, D-159.
