@@ -1693,3 +1693,54 @@ Target: zero API tests skipped in CI. Built as D-148.
 5. **The parse worker, stuck-document detection and Stripe reconciliation are built in 5.5.** **Phase 6's versions of these items are therefore already satisfied and must not be redone:** the isolated parse worker (7.11), the stuck-in-processing alert (7.9) and Stripe status reconciliation.
 
 **Related:** D-149 – D-153; review H4, H5, H8, M7, H11.
+
+
+## D-158 -- One guarded state machine; jobs that can be redelivered; review only once checked (H1, H3, M1, M3)
+
+**Context:** review H1, H3, M1, M3; Stage 1b of Phase 5.5.
+- H1: an order was committed as `needs_review` before matching, duplicate detection and validation ran, and a failure in those steps was only logged. It could sit in review with zero warnings and be approved.
+- H3: the task set `processing` unconditionally. Late acknowledgement plus Redis redelivery could knock an approved order back, pay for a second extraction, fail on the header insert, and strand the order.
+- M1: `max_tokens=4096` truncated any order past roughly 50–60 lines.
+- M3: a failure while saving the model's answer left the document in `processing` with nothing recorded.
+
+**Decisions:**
+- **The state machine lives in the database** (migration 0027): `document_status_transition_allowed()` lists the legal moves, and a trigger refuses every other one, whoever sends it. `docflow_core.document_status.ALLOWED` mirrors the list, and a test asserts the two agree.
+  - Legal moves: pending→processing / quarantined / failed; staged→pending; quarantined→pending; processing→needs_review / failed; needs_review→approved / rejected; approved→exported; approved, exported or rejected→needs_review.
+  - Nothing goes back to `processing` except a stale claim being taken over.
+- **Every status change is a compare-and-set** through `document_status.transition`: approve, reject, reopen, export, hold, release, run extraction and the worker's changes. A guard test fails the build if any other code writes a document's status. A second approval racing the first now gets REV-002 instead of a double write.
+- **The worker claims first.** It claims a `pending` document, or one left in `processing` past `STUCK_PROCESSING_TIMEOUT_MIN` (30), incrementing `processing_attempts`. A redelivered or duplicate job, or one for an order already reviewed, finds nothing to claim and returns.
+- **Resumable.** The model's answer, header, lines and run record are saved in one transaction while still `processing`. A job that finds `current_extraction_run_id` already set resumes post-processing and never calls the model again. Proven by a test that SIGKILLs a real child process mid-job and redelivers.
+- **Into review only with the checks.**
+  - Buyer identification, matching and duplicate detection keep their own transactions (D-058: never lose a paid extraction).
+  - A step that fails is written to `documents.pipeline_issues`. That raises **VAL-016** on every later re-validation, plus a `pipeline_step_failed` founder alert.
+  - Validation and the move to `needs_review` are one transaction. If validation raises, the order is `failed` with **DOC-021** and a `document_failed` alert.
+  - A failure saving the answer is also DOC-021, with the answer kept in `raw_json` (M3).
+- **`documents.failure_code`** records why a document failed after the model answered, because `raw_json` holds the answer and is never overwritten. The API reads it first.
+- **M1:** `EXTRACTION_MAX_TOKENS = 16000`. That is the Anthropic SDK's advised ceiling for a non-streaming call (above it a request can outrun the HTTP timeout) and holds about 250 lines. `stop_reason == "max_tokens"` is **DOC-020**: nothing half-read is kept. Streaming for longer orders is left for when one is seen.
+- **Stuck documents (Section 7.9):** `docflow_core.stuck_documents`, run by celery beat every 5 minutes.
+  - A stale `processing` claim is re-queued up to `MAX_PROCESSING_ATTEMPTS` (3), then failed with **DOC-022** plus a `document_stuck` alert.
+  - A `pending` document waiting past the timeout is re-queued, because its job may have been lost. It raises one `document_stuck` alert per tenant per day and is never failed for waiting, since a 500-document backfill legitimately waits.
+  - Tenants are listed through a new narrow `pipeline_sweep_session` that can read `tenants` only.
+  - Redis `visibility_timeout` is 2 hours, longer than any job should run. A redelivery that happens anyway is a no-op.
+- **The model's answer on every reviewable document:** the trigger refuses a document entering review from `processing`, or inserted directly into a reviewable status, without `raw_json ? 'header'`.
+  - The 28 legacy seeded rows (D-156) are not rewritten; only changes from now on are checked.
+  - Fixtures and seed scripts that insert reviewable documents directly carry a labelled stand-in answer (`"test_fixture": true` / `"seeded_demo": true`), never an invented one.
+  - Tests that jumped `needs_review` → `failed` now create the document as failed.
+
+**Tests first:**
+- Commit `06e14c6` carried the new tests and migration with the old code. CI run 36212657836 failed exactly the new ones: 9 worker tests plus the core guard (six status writes outside `document_status`).
+- Commit `bba6d08` fixed them. CI run 36212861609: core 512, worker 103, api 391, web 65, 0 skipped.
+
+**Why nothing caught H1/H3 before:**
+- The worker's pipeline had no real-database test. Its unit tests patched the session and asserted on SQL text (M14).
+- No test ever redelivered a job, killed a worker, or made a post-processing step fail and then looked at what the reviewer would see.
+
+**What prevents a regression now:**
+- The database trigger.
+- The code-versus-database agreement test.
+- The guard against status writes outside `document_status`.
+- The kill and redelivery tests on every CI run.
+
+**Phase 6 overlap (D-155):** the stuck-in-processing alert (7.9) is built here; Phase 6 must not redo it.
+
+**Related:** Section 7.1, 7.3, 7.7, 7.9, 10; review H1, H3, M1, M3, M14; D-058, D-095, D-145, D-155, D-156.
