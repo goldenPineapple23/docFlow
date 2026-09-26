@@ -2082,3 +2082,26 @@ Remaining limits, named rather than hidden:
 - **Main-branch failure found by the baseline run:** `test_tenant_audit_api.py::test_changes_are_listed_newest_first_and_views_only_when_asked` failed on `main` (`1 failed, 390 passed, 3 deselected, 425 warnings`).
   - Cause: the Console Audit tab merges two tables with two clocks. `admin_actions.created_at` is the application server's `datetime.now()`; `tenant_lifecycle_events.created_at` is the database's `clock_timestamp()`. When the server clock lags the database's, events appear out of order.
   - Decision (founder): fixed in the named-system-actors PR. Console actions are stamped by the database clock, and the tab orders by timestamp, then id, so ties are stable.
+
+## D-164 -- The Audit tab runs on one clock: Console actions are stamped by the database; ties ordered by id
+
+**Context:** the full API suite on staging at `ba8fe20` ended `1 failed, 401 passed, 3 deselected, 439 warnings`. The failure was `test_tenant_audit_api.py::test_changes_are_listed_newest_first_and_views_only_when_asked`, the same one main's baseline run failed (D-163 follow-up). The founder moved the fix from the actors PR into 1c, so the merge line can read clean.
+
+**Cause (measured):**
+- `admin_actions.created_at` was the application server's `datetime.now()`. `tenant_lifecycle_events.created_at` is the database's `clock_timestamp()`. The Console's Audit tab (D-143) merges both tables by timestamp.
+- The development machine's clock runs **662 ms behind** the staging database's: three readings, 19–20 ms round trip. When the test's two requests landed less than about 0.66 s apart, the second Console action was listed before the first lifecycle event.
+- That is why the test passed in some runs and failed in others. It was a real ordering defect in the audit trail, not a flaky test. A production server whose clock drifted would show the founder events out of order.
+
+**Decision:**
+- Both writers of `admin_actions` stamp `created_at` with the database's `clock_timestamp()`: `admin_data_access._record_admin_action` and `tiers.py`'s tier-version record. It is `clock_timestamp()`, not `now()`, so several actions in one transaction stay distinct (the D-123 trap).
+- The Audit tab orders by timestamp, then id. Rows with the same timestamp keep one order, so a page never shuffles between two reads. Each entry now carries its row `id`.
+- No migration: the column is unchanged, only who fills it. Existing rows keep the application time they were written with.
+
+**Tests (written first; all three failed before the fix):**
+- `apps/api/tests/test_tenant_audit_api.py::test_the_order_holds_when_the_app_clock_runs_behind_the_database`. The app clock is simulated an hour behind, so the test is deterministic, whatever the machine's real skew. Before the fix it failed with exactly the staging signature ("At index 1 diff").
+- `…::test_rows_with_the_same_timestamp_come_back_in_the_same_order_every_time`: three rows with one timestamp come back ordered by id, the same on two reads.
+- `packages/core/tests/test_audit_clock.py`: every `INSERT INTO admin_actions` in core uses `clock_timestamp()`.
+
+**The actors PR keeps:** the named system actors and the `idle_in_transaction_session_timeout` migration (D-159, D-163).
+
+**Related:** Sections 7.15.1, 7.15.3; D-123, D-143, D-159, D-163.

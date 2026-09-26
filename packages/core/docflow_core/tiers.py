@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -197,7 +196,8 @@ def create(session: Session, code: str, changes: Changes, *, platform_admin_user
             """
             INSERT INTO admin_actions (id, platform_admin_user_id, action, target_type, target_id,
                                        payload, created_at)
-            VALUES (:id, :by, 'tier_version_create', 'tier', :target, CAST(:payload AS jsonb), :at)
+            VALUES (:id, :by, 'tier_version_create', 'tier', :target, CAST(:payload AS jsonb),
+                    clock_timestamp())
             """
         ),
         {
@@ -212,7 +212,6 @@ def create(session: Session, code: str, changes: Changes, *, platform_admin_user
                     "note": note,
                 }
             ),
-            "at": datetime.now(timezone.utc),
         },
     )
     return new_id
