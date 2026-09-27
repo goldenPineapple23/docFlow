@@ -5,7 +5,7 @@ import { ConfidenceBadge, isLowConfidence } from "./confidence";
 import { HeaderFields } from "./HeaderFields";
 import { LineTable } from "./LineTable";
 import { TrailPanel } from "./TrailPanel";
-import { WarningsPanel } from "./WarningsPanel";
+import { WarningsPanel, warningRowId } from "./WarningsPanel";
 import type { DocumentHeader, DocumentLine, DocumentWarning, TrailEntry } from "@/lib/review";
 import { AppHeader } from "@/components/AppHeader";
 
@@ -298,6 +298,7 @@ describe("the approval gate (Section 7.3)", () => {
       <WarningsPanel
         warnings={[warning]}
         acknowledged={new Set()}
+        appeared={new Set()}
         disabled={false}
         onToggle={onToggle}
       />,
@@ -314,6 +315,7 @@ describe("the approval gate (Section 7.3)", () => {
       <WarningsPanel
         warnings={[warning]}
         acknowledged={new Set()}
+        appeared={new Set()}
         disabled={false}
         onToggle={() => {}}
       />,
@@ -331,6 +333,7 @@ describe("the approval gate (Section 7.3)", () => {
       <WarningsPanel
         warnings={[warning]}
         acknowledged={new Set()}
+        appeared={new Set()}
         disabled={false}
         onToggle={() => {}}
       />,
@@ -340,9 +343,59 @@ describe("the approval gate (Section 7.3)", () => {
     expect(row).toHaveTextContent(/doesn't equal the sum of the line totals/i);
   });
 
+  it("marks a check the reviewer's last save raised (D-166)", () => {
+    // The Stage 1 walkthrough: an edit raised a check, the panel was below
+    // the fold, and nothing told the reviewer which of the checks down
+    // there was the new one.
+    render(
+      <WarningsPanel
+        warnings={[warning]}
+        acknowledged={new Set()}
+        appeared={new Set([warning.id])}
+        disabled={false}
+        onToggle={() => {}}
+      />,
+    );
+    expect(screen.getByTestId(`warning-new-${warning.id}`)).toBeInTheDocument();
+  });
+
+  it("does not call a check new when it was already there", () => {
+    render(
+      <WarningsPanel
+        warnings={[warning]}
+        acknowledged={new Set()}
+        appeared={new Set()}
+        disabled={false}
+        onToggle={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId(`warning-new-${warning.id}`)).toBeNull();
+  });
+
+  it("gives every check a row the rest of the screen can point at (D-166)", () => {
+    // The blocked-Approve strip scrolls to this id. Without it, "Show it"
+    // is a button that does nothing.
+    render(
+      <WarningsPanel
+        warnings={[warning]}
+        acknowledged={new Set()}
+        appeared={new Set()}
+        disabled={false}
+        onToggle={() => {}}
+      />,
+    );
+    expect(document.getElementById(warningRowId(warning.id))).not.toBeNull();
+  });
+
   it("says so plainly when nothing needs attention", () => {
     render(
-      <WarningsPanel warnings={[]} acknowledged={new Set()} disabled={false} onToggle={() => {}} />,
+      <WarningsPanel
+        warnings={[]}
+        acknowledged={new Set()}
+        appeared={new Set()}
+        disabled={false}
+        onToggle={() => {}}
+      />,
     );
     expect(screen.getByTestId("no-warnings")).toBeInTheDocument();
   });
@@ -412,7 +465,8 @@ describe("saying which box a check is about (founder feedback, D-116)", () => {
 
   it("names the field in words and links to it", () => {
     render(
-      <WarningsPanel warnings={[missingCurrency]} acknowledged={new Set()} disabled={false} onToggle={() => {}} />,
+      <WarningsPanel warnings={[missingCurrency]} acknowledged={new Set()}
+        appeared={new Set()} disabled={false} onToggle={() => {}} />,
     );
     expect(screen.getByTestId(`warning-field-${missingCurrency.id}`)).toHaveTextContent("Currency:");
     expect(screen.getByRole("button", { name: /show “currency”/i })).toBeInTheDocument();

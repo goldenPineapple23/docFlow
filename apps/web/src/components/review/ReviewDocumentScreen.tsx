@@ -12,6 +12,7 @@ import {
   reopenDocument,
   saveEdits,
   type DocumentDetail,
+  type DocumentWarning,
   type ExportFormat,
 } from "@/lib/review";
 import { DocumentViewer } from "@/components/review/DocumentViewer";
@@ -25,7 +26,7 @@ import {
 import { HeaderFields } from "@/components/review/HeaderFields";
 import { LineTable } from "@/components/review/LineTable";
 import { TrailPanel } from "@/components/review/TrailPanel";
-import { WarningsPanel } from "@/components/review/WarningsPanel";
+import { WarningsPanel, focusWarning } from "@/components/review/WarningsPanel";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ReviewChrome } from "@/components/review/ReviewChrome";
 import { useReviewScope } from "@/lib/reviewScope";
@@ -51,11 +52,17 @@ import { useReviewScope } from "@/lib/reviewScope";
  */
 
 type Banner = {
-  kind: "error" | "success";
+  // `warning` is for a save that went through and left something to look
+  // at. Green next to a dead Approve button is the lie that started this:
+  // the founder saved a bad unit price, saw "Saved", and had no way to know
+  // a new check had appeared below the fold.
+  kind: "error" | "success" | "warning";
   title: string;
   message: string;
   action?: string;
   link?: { href: string; label: string };
+  /** Scrolls to one check and focuses its tick box. */
+  jump?: { warningId: string; label: string };
 };
 
 export function ReviewDocumentScreen({ id }: { id: string }) {
@@ -72,6 +79,9 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
   const [headerEdits, setHeaderEdits] = useState<Record<string, string | null>>({});
   const [lineEdits, setLineEdits] = useState<Record<string, Record<string, string | null>>>({});
   const [acknowledged, setAcknowledged] = useState<Set<string>>(new Set());
+  // Checks the reviewer's last save raised. Marked "New" in the panel and
+  // counted in the banner; cleared by any read that isn't a save.
+  const [appeared, setAppeared] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   // The one-step confirmation before a decided order goes back to review.
@@ -86,13 +96,26 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
 
   // Adopting a freshly-read document: one place, so the mount path and the
   // after-a-write path cannot drift about which local state gets cleared.
-  const applyDetail = useCallback((next: DocumentDetail) => {
-    setDetail(next);
-    setBanner(null);
-    setHeaderEdits({});
-    setLineEdits({});
-    setAcknowledged(new Set());
-  }, []);
+  //
+  // `keep` carries the ticks forward. A check whose numbers changed gets a
+  // new fingerprint, and therefore a new row and a new id, on the server
+  // (D-074) -- so it arrives here unticked, which is exactly what the
+  // Section 7.3 gate is for. A check that is still the same row is still
+  // the same statement about the same values, and making the reviewer tick
+  // all of them again after every unrelated edit taught them only that
+  // Approve turns off for no reason.
+  const applyDetail = useCallback(
+    (next: DocumentDetail, keep?: { acknowledged: Set<string>; appeared: Set<string> }) => {
+      setDetail(next);
+      setBanner(null);
+      setHeaderEdits({});
+      setLineEdits({});
+      const stillOpen = new Set(next.warnings.filter((w) => w.status === "open").map((w) => w.id));
+      setAcknowledged(new Set([...(keep?.acknowledged ?? [])].filter((id) => stillOpen.has(id))));
+      setAppeared(new Set([...(keep?.appeared ?? [])].filter((id) => stillOpen.has(id))));
+    },
+    [],
+  );
 
   // The mount read. Written as `.then` rather than an awaited call so no
   // state is set synchronously in the effect body, which would cascade a
@@ -114,13 +137,20 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
   }, [id, applyDetail]);
 
   // The re-read after a write. Called from event handlers, never an effect.
-  const load = useCallback(async () => {
-    try {
-      applyDetail(await getDocument(id));
-    } catch (e) {
-      showError(e, setBanner);
-    }
-  }, [id, applyDetail]);
+  // Returns what it read so a caller can say what changed.
+  const load = useCallback(
+    async (keep?: { acknowledged: Set<string>; appeared: Set<string> }) => {
+      try {
+        const next = await getDocument(id);
+        applyDetail(next, keep);
+        return next;
+      } catch (e) {
+        showError(e, setBanner);
+        return null;
+      }
+    },
+    [id, applyDetail],
+  );
 
   const exportable =
     detail?.document.status === "approved" || detail?.document.status === "exported";
@@ -132,25 +162,41 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
     () => (detail?.warnings ?? []).filter((w) => w.status === "open"),
     [detail],
   );
-  const everyWarningAcknowledged = openWarnings.every((w) => acknowledged.has(w.id));
+  // The checks the Approve button is waiting on. One list, so the hint by
+  // the button, the strip below it and the gate itself can never disagree
+  // about how many are left or which one is first. Naming that check on
+  // screen is the defect this fixes: a disabled Approve with no reason.
+  const blockingWarnings = openWarnings.filter((w) => !acknowledged.has(w.id));
+  const everyWarningAcknowledged = blockingWarnings.length === 0;
 
   const save = useCallback(async () => {
     if (!detail || !dirty || busy) return;
     setBusy(true);
+    // The checks as they stood before the write, to diff against.
+    const before = openWarnings;
     try {
       await saveEdits(id, {
         header: headerEdits,
         lines: Object.entries(lineEdits).map(([line_id, fields]) => ({ line_id, fields })),
         expected_version: detail.version,
       });
-      await load();
-      setBanner({ kind: "success", title: "Saved", message: "Your changes are recorded." });
+      // The API re-runs Section 7.7 in the same transaction as the edit, so
+      // this read is what the document now says about itself.
+      const next = await load({ acknowledged, appeared: new Set() });
+      if (!next) return;
+      const nowOpen = next.warnings.filter((w) => w.status === "open");
+      const beforeIds = new Set(before.map((w) => w.id));
+      const nowIds = new Set(nowOpen.map((w) => w.id));
+      const raised = nowOpen.filter((w) => !beforeIds.has(w.id));
+      const cleared = before.filter((w) => !nowIds.has(w.id));
+      setAppeared(new Set(raised.map((w) => w.id)));
+      setBanner(savedBanner(raised, cleared));
     } catch (e) {
       showError(e, setBanner);
     } finally {
       setBusy(false);
     }
-  }, [detail, dirty, busy, id, headerEdits, lineEdits, load]);
+  }, [detail, dirty, busy, id, headerEdits, lineEdits, load, openWarnings, acknowledged]);
 
   const approve = useCallback(async (): Promise<boolean> => {
     if (!detail || busy) return false;
@@ -179,12 +225,22 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
       });
       return true;
     } catch (e) {
+      // The API brings the checks up to date in its own transaction before
+      // it decides (H2), so a refusal can be about a check this screen has
+      // never seen. Re-read before saying anything, or the reviewer is told
+      // "no" and shown nothing.
+      const before = new Set(openWarnings.map((w) => w.id));
+      const next = await load({ acknowledged, appeared });
+      if (next) {
+        const raised = next.warnings.filter((w) => w.status === "open" && !before.has(w.id));
+        if (raised.length > 0) setAppeared(new Set(raised.map((w) => w.id)));
+      }
       showError(e, setBanner);
       return false;
     } finally {
       setBusy(false);
     }
-  }, [detail, busy, dirty, id, openWarnings, acknowledged, load, scope.tenantId, back.href, back.long]);
+  }, [detail, busy, dirty, id, openWarnings, acknowledged, appeared, load, scope.tenantId, back.href, back.long]);
 
   // Back to Needs review, on purpose (D-144). Fields stay locked on a decided
   // order so a stray keystroke can never unapprove it; this is the way in.
@@ -362,7 +418,7 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
               status: detail.document.status,
               canEdit: detail.can_edit,
               dirty,
-              remaining: openWarnings.filter((w) => !acknowledged.has(w.id)).length,
+              remaining: blockingWarnings.length,
               canReopen,
             })}
           </p>
@@ -442,6 +498,34 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
 
       {banner ? <div className="mt-3"><BannerView banner={banner} /></div> : null}
 
+      {/*
+        Why Approve is off, in the reviewer's line of sight. The checks panel
+        is below the line table and on a normal window it is never on screen
+        at the same time as the button it controls -- so a check raised by an
+        edit used to show up as nothing but a button that stopped working.
+      */}
+      {!readOnly && blockingWarnings.length > 0 ? (
+        <div
+          data-testid="approve-blocked"
+          role="status"
+          className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg border border-amber-400 bg-amber-100/80 p-3 text-sm text-amber-950"
+        >
+          <span className="font-medium">
+            Approve is off until every check is ticked — {blockingWarnings.length}{" "}
+            {blockingWarnings.length === 1 ? "check" : "checks"} left.
+          </span>
+          <span data-testid="approve-blocked-by">First: {warningLabel(blockingWarnings[0])}</span>
+          <button
+            type="button"
+            onClick={() => focusWarning(blockingWarnings[0].id)}
+            data-testid="approve-blocked-show"
+            className="font-medium text-blue-800 underline"
+          >
+            Show it →
+          </button>
+        </div>
+      ) : null}
+
       {rejecting ? (
         <form
           className="mt-3 rounded border border-gray-300 p-3"
@@ -514,7 +598,9 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
             onConfirmMapping={async (lineId, itemId) => {
               try {
                 await createMapping(id, lineId, itemId);
-                await load();
+                // Same rule as a save: a check the mapping did not change is
+                // still ticked afterwards.
+                await load({ acknowledged, appeared });
               } catch (e) {
                 showError(e, setBanner);
               }
@@ -524,6 +610,7 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
           <WarningsPanel
             warnings={detail.warnings}
             acknowledged={acknowledged}
+            appeared={appeared}
             disabled={readOnly}
             onToggle={(warningId, checked) =>
               setAcknowledged((prev) => {
@@ -602,19 +689,74 @@ function actionHint({
   return "Everything checked. Ready to approve.";
 }
 
+/** One check in a sentence: where it is and what it says. */
+function warningLabel(warning: DocumentWarning): string {
+  const where = warning.line_number !== null ? `Line ${warning.line_number} · ` : "";
+  return `${where}${warning.title || warning.code}`;
+}
+
+/**
+ * What a save did to the checks.
+ *
+ * The screen used to say "Saved · Your changes are recorded" whatever
+ * happened, in green, while Approve went dead and the check that killed it
+ * sat a thousand pixels below the fold. A save that raises a check is
+ * reported as such, in amber, with a way to get to it.
+ */
+function savedBanner(raised: DocumentWarning[], cleared: DocumentWarning[]): Banner {
+  const clearedNote =
+    cleared.length > 0
+      ? ` ${cleared.length} earlier ${cleared.length === 1 ? "check no longer applies" : "checks no longer apply"}.`
+      : "";
+
+  if (raised.length === 0) {
+    return {
+      kind: "success",
+      title: "Saved",
+      message: `Your changes are recorded.${clearedNote}`,
+    };
+  }
+
+  return {
+    kind: "warning",
+    title: `Saved — ${raised.length} new ${raised.length === 1 ? "check" : "checks"} to look at`,
+    message:
+      `Your change raised ${raised.length === 1 ? "a check" : `${raised.length} checks`}: ` +
+      `${raised.map(warningLabel).join("; ")}.${clearedNote}`,
+    action: "Nothing was altered for you — read each one against the original, then tick it.",
+    jump: {
+      warningId: raised[0].id,
+      label: raised.length === 1 ? "Show the check →" : "Show the first one →",
+    },
+  };
+}
+
+const BANNER_STYLES: Record<Banner["kind"], string> = {
+  error: "border-red-300 bg-red-50",
+  success: "border-green-300 bg-green-50",
+  warning: "border-amber-400 bg-amber-100/80 text-amber-950",
+};
+
 function BannerView({ banner }: { banner: Banner }) {
   return (
     <div
       role="alert"
       data-testid={`banner-${banner.kind}`}
-      className={[
-        "rounded border p-3 text-sm",
-        banner.kind === "error" ? "border-red-300 bg-red-50" : "border-green-300 bg-green-50",
-      ].join(" ")}
+      className={["rounded border p-3 text-sm", BANNER_STYLES[banner.kind]].join(" ")}
     >
       <p className="font-medium">{banner.title}</p>
       <p className="mt-1">{banner.message}</p>
       {banner.action ? <p className="mt-1 text-gray-700">{banner.action}</p> : null}
+      {banner.jump ? (
+        <button
+          type="button"
+          onClick={() => focusWarning(banner.jump!.warningId)}
+          data-testid="banner-jump"
+          className="mt-2 inline-block font-medium text-blue-800 underline"
+        >
+          {banner.jump.label}
+        </button>
+      ) : null}
       {banner.link ? (
         <Link href={banner.link.href} className="mt-2 inline-block font-medium text-blue-700 underline">
           {banner.link.label}

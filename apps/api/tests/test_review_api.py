@@ -657,3 +657,241 @@ def test_approving_twice_over_http_is_rev_002(client):
 
         assert response.status_code == 409
         assert response.json()["detail"]["code"] == "REV-002"
+
+
+# -- what a save does to the checks, as the review screen reads it (D-166) ---
+
+
+def _open_warnings(client, tenant, document_id) -> list[dict]:
+    body = client.get(f"/review/documents/{document_id}", headers=tenant.headers()).json()
+    return [w for w in body["warnings"] if w["status"] == "open"]
+
+
+@requires_review_schema
+def test_a_save_that_breaks_a_line_returns_the_new_check_on_the_very_next_read(client):
+    """
+    The contract the review screen depends on: the checks a document carries
+    after a save are current as of that save, because the edit re-runs
+    Section 7.7 in its own transaction (H2). The Stage 1 walkthrough's defect
+    was on the other side of this line -- the screen read this correctly and
+    showed the reviewer nothing (D-166) -- so this pins the half the screen
+    is entitled to rely on.
+    """
+    with _ReviewTenant("Acme Test Distributor -- new check") as tenant:
+        document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        before = _open_warnings(client, tenant, document)
+        assert before == []
+
+        detail = client.get(f"/review/documents/{document}", headers=tenant.headers()).json()
+        response = client.patch(
+            f"/review/documents/{document}",
+            headers=tenant.headers(),
+            json={
+                "lines": [{"line_id": detail["lines"][0]["id"], "fields": {"unit_price": "4750"}}],
+                "expected_version": detail["version"],
+            },
+        )
+        assert response.status_code == 200
+
+        after = _open_warnings(client, tenant, document)
+        assert [w["code"] for w in after] == ["VAL-001"]
+        # Rendered from the catalog, so the screen has something to say
+        # rather than a bare code (Section 7.16.5).
+        assert after[0]["title"] and after[0]["message"] and after[0]["action"]
+        assert after[0]["detail"]["unit_price"] == "4750"
+
+
+@requires_review_schema
+def test_editing_the_value_a_check_is_about_gives_it_a_new_id(client):
+    """
+    Why the review screen may carry a tick across a save at all (D-166).
+
+    It keeps a tick by warning id. That is only safe because the id changes
+    whenever the statement does: the fingerprint covers the compared values
+    (D-074), so "out by 330" and "out by 3,430" are different rows. This
+    asserts the property the screen relies on -- change the number a check is
+    about and the check that comes back is a different, unacknowledged one.
+    """
+    with _ReviewTenant("Acme Test Distributor -- changed check") as tenant:
+        document = tenant.create_document(
+            header={"po_number": "BCH-2291", "order_total": Decimal("900.00")},
+            lines=CLEAN_LINES,
+        )
+        with tenant_session(tenant.tenant_id) as session:
+            validate_document(session, tenant.tenant_id, document)
+
+        first = _open_warnings(client, tenant, document)
+        assert [w["code"] for w in first] == ["VAL-002"]
+
+        detail = client.get(f"/review/documents/{document}", headers=tenant.headers()).json()
+        assert (
+            client.patch(
+                f"/review/documents/{document}",
+                headers=tenant.headers(),
+                json={"header": {"order_total": "4000.00"}, "expected_version": detail["version"]},
+            ).status_code
+            == 200
+        )
+
+        second = _open_warnings(client, tenant, document)
+        assert [w["code"] for w in second] == ["VAL-002"]
+        assert second[0]["id"] != first[0]["id"]
+        assert second[0]["acknowledged_at"] is None
+
+
+@requires_review_schema
+def test_a_save_that_fixes_the_number_resolves_the_check(client):
+    """The other half of what the screen reports after a save: a check that
+    no longer applies is gone from the open set, so the screen can say so
+    instead of leaving it on screen (D-166)."""
+    with _ReviewTenant("Acme Test Distributor -- resolved check") as tenant:
+        document = tenant.create_document(
+            header={"po_number": "BCH-2291", "order_total": Decimal("900.00")},
+            lines=CLEAN_LINES,
+        )
+        with tenant_session(tenant.tenant_id) as session:
+            validate_document(session, tenant.tenant_id, document)
+        assert [w["code"] for w in _open_warnings(client, tenant, document)] == ["VAL-002"]
+
+        detail = client.get(f"/review/documents/{document}", headers=tenant.headers()).json()
+        assert (
+            client.patch(
+                f"/review/documents/{document}",
+                headers=tenant.headers(),
+                json={"header": {"order_total": "570.00"}, "expected_version": detail["version"]},
+            ).status_code
+            == 200
+        )
+
+        assert _open_warnings(client, tenant, document) == []
+
+
+def _stored_warning(document_id, warning_id) -> dict:
+    """The row as the database holds it, including the soft-deleted ones the
+    detail view no longer shows."""
+    with platform_session() as session:
+        return dict(
+            session.execute(
+                text(
+                    "SELECT id, status, acknowledged_at, resolved_at, deleted_at, fingerprint "
+                    "FROM document_warnings WHERE id = :id AND document_id = :document_id"
+                ),
+                {"id": str(warning_id), "document_id": str(document_id)},
+            ).mappings().one()
+        )
+
+
+def _approve(client, tenant, document_id, warning_ids: list[str]):
+    detail = client.get(f"/review/documents/{document_id}", headers=tenant.headers()).json()
+    return client.post(
+        f"/review/documents/{document_id}/approve",
+        headers=tenant.headers(),
+        json={
+            "acknowledgements": [{"warning_id": w, "note": None} for w in warning_ids],
+            "expected_version": detail["version"],
+        },
+    )
+
+
+@requires_review_schema
+def test_an_unrelated_edit_leaves_an_acknowledged_check_exactly_as_it_was(client):
+    """
+    The other half of D-166, and the one that is easy to get wrong in the
+    safe-looking direction: clearing a tick too readily is as bad as not
+    clearing it. It trains a reviewer that Approve turns off for no reason,
+    and a gate that cries wolf is a gate people learn to click through.
+
+    An edit to a field a check says nothing about must leave that check
+    untouched -- same row, same id, acknowledgement intact -- so the review
+    screen, which carries ticks forward by id, keeps it.
+    """
+    with _ReviewTenant("Acme Test Distributor -- unrelated edit") as tenant:
+        document = tenant.create_document(
+            header={"po_number": "BCH-2291", "order_total": Decimal("900.00")},
+            lines=CLEAN_LINES,
+        )
+        with tenant_session(tenant.tenant_id) as session:
+            validate_document(session, tenant.tenant_id, document)
+
+        before = _open_warnings(client, tenant, document)
+        assert [w["code"] for w in before] == ["VAL-002"]
+        assert _approve(client, tenant, document, [before[0]["id"]]).status_code == 200
+
+        acknowledged = _stored_warning(document, before[0]["id"])
+        assert acknowledged["status"] == "acknowledged"
+        assert acknowledged["acknowledged_at"] is not None
+
+        # A field the check says nothing about. This reopens the order for
+        # review (D-144) and re-runs Section 7.7 -- neither of which is a
+        # reason to make the reviewer look at this check again.
+        detail = client.get(f"/review/documents/{document}", headers=tenant.headers()).json()
+        assert (
+            client.patch(
+                f"/review/documents/{document}",
+                headers=tenant.headers(),
+                json={"header": {"payment_terms": "Net 45"}, "expected_version": detail["version"]},
+            ).status_code
+            == 200
+        )
+
+        after = _stored_warning(document, before[0]["id"])
+        assert after["id"] == acknowledged["id"]
+        assert after["status"] == "acknowledged"
+        assert after["acknowledged_at"] == acknowledged["acknowledged_at"]
+        assert after["deleted_at"] is None
+        # And nothing new was raised by the edit itself.
+        assert [w["code"] for w in _open_warnings(client, tenant, document)] == []
+
+
+@requires_review_schema
+def test_a_check_that_returns_after_a_round_trip_returns_unacknowledged(client):
+    """
+    Tick at 900, edit to 4000, edit back to 900 (D-168).
+
+    The old acknowledged row does NOT come back. It resolved when the number
+    changed and stays soft-deleted for the audit trail; the recurrence is a
+    new, open, unacknowledged row. That is what the partial unique index on
+    `(document_id, fingerprint) WHERE deleted_at IS NULL` is for.
+
+    The reviewer confirms it again, and that is the intent: they last looked
+    at this discrepancy two edits ago, on a document that has changed twice
+    since. A tick is a statement that a person checked this number against
+    the original just now, not a preference the document remembers.
+    """
+    with _ReviewTenant("Acme Test Distributor -- round trip") as tenant:
+        document = tenant.create_document(
+            header={"po_number": "BCH-2291", "order_total": Decimal("900.00")},
+            lines=CLEAN_LINES,
+        )
+        with tenant_session(tenant.tenant_id) as session:
+            validate_document(session, tenant.tenant_id, document)
+
+        first = _open_warnings(client, tenant, document)[0]
+        assert _approve(client, tenant, document, [first["id"]]).status_code == 200
+        assert _stored_warning(document, first["id"])["acknowledged_at"] is not None
+
+        for total in ("4000.00", "900.00"):
+            detail = client.get(f"/review/documents/{document}", headers=tenant.headers()).json()
+            assert (
+                client.patch(
+                    f"/review/documents/{document}",
+                    headers=tenant.headers(),
+                    json={"header": {"order_total": total}, "expected_version": detail["version"]},
+                ).status_code
+                == 200
+            )
+
+        live = _open_warnings(client, tenant, document)
+        assert [w["code"] for w in live] == ["VAL-002"]
+        assert live[0]["id"] != first["id"]
+        assert live[0]["acknowledged_at"] is None
+        assert live[0]["detail"]["order_total"] == "900.00"
+
+        # The acknowledgement is not erased, only retired: who agreed to what
+        # and when stays in the record (Section 7.3).
+        retired = _stored_warning(document, first["id"])
+        assert retired["status"] == "resolved"
+        assert retired["acknowledged_at"] is not None
+        assert retired["deleted_at"] is not None
+        # Same statement about the same numbers, and still a different row.
+        assert retired["fingerprint"] == _stored_warning(document, live[0]["id"])["fingerprint"]

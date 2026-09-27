@@ -22,6 +22,7 @@ don't need network access (see apps/api/tests/test_admin_access.py).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -31,6 +32,8 @@ from docflow_core.db import identity_lookup_session
 from fastapi import Header, HTTPException
 from jwt import PyJWKClient
 from sqlalchemy import text
+
+logger = logging.getLogger(__name__)
 
 _jwks_client: PyJWKClient | None = None
 
@@ -63,6 +66,35 @@ class AuthenticatedIdentity:
 # rejected before a key is chosen for it.
 _SYMMETRIC_ALGS = frozenset({"HS256"})
 _ASYMMETRIC_ALGS = frozenset({"ES256", "RS256"})
+
+# How far this server's clock may differ from Supabase's before a real
+# session token is refused (DECISIONS.md D-167).
+#
+# Supabase stamps `iat` from its own clock. If this machine's clock is even
+# one second behind, the token that a browser has just been issued is "not
+# yet valid" here, PyJWT raises ImmatureSignatureError, and the person is
+# told they are signed out and sent back to /login -- on the very first
+# request after signing in, which is when the gap is smallest and the odds
+# of losing that coin flip are highest. Caught driving the real stack: one
+# sign-in in six failed with iat exactly one second ahead of `now`.
+#
+# **This allowance is symmetric: PyJWT applies `leeway` to `exp` as well as
+# to `iat` and `nbf`.** So an expired token is accepted for this long after
+# it expires. That is the cost of the fix and it is stated here rather than
+# buried, because it is the only part of it that gives anything away.
+#
+# 30 seconds, chosen over the conventional 60 (founder, 2026-09-27): the
+# skew actually observed was one second, ordinary NTP drift is well under
+# 30, and halving the number halves the only downside. If a machine is ever
+# more than 30 seconds out, that is an operational fault worth seeing, not
+# one worth absorbing silently.
+#
+# What the 30 seconds on `exp` is worth to an attacker: nothing they did not
+# already have. A session token is valid for an hour regardless, and every
+# request re-reads the `users` row -- so deactivating or removing someone
+# (is_active, deleted_at) takes effect on their next request, not when their
+# token expires (D-132).
+_CLOCK_SKEW_LEEWAY_SECONDS = 30
 
 
 def _decode_bearer_token(authorization: str | None) -> dict | None:
@@ -110,6 +142,7 @@ def _decode_bearer_token(authorization: str | None) -> dict | None:
                 settings.supabase_jwt_secret,
                 algorithms=sorted(_SYMMETRIC_ALGS),
                 audience="authenticated",
+                leeway=_CLOCK_SKEW_LEEWAY_SECONDS,
             )
         except jwt.PyJWTError:
             return None
@@ -122,12 +155,22 @@ def _decode_bearer_token(authorization: str | None) -> dict | None:
                 signing_key.key,
                 algorithms=sorted(_ASYMMETRIC_ALGS),
                 audience="authenticated",
+                leeway=_CLOCK_SKEW_LEEWAY_SECONDS,
             )
-        except Exception:
+        except Exception as exc:
             # Covers jwt.PyJWTError as well as JWKS-fetch failures (network,
             # bad url, unknown kid) -- all of them mean "can't verify this
             # token", not "the server is broken", so this fails closed rather
             # than raising.
+            #
+            # Logged, because failing closed silently makes two very
+            # different things look identical from outside: a forged token,
+            # and a signing key we could not fetch. The second signs a real
+            # person out for a network blip, and until this line existed
+            # there was nothing anywhere to say so. The error's type and text
+            # only -- never the token, never a claim (Section 7.10).
+            logger.warning("Session token rejected on the JWKS path: %s: %s",
+                           type(exc).__name__, exc)
             return None
 
     # An algorithm we do not accept, or one we have no key material for.
