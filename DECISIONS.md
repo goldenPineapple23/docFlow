@@ -2264,3 +2264,38 @@ The rule is derived from the warning's own payload rather than from a list of co
 **Tests:** six component tests (every compared number marked and no others; the words as well as the colour; the row marker; a clean line untouched; a check belonging to another line ignored; a settled check ignored), plus assertions in the live suite that the marks appear on the real stack when an edit raises a check and clear when it is resolved.
 
 **Related:** Sections 7.6, 7.7, 7.12; D-074, D-166.
+
+## D-170 — One clock rule: a timestamp the database will later compare is written by the database
+
+**Context:** D-167 (a session token one second ahead of this machine's clock refused as "signed out") was the second clock-skew defect after D-164 (the Audit tab listing two events out of order because one table was stamped by the app and the other by the database). The founder called it a class, not two incidents, and asked for every place the app compares its clock with another one to be listed before anything was fixed (2026-09-27). The sweep was reported; the rule below is the founder's answer to it.
+
+**Five clocks are in play:** the app process, the staging Postgres, GoTrue (Supabase Auth), Stripe, and the reviewer's browser.
+
+**The rule (founder, 2026-09-27):**
+
+- **A timestamp the database will later compare is written by the database.** Not `datetime.now()` in Python, then compared against `now()` in SQL. One clock decides, and it is the one that does the comparing.
+- **A foreign clock — GoTrue, Stripe, the browser — gets a named tolerance and a test.** Named, so the cost of the allowance is stated where it is granted rather than discovered later (D-167's symmetric `exp` is the model for this). Tested, so the allowance cannot be deleted while every suite stays green.
+
+**Already compliant, confirmed by the sweep rather than assumed:** the Audit tab (D-164); session-token verification (D-167, `leeway=30`, six tests); allowance metering's month boundary; review-backlog age; the unknown-sender rolling hour; quarantine TTL; the stuck-document timeout; intake grace expiry; `review_started_at` → `approved_at` for the ≤ 2-minute KPI; every `updated_at`.
+
+**The seven that were not, and when each is fixed:**
+
+| # | Where | When |
+|---|---|---|
+| 2 | `tenants.deletion_scheduled_at` — written app-side (`lifecycle.py:305`), compared three ways: database clock in the sweep and the days-remaining display, **app clock in the delete guard** (`admin_data_access.py:1467`) and the reminder text | **First, ahead of #1** (founder): it guards an irreversible action |
+| 3 | `tenants.first_past_due_at` — written app-side (`billing_webhooks.py:94`) in the same statement whose `updated_at` is the database's; the truthful event time is Stripe's | Folded into Stage 2 (H11), **using Stripe's event time** (founder) |
+| 6 | Stripe's webhook-signature timestamp — tolerance is explicit (300 s, Stripe's own default) but nothing tests it; the guard could be deleted and the suites stay green | Folded into Stage 2: tests that a **stale** and a **future-dated** signature are both refused (founder) |
+| 1 | `tenants.cancellation_effective_at` — claimed by the database clock (`lifecycle.py:394`), re-checked against the app clock (`lifecycle.py:302`) | Separate PR right after Stage 2 |
+| 4 | `scheduled_jobs.run_at` — two writers use the app clock (`lifecycle.py:347`, `onboarding.py:438`), one the database's (`review_digest.py:63`) | Separate PR right after Stage 2 |
+| 5 | `rollup_runs.finished_at` — database write, app-side staleness check against `ROLLUP_STALE_HOURS` = 36. A tolerance that works by accident rather than by decision | Separate PR right after Stage 2 |
+| 7 | The once-a-day alert dedupe keys (`founder_alerts.py:189`, `stuck_documents.py:99`) build `day` from the app clock while deduping database-stamped rows — near midnight, a skew double-sends or drops a day | Separate PR right after Stage 2 |
+
+**The separate PR must land before any real tenant is onboarded** (founder). Until then the exposure is limited to test tenants, which is why it is allowed to follow Stage 2 rather than precede it.
+
+**Display-only, no action** (founder): the browser's clock deciding "N minutes ago" (`ActivityList.tsx:31`), days-since (`TenantTable.tsx:34`), and whether the founding-price banner shows (`BillingCard.tsx:45`, `PlanChange.tsx:43`) against a database-written `founding_price_ends_at`. Also one-way and left as is: `trial_end` computed app-side and handed to Stripe (`admin.py:826`), where a skew shifts a trial by the skew.
+
+**Stage 3 note (H6):** signed URLs are minted and verified on the app clock today (`signed_urls.py`), which is one clock because one service does both. Moving to Supabase Storage makes the expiry Supabase's clock and this rule applies to it — a named tolerance and a test, or the expiry is decided in one place.
+
+**Why the rule rather than seven fixes:** it collapses #1, #2, #4, #5 and #7 into one change per write site and introduces no new tolerances, and it makes the next occurrence a review question with a one-line answer instead of a defect found in a walkthrough.
+
+**Related:** Sections 7.3, 7.9, 7.14, 7.15.3, 7.15.4; D-123, D-143, D-164, D-167.

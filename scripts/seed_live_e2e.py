@@ -25,6 +25,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import secrets
 import sys
@@ -110,26 +111,43 @@ def _check_password_sign_in(email: str, password: str) -> None:
         json={"email": email, "password": password},
         timeout=30,
     )
-    if response.status_code != 200 or "access_token" not in response.json():
-        # What the auth server thinks it offers. A refusal here is usually
-        # about how the server is configured rather than about this account,
-        # and that answer is one request away -- so fetch it rather than
-        # leaving whoever reads this to guess which provider is off.
-        try:
-            offered = httpx.get(
-                f"{settings.supabase_url}/auth/v1/settings",
-                headers={"apikey": settings.supabase_anon_key},
-                timeout=30,
-            ).text[:400]
-        except Exception as exc:  # noqa: BLE001 -- diagnosis, not control flow
-            offered = f"(could not be read: {type(exc).__name__})"
-        sys.exit(
-            "The seeded reviewer cannot sign in with the anon key, so the live suite would "
-            "only report timeouts.\n"
-            f"  POST {settings.supabase_url}/auth/v1/token -> {response.status_code}\n"
-            f"  {response.text[:400]}\n"
-            f"  what this auth server offers: {offered}"
+    if response.status_code == 200 and "access_token" in response.json():
+        # Report which signing algorithm this project really issues, so nobody
+        # has to infer it. `app/deps.py` verifies HS256 against the legacy
+        # shared secret and ES256/RS256 against JWKS -- different code, taking
+        # keys from different places -- and this suite only ever exercises the
+        # one its environment happens to issue. Staging and the CI stack are
+        # different projects and need not agree, so each run says which path it
+        # just proved. Header only: never the token, never a claim (7.10).
+        header_b64 = response.json()["access_token"].split(".")[0]
+        header = json.loads(base64.urlsafe_b64decode(header_b64 + "=" * (-len(header_b64) % 4)))
+        print(
+            f"  this project issues alg={header.get('alg')} "
+            f"(kid {str(header.get('kid'))[:8]}) -- "
+            + ("the JWKS path" if header.get("alg") in ("ES256", "RS256") else "the shared-secret path")
+            + " is what this run proves"
         )
+        return
+
+    # What the auth server thinks it offers. A refusal here is usually
+    # about how the server is configured rather than about this account,
+    # and that answer is one request away -- so fetch it rather than
+    # leaving whoever reads this to guess which provider is off.
+    try:
+        offered = httpx.get(
+            f"{settings.supabase_url}/auth/v1/settings",
+            headers={"apikey": settings.supabase_anon_key},
+            timeout=30,
+        ).text[:400]
+    except Exception as exc:  # noqa: BLE001 -- diagnosis, not control flow
+        offered = f"(could not be read: {type(exc).__name__})"
+    sys.exit(
+        "The seeded reviewer cannot sign in with the anon key, so the live suite would "
+        "only report timeouts.\n"
+        f"  POST {settings.supabase_url}/auth/v1/token -> {response.status_code}\n"
+        f"  {response.text[:400]}\n"
+        f"  what this auth server offers: {offered}"
+    )
 
 
 def _delete_auth_user(auth_user_id: str) -> None:
