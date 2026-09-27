@@ -39,6 +39,10 @@ def main() -> int:
             "GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO docflow_app",
             "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO docflow_app",
             "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO docflow_app",
+            # Migration 0028 sets this on staging and production; here the
+            # role is created after the migrations ran, so it is set again
+            # (D-165). The two values must match (test_system_actors.py).
+            "ALTER ROLE docflow_app SET idle_in_transaction_session_timeout = '5min'",
         ):
             conn.execute(statement)
 

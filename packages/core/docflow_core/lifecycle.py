@@ -37,7 +37,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from docflow_core import email_outbox, founder_alerts
+from docflow_core import email_outbox, founder_alerts, system_actors
 from docflow_core.constants import (
     CURE_PERIOD_DAYS,
     EXPORT_WINDOW_DAYS,
@@ -65,10 +65,12 @@ def _lifecycle_event(
     tenant_id: UUID,
     event_type: str,
     *,
-    actor_user_id: UUID | None,
+    actor_user_id: UUID,
     payload: dict[str, Any] | None = None,
     constants: dict[str, Any] | None = None,
 ) -> None:
+    # Every event names who did it: a person, or a named system actor
+    # (docflow_core.system_actors, D-165). The column is NOT NULL since 0028.
     # clock_timestamp(), not now(): claim_for_suspend writes two of these in
     # one transaction, and now() is frozen for the whole transaction in
     # Postgres -- both rows would get an identical created_at, making
@@ -86,7 +88,7 @@ def _lifecycle_event(
             "id": str(uuid4()),
             "tenant_id": str(tenant_id),
             "event_type": event_type,
-            "actor": str(actor_user_id) if actor_user_id else None,
+            "actor": str(actor_user_id),
             "constants": json.dumps(constants or {}),
             "payload": json.dumps(payload or {}, default=str),
         },
@@ -317,12 +319,15 @@ def claim_for_suspend(session: Session, tenant_id: UUID) -> SuspendClaim | None:
     )
 
     cconsts = constants_in_effect("EXPORT_WINDOW_DAYS", "REMINDER_DAYS")
-    _lifecycle_event(session, tenant_id, "suspended", actor_user_id=None, constants=cconsts)
+    # Nobody clicked anything: the sweep did it, and says so (D-165).
+    _lifecycle_event(
+        session, tenant_id, "suspended", actor_user_id=system_actors.LIFECYCLE_SWEEP, constants=cconsts
+    )
     _lifecycle_event(
         session,
         tenant_id,
         "pending_deletion_entered",
-        actor_user_id=None,
+        actor_user_id=system_actors.LIFECYCLE_SWEEP,
         payload={"deletion_scheduled_at": deletion_at.isoformat()},
         constants=cconsts,
     )

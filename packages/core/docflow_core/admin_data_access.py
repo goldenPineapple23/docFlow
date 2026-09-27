@@ -34,7 +34,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import RowMapping, text
 
-from docflow_core import deal_terms
+from docflow_core import deal_terms, system_actors
 from docflow_core.db import platform_session, rowcount
 
 logger = logging.getLogger(__name__)
@@ -1472,13 +1472,17 @@ def delete_tenant(
 
         # The lifecycle log outlives the tenant, but the tenant's own people do
         # not: an event one of them caused (a Team-page invite, D-132) keeps
-        # its row and loses the name. The founder's own events keep theirs.
+        # its row and now names the one shared "deleted account" actor -- never
+        # blank, and nothing that leads back to the person (D-165). Done in
+        # this transaction, before their users rows go, so there is never a
+        # moment with a blank or dangling actor. The founder's own events keep
+        # theirs.
         session.execute(
             text(
-                "UPDATE tenant_lifecycle_events SET actor_user_id = NULL "
+                "UPDATE tenant_lifecycle_events SET actor_user_id = :deleted "
                 "WHERE tenant_id = :id AND actor_user_id IN (SELECT id FROM users WHERE tenant_id = :id)"
             ),
-            {"id": str(tenant_id)},
+            {"id": str(tenant_id), "deleted": str(system_actors.DELETED_ACCOUNT)},
         )
         counts: dict[str, int] = {}
         for table in _PURGE_TABLES:
