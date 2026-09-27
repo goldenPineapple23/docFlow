@@ -24,6 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from tests.conftest import requires_database
+from tests.test_quarantine_api import _Tenant
 
 pytestmark = [requires_database]
 
@@ -110,17 +111,18 @@ def test_no_lifecycle_event_has_a_blank_actor():
 
 
 def test_a_lifecycle_event_without_an_actor_is_refused():
-    with pytest.raises(DBAPIError) as excinfo:
-        with platform_session() as session:
-            tenant_id = session.execute(text("SELECT id FROM tenants LIMIT 1")).scalar_one()
-            session.execute(
-                text(
-                    "INSERT INTO tenant_lifecycle_events (tenant_id, event_type, actor_user_id, payload) "
-                    "VALUES (:t, 'acme_test_blank_actor', NULL, '{}'::jsonb)"
-                ),
-                {"t": str(tenant_id)},
-            )
-    assert _sqlstate(excinfo) == NOT_NULL_VIOLATION
+    # Its own throwaway tenant: never "any tenant that happens to exist" (D-160).
+    with _Tenant("Acme Test Blank Actor") as tenant:
+        with pytest.raises(DBAPIError) as excinfo:
+            with platform_session() as session:
+                session.execute(
+                    text(
+                        "INSERT INTO tenant_lifecycle_events (tenant_id, event_type, actor_user_id, payload) "
+                        "VALUES (:t, 'acme_test_blank_actor', NULL, '{}'::jsonb)"
+                    ),
+                    {"t": str(tenant.tenant_id)},
+                )
+        assert _sqlstate(excinfo) == NOT_NULL_VIOLATION
 
 
 def test_the_app_roles_idle_transactions_are_capped_at_five_minutes():
