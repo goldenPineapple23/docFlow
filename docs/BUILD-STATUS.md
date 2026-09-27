@@ -184,8 +184,8 @@ are D-149 – D-153.
 | Stage | What | Status | Decisions |
 |---|---|---|---|
 | 0 | Safety net: push, CI green, `main` protected (done before 5.5 began); **CI database and the unapproved-skip check** (H7 part 2); core type-checked and pinned in CI | DONE (PR #3, merged 2026-09-25) | D-148 |
-| 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents | IN PROGRESS: 1a DONE (PR #4, D-156); 1b DONE (PR #6, migration `0027`, D-158 – D-160); 1c DONE (PR #7: golden rename, M1 streaming measured, H2/M4/M5, one read budget, every paid call costed, Audit tab on one clock; D-159, D-161 – D-164); **named system actors BUILT** on `phase55/stage1-system-actors` (migration `0028` NOT yet applied: 3 system actors, no blank lifecycle actor, idle-transaction cap 5 min; D-165); then the Stage 1 checkpoint | D-149, D-154 – D-165 |
-| 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events | PLANNED | D-151 |
+| 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents | **CHECKPOINT DONE 2026-09-26, awaiting "go"** (`CHECKPOINTS.md`: C1, H1, H3, M1, M3, H2, M4, M5 all closed). 1a DONE (PR #4, D-156); 1b DONE (PR #6, migration `0027`, D-158 – D-160); 1c DONE (PR #7: golden rename, M1 streaming measured, H2/M4/M5, one read budget, every paid call costed, Audit tab on one clock; D-159, D-161 – D-164); named system actors DONE (PR #8, migration `0028` applied and verified on staging 2026-09-26: 3 system actors, no blank lifecycle actor, idle-transaction cap 5 min; D-165); Stage 1 checkpoint run on `b04f16d` | D-149, D-154 – D-165 |
+| 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events (record the event in the same transaction as its effect; ignore an event older than the state already saved; **an event in the same second as the saved state can't be ordered by `created` (one-second resolution), so it re-fetches the subscription from Stripe and saves that, never guesses** -- a webhook-side fetch, not a page-load one, so within 7.15.3 (founder, 2026-09-26); the Phase 6 plan-change reconcile reuses this guard) | PLANNED | D-151 |
 | 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation, H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) | PLANNED | D-150, D-159 |
 | 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items | PLANNED | D-152 |
 | 5 | Remaining findings, doc/code contradictions, proposed CLAUDE.md additions; **audit every test that counts a whole table** (the `deal7` pattern) and move each one to data only that test can see, after which staging suites may run concurrently again (RUNBOOK 1.4); **robust test cleanup** (every test that creates data cleans it up in a fixture or `finally`, so a failing test still leaves nothing); **a staging sweep script** that lists tenants named "Acme Test ..." older than a day, with what each holds, and deletes one only on the founder's per-action OK (a stopped run always strands something); **triage the API suite's warnings** (425 on the 2026-09-26 run): list each kind, say which are harmless library deprecations and which point at a real problem in our code -- listed, not fixed (triage done 2026-09-26, D-163: all 439 are test-only; 438 are PyJWT's `InsecureKeyLengthWarning` from short test signing keys); **use a test JWT secret of at least 32 bytes** to clear that noise (founder); **a test that expects the database to refuse a write** must run in a transaction that is always rolled back, or on data it owns, so it can't leave a row behind when the refusal doesn't happen (D-165 incident); *low priority, not a blocker:* **count rows in spreadsheet and CSV orders for free before extraction** (no model call needed), so an oversized order is caught before a paid read (founder, D-163) | PLANNED | D-160, D-163, D-165 |
@@ -203,6 +203,40 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   fully true.
 - Some Phase 6 items already have early versions (alerts table, outbox, cost
   breaker). Phase 6 finishes and audits them; it does not start from zero.
+
+**Phase 6 items added by the founder:**
+
+- **Console plan changes must not hold a database transaction across Stripe
+  calls** (founder, 2026-09-26; D-138, D-165). **Do this early in Phase 6:**
+  while the lock is held, anything else that needs the tenant row waits up to
+  about 90 s. Today `change_tier`
+  (`packages/core/docflow_core/admin_data_access.py:967`) locks the tenant row
+  (`FOR UPDATE`) and keeps that transaction open while
+  `external_services.change_subscription_tier` makes its Stripe requests
+  (about 90 s in the worst case). That is why the app role's
+  idle-transaction cap is 5 minutes, not 60 s. The item:
+  1. Move the Stripe calls outside the transaction. Record the intended change
+     first, call Stripe with an idempotency key derived from it, then write the
+     result in a short second transaction.
+  2. Reconcile: a change Stripe made that DocFlow didn't record (a crash
+     between the call and the write) is found and completed, never left
+     disagreeing. Tested by killing the process between the two.
+     **What calls it:** a scheduled sweep (celery beat, every 5 minutes, like
+     the stuck-document sweep) for any recorded change older than a few
+     minutes, and Stripe's `customer.subscription.updated` webhook, which
+     completes it as soon as it arrives. Never on a read: the tenant page
+     shows "plan change pending" but never calls Stripe on page load
+     (Section 7.15.3). A change still unresolved after the sweep's retries is
+     a `founder_alerts` row.
+     **Webhooks arrive twice or out of order.** A repeat is already a no-op
+     (`billing_webhooks.py:47`, `ON CONFLICT (id) DO NOTHING` on the event
+     id). Ordering is not handled today; that is review finding H11, fixed
+     in Phase 5.5 Stage 2 (an event older than the state already saved is
+     ignored, and the event is recorded in the same transaction as its
+     effect). This item reuses that guard; it does not build its own.
+  3. Then revisit lowering `idle_in_transaction_session_timeout` for
+     `docflow_app` (migration 0028 sets 5 min) toward 60 s, as a new
+     migration plus the CI role script and its agreement test.
 
 ---
 
