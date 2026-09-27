@@ -92,6 +92,44 @@ How a run is reported:
   3 deselected` with nothing failed or skipped. The 3 deselected are the
   `live_api` tests, which only run at checkpoints (`apps/api/pyproject.toml`).
 
+### 1.5 The live end-to-end suite (`apps/web/e2e-live`)
+
+The one browser suite with nothing stubbed: a real sign-in, the real API over
+HTTP, real Postgres, real RLS (DECISIONS.md D-166). It needs three things
+running before it will do anything useful.
+
+1. **The API**, on port 8000:
+
+   ```
+   cd apps/api && .venv/Scripts/python -m uvicorn app.main:app --port 8000
+   ```
+
+2. **A current production build of the web app.** The suite serves it on port
+   3101, and Next compiles `NEXT_PUBLIC_*` into the bundle — so a build made
+   against different settings will point the browser at the wrong stack:
+
+   ```
+   cd apps/web && npm run build
+   ```
+
+3. **Then the suite itself**, which seeds its own throwaway tenant, reviewer
+   and orders before the run and deletes them after it:
+
+   ```
+   cd apps/web && npm run test:e2e:live
+   ```
+
+It counts as one of the suites under the one-at-a-time rule above. The tenant
+it creates is named `Acme Test Live E2E <id>`; if a run is interrupted before
+its teardown, remove the leftovers with:
+
+```
+python scripts/seed_live_e2e.py teardown --out apps/web/e2e-live/.seed.json
+```
+
+CI runs the same suite in the `web-live` job against the local Supabase stack,
+so it needs no staging credentials there.
+
 ---
 
 ## 2. Inbound email (Postmark) — arrives with Phase 5.5 Stage 2

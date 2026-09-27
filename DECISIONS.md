@@ -2158,3 +2158,89 @@ Remaining limits, named rather than hidden:
 - The general lesson goes to the Stage 5 cleanup audit: a test that expects a refusal must not be able to leave data behind when the refusal doesn't happen. It either runs in a transaction that is always rolled back, or it owns and removes its data.
 
 **Related:** Sections 3, 7.10, 7.14, 7.15.1; D-004, D-123, D-133, D-138, D-159, D-162, D-163.
+
+## D-166 — After an edit the review screen says what the checks now are, and a blocked Approve names the check blocking it
+
+**Context:** the Stage 1 walkthrough on staging. The founder changed a unit price from 47.50 to 4750 in review and saved. Approve went dead and nothing on the screen said why.
+
+**What was actually happening.** The API was right at every step. `PATCH /review/documents/{id}` re-runs Section 7.7 in the same transaction as the edit (H2), so the new `VAL-001` existed the moment the save committed; the screen's own re-read fetched it. Reproduced on the real stack and confirmed from both ends before changing anything.
+
+The defect was entirely in `ReviewDocumentScreen`, and it was four things at once:
+
+- **The new check rendered where nobody was looking.** The checks panel is the last thing in the right-hand column, below the line table. Measured in a 1440×900 window: the panel's heading sits at y≈1429. It is never on screen at the same time as the Approve button it controls.
+- **Every tick the reviewer had already made was silently cleared.** `applyDetail` reset the acknowledged set on every read, including the read after a save. Five ticked checks became five unticked ones because of an edit to an unrelated line.
+- **The banner said the opposite of what had happened.** A green "Saved · Your changes are recorded" sat directly above a disabled Approve.
+- **A refused approval showed nothing new.** The API brings the checks up to date in its own transaction before deciding (H2), precisely so a check found at approval time survives the refusal — but the screen never re-read, so it never displayed the thing it had just been refused over.
+
+The only clue on screen was `action-hint`: 12px grey text reading "6 checks still to tick below before you can approve." It is accurate, it is easy to miss, it does not say a check is *new*, and it does not say *which*.
+
+**Decision:**
+- **Acknowledgements survive a re-read when the check is still the same row.** A check's fingerprint includes the values it compared (D-074), so changing a number resolves the old row and raises a new one with a new id — which arrives unticked, which is exactly what the Section 7.3 gate is for. A check that is still the same row is still the same statement about the same values. Re-ticking it after every unrelated edit taught the reviewer only that Approve turns off for no reason.
+- **A save reports what it did to the checks.** The screen diffs the open checks across the write. Raised any? An amber banner names them and offers a jump to the first. Resolved any? The banner says how many no longer apply. Neither? "Saved", as before. A save that leaves work to do is no longer reported in green.
+- **A blocked Approve names the check blocking it**, in a strip under the header — in the viewport, where the button is — with the check's line and title and a "Show it →" that scrolls to it and focuses its tick box. This covers first open as well as post-edit.
+- **Checks raised by the last save are tagged "New"** in the panel, so scrolling down settles the question.
+- **A refused approval re-reads first**, so a check the server raised at approval time is on screen before the refusal is explained.
+
+**Also decided here — a live end-to-end suite, because the stubbed one cannot catch this.** `apps/web/e2e-live`, its own Playwright config, its own CI job: a real browser, the real Next build, the real FastAPI over HTTP, real Postgres, real RLS, a real sign-in, nothing stubbed. Its data is a throwaway tenant created and deleted per run by `scripts/seed_live_e2e.py` (D-160). Verified honestly: both specs were run against the unfixed screen and both fail there, one on the missing banner and one on the wiped ticks.
+
+D-086 stands for `e2e/`. A stub decides for itself what the API returns, so no test in that suite can fail on a disagreement between the screen and the server after a write — and none did; that suite was green throughout. What D-086 gave up, in its own words, was "a backend change that broke the contract without breaking its own tests". This was the mirror image: a front-end that read the contract correctly and showed the reviewer nothing. The seam is real and now has exactly one suite pointed at it. The rule that keeps it from growing into a second copy of `e2e/`: anything provable with a stub belongs in `e2e/`, anything provable without a browser belongs in `apps/api/tests`, and only what needs the whole stack lives here.
+
+`cors_allowed_origins` gains `http://localhost:3101` and `http://127.0.0.1:3101`, the live suite's own port, for the reason the two spellings of "this machine" are already there: a CORS refusal shows up as a page that loads and then does nothing. Every origin in that default is a loopback address; staging and prod set `CORS_ALLOWED_ORIGINS` explicitly.
+
+**What it found on its first CI run, before it had run a single assertion there:** nobody could sign in to the CI stack at all. `supabase/config.toml` set `[auth.email] enable_signup = false`, which in the Supabase CLI does not mean "email accounts cannot self-register" -- it switches the email provider **off entirely**. Every password sign-in came back `422 email_provider_disabled`, and `/auth/v1/settings` reported `"email": false`.
+
+Wrong since the CI database was introduced (D-148), and unnoticed because until this suite no CI job had ever signed in: the Python suites mint their own tokens and never touch GoTrue. No public signup is still enforced -- by `[auth] enable_signup = false` (GoTrue's `DISABLE_SIGNUP`) and by the product having no `/signup` route, which its own tests assert. This is the argument for the suite existing, made by the suite itself on day one.
+
+**Worth recording how it was found, because the first two answers were wrong.** The failure began as three identical `waitForURL` timeouts naming nothing. Adding `enabled = true` looked like the fix and was not; adding the mail catcher looked like the fix and was not. What ended it was making the suite report rather than infer -- a check that signs in during seeding, before a browser tries, and a failure that prints what `/auth/v1/settings` says the server offers. Both are still there. A test that fails without saying why costs more than the bug it is hiding.
+
+**Related:** Sections 7.3, 7.7, 7.16.5, Section 10; D-074, D-086, D-116, D-144, D-148, D-160, D-167.
+
+## D-167 — A session token is verified with 30 seconds of clock-skew allowance, which also extends `exp`
+
+**Context:** found while making the D-166 live suite reliable. Roughly one sign-in in six failed: Supabase issued a token, the browser sent it, and the API answered 401 `AUTH-005` — "You're signed out" — on the very first request after signing in. The next attempt worked.
+
+**The cause, from the API's own log once it had one:** `ImmatureSignatureError: The token is not yet valid (iat)`. Supabase stamps `iat` from its clock. This machine's clock was a second behind, so a token issued at `iat = now + 1` was "not yet valid" here. The odds are worst exactly where it hurts most — the first request after sign-in, when the token is a fraction of a second old.
+
+**Two changes:**
+- **`leeway=30` on both verification paths** (HS256 and the JWKS path).
+
+  **The allowance is symmetric — PyJWT applies `leeway` to `exp` exactly as it does to `iat` and `nbf`.** An expired session token is therefore accepted for 30 seconds past its expiry. That is the whole cost of this fix, and it is named here rather than left to be discovered: it is the only thing the change gives away.
+
+  **Why 30 and not the conventional 60** (founder, 2026-09-27): the skew actually observed was one second, ordinary NTP drift is well under 30, and halving the number halves the only downside. A machine more than 30 seconds out is an operational fault worth seeing rather than absorbing.
+
+  **What the 30 seconds on `exp` is worth to an attacker: nothing they did not already have.** A session token is good for an hour either way, and every request re-reads the `users` row — so deactivating or removing someone takes effect on their next request, not when their token expires (D-132). Expiry is not what revokes access here.
+- **The JWKS path logs why it rejected a token** (error type and message only — never the token, never a claim; Section 7.10). Failing closed in silence made two very different things look identical from outside: a forged token, and a real one we could not verify. This bug was invisible for exactly that reason, and the log is what identified it in one run.
+
+**Verified:** 40 consecutive real sign-ins through the browser with no failure, against roughly 1 in 6 before. `apps/api/tests/test_token_verification.py` gains six tests — a few seconds ahead is accepted on both paths; an hour ahead is refused; a token five seconds past expiry is accepted, which pins the symmetric behaviour above rather than leaving it a side effect; two minutes past expiry is refused; an old expired token is refused. The two "ahead of the clock" tests fail with the leeway set back to 0.
+
+**Not in the original scope of the Stage 1 walkthrough fix.** It was found by building the test the founder asked for, it made that test flaky, and the honest fix was the product bug rather than a retry in the test. Raised as an auth change, which is Stage 2's territory (H9); the founder kept it in this pull request and set the allowance at 30 seconds (2026-09-27).
+
+**Related:** Section 3, Section 7.10; D-088, D-132, D-166.
+
+## D-168 — A check that recurs after a round trip comes back unacknowledged
+
+**Context:** the founder's question on the D-166 fix. Tick the "order total doesn't match the line items" check at 900.00, edit the total to 4000.00, then edit it back to 900.00. Does the original acknowledged row come back, tick and all?
+
+**What actually happens** (established against staging, not reasoned about — `apps/api/tests/test_review_api.py::test_a_check_that_returns_after_a_round_trip_returns_unacknowledged`):
+
+| Step | The check |
+|---|---|
+| 900.00, acknowledged | row `W1`, `status='acknowledged'`, `acknowledged_at` set |
+| → 4000.00 | `W1` resolves: `status='resolved'`, `resolved_at` and `deleted_at` set. New open row `W2` for the new discrepancy |
+| → back to 900.00 | `W2` resolves. **A third row `W3`** — open, `acknowledged_at` NULL — with the *same fingerprint as `W1`* |
+
+`W1` is not revived and not erased. It stays soft-deleted with its acknowledgement intact, so the record of who agreed to what, and when, survives (Section 7.3). The recurrence is a new row because the unique index is partial — `(document_id, fingerprint) WHERE deleted_at IS NULL` — which `0006_validation_and_duplicates.sql` states was the intent: "a warning that was resolved and later recurs can be raised again as a new, unacknowledged row."
+
+**Decision: keep it. The reviewer re-confirms.** This is the behaviour the founder wanted, and it is right on its own terms. A tick is not a preference the document remembers; it is a person saying "I have just checked this number against the original." By the time the total comes back to 900.00 they last looked two edits ago, at a document that has changed twice since — and the most likely reason a number went 900 → 4000 → 900 is that somebody was unsure. That is the moment to ask again, not to wave through.
+
+It also keeps one rule instead of two. The screen carries a tick forward by warning id and nothing else (D-166); the id changes whenever the statement does. No special case for "we have seen this fingerprint before", no cache of retired acknowledgements to reason about, and no way for a tick to outlive the document state it was about.
+
+**The cost, stated plainly:** a reviewer who edits a number and changes their mind re-ticks one check. Small, and on the safe side of a gate whose whole purpose is that a person looked.
+
+**Pinned by two tests**, because this is a behaviour it would be easy to "fix" later without realising it was chosen:
+- the API test above — `W3.id != W1.id`, `W3.acknowledged_at is None`, `W1` still present with `deleted_at` set and its `acknowledged_at` intact, and `W1.fingerprint == W3.fingerprint` (same statement, different row);
+- and its mirror in `apps/web/e2e-live/review-warnings.spec.ts`, where the reviewer ticks, edits away, edits back, and finds the check waiting un-ticked with Approve still off.
+
+**And the opposite case is pinned too** — `test_an_unrelated_edit_leaves_an_acknowledged_check_exactly_as_it_was`. Clearing a tick too readily is as bad as not clearing it: it teaches the reviewer that Approve turns off for no reason, and a gate that cries wolf is one people learn to click through. An edit to a field a check says nothing about leaves that check on the same row, with the same id and the same `acknowledged_at`.
+
+**Related:** Sections 7.3, 7.7; D-074, D-144, D-166.

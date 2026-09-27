@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-09-25** (Phase 5.5: Stage 0 done, Stage 1 in progress).
+commit as the slice. Statuses below are as of **2026-09-27** (Phase 5.5: Stage 0 done, Stage 1 checkpoint done and walked, Stage 2 next).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -184,7 +184,7 @@ are D-149 – D-153.
 | Stage | What | Status | Decisions |
 |---|---|---|---|
 | 0 | Safety net: push, CI green, `main` protected (done before 5.5 began); **CI database and the unapproved-skip check** (H7 part 2); core type-checked and pinned in CI | DONE (PR #3, merged 2026-09-25) | D-148 |
-| 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents | **CHECKPOINT DONE 2026-09-26, awaiting "go"** (`CHECKPOINTS.md`: C1, H1, H3, M1, M3, H2, M4, M5 all closed). 1a DONE (PR #4, D-156); 1b DONE (PR #6, migration `0027`, D-158 – D-160); 1c DONE (PR #7: golden rename, M1 streaming measured, H2/M4/M5, one read budget, every paid call costed, Audit tab on one clock; D-159, D-161 – D-164); named system actors DONE (PR #8, migration `0028` applied and verified on staging 2026-09-26: 3 system actors, no blank lifecycle actor, idle-transaction cap 5 min; D-165); Stage 1 checkpoint run on `b04f16d` | D-149, D-154 – D-165 |
+| 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents. **Plus the two defects the founder's walkthrough found on the real stack (2026-09-27): the review screen said nothing when an edit raised a check (D-166), and a session token one second ahead of this clock was refused as "signed out" (D-167).** | **CHECKPOINT DONE 2026-09-26, awaiting "go"** (`CHECKPOINTS.md`: C1, H1, H3, M1, M3, H2, M4, M5 all closed). 1a DONE (PR #4, D-156); 1b DONE (PR #6, migration `0027`, D-158 – D-160); 1c DONE (PR #7: golden rename, M1 streaming measured, H2/M4/M5, one read budget, every paid call costed, Audit tab on one clock; D-159, D-161 – D-164); named system actors DONE (PR #8, migration `0028` applied and verified on staging 2026-09-26: 3 system actors, no blank lifecycle actor, idle-transaction cap 5 min; D-165); Stage 1 checkpoint run on `b04f16d`; walkthrough fixes DONE (D-166, D-167, and the live end-to-end suite that catches this class of defect) | D-149, D-154 – D-167 |
 | 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events (record the event in the same transaction as its effect; ignore an event older than the state already saved; **an event in the same second as the saved state can't be ordered by `created` (one-second resolution), so it re-fetches the subscription from Stripe and saves that, never guesses** -- a webhook-side fetch, not a page-load one, so within 7.15.3 (founder, 2026-09-26); the Phase 6 plan-change reconcile reuses this guard) | PLANNED | D-151 |
 | 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation, H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) | PLANNED | D-150, D-159 |
 | 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items | PLANNED | D-152 |
@@ -299,6 +299,13 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   D-148): CI now runs the core, api and worker suites against a local Supabase
   stack with every migration applied, as `docflow_app` (NOBYPASSRLS), and fails
   on any skipped test not approved in `.github/approved-skips.txt` (none are).
+  A **fifth job, `web-live`**, was added 2026-09-27 (D-166): the review screen
+  in a real browser against the real API, real Postgres and a real sign-in,
+  with nothing stubbed. It is the only suite that can fail when the screen and
+  the server disagree after a write, which is the gap D-086 knowingly left and
+  the Stage 1 walkthrough fell into. **The founder needs to add it to the
+  required checks on `main` in the GitHub branch-protection settings** -- the
+  other four were added by hand and this one has to be too.
 - Browser walkthroughs: `docs/walkthroughs/README.md` is the index, one file
   per phase or slice from Phase 0 to 5.10, to walk in order before Phase 6
   (QA/UAT). Files for Phases 0–4, 5.1–5.5 and 5.8a–c were added 2026-09-25;

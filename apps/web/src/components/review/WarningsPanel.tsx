@@ -21,6 +21,24 @@ function fieldLabel(warning: DocumentWarning): string | null {
   return HEADER_FIELDS.find((f) => f.name === warning.field_name)?.label ?? null;
 }
 
+/**
+ * The DOM id of a check's own row, so the rest of the screen can point at
+ * it. A reviewer who is told "this check is why Approve is off" has to be
+ * able to get to it in one click -- the panel sits below the line table and
+ * is usually off the bottom of the window.
+ */
+export function warningRowId(warningId: string): string {
+  return `warning-row-${warningId}`;
+}
+
+/** Scroll one check into view and put the cursor on its tick box. */
+export function focusWarning(warningId: string): void {
+  const row = document.getElementById(warningRowId(warningId));
+  if (!row) return;
+  row.scrollIntoView({ behavior: "smooth", block: "center" });
+  document.getElementById(`ack-${warningId}`)?.focus({ preventScroll: true });
+}
+
 /** Scroll to the box a check is about and put the cursor in it. */
 function goTo(warning: DocumentWarning) {
   const target =
@@ -60,11 +78,18 @@ const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, warning: 
 export function WarningsPanel({
   warnings,
   acknowledged,
+  appeared,
   disabled,
   onToggle,
 }: {
   warnings: DocumentWarning[];
   acknowledged: Set<string>;
+  /**
+   * Checks that were raised by the reviewer's last save. Marked here so that
+   * scrolling down after an edit settles the question the founder's
+   * walkthrough could not answer: which of these is new?
+   */
+  appeared: Set<string>;
   disabled: boolean;
   onToggle: (warningId: string, checked: boolean) => void;
 }) {
@@ -114,6 +139,7 @@ export function WarningsPanel({
         {open.map((warning) => (
           <li
             key={warning.id}
+            id={warningRowId(warning.id)}
             data-testid={`warning-${warning.code}`}
             className={[
               "rounded-lg border bg-white p-4 text-sm",
@@ -134,6 +160,14 @@ export function WarningsPanel({
               />
               <label htmlFor={`ack-${warning.id}`} className="flex-1 cursor-pointer">
                 <span className="block font-medium text-gray-900">
+                  {appeared.has(warning.id) ? (
+                    <span
+                      data-testid={`warning-new-${warning.id}`}
+                      className="mr-1.5 rounded bg-amber-900 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white"
+                    >
+                      New
+                    </span>
+                  ) : null}
                   {warning.line_number !== null ? `Line ${warning.line_number} · ` : ""}
                   {fieldLabel(warning) ? (
                     <span data-testid={`warning-field-${warning.id}`} className="text-amber-900">

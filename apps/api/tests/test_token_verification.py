@@ -16,6 +16,8 @@ without reaching Supabase.
 
 from __future__ import annotations
 
+import time
+
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -131,3 +133,89 @@ def test_no_key_material_at_all_is_a_loud_failure(monkeypatch):
 
     with pytest.raises(RuntimeError):
         deps._decode_bearer_token(f"Bearer {token}")
+
+
+# ── Clock skew (D-167) ──────────────────────────────────────────────────────
+
+
+def _at(offset_seconds: int) -> dict:
+    """The claims, with `iat` shifted relative to this machine's clock."""
+    now = int(time.time())
+    return {**CLAIMS, "iat": now + offset_seconds, "exp": now + offset_seconds + 3600}
+
+
+def test_a_token_issued_a_few_seconds_ahead_of_this_clock_is_accepted(monkeypatch, es256_keys):
+    """
+    Supabase stamps `iat` from its own clock. When this server's clock is a
+    second or two behind, a token the browser has only just been issued is
+    "not yet valid" here -- and the person is told they are signed out on
+    their first request after signing in. Found driving the real stack: one
+    sign-in in six, with `iat` exactly one second ahead of `now` (D-167).
+    """
+    private_key, public_key = es256_keys
+    _stub_jwks(monkeypatch, public_key)
+    token = jwt.encode(_at(5), private_key, algorithm="ES256")
+
+    claims = deps._decode_bearer_token(f"Bearer {token}")
+
+    assert claims is not None and claims["sub"] == CLAIMS["sub"]
+
+
+def test_the_same_allowance_applies_to_the_shared_secret_path(monkeypatch, es256_keys):
+    token = jwt.encode(_at(5), HS_SECRET, algorithm="HS256")
+
+    claims = deps._decode_bearer_token(f"Bearer {token}")
+
+    assert claims is not None and claims["sub"] == CLAIMS["sub"]
+
+
+def test_a_token_from_far_in_the_future_is_still_refused(monkeypatch, es256_keys):
+    """The allowance is for clock skew, not for a token that was never
+    plausibly issued to this session."""
+    private_key, public_key = es256_keys
+    _stub_jwks(monkeypatch, public_key)
+    token = jwt.encode(_at(3600), private_key, algorithm="ES256")
+
+    assert deps._decode_bearer_token(f"Bearer {token}") is None
+
+
+def test_the_allowance_is_symmetric_and_that_is_on_purpose(monkeypatch, es256_keys):
+    """
+    PyJWT applies `leeway` to `exp` as well as to `iat`, so a token that has
+    just expired is accepted for the same 30 seconds. This asserts it rather
+    than leaving it as a side effect nobody wrote down (D-167).
+
+    It costs nothing that matters: a session token is good for an hour
+    either way, and access is re-read from the `users` row on every request,
+    so removing someone takes effect on their next request and not when
+    their token runs out (D-132).
+    """
+    private_key, public_key = es256_keys
+    _stub_jwks(monkeypatch, public_key)
+    now = int(time.time())
+    token = jwt.encode({**CLAIMS, "iat": now - 3600, "exp": now - 5}, private_key, algorithm="ES256")
+
+    assert deps._decode_bearer_token(f"Bearer {token}") is not None
+
+
+def test_a_token_expired_beyond_the_allowance_is_refused(monkeypatch, es256_keys):
+    """The line has to be somewhere, and it is 30 seconds."""
+    private_key, public_key = es256_keys
+    _stub_jwks(monkeypatch, public_key)
+    now = int(time.time())
+    token = jwt.encode(
+        {**CLAIMS, "iat": now - 3600, "exp": now - 120}, private_key, algorithm="ES256"
+    )
+
+    assert deps._decode_bearer_token(f"Bearer {token}") is None
+
+
+def test_an_expired_token_is_still_refused(monkeypatch, es256_keys):
+    private_key, public_key = es256_keys
+    _stub_jwks(monkeypatch, public_key)
+    now = int(time.time())
+    token = jwt.encode(
+        {**CLAIMS, "iat": now - 7200, "exp": now - 3600}, private_key, algorithm="ES256"
+    )
+
+    assert deps._decode_bearer_token(f"Bearer {token}") is None

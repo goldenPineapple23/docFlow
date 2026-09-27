@@ -26,7 +26,16 @@ class Settings(BaseSettings):
     # refuses every call (see apps/api/app/main.py). Both spellings of "this
     # machine" are included by default because a developer may open either
     # and the failure is invisible when they get it wrong.
-    cors_allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    #
+    # Port 3101 is the live end-to-end suite's own server (D-166). It is
+    # here rather than in a test-only override for the same reason as the
+    # two spellings above: a CORS refusal shows up as a page that loads and
+    # then does nothing, which costs an hour to diagnose every time. Every
+    # origin in this default is a loopback address and can never be a
+    # deployed one; staging and prod set CORS_ALLOWED_ORIGINS explicitly.
+    cors_allowed_origins: str = (
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3101,http://127.0.0.1:3101"
+    )
     api_base_url: str = "http://localhost:8000"
 
     supabase_url: str = ""

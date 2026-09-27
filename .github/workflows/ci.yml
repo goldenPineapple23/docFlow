@@ -64,6 +64,132 @@ jobs:
       - name: Dependency audit (fail on high/critical)
         run: npm audit --audit-level=high
 
+  web-live:
+    name: web-live (the review screen against the real API)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v2.1.2
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Start the local Supabase stack (applies supabase/migrations/)
+        run: supabase start
+      # The API must verify tokens with the same secret the local GoTrue
+      # signs them with, and the browser bundle needs that stack's URL and
+      # anon key compiled into it. Both come from the running stack rather
+      # than being written down twice.
+      - name: Read the local stack's keys
+        run: |
+          supabase status -o env | sed 's/^/export /' > /tmp/supabase.env
+          . /tmp/supabase.env
+          # Named loudly if the CLI ever renames one of these, rather than
+          # letting the job fail later as an unexplained 401.
+          for required in API_URL ANON_KEY SERVICE_ROLE_KEY JWT_SECRET; do
+            if [ -z "$(eval echo \"\$$required\")" ]; then
+              echo "supabase status -o env did not provide $required" >&2
+              exit 1
+            fi
+          done
+          echo "SUPABASE_URL=$API_URL" >> "$GITHUB_ENV"
+          echo "SUPABASE_ANON_KEY=$ANON_KEY" >> "$GITHUB_ENV"
+          echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY" >> "$GITHUB_ENV"
+          echo "SUPABASE_JWT_SECRET=$JWT_SECRET" >> "$GITHUB_ENV"
+          echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL" >> "$GITHUB_ENV"
+          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY" >> "$GITHUB_ENV"
+          # Set here, not on the build step, so the guard below sees every
+          # address the browser will be given before the build bakes it in.
+          echo "NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000" >> "$GITHUB_ENV"
+      # This job seeds and deletes real rows, so it says out loud which
+      # database it is about to do that to. Staging holds a paying
+      # customer's data one day; a job that could reach it must fail here,
+      # not quietly succeed. (It cannot: `.env` is gitignored so nothing
+      # points at staging in a runner, no repository secret is referenced
+      # by this workflow, and `database_url` defaults to empty rather than
+      # to anything real. This step is the assertion of that, not the only
+      # thing standing in the way.)
+      - name: Refuse to run against anything but this runner's own stack
+        run: |
+          # Everything the server talks to, and -- just as important -- every
+          # address compiled into the browser bundle. The browser in this
+          # suite calls the NEXT_PUBLIC_* ones, not DATABASE_URL, so a wrong
+          # value there would have the test sign in against a real project
+          # while the assertions still passed.
+          checked=0
+          while IFS='=' read -r name value; do
+            [ -n "$name" ] || continue
+            if [ -z "$value" ]; then
+              echo "$name is not set; this job needs it" >&2
+              exit 1
+            fi
+            case "$value" in
+              http://127.0.0.1*|http://localhost*|postgresql://*@127.0.0.1:*|postgresql://*@localhost:*)
+                echo "$name -> this runner, good" ;;
+              *)
+                echo "$name is not an address on this runner: refusing to seed or delete anything" >&2
+                exit 1 ;;
+            esac
+            checked=$((checked + 1))
+          done <<EOF
+          DATABASE_URL=$DATABASE_URL
+          SUPABASE_URL=$SUPABASE_URL
+          NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+          NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+          EOF
+          # If someone adds a NEXT_PUBLIC_*_URL and forgets this list, say so
+          # rather than letting it through unchecked.
+          declared=$(env | grep -c '^NEXT_PUBLIC_.*_URL=' || true)
+          if [ "$declared" -gt 2 ]; then
+            echo "A NEXT_PUBLIC_*_URL exists that this guard does not check:" >&2
+            env | grep '^NEXT_PUBLIC_.*_URL=' >&2
+            exit 1
+          fi
+          echo "$checked addresses checked."
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: apps/api/requirements.lock.txt
+      - run: python -m pip install --upgrade pip
+      - run: pip install -r apps/api/requirements.lock.txt
+      - run: pip install --no-deps -e packages/core
+      - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
+        run: python scripts/ci/create_app_role.py
+      - name: Start the API
+        run: |
+          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/api.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8000/healthz && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8000/healthz
+        working-directory: apps/api
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+        working-directory: apps/web
+      # NEXT_PUBLIC_* are compiled into the bundle, so the build has to know
+      # which stack it is talking to.
+      - run: npm run build
+        working-directory: apps/web
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      # Nothing is stubbed here: a real browser, the real API, real Postgres,
+      # real RLS and a real sign-in (DECISIONS.md D-166). It has its own job
+      # because it needs a database and two servers, and because a failure
+      # here means something different from a failure in the stubbed suite.
+      - name: Live end-to-end tests (playwright)
+        run: npm run test:e2e:live
+        working-directory: apps/web
+        env:
+          DOCFLOW_PYTHON: python
+      - name: The API's log, if anything failed
+        if: failure()
+        run: cat /tmp/api.log
+
   core:
     name: core (lint, test, audit)
     runs-on: ubuntu-latest
