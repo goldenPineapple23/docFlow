@@ -105,7 +105,19 @@ async function save(page: Page) {
     page.waitForResponse((r) => r.request().method() === "PATCH" && r.status() === 200),
     page.getByTestId("save-button").click(),
   ]);
-  await expect(page.getByTestId("save-button")).toBeDisabled();
+  // The write, then the re-read, then the screen's account of what changed.
+  // Waiting on the Save button is not enough: it goes disabled the moment
+  // the click is handled, because `busy` alone disables it -- so assertions
+  // could race the read that follows and see the old checks. Every
+  // successful save ends by putting up a banner, and that only happens once
+  // the re-read has landed, so that is the thing to wait for.
+  // The two kinds a save can produce, named exactly. A prefix match would
+  // also catch `banner-jump`, the button inside the amber one, and match
+  // two elements -- which fails only on the saves that raise a check, the
+  // ones these specs care most about.
+  await expect(
+    page.locator('[data-testid="banner-success"], [data-testid="banner-warning"]'),
+  ).toBeVisible();
 }
 
 /** True when an element is inside the window the reviewer is looking at. */
@@ -147,22 +159,34 @@ test("an edit that raises a check says so, names it, and Approve says which one 
   await expect(blocked).toContainText(/Line 1/);
   expect(await inViewport(page, "approve-blocked")).toBe(true);
 
-  // 3. One click reaches the check itself, wherever the panel happens to be.
+  // 3. The line itself says it is in question. The founder's walkthrough
+  //    found this the other way round: line 3's quantity was 2 where the
+  //    document said 24, the check was raised and sitting in the panel, and
+  //    the row in the table looked exactly like the rows either side of it.
+  await expect(page.getByTestId("line-1-flag")).toBeVisible();
+  for (const field of ["quantity", "unit_price", "line_total"]) {
+    await expect(page.getByTestId(`line-1-${field}`)).toHaveAttribute("data-flagged", "true");
+  }
+  await expect(page.getByTestId("line-1-sku")).toHaveAttribute("data-flagged", "false");
+
+  // 4. One click reaches the check itself, wherever the panel happens to be.
   await page.getByTestId("approve-blocked-show").click();
   const row = page.getByTestId("warning-VAL-001");
   await expect(row).toBeVisible();
   await expect(row).toContainText(/New/);
   await expect(row.getByRole("checkbox")).toBeFocused();
 
-  // 4. Ticking it -- and only it -- releases Approve.
+  // 5. Ticking it -- and only it -- releases Approve.
   await row.getByRole("checkbox").check();
   await expect(page.getByTestId("approve-button")).toBeEnabled();
 
-  // 5. Putting the number back clears the check, and the screen says that too.
+  // 6. Putting the number back clears the check, and the screen says that too.
   await page.getByTestId("line-1-unit_price").fill("47.50");
   await save(page);
   await expect(page.getByTestId("warning-VAL-001")).toHaveCount(0);
   await expect(page.getByTestId("no-warnings")).toBeVisible();
+  await expect(page.getByTestId("line-1-flag")).toHaveCount(0);
+  await expect(page.getByTestId("line-1-line_total")).toHaveAttribute("data-flagged", "false");
   await expect(page.getByTestId("banner-success")).toContainText(/no longer applies/i);
   await expect(page.getByTestId("approve-button")).toBeEnabled();
 });

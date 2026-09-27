@@ -59,6 +59,14 @@ function publicEnvFromRepoRoot(): Record<string, string> {
 }
 
 const nextConfig: NextConfig = {
+  // Where the build goes. `next dev` and `next build` both write to `.next`
+  // by default, so a production build run while a dev server is up corrupts
+  // it under the dev server's feet -- the page then dies with "Jest worker
+  // encountered N child process exceptions", which names nothing that
+  // happened. The live end-to-end suite (D-166) builds and serves its own
+  // copy, so it sets this and leaves a running `npm run dev` alone.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+
   // A real environment variable already set in the shell wins, so CI and a
   // deployment can override without editing a file.
   env: { ...publicEnvFromRepoRoot(), ...pickPublic(process.env) },

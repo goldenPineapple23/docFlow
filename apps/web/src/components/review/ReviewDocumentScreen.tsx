@@ -588,6 +588,7 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
           <LineTable
             lines={detail.lines}
             edits={lineEdits}
+            warnings={detail.warnings}
             disabled={readOnly}
             onChange={(lineId, field, value) =>
               setLineEdits((prev) => ({

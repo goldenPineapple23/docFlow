@@ -192,6 +192,7 @@ describe("line items (Section 7.6)", () => {
       <LineTable
         lines={[withCandidates]}
         edits={{}}
+        warnings={[]}
         disabled={false}
         onChange={() => {}}
         onConfirmMapping={async () => {}}
@@ -207,6 +208,7 @@ describe("line items (Section 7.6)", () => {
       <LineTable
         lines={[{ ...line, uom_mismatch: true, matched_uom: "EA" }]}
         edits={{}}
+        warnings={[]}
         disabled={false}
         onChange={() => {}}
         onConfirmMapping={async () => {}}
@@ -228,6 +230,7 @@ describe("line items (Section 7.6)", () => {
           },
         ]}
         edits={{}}
+        warnings={[]}
         disabled={false}
         onChange={() => {}}
         onConfirmMapping={onConfirmMapping}
@@ -246,6 +249,7 @@ describe("line items (Section 7.6)", () => {
       <LineTable
         lines={[line]}
         edits={{}}
+        warnings={[]}
         disabled={false}
         onChange={() => {}}
         onConfirmMapping={async () => {}}
@@ -267,12 +271,101 @@ describe("line items (Section 7.6)", () => {
       <LineTable
         lines={[line]}
         edits={{}}
+        warnings={[]}
         disabled={false}
         onChange={() => {}}
         onConfirmMapping={async () => {}}
       />,
     );
     expect(screen.getByTestId("line-1-quantity")).toHaveValue("12.0000");
+  });
+});
+
+describe("a line the checks are about (D-169)", () => {
+  // The walkthrough order: the document says 24, the extraction recorded 2,
+  // and 2 x 8.25 is not the 198.00 printed on the line. DocFlow cannot know
+  // which of the three numbers is wrong (Section 7.7), so it says all three
+  // are implicated and lets the reviewer decide.
+  const lineTotalMismatch: DocumentWarning = {
+    id: "44444444-4444-4444-4444-444444444444",
+    code: "VAL-001",
+    title: "Line total doesn't match quantity times price",
+    message: "On this line, the printed total isn't the quantity multiplied by the unit price.",
+    action: "Check the line against the original document.",
+    severity: "high",
+    field_name: "line_total",
+    line_number: 1,
+    document_line_id: line.id,
+    detail: {
+      expected: "16.50",
+      quantity: "2",
+      unit_price: "8.25",
+      line_total: "198",
+      difference: "181.50",
+      line_number: "1",
+    },
+    status: "open",
+    acknowledged_at: null,
+  };
+
+  function renderWith(warnings: DocumentWarning[]) {
+    render(
+      <LineTable
+        lines={[line]}
+        edits={{}}
+        warnings={warnings}
+        disabled={false}
+        onChange={() => {}}
+        onConfirmMapping={async () => {}}
+      />,
+    );
+  }
+
+  it("marks every number the check compared, not only the one it is filed under", () => {
+    // The founder's walkthrough: a quantity misread as 2 where the document
+    // says 24 shows up as a line-total discrepancy. Marking only the total
+    // would point at the number that is probably right.
+    renderWith([lineTotalMismatch]);
+
+    for (const field of ["quantity", "unit_price", "line_total"]) {
+      expect(screen.getByTestId(`line-1-${field}`)).toHaveAttribute("data-flagged", "true");
+    }
+    // Not the ones it says nothing about.
+    for (const field of ["sku", "description", "unit"]) {
+      expect(screen.getByTestId(`line-1-${field}`)).toHaveAttribute("data-flagged", "false");
+    }
+  });
+
+  it("says it in words too, not only in amber", () => {
+    renderWith([lineTotalMismatch]);
+    expect(screen.getByTestId("line-1-quantity")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Line total doesn't match quantity times price"),
+    );
+  });
+
+  it("marks the row so a reviewer reading down a column sees it", () => {
+    renderWith([lineTotalMismatch]);
+    expect(screen.getByTestId("line-1-flag")).toBeInTheDocument();
+  });
+
+  it("leaves a line no check is about completely alone", () => {
+    renderWith([]);
+    expect(screen.queryByTestId("line-1-flag")).toBeNull();
+    for (const field of ["quantity", "unit_price", "line_total"]) {
+      expect(screen.getByTestId(`line-1-${field}`)).toHaveAttribute("data-flagged", "false");
+    }
+  });
+
+  it("ignores a check that belongs to a different line", () => {
+    renderWith([{ ...lineTotalMismatch, line_number: 2 }]);
+    expect(screen.queryByTestId("line-1-flag")).toBeNull();
+    expect(screen.getByTestId("line-1-line_total")).toHaveAttribute("data-flagged", "false");
+  });
+
+  it("ignores one that is already settled", () => {
+    renderWith([{ ...lineTotalMismatch, status: "acknowledged" }]);
+    expect(screen.queryByTestId("line-1-flag")).toBeNull();
   });
 });
 

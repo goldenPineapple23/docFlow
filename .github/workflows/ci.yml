@@ -170,10 +170,6 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
         working-directory: apps/web
-      # NEXT_PUBLIC_* are compiled into the bundle, so the build has to know
-      # which stack it is talking to.
-      - run: npm run build
-        working-directory: apps/web
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
         working-directory: apps/web
@@ -181,6 +177,8 @@ jobs:
       # real RLS and a real sign-in (DECISIONS.md D-166). It has its own job
       # because it needs a database and two servers, and because a failure
       # here means something different from a failure in the stubbed suite.
+      # The suite builds the app itself (playwright.live.config.ts), into
+      # its own directory, with this job's NEXT_PUBLIC_* compiled in.
       - name: Live end-to-end tests (playwright)
         run: npm run test:e2e:live
         working-directory: apps/web
