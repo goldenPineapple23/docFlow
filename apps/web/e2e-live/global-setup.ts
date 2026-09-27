@@ -1,6 +1,4 @@
-import { execFileSync } from "node:child_process";
-import path from "node:path";
-import { PYTHON, SEED_FILE } from "../playwright.live.config";
+import { runSeedScript } from "./seed";
 
 /**
  * The throwaway tenant, reviewer and documents this suite drives. Created
@@ -8,6 +6,5 @@ import { PYTHON, SEED_FILE } from "../playwright.live.config";
  * (DECISIONS.md D-160).
  */
 export default function globalSetup() {
-  const script = path.resolve(__dirname, "../../../scripts/seed_live_e2e.py");
-  execFileSync(PYTHON, [script, "setup", "--out", SEED_FILE], { stdio: "inherit" });
+  runSeedScript("setup");
 }
