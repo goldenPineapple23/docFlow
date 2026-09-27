@@ -67,6 +67,31 @@ class Settings(BaseSettings):
     email_from_address: str = "notifications@docflow.example"
     intake_email_domain: str = "mail.docflow.example"
 
+    # Authenticates the *provider* of inbound mail, separately from the
+    # address (review finding H8). The per-tenant token in the intake URL
+    # identifies the tenant and nothing more: it is the local part of an
+    # address the customer hands to its buyers, so it is public by design and
+    # cannot also be a credential. Postmark puts HTTP Basic credentials on the
+    # webhook URL; these are that pair, and they are not derivable from any
+    # address.
+    #
+    # Blank means the inbound webhook refuses everything. That is deliberate
+    # and it is why RUNBOOK section 2 states a cutover order: set these, point
+    # Postmark at the URL carrying them, and only then is inbound mail live.
+    # The alternative -- falling back to token-only when unset -- would make a
+    # missing environment variable silently reopen the hole H8 describes.
+    postmark_webhook_username: str = ""
+    postmark_webhook_password: str = ""
+
+    # Source addresses Postmark's inbound webhook really posts from
+    # (comma-separated). **Log-only, never enforcing**, until the real
+    # addresses are confirmed against Postmark's published list by the
+    # RUNBOOK section 2 procedure (D-155): an allowlist that refuses before it
+    # has been verified silently drops customers' purchase orders. The
+    # credentials above are the control that actually holds; this is
+    # corroboration.
+    postmark_inbound_ip_allowlist: str = ""
+
     founder_alert_email: str = ""
 
     sentry_dsn: str = ""

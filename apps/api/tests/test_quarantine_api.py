@@ -32,7 +32,7 @@ from docflow_core import intake_admin, usage
 from docflow_core.db import platform_session, tenant_session
 from sqlalchemy import text
 
-from tests.conftest import requires_database
+from tests.conftest import intake_webhook_headers, requires_database
 from tests.test_console_api import JWT_SECRET, _Console, _environment, stripe  # noqa: F401
 from tests.test_email_intake import _pm_attachment, _pm_payload
 
@@ -292,7 +292,9 @@ class _Tenant:
 def _email(client, tenant: _Tenant, sender: str, *, n: int = 1, token: str | None = None):
     attachments = [_pm_attachment(f"po-{uuid4().hex[:6]}.txt", f"PO {uuid4()}".encode()) for _ in range(n)]
     return client.post(
-        f"/intake/email/{token or tenant.token}", json=_pm_payload(sender, attachments=attachments)
+        f"/intake/email/{token or tenant.token}",
+        json=_pm_payload(sender, attachments=attachments),
+        headers=intake_webhook_headers(),
     )
 
 
@@ -738,7 +740,11 @@ def test_held_documents_past_retention_raise_one_alert_and_are_never_deleted(cli
 @requires_quarantine_schema
 def test_mail_that_made_no_document_is_listed_for_the_tenant(client):
     with _Tenant() as t:
-        client.post(f"/intake/email/{t.token}", json=_pm_payload("nobody@example.test", attachments=[]))
+        client.post(
+            f"/intake/email/{t.token}",
+            json=_pm_payload("nobody@example.test", attachments=[]),
+            headers=intake_webhook_headers(),
+        )
         mail = client.get("/ignored-mail", headers=t.headers()).json()["mail"]
         assert mail and mail[0]["code"] == "INT-001" and mail[0]["sender_email"] == "nobody@example.test"
         assert mail[0]["action"]  # what to do next, from the catalog
