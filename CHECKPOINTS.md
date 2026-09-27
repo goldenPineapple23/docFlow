@@ -7,6 +7,61 @@ phase."
 
 ---
 
+## Phase 5.5 Stage 1 — Data integrity — COMPLETE, awaiting "go" (2026-09-26)
+
+Built as 1a (PR #4), 1b (PR #6), 1c (PR #7) and the named system actors
+(PR #8). Migrations `0026`, `0027` and `0028` applied and verified on
+`docflow-staging`. Checkpoint run on `main` at `b04f16d`.
+
+### Test runs
+
+On staging, one at a time (D-160), as pytest printed them:
+
+- **API:** `413 passed, 3 deselected, 443 warnings in 1690.85s (0:28:10)`. The 3 deselected are the `live_api` tests below.
+- **Worker:** `107 passed, 4 warnings in 542.62s (0:09:02)`.
+- **Live** (`pytest -m live_api`, real calls to `claude-sonnet-5`): `3 passed, 8 deselected, 1 warning in 21.21s`.
+  - `test_live_extraction_matches_section_8_3` (golden)
+  - `test_live_golden_fixture_still_extracts_exactly_with_examples`
+  - `test_live_contamination_no_example_value_appears`
+
+Also:
+
+- **Core** (no database): `542 passed in 5.51s`.
+- **CI on `b04f16d`:** web, core, worker and api all green.
+
+No failures and no skips in any run.
+
+### Verdicts
+
+| Finding | Verdict | Evidence |
+|---|---|---|
+| **C1** The database rounded money and quantities | **Closed** | Migration 0026 makes the four columns plain `numeric` (D-154). Worker `test_numeric_fidelity_db.py`: `test_C1_worker_stores_extracted_numbers_exactly`, `test_C1_human_edit_is_stored_exactly`, `test_C1_every_export_matches_raw_json_for_unedited_fields`, `test_C1_property_random_decimals_survive_model_db_edit_approve_and_every_export` (random decimals from model to every export, compared with the original strings), `test_C1_numeric_columns_are_unconstrained_so_postgres_cannot_round`. Core `test_numeric_fidelity.py` (no exponents, exact checks, VAL-015 warns and never rounds). |
+| **H1** "Needs review" before the checks ran; failures silent | **Closed** | Validation and the move to review are one transaction; a failed step is VAL-016 plus an alert (D-158). Worker `test_pipeline_integrity_db.py`: `test_H1_an_order_is_still_processing_while_its_checks_run`, `test_H1_a_validation_failure_fails_the_order_with_a_code_and_alerts`, `test_H1_a_step_that_did_not_finish_is_an_explicit_warning_and_an_alert`. |
+| **H3** Redelivery could knock an approved order back | **Closed** | State machine enforced by a database trigger (0027); claim-first, resumable worker (D-158). Worker: `test_H3_a_redelivered_job_for_an_approved_order_changes_nothing`, `test_H3_a_duplicate_delivery_while_another_worker_is_on_it_is_a_no_op`, `test_H3_a_worker_killed_mid_job_is_resumed_without_a_second_model_call` (SIGKILLs a real process), `test_H3_the_database_refuses_to_move_an_approved_order_back_to_processing`, `test_H3_the_state_machine_in_code_is_the_one_in_the_database`, plus the stuck-document tests. Core `test_document_status.py` guards status writes outside `document_status`. The whole read (retries included) ends inside the 30-minute stuck timeout: `test_M1_the_whole_read_ends_well_inside_the_stuck_timeout`. |
+| **M1** Orders over ~50–60 lines always failed | **Closed** up to about 1,000 lines | Streamed call, `max_tokens` 128,000, measured 80 / 300 / 600 lines read exactly (D-161). Core `test_extraction_streaming.py` (10 `test_M1_*`); worker `test_M1_a_100_line_order_is_stored_whole`, `test_M1_a_truncated_answer_fails_with_DOC_020_and_keeps_nothing`, `test_M1_the_read_deadline_is_set_at_the_claim`. **Accepted limit (founder, D-163):** past about 1,000 lines the order ends as DOC-020 after up to the 20-minute read, not immediately; the RUNBOOK onboarding checklist checks the largest sample order. Chunking stays deferred. |
+| **M3** A bad confidence or a failed save stranded the order | **Closed** | Out-of-range confidence becomes 0 (D-154); a failed save is DOC-021 with the answer kept (D-158). Core `test_M3_an_out_of_range_confidence_is_treated_as_no_confidence`, `test_M3_an_in_range_confidence_is_untouched`; worker `test_M3_a_failure_saving_the_answer_ends_in_failed_not_stranded`. |
+| **H2** A human edit was never re-validated | **Closed** | `apply_edits` re-validates in the same transaction; approval re-checks first (D-162). API `test_review_integrity.py`: `test_H2_a_mistyped_price_raises_a_warning_and_blocks_approval`, `test_H2_fixing_the_value_resolves_its_warning`, `test_H2_approval_rechecks_and_saves_a_warning_it_finds_even_though_it_refuses`, `test_H2_an_edit_through_the_core_function_rechecks_too`. |
+| **M4** Acknowledgement text came from the browser | **Closed** | The server writes the catalog wording plus the stored values; the body carries only a warning id and a note (D-162). API `test_M4_the_acknowledgement_text_is_the_catalog_wording_not_what_the_client_sent`, `test_M4_an_acknowledgement_of_a_warning_not_on_this_order_is_refused`, `test_M5_M4_the_core_acknowledgement_carries_only_an_id_and_a_note`. |
+| **M5** Approval not tied to what the reviewer saw | **Closed** | `expected_version` required on approve, row lock in the transaction (D-162); a dead connection's lock is now released within 5 minutes (0028, D-165). API `test_M5_approving_values_someone_changed_since_you_loaded_them_is_refused`, `test_M5_the_approve_route_requires_the_version_token`, `test_M5_a_stale_version_is_refused_by_the_core_function`, `test_M5_an_approval_in_progress_holds_the_row_so_an_edit_waits`; `test_system_actors.py::test_the_app_roles_idle_transactions_are_capped_at_five_minutes`. Browser `e2e/review.spec.ts` refuses an approval without the screen's version. |
+
+### Also done in Stage 1
+
+- **Golden fixture renamed** to fake names (D-159).
+- **Every paid call has a cost record** (D-163).
+- **The Audit tab runs on one clock** (D-164).
+- **Named system actors:** no blank actor in the lifecycle log; the app role can't touch the actors (D-165).
+
+### Open, carried forward (not part of these findings)
+
+- **Stage 3:**
+  - A run row is written only after the model answers, so a worker killed mid-call leaves that call's cost unrecorded (D-163).
+  - F-1, separate database logins.
+- **Phase 6, early:** plan changes must stop holding a transaction across Stripe calls; then revisit the 5-minute cap.
+- **Stage 5:** the test-hygiene items and the stranded test tenants in `docs/BUILD-STATUS.md`.
+- **IIF's QuickBooks limits** stay a warning (EXP-008) until a real import decides (D-157, UAT TC-26).
+
+---
+
 ## Phase 5 — Founder Console, tenant surface, operations — COMPLETE, awaiting "go" (2026-09-25)
 
 Built as ten slices from 18 to 25 Sept 2026, each walked by the founder
