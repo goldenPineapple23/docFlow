@@ -2148,4 +2148,13 @@ Remaining limits, named rather than hidden:
   - no core code writes a blank actor (this would have flagged 3 lines on main).
 - `apps/api/tests/test_lifecycle_api.py`: the sweep's two events name `lifecycle-sweep`; a purged person's event names `deleted-account`, and nothing in the tenant's log names or mentions the purged owner's id.
 
+**Incident while applying it (2026-09-26):**
+- The founder's pre-check found one blank row that matched no rule. It was test debris from Claude's own red run of `test_a_lifecycle_event_without_an_actor_is_refused`, made against staging before the migration existed there.
+  - That first version picked "any existing tenant" and expected the insert to be refused. With no NOT NULL yet, the insert went through and was committed.
+  - The row: `02caa00f-…2518639`, event `acme_test_blank_actor`, tenant "acme test prospect 3", written 2026-09-27 00:10:39 UTC.
+- The migration's own guard would have refused to run (SET NOT NULL fails on a blank), so nothing was damaged.
+- Removed on the founder's per-action OK: 1 row, matched by id, event type and blank actor. The 7 known blanks remained.
+- The test now owns a throwaway tenant (36a3396).
+- The general lesson goes to the Stage 5 cleanup audit: a test that expects a refusal must not be able to leave data behind when the refusal doesn't happen. It either runs in a transaction that is always rolled back, or it owns and removes its data.
+
 **Related:** Sections 3, 7.10, 7.14, 7.15.1; D-004, D-123, D-133, D-138, D-159, D-162, D-163.

@@ -36,6 +36,17 @@ def _sqlstate(excinfo) -> str | None:
     return getattr(excinfo.value.orig, "sqlstate", None)
 
 
+def _attempt(statement: str, params: dict) -> None:
+    """Run a write the database should refuse, and roll it back whatever
+    happens: if the refusal is missing, the test fails and nothing is left
+    behind (a red run once committed a blank-actor row on staging, D-165)."""
+    with platform_session() as session:
+        try:
+            session.execute(text(statement), params)
+        finally:
+            session.rollback()
+
+
 def test_the_system_actors_exist_with_the_codes_ids_and_can_never_sign_in():
     with platform_session() as session:
         rows = session.execute(
@@ -61,21 +72,17 @@ def test_the_system_actors_exist_with_the_codes_ids_and_can_never_sign_in():
 )
 def test_the_app_role_cannot_edit_or_delete_a_system_actor(statement):
     with pytest.raises(DBAPIError) as excinfo:
-        with platform_session() as session:
-            session.execute(text(statement), {"id": str(system_actors.LIFECYCLE_SWEEP)})
+        _attempt(statement, {"id": str(system_actors.LIFECYCLE_SWEEP)})
     assert _sqlstate(excinfo) == INSUFFICIENT_PRIVILEGE
 
 
 def test_the_app_role_cannot_create_a_system_actor():
     with pytest.raises(DBAPIError) as excinfo:
-        with platform_session() as session:
-            session.execute(
-                text(
-                    "INSERT INTO users (id, tenant_id, email, role, is_active, system_actor) "
-                    "VALUES (:id, NULL, 'fake@system.docflow.invalid', 'viewer', false, 'fake-actor')"
-                ),
-                {"id": str(uuid4())},
-            )
+        _attempt(
+            "INSERT INTO users (id, tenant_id, email, role, is_active, system_actor) "
+            "VALUES (:id, NULL, 'fake@system.docflow.invalid', 'viewer', false, 'fake-actor')",
+            {"id": str(uuid4())},
+        )
     assert _sqlstate(excinfo) == INSUFFICIENT_PRIVILEGE
 
 
@@ -91,11 +98,10 @@ def test_the_app_role_cannot_turn_a_person_into_a_system_actor():
         )
     try:
         with pytest.raises(DBAPIError) as excinfo:
-            with platform_session() as session:
-                session.execute(
-                    text("UPDATE users SET system_actor = 'lifecycle-sweep-2' WHERE id = :id"),
-                    {"id": str(person)},
-                )
+            _attempt(
+                "UPDATE users SET system_actor = 'lifecycle-sweep-2' WHERE id = :id",
+                {"id": str(person)},
+            )
         assert _sqlstate(excinfo) == INSUFFICIENT_PRIVILEGE
     finally:
         with platform_session() as session:
@@ -114,14 +120,11 @@ def test_a_lifecycle_event_without_an_actor_is_refused():
     # Its own throwaway tenant: never "any tenant that happens to exist" (D-160).
     with _Tenant("Acme Test Blank Actor") as tenant:
         with pytest.raises(DBAPIError) as excinfo:
-            with platform_session() as session:
-                session.execute(
-                    text(
-                        "INSERT INTO tenant_lifecycle_events (tenant_id, event_type, actor_user_id, payload) "
-                        "VALUES (:t, 'acme_test_blank_actor', NULL, '{}'::jsonb)"
-                    ),
-                    {"t": str(tenant.tenant_id)},
-                )
+            _attempt(
+                "INSERT INTO tenant_lifecycle_events (tenant_id, event_type, actor_user_id, payload) "
+                "VALUES (:t, 'acme_test_blank_actor', NULL, '{}'::jsonb)",
+                {"t": str(tenant.tenant_id)},
+            )
         assert _sqlstate(excinfo) == NOT_NULL_VIOLATION
 
 
