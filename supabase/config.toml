@@ -41,11 +41,12 @@ enabled = false
 enabled = false
 
 [local_smtp]
-# The local mail catcher. On, because GoTrue's email provider needs a
-# mailer: with this off, the stack reported `email_provider_disabled` for
-# every password sign-in even with `[auth.email] enabled = true`. Nothing
-# reads the mailbox -- the suites assert on the `email_outbox` table, not
-# on delivered mail -- it exists so that signing in works at all.
+# The local mail catcher. On so the auth stack is complete, since GoTrue's
+# email provider expects a mailer. Not the cause of the sign-in failure
+# below -- turning it on changed nothing -- but a stack that can sign
+# people in and not send them anything is a half-built one, and the invite
+# and reset flows will want it. Nothing reads the mailbox: the suites
+# assert on the `email_outbox` table, not on delivered mail.
 enabled = true
 
 [storage]
@@ -64,16 +65,21 @@ site_url = "http://127.0.0.1:3000"
 enable_signup = false
 
 [auth.email]
-# `enabled` must be stated. Declaring this table without it left the email
-# provider off altogether, so the local stack answered every password
-# sign-in with 422 `email_provider_disabled` -- while the intent here was
-# only to switch off self-signup. That is not what staging does: DocFlow's
-# invited users sign in with an email and a password (Section 3), and an
-# account they cannot sign in to is not an account.
+# **`enable_signup` is deliberately absent here.** In the Supabase CLI,
+# `[auth.email] enable_signup = false` does not mean "email accounts
+# cannot self-register" -- it switches the email provider off entirely.
+# With it set, the local stack answered every password sign-in with
+# `422 email_provider_disabled`, and `/auth/v1/settings` reported
+# `"email": false` even with `enabled = true` below and the mailer
+# running. Invited users sign in with an email and a password (Section 3),
+# so an account nobody can sign in to is not an account.
 #
-# Nothing caught it for three phases because no CI job had ever signed in:
-# the Python suites mint their own tokens and never touch GoTrue. The live
-# end-to-end suite (D-166) is the first thing here that signs in the way a
-# person does, and it found this on its first run.
+# No public signup is still enforced, by `[auth] enable_signup = false`
+# above (GoTrue's DISABLE_SIGNUP) and by the product having no `/signup`
+# route at all, which its own tests assert.
+#
+# Nothing caught this for three phases because no CI job had ever signed
+# in: the Python suites mint their own tokens and never touch GoTrue. The
+# live end-to-end suite (D-166) is the first thing here that signs in the
+# way a person does, and it found this on its first run.
 enabled = true
-enable_signup = false
