@@ -88,9 +88,13 @@ How a run is reported:
 - Save each suite's full output to a file. Never cut it with `tail` or
   `head`: the exit code of the pipe replaces pytest's, so a failed run looks
   like it passed, and the failure details are lost.
-- Quote pytest's last line as printed. The API suite should read `391 passed,
-  3 deselected` with nothing failed or skipped. The 3 deselected are the
-  `live_api` tests, which only run at checkpoints (`apps/api/pyproject.toml`).
+- Quote pytest's last line as printed. The API suite should read `424 passed,
+  3 deselected` with nothing failed or skipped (391 before the Stage 1
+  walkthrough fixes added tests; if the count is *lower* than the number
+  written here, find out what stopped running before calling the run green).
+  The 3 deselected are the `live_api` tests, which only run at checkpoints
+  (`apps/api/pyproject.toml`): `pytest -m live_api` — the golden fixture, the
+  golden fixture with examples, and the example-contamination check.
 
 ### 1.5 The live end-to-end suite (`apps/web/e2e-live`)
 
@@ -129,6 +133,43 @@ python scripts/seed_live_e2e.py teardown --out apps/web/e2e-live/.seed.json
 
 CI runs the same suite in the `web-live` job against the local Supabase stack,
 so it needs no staging credentials there.
+
+### 1.6 Standing rule: the suite reports its own evidence
+
+**A suite says why it failed. Nobody diagnoses a failure from a symptom.**
+When a run fails, the first fix is not to the product — it is to make the
+failure name its own cause. Only then fix what it names.
+
+What this means in practice:
+
+- **A timeout is not a diagnosis.** `waitForURL` timing out says the page
+  never arrived; it says nothing about why. A suite that can time out on a
+  dependency (a sign-in, a service, a build) checks that dependency first,
+  outside the browser, and fails there with what it found.
+- **Print what the other side actually said.** Not "sign-in failed" but what
+  `/auth/v1/settings` reports the server offers. Not "401" but the error type
+  the verifier raised. A failure that carries the other side's own answer ends
+  in one run.
+- **Two plausible fixes in a row means the evidence is missing, not that the
+  third guess will land.** Stop changing the product and make the suite talk.
+- **CI logs are unreadable here** (`project-github-workflow`: job logs return
+  403). The message thrown by the test is the whole of what we get, so it has
+  to be enough on its own. Playwright's `github` reporter puts it in the
+  annotations; make it worth reading.
+- **This applies to the product too.** A path that fails closed in silence —
+  a rejected token, a refused write — logs the error type and message, never
+  the token, the claim or the data (Section 7.10).
+
+**Why this is a standing rule and not one decision's footnote.** Twice in
+Phase 5.5 a diagnosis lived somewhere unreadable and cost multiple round
+trips: the `web-live` sign-in failure, where two convincing fixes were both
+wrong and what ended it was a seeding-time check that printed the server's own
+settings (D-166); and the session-token skew behind it, invisible until the
+JWKS path logged why it had rejected a token (D-167). Both were found by
+instrumentation, not by reasoning. A test that fails without saying why costs
+more than the bug it is hiding.
+
+**Related:** D-166, D-167; §1.4 on how a run is reported.
 
 ---
 
