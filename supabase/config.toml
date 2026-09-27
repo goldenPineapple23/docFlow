@@ -59,4 +59,16 @@ site_url = "http://127.0.0.1:3000"
 enable_signup = false
 
 [auth.email]
+# `enabled` must be stated. Declaring this table without it left the email
+# provider off altogether, so the local stack answered every password
+# sign-in with 422 `email_provider_disabled` -- while the intent here was
+# only to switch off self-signup. That is not what staging does: DocFlow's
+# invited users sign in with an email and a password (Section 3), and an
+# account they cannot sign in to is not an account.
+#
+# Nothing caught it for three phases because no CI job had ever signed in:
+# the Python suites mint their own tokens and never touch GoTrue. The live
+# end-to-end suite (D-166) is the first thing here that signs in the way a
+# person does, and it found this on its first run.
+enabled = true
 enable_signup = false

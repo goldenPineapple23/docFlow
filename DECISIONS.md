@@ -2187,7 +2187,11 @@ D-086 stands for `e2e/`. A stub decides for itself what the API returns, so no t
 
 `cors_allowed_origins` gains `http://localhost:3101` and `http://127.0.0.1:3101`, the live suite's own port, for the reason the two spellings of "this machine" are already there: a CORS refusal shows up as a page that loads and then does nothing. Every origin in that default is a loopback address; staging and prod set `CORS_ALLOWED_ORIGINS` explicitly.
 
-**Related:** Sections 7.3, 7.7, 7.16.5, Section 10; D-074, D-086, D-116, D-144, D-160, D-167.
+**What it found on its first CI run, before it had run a single assertion there:** `supabase/config.toml` declared `[auth.email]` with only `enable_signup = false`, which left the email provider **off entirely** -- the local stack answered every password sign-in with `422 email_provider_disabled`. The intent was to switch off self-signup, not to make signing in impossible. Staging does not behave that way: DocFlow's invited users sign in with an email and a password (Section 3).
+
+It had been wrong since the CI database was introduced (D-148) and nothing noticed, because until this suite no CI job had ever signed in -- the Python suites mint their own tokens and never touch GoTrue. `enabled = true` is now stated explicitly. This is the argument for the suite existing, made by the suite itself on day one.
+
+**Related:** Sections 7.3, 7.7, 7.16.5, Section 10; D-074, D-086, D-116, D-144, D-148, D-160, D-167.
 
 ## D-167 — A session token is verified with 30 seconds of clock-skew allowance, which also extends `exp`
 
