@@ -29,6 +29,9 @@ import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 3101;
 
+/** This suite's own build output; see `env` on the web server below. */
+export const LIVE_DIST_DIR = ".next-live";
+
 // The interpreter that has `docflow_core` installed. CI sets it; on the
 // founder's machine the API's virtualenv is the one that does.
 export const PYTHON =
@@ -57,9 +60,15 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    // `npm run build` must already have run with the NEXT_PUBLIC_* values
-    // for the stack under test -- Next compiles them into the bundle.
-    command: `npm run start -- --port ${PORT}`,
+    // Builds as well as serves. Next compiles NEXT_PUBLIC_* into the
+    // bundle, so a build made earlier -- or for a different stack -- serves
+    // a browser that talks to the wrong place, and the suite fails in ways
+    // that look like the app is broken. Building here means the bundle
+    // always matches the working tree and the environment of this run.
+    command: `npm run build && npm run start -- --port ${PORT}`,
+    // Its own build directory, so building for this suite never disturbs a
+    // `npm run dev` someone has open (see next.config.ts).
+    env: { ...process.env, NEXT_DIST_DIR: LIVE_DIST_DIR },
     url: `http://127.0.0.1:${PORT}`,
     // Never reuse a server already on this port, unlike the stubbed suite.
     // A `next start` serves the build that was on disk when it started, so
@@ -70,6 +79,7 @@ export default defineConfig({
     // always starting fresh: a few seconds. Cost of the alternative: an
     // afternoon, once, which is how this comment came to be written.
     reuseExistingServer: false,
-    timeout: 120_000,
+    // A build, then a server start.
+    timeout: 300_000,
   },
 });

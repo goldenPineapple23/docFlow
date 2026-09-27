@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import type { CatalogItem, DocumentLine } from "@/lib/review";
+import type { CatalogItem, DocumentLine, DocumentWarning } from "@/lib/review";
 import { searchItems } from "@/lib/review";
 import { ConfidenceBadge, ProvenanceNote, isLowConfidence } from "./confidence";
+import { focusWarning } from "./WarningsPanel";
 
 /**
  * The editable line items, with matching state and the "create mapping"
@@ -42,15 +43,46 @@ const COLUMNS: Array<{ name: string; label: string; numeric?: boolean; width: st
   { name: "line_total", label: "Line total", numeric: true, width: "w-[14%]" },
 ];
 
+const LINE_FIELDS = new Set(COLUMNS.map((column) => column.name));
+
+/**
+ * The numbers a check actually compared, so the boxes holding them can say
+ * so (D-169).
+ *
+ * `field_name` is where the check is anchored -- for `VAL-001` that is
+ * `line_total` -- but the check is a statement about every number it
+ * compared, and `detail` names them. A quantity misread as 2 where the
+ * document says 24 surfaces as a line-total discrepancy, and marking only
+ * the total would point at the one number that is probably right.
+ *
+ * Which of them is wrong is not DocFlow's call (Section 7.7: warn, never
+ * auto-correct). This only says which numbers are implicated.
+ */
+function comparedFields(warning: DocumentWarning): string[] {
+  const fields = new Set<string>();
+  if (warning.field_name && LINE_FIELDS.has(warning.field_name)) fields.add(warning.field_name);
+  for (const key of Object.keys(warning.detail ?? {})) if (LINE_FIELDS.has(key)) fields.add(key);
+  return [...fields];
+}
+
 export function LineTable({
   lines,
   edits,
+  warnings,
   disabled,
   onChange,
   onConfirmMapping,
 }: {
   lines: DocumentLine[];
   edits: Record<string, Record<string, string | null>>;
+  /**
+   * The document's open checks. The table marks the rows, and the boxes,
+   * they are about: the checks panel sits below this table and is usually
+   * off-screen, so a reviewer reading down a column of quantities against
+   * the document had nothing on the row itself to say this line was
+   * already in question (D-169).
+   */
+  warnings: DocumentWarning[];
   disabled: boolean;
   onChange: (lineId: string, field: string, value: string) => void;
   onConfirmMapping: (lineId: string, itemId: string) => Promise<void>;
@@ -108,6 +140,9 @@ export function LineTable({
                   key={line.id}
                   line={line}
                   edits={edits[line.id] ?? {}}
+                  warnings={warnings.filter(
+                    (w) => w.status === "open" && w.line_number === line.line_number,
+                  )}
                   disabled={disabled}
                   onChange={onChange}
                   onConfirmMapping={onConfirmMapping}
@@ -124,19 +159,28 @@ export function LineTable({
 function LineRow({
   line,
   edits,
+  warnings,
   disabled,
   onChange,
   onConfirmMapping,
 }: {
   line: DocumentLine;
   edits: Record<string, string | null>;
+  warnings: DocumentWarning[];
   disabled: boolean;
   onChange: (lineId: string, field: string, value: string) => void;
   onConfirmMapping: (lineId: string, itemId: string) => Promise<void>;
 }) {
   const low = isLowConfidence(line.confidence);
+  // Which boxes on this row a check is about, and why.
+  const flagged = new Map<string, DocumentWarning[]>();
+  for (const warning of warnings) {
+    for (const field of comparedFields(warning)) {
+      flagged.set(field, [...(flagged.get(field) ?? []), warning]);
+    }
+  }
   // Anything a reviewer would want to look at before approving this line.
-  const needsAttention = low || line.uom_mismatch || !line.matched_item_id;
+  const needsAttention = low || line.uom_mismatch || !line.matched_item_id || warnings.length > 0;
   // The details row starts open when there is something to see, and the
   // arrow always opens and closes it. It used to be forced open for those
   // lines, so the arrow only flipped direction and seemed broken.
@@ -150,10 +194,27 @@ function LineRow({
         data-testid={`line-${line.line_number}`}
         className={[
           "border-t border-sky-50",
-          low ? "bg-amber-50/70" : "odd:bg-white even:bg-sky-50/30",
+          warnings.length > 0
+            ? "bg-amber-100/70"
+            : low
+              ? "bg-amber-50/70"
+              : "odd:bg-white even:bg-sky-50/30",
         ].join(" ")}
       >
-        <td className="px-2 py-1.5 align-middle text-xs text-gray-400">{line.line_number}</td>
+        <td className="px-2 py-1.5 align-middle text-xs text-gray-400">
+          {warnings.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => focusWarning(warnings[0].id)}
+              data-testid={`line-${line.line_number}-flag`}
+              title={warnings.map((w) => w.title || w.code).join("; ")}
+              className="mr-1 rounded bg-amber-900 px-1 font-semibold text-white"
+            >
+              !
+            </button>
+          ) : null}
+          {line.line_number}
+        </td>
 
         {COLUMNS.map(({ name, numeric }) => {
           const stored = line[name as keyof DocumentLine] as string | null;
@@ -174,6 +235,18 @@ function LineRow({
                 onChange={(e) => onChange(line.id, name, e.target.value)}
                 data-testid={`line-${line.line_number}-${name}`}
                 data-dirty={name in edits ? "true" : "false"}
+                data-flagged={flagged.has(name) ? "true" : "false"}
+                // Said in words as well as colour, for a reviewer who cannot
+                // rely on the amber (Section 7.12's escaping rules are not
+                // the only accessibility that matters here).
+                title={
+                  flagged.has(name)
+                    ? `A check is about this value: ${flagged
+                        .get(name)!
+                        .map((w) => w.title || w.code)
+                        .join("; ")}`
+                    : undefined
+                }
                 className={[
                   "w-full rounded border px-1.5 py-1 text-[13px] transition-colors",
                   "focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100",
@@ -181,7 +254,11 @@ function LineRow({
                   // Numbers are read down a column and compared against the
                   // document, so they are tabular and right-aligned.
                   numeric ? "numeric text-right" : "",
-                  name in edits ? "border-blue-400 bg-blue-50/50" : "border-slate-200 bg-white",
+                  name in edits
+                    ? "border-blue-400 bg-blue-50/50"
+                    : flagged.has(name)
+                      ? "border-amber-500 bg-amber-50"
+                      : "border-slate-200 bg-white",
                 ].join(" ")}
               />
             </td>

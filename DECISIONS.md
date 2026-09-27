@@ -2244,3 +2244,23 @@ It also keeps one rule instead of two. The screen carries a tick forward by warn
 **And the opposite case is pinned too** — `test_an_unrelated_edit_leaves_an_acknowledged_check_exactly_as_it_was`. Clearing a tick too readily is as bad as not clearing it: it teaches the reviewer that Approve turns off for no reason, and a gate that cries wolf is one people learn to click through. An edit to a field a check says nothing about leaves that check on the same row, with the same id and the same `acknowledged_at`.
 
 **Related:** Sections 7.3, 7.7; D-074, D-144, D-166.
+
+## D-169 — The line-items table marks the rows, and the numbers, a check is about
+
+**Context:** the founder's walkthrough of the D-166 fix. Line 3 of the golden order reads `SY-0045 · qty 2 · 8.25 · 198.00`, where the document plainly says 24. Their report: "the system did not flag it."
+
+**It had flagged it.** `VAL-001`, severity high, on line 3, with the arithmetic in the detail (`expected 16.50`, `difference 181.50`), and approval was blocked until it was ticked. The check was in the checks panel, correctly worded, all along.
+
+**But the report was right about what matters.** Look at the line-items table on its own and row 3 is indistinguishable from the rows either side of it: same background, same borders, a plausible-looking `2`. A reviewer's actual job is reading down the Qty column against the document, and the panel that says otherwise is below the table and usually off the bottom of the window — the same geometry that caused D-166 one layer up. Detection was never the problem. Nothing on the row said the row was in question.
+
+**Decision:** the table marks what the checks are about.
+- **The row** gets an amber tint and a `!` button in its number column, titled with the check's text; clicking it scrolls to the check and focuses its tick box.
+- **Each number the check compared** gets an amber border and a `title` saying which check it belongs to — said in words, not only in colour.
+
+**Which numbers count as "compared" is the part worth explaining.** A check is anchored to one field (`VAL-001` files under `line_total`), but it is a statement about every number it weighed, and `detail` already names them — for `VAL-001`, quantity, unit price and line total. Marking only the anchor would have pointed at the total, which in this case is the one number that is right. So the mark goes on all three, and **DocFlow still does not say which is wrong**: Section 7.7's rule is that it warns and the human decides. The table now says "these three numbers disagree with each other", which is exactly what is known.
+
+The rule is derived from the warning's own payload rather than from a list of codes, so a new check that compares a different set of fields marks the right boxes without anyone remembering to update a mapping.
+
+**Tests:** six component tests (every compared number marked and no others; the words as well as the colour; the row marker; a clean line untouched; a check belonging to another line ignored; a settled check ignored), plus assertions in the live suite that the marks appear on the real stack when an edit raises a check and clear when it is resolved.
+
+**Related:** Sections 7.6, 7.7, 7.12; D-074, D-166.
