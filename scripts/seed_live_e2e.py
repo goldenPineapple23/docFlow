@@ -89,6 +89,36 @@ def _create_auth_user(email: str, password: str) -> str:
     return response.json()["id"]
 
 
+def _check_password_sign_in(email: str, password: str) -> None:
+    """
+    Prove the browser will be able to sign in, before a browser tries.
+
+    Creating the account uses the service-role key and the admin endpoint;
+    signing in uses the anon key and the public one. Those are different
+    keys on different routes, so the first working says nothing about the
+    second -- and when the second is what's broken, the symptom is three
+    identical "waitForURL timed out" failures that name nothing. Ask here,
+    where the answer can be reported properly.
+    """
+    settings = get_settings()
+    if not settings.supabase_anon_key:
+        sys.exit("SUPABASE_ANON_KEY is not set, so the browser could not sign in -- see SETUP.md Step 1.")
+
+    response = httpx.post(
+        f"{settings.supabase_url}/auth/v1/token?grant_type=password",
+        headers={"apikey": settings.supabase_anon_key, "Content-Type": "application/json"},
+        json={"email": email, "password": password},
+        timeout=30,
+    )
+    if response.status_code != 200 or "access_token" not in response.json():
+        sys.exit(
+            "The seeded reviewer cannot sign in with the anon key, so the live suite would "
+            "only report timeouts.\n"
+            f"  POST {settings.supabase_url}/auth/v1/token -> {response.status_code}\n"
+            f"  {response.text[:400]}"
+        )
+
+
 def _delete_auth_user(auth_user_id: str) -> None:
     url, headers = _auth_admin()
     httpx.delete(f"{url}/{auth_user_id}", headers=headers, timeout=30)
@@ -312,6 +342,7 @@ def _seed_rows(
         ),
         encoding="utf-8",
     )
+    _check_password_sign_in(email, password)
     print(f"Seeded {name}: clean order has {clean_warnings} checks, flagged order has {flagged_warnings}.")
     if clean_warnings != 0:
         sys.exit("The clean order came back with checks on it -- the live suite needs it clean.")
