@@ -2105,3 +2105,47 @@ Remaining limits, named rather than hidden:
 **The actors PR keeps:** the named system actors and the `idle_in_transaction_session_timeout` migration (D-159, D-163).
 
 **Related:** Sections 7.15.1, 7.15.3; D-123, D-143, D-159, D-163.
+
+## D-165 -- Named system actors; no blank actor in the lifecycle log; the app role's idle transactions capped at 5 minutes (migration 0028)
+
+**Context:** D-159 (the founder's instruction: an audit row never has a blank actor) and D-163 (cap idle transactions in a migration, not by hand, so every environment gets it). A separate PR after 1c, on the founder's instruction.
+
+**What was found:**
+- `tenant_lifecycle_events.actor_user_id` is the only actor column in an event log that could be blank: `review_actions.user_id` and `admin_actions.platform_admin_user_id` are NOT NULL. The other nullable actor columns (approved_by, acknowledged_by, committed_by, released_by_user_id, …) are empty until the thing happens. On staging, none of those records the thing happening without its actor.
+- The 7 blank rows on staging: 3 `suspended` + 3 `pending_deletion_entered` (4 of them on the already-deleted tenant), all written by the lifecycle sweep (`lifecycle.py`, the only code that passed no actor); 1 `renamed` (the 2026-09-26 test-tenant rename script).
+- **A conflict, decided by the founder:** a tenant's hard delete (7.14, D-133) blanked the actor on events its own people caused, so the history would no longer name a deleted person. The founder chose a named placeholder, on four conditions:
+  1. one shared `deleted-account` actor, with nothing that links back to the person;
+  2. re-point and delete in the same transaction;
+  3. the app role can't delete or edit system actors;
+  4. the migration also names blanks left by past purges, and reports the count.
+
+**Decision (migration 0028, `docflow_core.system_actors`):**
+- **Three system actors** as `users` rows with fixed ids (`…a001` `lifecycle-sweep`, `…a002` `maintenance-script`, `…a003` `deleted-account`), marked in a new `users.system_actor` column (unique).
+  - Section 3 allows only the four tenant roles, so they take the least one (`viewer`).
+  - A check constraint holds each one inert: no tenant, no sign-in id, inactive, `viewer`. So one can never sign in or be invited.
+  - Only actors that something uses were created. Adding one is a migration plus a constant, and a test checks the two agree.
+- **Protected by a trigger:** any insert, edit or delete of a system-actor row, or turning a person into one, is refused (`insufficient_privilege`) unless the connected role owns `users` (`postgres`, which applies migrations). The rule depends on who is connected, not on a session setting any connection could set (F-1).
+- **Backfill by rule, never by guess:** `suspended` / `pending_deletion_entered` → `lifecycle-sweep`; `renamed` → `maintenance-script`; any other blank row of a deleted tenant → `deleted-account`. The counts are reported as a NOTICE. Then `actor_user_id` becomes NOT NULL. A blank row that matches no rule makes that statement fail, and the whole migration changes nothing.
+- **Code:**
+  - The sweep writes as `lifecycle-sweep`.
+  - Both lifecycle helpers require an actor.
+  - The purge re-points the tenant's people's events to `deleted-account` in its own transaction, before their `users` rows are deleted, so there is never a blank or dangling actor. The old id is not kept anywhere.
+- **`idle_in_transaction_session_timeout = 5min` on `docflow_app`.**
+  - In the migration: a guarded `ALTER ROLE`, so a database where the role doesn't exist yet (CI creates it after the migrations) skips it. `scripts/ci/create_app_role.py` then sets the same value in CI, and a test checks the two agree.
+  - Why 5 minutes, not the 60 s recommended in D-163: a Console plan change holds its transaction across two Stripe requests (up to about 90 s in the worst case: 15 s each for connect, send and receive, twice). Cutting it off would leave Stripe changed and DocFlow not (D-138).
+  - It takes effect on new connections. The pooler's existing server connections pick it up when they are recycled.
+
+**Tests (written before the migration is applied; all 9 database tests fail against staging until it is):**
+- `apps/api/tests/test_system_actors.py` (9):
+  - the actors exist with the code's ids and are inert;
+  - the app role can't edit (2 cases) or delete one, create one, or turn a person into one;
+  - no blank actor remains;
+  - a blank actor is refused;
+  - the role's timeout is 5 min.
+- `packages/core/tests/test_system_actors.py` (3):
+  - code and migration seed the same ids;
+  - migration and CI set the same timeout;
+  - no core code writes a blank actor (this would have flagged 3 lines on main).
+- `apps/api/tests/test_lifecycle_api.py`: the sweep's two events name `lifecycle-sweep`; a purged person's event names `deleted-account`, and nothing in the tenant's log names or mentions the purged owner's id.
+
+**Related:** Sections 3, 7.10, 7.14, 7.15.1; D-004, D-123, D-133, D-138, D-159, D-162, D-163.

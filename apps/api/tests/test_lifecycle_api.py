@@ -28,7 +28,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from docflow_core import external_services, lifecycle
+from docflow_core import external_services, lifecycle, system_actors
 from docflow_core.db import platform_session, tenant_session
 from sqlalchemy import text
 
@@ -286,6 +286,13 @@ def test_the_sweep_moves_a_due_tenant_straight_to_pending_deletion(client, strip
             t=tenant_id,
         )
         assert list(events) == ["suspended", "pending_deletion_entered"]
+        # Both name the sweep, never a blank actor (D-165).
+        actors = _scalar(
+            "SELECT array_agg(DISTINCT actor_user_id::text) FROM tenant_lifecycle_events "
+            "WHERE tenant_id = :t AND event_type IN ('suspended', 'pending_deletion_entered')",
+            t=tenant_id,
+        )
+        assert list(actors) == [str(system_actors.LIFECYCLE_SWEEP)]
 
         reminder_count = _scalar(
             "SELECT count(*) FROM scheduled_jobs WHERE tenant_id = :t "
@@ -530,13 +537,19 @@ def test_delete_succeeds_for_a_tenant_whose_rows_point_at_each_other(client, str
         assert response.status_code == 200, response.text
         assert _scalar("SELECT status FROM tenants WHERE id = :t", t=tenant_id) == "deleted"
         assert _scalar("SELECT count(*) FROM users WHERE tenant_id = :t", t=tenant_id) == 0
-        # The history keeps the event -- that it happened -- but no longer
-        # names a person whose account data is gone.
+        # The history keeps the event -- that it happened -- and names the one
+        # shared "deleted account" actor: never blank, and nothing that leads
+        # back to the person whose account data is gone (D-165).
         assert _scalar(
             "SELECT count(*) FROM tenant_lifecycle_events "
-            "WHERE tenant_id = :t AND event_type = 'user_invited' AND actor_user_id IS NULL",
-            t=tenant_id,
+            "WHERE tenant_id = :t AND event_type = 'user_invited' AND actor_user_id = :deleted",
+            t=tenant_id, deleted=str(system_actors.DELETED_ACCOUNT),
         ) == 1
+        assert _scalar(
+            "SELECT count(*) FROM tenant_lifecycle_events WHERE tenant_id = :t "
+            "AND (actor_user_id IS NULL OR actor_user_id = :owner OR payload::text LIKE :owner_like)",
+            t=tenant_id, owner=str(owner_id), owner_like=f"%{owner_id}%",
+        ) == 0
 
 
 @requires_lifecycle_schema
