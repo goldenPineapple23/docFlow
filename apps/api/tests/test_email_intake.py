@@ -25,7 +25,11 @@ from uuid import uuid4
 from docflow_core.db import platform_session
 from sqlalchemy import text
 
-from tests.conftest import requires_database, requires_email_intake_schema
+from tests.conftest import (
+    intake_webhook_headers,
+    requires_database,
+    requires_email_intake_schema,
+)
 
 
 class _FakeCeleryClient:
@@ -184,7 +188,11 @@ def test_11_attachments_quarantines_all_and_none_enqueued(client, monkeypatch):
     with _TestIntakeTenant("Acme Test Distributor") as tenant:
         attachments = [_pm_attachment(f"po-{i}.txt", f"PO number {i}".encode()) for i in range(11)]
         payload = _pm_payload("buyer-cap@example.test", attachments=attachments)
-        response = client.post(f"/intake/email/{tenant.token}", json=payload)
+        response = client.post(
+            f"/intake/email/{tenant.token}",
+            json=payload,
+            headers=intake_webhook_headers(),
+        )
         assert response.status_code == 200
         assert response.json()["outcome"] == "quarantined"
 
@@ -211,7 +219,11 @@ def test_unknown_sender_velocity_quarantines_21st_but_not_known_sender(client, m
         known_payload = _pm_payload(
             "known-buyer@example.test", attachments=[_pm_attachment("known.txt", b"known sender PO")]
         )
-        known_response = client.post(f"/intake/email/{tenant.token}", json=known_payload)
+        known_response = client.post(
+            f"/intake/email/{tenant.token}",
+            json=known_payload,
+            headers=intake_webhook_headers(),
+        )
         assert known_response.status_code == 200
         assert known_response.json()["outcome"] == "processed"
 
@@ -219,7 +231,11 @@ def test_unknown_sender_velocity_quarantines_21st_but_not_known_sender(client, m
         new_unknown_payload = _pm_payload(
             "unknown-20@example.test", attachments=[_pm_attachment("new.txt", b"brand new unknown sender PO")]
         )
-        new_unknown_response = client.post(f"/intake/email/{tenant.token}", json=new_unknown_payload)
+        new_unknown_response = client.post(
+            f"/intake/email/{tenant.token}",
+            json=new_unknown_payload,
+            headers=intake_webhook_headers(),
+        )
         assert new_unknown_response.status_code == 200
         assert new_unknown_response.json()["outcome"] == "quarantined"
 
@@ -244,7 +260,11 @@ def test_dmarc_fail_quarantines_attachment(client, monkeypatch):
                 "mx.example.com; spf=pass smtp.mailfrom=x@example.test; dkim=pass; dmarc=fail"
             ),
         )
-        response = client.post(f"/intake/email/{tenant.token}", json=payload)
+        response = client.post(
+            f"/intake/email/{tenant.token}",
+            json=payload,
+            headers=intake_webhook_headers(),
+        )
         assert response.status_code == 200
         assert response.json()["outcome"] == "quarantined"
 
@@ -277,7 +297,11 @@ def test_dmarc_none_with_spf_fail_is_not_quarantined(client, monkeypatch):
             attachments=[_pm_attachment("po.txt", b"a purchase order")],
             headers=_auth_header("mx.example.com; spf=fail smtp.mailfrom=x@example.test"),
         )
-        response = client.post(f"/intake/email/{tenant.token}", json=payload)
+        response = client.post(
+            f"/intake/email/{tenant.token}",
+            json=payload,
+            headers=intake_webhook_headers(),
+        )
         assert response.status_code == 200
         assert response.json()["outcome"] == "processed"
 
@@ -294,7 +318,11 @@ def test_no_attachment_writes_intake_rejection_only(client, monkeypatch):
     monkeypatch.setattr("docflow_core.email_intake.celery_client", fake_celery)
     with _TestIntakeTenant("Acme Test Distributor") as tenant:
         payload = _pm_payload("no-attachment-buyer@example.test", attachments=[])
-        response = client.post(f"/intake/email/{tenant.token}", json=payload)
+        response = client.post(
+            f"/intake/email/{tenant.token}",
+            json=payload,
+            headers=intake_webhook_headers(),
+        )
         assert response.status_code == 200
         assert response.json()["outcome"] == "rejected"
 
@@ -320,11 +348,11 @@ def test_duplicate_webhook_delivery_is_idempotent(client, monkeypatch):
             attachments=[_pm_attachment("po.txt", b"a purchase order")],
         )
 
-        first = client.post(f"/intake/email/{tenant.token}", json=payload)
+        first = client.post(f"/intake/email/{tenant.token}", json=payload, headers=intake_webhook_headers())
         assert first.status_code == 200
         assert first.json()["outcome"] == "processed"
 
-        second = client.post(f"/intake/email/{tenant.token}", json=payload)
+        second = client.post(f"/intake/email/{tenant.token}", json=payload, headers=intake_webhook_headers())
         assert second.status_code == 200
         assert second.json()["outcome"] == "duplicate"
 
@@ -342,7 +370,11 @@ def test_valid_tier1_attachment_creates_document_and_enqueues(client, monkeypatc
             "fresh-buyer@example.test",
             attachments=[_pm_attachment("po.txt", b"PO Number: TEST-0001\nBuyer: Acme Test Distributor\n")],
         )
-        response = client.post(f"/intake/email/{tenant.token}", json=payload)
+        response = client.post(
+            f"/intake/email/{tenant.token}",
+            json=payload,
+            headers=intake_webhook_headers(),
+        )
         assert response.status_code == 200
         assert response.json()["outcome"] == "processed"
 
@@ -382,7 +414,11 @@ def test_tier2_attachment_is_accepted_and_a_tier3_one_is_rejected_by_code(client
                 _pm_attachment("orders.zip", buf.getvalue(), "application/zip"),
             ],
         )
-        response = client.post(f"/intake/email/{tenant.token}", json=payload)
+        response = client.post(
+            f"/intake/email/{tenant.token}",
+            json=payload,
+            headers=intake_webhook_headers(),
+        )
         assert response.status_code == 200
         assert response.json()["outcome"] == "processed"
 
@@ -396,7 +432,11 @@ def test_tier2_attachment_is_accepted_and_a_tier3_one_is_rejected_by_code(client
 
 @requires_database
 def test_unresolvable_token_returns_404_without_leaking_existence(client):
-    response = client.post(f"/intake/email/{uuid4().hex}", json=_pm_payload("nobody@example.test"))
+    response = client.post(
+        f"/intake/email/{uuid4().hex}",
+        json=_pm_payload("nobody@example.test"),
+        headers=intake_webhook_headers(),
+    )
     assert response.status_code == 404
 
 
@@ -412,7 +452,11 @@ def test_mail_to_a_tenant_not_yet_live_is_logged_not_read_and_answered_once_a_da
                 "early-buyer@example.test",
                 attachments=[_pm_attachment("po.txt", b"PO Number: TEST-0001\n")],
             )
-            response = client.post(f"/intake/email/{tenant.token}", json=payload)
+            response = client.post(
+                f"/intake/email/{tenant.token}",
+                json=payload,
+                headers=intake_webhook_headers(),
+            )
             assert response.status_code == 200
             assert response.json()["outcome"] == "rejected"
 

@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import secrets
 import sys
 from decimal import Decimal
@@ -121,12 +122,27 @@ def _check_password_sign_in(email: str, password: str) -> None:
         # just proved. Header only: never the token, never a claim (7.10).
         header_b64 = response.json()["access_token"].split(".")[0]
         header = json.loads(base64.urlsafe_b64decode(header_b64 + "=" * (-len(header_b64) % 4)))
-        print(
-            f"  this project issues alg={header.get('alg')} "
-            f"(kid {str(header.get('kid'))[:8]}) -- "
-            + ("the JWKS path" if header.get("alg") in ("ES256", "RS256") else "the shared-secret path")
-            + " is what this run proves"
+        path = "the JWKS path" if header.get("alg") in ("ES256", "RS256") else "the shared-secret path"
+        line = (
+            f"this project issues alg={header.get('alg')} "
+            f"(kid {str(header.get('kid'))[:8]}) -- {path} is what this run proves"
         )
+        print(f"  {line}")
+        if os.environ.get("GITHUB_ACTIONS"):
+            # As a workflow *annotation*, and on the run's summary page -- not
+            # only as a log line. This repo's job logs need admin rights to
+            # download, so an answer that exists only in a log is an answer most
+            # readers cannot get at, while an annotation shows on the run summary
+            # and comes back from the check-runs API. Same reasoning as
+            # RUNBOOK 1.6: report the evidence somewhere the reader can reach.
+            print(f"::notice title=Auth::{line}")
+            summary = os.environ.get("GITHUB_STEP_SUMMARY")
+            if summary:
+                try:
+                    with open(summary, "a", encoding="utf-8") as fh:
+                        fh.write(f"- **Auth:** {line}\n")
+                except OSError:
+                    pass  # a missing summary file is not a reason to fail seeding
         return
 
     # What the auth server thinks it offers. A refusal here is usually

@@ -1,3 +1,5 @@
+import base64
+
 import pytest
 from docflow_core.config import get_settings
 from fastapi.testclient import TestClient
@@ -331,3 +333,33 @@ requires_console_schema = pytest.mark.skipif(
         "yet -- see SETUP.md Step 5 / DECISIONS.md D-102."
     ),
 )
+
+
+# ── The inbound-mail webhook's credentials (review finding H8) ──────────────
+#
+# Inbound mail now needs the provider's own HTTP Basic credentials, separately
+# from the per-tenant token in the URL (which is public by design). Configured
+# here for the whole API suite so every existing intake test keeps exercising
+# what it was written to exercise; the tests that are *about* this check clear
+# or change them for themselves.
+#
+# Obviously fake, and never a real secret (CLAUDE.md Section 0 rule 4, 7.10).
+INTAKE_WEBHOOK_USERNAME = "docflow-test-inbound"
+INTAKE_WEBHOOK_PASSWORD = "not-a-real-secret-only-a-test-credential"
+
+
+def intake_webhook_headers(
+    username: str = INTAKE_WEBHOOK_USERNAME, password: str = INTAKE_WEBHOOK_PASSWORD
+) -> dict[str, str]:
+    """The Authorization header Postmark's webhook URL would carry."""
+    encoded = base64.b64encode(f"{username}:{password}".encode()).decode()
+    return {"Authorization": f"Basic {encoded}"}
+
+
+@pytest.fixture(autouse=True)
+def _inbound_webhook_credentials(monkeypatch):
+    monkeypatch.setenv("POSTMARK_WEBHOOK_USERNAME", INTAKE_WEBHOOK_USERNAME)
+    monkeypatch.setenv("POSTMARK_WEBHOOK_PASSWORD", INTAKE_WEBHOOK_PASSWORD)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()

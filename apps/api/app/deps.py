@@ -22,6 +22,9 @@ don't need network access (see apps/api/tests/test_admin_access.py).
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hmac
 import logging
 from dataclasses import dataclass
 from uuid import UUID
@@ -314,3 +317,96 @@ def require_platform_admin(authorization: str | None = Header(default=None)) -> 
     if identity is None or not identity.is_platform_admin:
         raise HTTPException(status_code=404)
     return identity
+
+
+# ── The inbound-mail webhook's own credentials (review finding H8) ──────────
+#
+# The per-tenant token in the intake URL identifies the tenant. It is the local
+# part of an address the customer gives to its buyers, so it is public the
+# moment the product is used as intended, and it therefore cannot also be the
+# authentication. Without a separate provider credential, anyone holding an
+# intake address could POST a Postmark-shaped body with any `From` and any
+# `Authentication-Results`, which defeats the DMARC/SPF quarantine, the
+# unknown-sender velocity rule and sender-based example selection all at once
+# (CLAUDE.md Section 7.16.3).
+#
+# Postmark carries HTTP Basic credentials on the webhook URL. They are compared
+# in constant time, and neither the supplied value nor the configured one is
+# ever logged, put in a response, or added to an alert payload (Section 7.10).
+
+
+class InboundWebhookRefused(Exception):
+    """Raised when inbound mail is not from the configured provider."""
+
+    def __init__(self, reason: str) -> None:
+        # `reason` is one of a fixed set of words below -- never the credential,
+        # and never anything taken from the request.
+        self.reason = reason
+        super().__init__(reason)
+
+
+def _configured_inbound_credentials() -> tuple[str, str] | None:
+    settings = get_settings()
+    if not settings.postmark_webhook_username or not settings.postmark_webhook_password:
+        return None
+    return settings.postmark_webhook_username, settings.postmark_webhook_password
+
+
+def check_inbound_webhook_credentials(authorization: str | None) -> None:
+    """
+    Accept only a request carrying the configured HTTP Basic credentials.
+
+    Blank configuration refuses everything, on purpose: falling back to
+    token-only when the environment variable is missing would let a deploy
+    mistake silently reopen H8, and a hole that opens quietly is worse than
+    inbound mail that stops loudly. RUNBOOK section 2 states the cutover order
+    this implies.
+    """
+    configured = _configured_inbound_credentials()
+    if configured is None:
+        raise InboundWebhookRefused("not_configured")
+    if not authorization:
+        raise InboundWebhookRefused("no_credentials")
+
+    scheme, _, encoded = authorization.partition(" ")
+    if scheme.lower() != "basic" or not encoded:
+        raise InboundWebhookRefused("not_basic")
+    try:
+        supplied = base64.b64decode(encoded, validate=True)
+    except binascii.Error:
+        raise InboundWebhookRefused("undecodable") from None
+
+    # Compared as BYTES, never as str. `hmac.compare_digest` raises TypeError on
+    # a str containing non-ASCII characters, so comparing decoded text would let
+    # a credential with one non-ASCII byte turn a 401 into a 500 -- a refusal
+    # path that can be crashed by the thing it refuses. The bytes also mean no
+    # decoding step can fail on attacker-chosen input.
+    username, sep, password = supplied.partition(b":")
+    if not sep:
+        raise InboundWebhookRefused("undecodable")
+
+    # Both halves compared, both in constant time, and `&` rather than `and` so
+    # the second comparison is not skipped when the first fails -- otherwise the
+    # time taken tells an attacker whether the username was right.
+    expected_username, expected_password = configured
+    ok = hmac.compare_digest(username, expected_username.encode("utf-8")) & hmac.compare_digest(
+        password, expected_password.encode("utf-8")
+    )
+    if not ok:
+        raise InboundWebhookRefused("mismatch")
+
+
+def inbound_source_ip_note(client_host: str | None) -> str | None:
+    """
+    Whether this request came from an address on the configured allowlist.
+
+    **Log-only. This never refuses anything.** The allowlist stays advisory
+    until the real addresses are confirmed against Postmark's published list by
+    the RUNBOOK section 2 procedure (D-155), because an allowlist enforced on a
+    guess drops customers' purchase orders. Returns None when there is nothing
+    to say -- no allowlist configured, or the address is on it.
+    """
+    allowlist = [a.strip() for a in get_settings().postmark_inbound_ip_allowlist.split(",") if a.strip()]
+    if not allowlist or client_host is None:
+        return None
+    return None if client_host in allowlist else "source_not_on_allowlist"

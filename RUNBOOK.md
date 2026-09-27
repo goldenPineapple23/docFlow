@@ -173,14 +173,121 @@ more than the bug it is hiding.
 
 ---
 
-## 2. Inbound email (Postmark) — arrives with Phase 5.5 Stage 2
+## 2. Inbound email (Postmark)
 
-Two procedures are written when the webhook authentication is built (the
-founder asked for both, D-155; tracked in `docs/BUILD-STATUS.md`):
+The inbound webhook answers two separate questions, and it is worth keeping them
+separate in your head because only one of them is a secret:
 
-- confirming the addresses Postmark's inbound webhook really comes from, then
-  switching the IP allowlist from log-only to enforcing;
-- rotating the webhook's credentials.
+- **Which tenant is this for?** The per-tenant token in the URL path. Public by
+  design — it is the local part of the address the customer gives to its buyers.
+- **Is this actually Postmark?** HTTP Basic credentials on the webhook URL. This
+  is the secret, and it is the only thing standing between the intake endpoint
+  and anyone who has ever received a PO from one of your customers (review
+  finding H8).
+
+### 2.1 Cutover order — credentials before enforcement
+
+> **Do not run this on an address real customers send to until Stage 2c has
+> landed** (founder, 2026-09-27; D-171). A refused request looks identical from
+> outside whether it is a bad cutover or an attacker, and a bad cutover means no
+> mail arrives at all. Until 2c raises a founder alert on refusal, the only
+> signal is step 4's log line — which nobody is watching in real time. Staging
+> and a test address are fine now; a production intake address waits.
+
+
+**Do these in order.** Step 3 is what makes mail flow; steps 1–2 are what makes
+it flow *authenticated*. Doing 3 first means a window where the old hole is open;
+doing 3 last means no window at all, at the cost of inbound mail being refused
+until it is done — which is the right way round, and it is why a blank
+credential refuses everything rather than falling back to token-only.
+
+1. Generate the credential pair:
+
+   ```
+   python -c "import secrets; print(secrets.token_urlsafe(32))"
+   ```
+
+   Use a distinct value for the username too — it is compared in constant time
+   like the password, so it is a second 32 bytes of secret, not a label.
+
+2. Set `POSTMARK_WEBHOOK_USERNAME` and `POSTMARK_WEBHOOK_PASSWORD` in the API's
+   environment and **deploy**. Inbound mail is now refused for everyone,
+   including Postmark, which is expected: nothing is pointed here yet.
+
+3. In Postmark, set the inbound webhook URL to carry them:
+
+   ```
+   https://USER:PASS@<api-host>/intake/email/{token}
+   ```
+
+   Postmark sends them as an `Authorization: Basic` header. Send one test mail
+   and confirm a 200 in Postmark's own delivery log.
+
+4. Confirm nothing is being refused. **From Stage 2c onward** this is the
+   Console's attention panel: a refusal raises an `intake_webhook_refused` alert
+   at severity **high**, once per day per reason, so a mistake in step 3 shows up
+   in minutes rather than when a customer asks where their orders went.
+   **Until 2c lands**, read the API log instead — every refusal logs
+   `intake_webhook_refused reason=<word>`, and the word tells you which mistake
+   it was:
+
+   | reason | what it means |
+   |---|---|
+   | `not_configured` | step 2 didn't take effect — the environment has no credentials |
+   | `no_credentials` | step 3 didn't take effect — Postmark is posting without them |
+   | `mismatch` | step 2 and step 3 disagree — compare them, do not guess |
+   | `not_basic` / `undecodable` | something other than Postmark is posting here |
+
+**Never** put the credentials in the tenant's intake *address*, a Console
+screen, a log line or a support thread. They are not in any of those today and a
+test asserts it (`apps/api/tests/test_email_intake_auth.py`).
+
+### 2.2 Rotating the credentials
+
+Rotation has a gap by nature: Postmark's webhook URL holds one credential pair
+at a time, so between changing the environment and changing Postmark, mail is
+refused. Postmark retries a non-200 for a while, so a short gap loses nothing —
+but keep it short and do it deliberately rather than discovering it.
+
+1. Generate a new pair (2.1 step 1).
+2. Update Postmark's webhook URL to the new pair **first**. Inbound mail is now
+   refused; Postmark begins retrying.
+3. Set the new values in the API's environment and deploy.
+4. Send a test mail and confirm a 200 in Postmark's delivery log. Postmark's
+   retries of anything refused in the gap now succeed.
+5. Confirm no new `intake_webhook_refused` alert since the deploy.
+
+**Rotate when:** the credential has been in a shell history, a screenshot, a
+ticket or a third party's hands; someone with access to it leaves; or annually,
+whichever comes first. Rotating is cheap and the gap is minutes.
+
+**What rotation does not do:** it does not change any tenant's intake address.
+Rotating a *tenant's* address is a separate, per-tenant action on the tenant page
+(7.16.3) with its own grace period.
+
+### 2.3 Confirming the source addresses, then enforcing the allowlist
+
+`POSTMARK_INBOUND_IP_ALLOWLIST` is **log-only until confirmed** (D-155). An
+allowlist enforced on a guess silently drops customers' purchase orders, which
+is the exact failure the product exists to prevent — so it corroborates the
+credentials, it does not replace them.
+
+1. Leave it blank until real inbound mail is arriving.
+2. After the first genuine inbound mail, collect the source addresses the API
+   saw. With the allowlist blank nothing is logged about the source, so set it to
+   a deliberately wrong value (e.g. `203.0.113.1`) for the collection window:
+   every request then logs `source_not_on_allowlist`, and the request's source
+   address is in the web server's own access log.
+3. Compare what you collected against Postmark's published inbound IP list
+   (Postmark documents these; take them from Postmark's own page, not from a
+   search result).
+4. If they agree, set the confirmed addresses. **They are still log-only** — the
+   code has no enforcing branch, deliberately. Turning enforcement on is a code
+   change with its own test and its own `DECISIONS.md` entry, made once the list
+   has been stable across a few weeks of real mail.
+5. If they disagree, stop and find out why before changing anything. A source
+   address that is not Postmark's and still passed the credential check is worth
+   understanding, not filtering.
 
 ---
 
