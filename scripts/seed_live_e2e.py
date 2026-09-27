@@ -111,11 +111,24 @@ def _check_password_sign_in(email: str, password: str) -> None:
         timeout=30,
     )
     if response.status_code != 200 or "access_token" not in response.json():
+        # What the auth server thinks it offers. A refusal here is usually
+        # about how the server is configured rather than about this account,
+        # and that answer is one request away -- so fetch it rather than
+        # leaving whoever reads this to guess which provider is off.
+        try:
+            offered = httpx.get(
+                f"{settings.supabase_url}/auth/v1/settings",
+                headers={"apikey": settings.supabase_anon_key},
+                timeout=30,
+            ).text[:400]
+        except Exception as exc:  # noqa: BLE001 -- diagnosis, not control flow
+            offered = f"(could not be read: {type(exc).__name__})"
         sys.exit(
             "The seeded reviewer cannot sign in with the anon key, so the live suite would "
             "only report timeouts.\n"
             f"  POST {settings.supabase_url}/auth/v1/token -> {response.status_code}\n"
-            f"  {response.text[:400]}"
+            f"  {response.text[:400]}\n"
+            f"  what this auth server offers: {offered}"
         )
 
 

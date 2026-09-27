@@ -41,7 +41,12 @@ enabled = false
 enabled = false
 
 [local_smtp]
-enabled = false
+# The local mail catcher. On, because GoTrue's email provider needs a
+# mailer: with this off, the stack reported `email_provider_disabled` for
+# every password sign-in even with `[auth.email] enabled = true`. Nothing
+# reads the mailbox -- the suites assert on the `email_outbox` table, not
+# on delivered mail -- it exists so that signing in works at all.
+enabled = true
 
 [storage]
 enabled = false
