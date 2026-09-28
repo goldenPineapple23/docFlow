@@ -709,7 +709,12 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
             {"id": str(tenant_id)},
         ).mappings().first()
         if tenant is not None and not tenant["intake_address_active"]:
-            suspended = tenant["status"] in ("suspended", "pending_deletion")
+            # The same predicate the upload endpoint uses (review finding H10),
+            # so "does this lifecycle state stop new work" has one answer rather
+            # than a tuple repeated per channel. The *code* still differs by
+            # channel, and deliberately: INT-006 speaks to a buyer whose mail
+            # bounced, INT-010 to the tenant's own user (D-172).
+            suspended = intake_gate.blocks_new_intake(tenant["status"])
             error_code = "INT-006" if suspended else "INT-005"
             _insert_intake_rejection(
                 session, tenant_id, parsed, original_filename=None, detected_type=None, error_code=error_code

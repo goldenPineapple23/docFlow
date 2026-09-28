@@ -11,6 +11,7 @@ authenticated identity (Section 7.5 / Section 10).
 from __future__ import annotations
 
 import hashlib
+import logging
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -24,6 +25,8 @@ from sqlalchemy import text
 
 from app.celery_client import celery_client
 from app.deps import AuthenticatedIdentity, get_current_identity, require_reviewer
+
+logger = logging.getLogger("docflow.api")
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -71,6 +74,60 @@ def ingest_upload(
     (Step 7, D-112). `tenant_id` comes from the caller's authenticated
     context -- the tenant's own session, or the Console's audited route.
     """
+    # 7.14: a suspended or pending-deletion tenant gets a clear error here, not a
+    # 404 and not silence (review finding H10). Checked before anything else --
+    # before validation, before the file is stored, before the hash -- because a
+    # cancelled account's upload should cost nothing at all, and because the
+    # answer does not depend on the file.
+    #
+    # Read and export are untouched: 7.14 keeps those through the whole export
+    # window on purpose.
+    #
+    # **The attempt is recorded, the file is not** (founder, 2026-09-27; D-172).
+    # Without this the refusal left no trace anywhere -- the user saw INT-010 and
+    # nothing was retained, so nobody could tell a customer who tried once from
+    # one who tried forty times. `intake_rejections` is already the record of
+    # "something arrived and we didn't process it", already carries
+    # `source = 'upload'`, and is already visible to the tenant, so this needs no
+    # new table and no migration. The file's bytes are still never stored and no
+    # model call is ever made: what is kept is that an attempt happened, when,
+    # and under what name -- a retention signal, since somebody still trying to
+    # upload is somebody who wants their account back (7.14 calls reactivation a
+    # retention feature).
+    with tenant_session(tenant_id) as session:
+        blocked = intake_gate.lifecycle_block(session, tenant_id)
+        if blocked is not None:
+            session.execute(
+                text(
+                    """
+                    INSERT INTO intake_rejections
+                        (id, tenant_id, source, original_filename, detected_type, error_code, created_at)
+                    VALUES
+                        (:id, :tenant_id, 'upload', :original_filename, NULL, :error_code, now())
+                    """
+                ),
+                {
+                    "id": str(uuid4()),
+                    "tenant_id": str(tenant_id),
+                    # Metadata only, never a path or a shell argument (7.11).
+                    "original_filename": original_filename,
+                    "error_code": blocked,
+                },
+            )
+    if blocked is not None:
+        # IDs and codes only -- never the filename, never content (7.10).
+        logger.info("upload_refused_lifecycle tenant=%s code=%s", tenant_id, blocked)
+        error = get_error(blocked)
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": error.code,
+                "title": error.title,
+                "message": error.message,
+                "action": error.action,
+            },
+        )
+
     validation = file_types.validate_upload(content, original_filename)
     if not validation.ok:
         with tenant_session(tenant_id) as session:

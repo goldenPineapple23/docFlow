@@ -1478,6 +1478,28 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="info",
         audience="both",
     ),
+    # INT-006's reader is a *buyer* whose email bounced off a closed account, so
+    # it says "this email was logged" and "contact this company directly". Read by
+    # the tenant's own user on the upload screen, both halves are wrong: it is not
+    # an email, and they *are* the company. Review finding H10's suggested fix was
+    # to reuse INT-006 there; a separate entry is needed instead, because 7.16.5
+    # requires the message to answer what/why/what-next *for its reader*, and
+    # telling a customer to contact themselves answers none of the three.
+    # (Phase 5.5 Stage 2b, D-172.)
+    "INT-010": ErrorCatalogEntry(
+        code="INT-010",
+        title="This account isn't accepting new orders",
+        message=(
+            "DocFlow has stopped processing new orders for this account. Everything already "
+            "here stays available to open, review and export."
+        ),
+        action=(
+            "Resume billing to start processing again -- nothing has been deleted and no "
+            "re-setup is needed. Contact DocFlow if you think this is wrong."
+        ),
+        severity="warning",
+        audience="both",
+    ),
     # ── LIFE-0xx · tenant lifecycle actions (Section 7.14 / 7.15.4, slice 5.6) ─
     # Founder-audience, like every other Console refusal (CON-0xx, ONB-0xx).
     "LIFE-001": ErrorCatalogEntry(
