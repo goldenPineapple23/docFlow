@@ -15,9 +15,10 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from docflow_core import lifecycle, onboarding
+from docflow_core import lifecycle, metrics, onboarding
 from docflow_core.constants import FIRST_WEEK_CHECKIN_DAYS, REMINDER_DAYS
-from docflow_core.db import tenant_session
+from docflow_core.db import rollup_session, tenant_session
+from sqlalchemy import text
 
 from tests.app_clock import skew_app_clock
 from tests.test_console_api import _Console, _environment, _scalar, stripe  # noqa: F401
@@ -86,3 +87,41 @@ def test_the_deletion_reminders_are_scheduled_on_the_database_clock(
             t=tenant_id,
         )
         assert mismatched == 0
+
+
+# ── #5 rollup staleness ──────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "skew,finished_ago,stale",
+    [
+        # The app thinks 37 h have passed; the database says 35 h -- fresh.
+        (AHEAD, "35 hours", False),
+        # The database says 37 h; the app thinks 35 h -- stale all the same.
+        (BEHIND, "37 hours", True),
+    ],
+    ids=["app-clock-ahead", "app-clock-behind"],
+)
+def test_the_rollups_staleness_is_judged_on_the_database_clock(
+    client, stripe, _environment, monkeypatch, skew, finished_ago, stale
+):
+    """The database stamps finished_at, so its clock says how long ago that
+    was, against ROLLUP_STALE_HOURS (36). Read through the dashboard, as the
+    founder sees it; the run is this test's own and is removed afterwards."""
+    with rollup_session() as session:
+        run_id = session.execute(
+            text(
+                "INSERT INTO rollup_runs (trigger, finished_at, ok) "
+                "VALUES ('manual', now() - CAST(:ago AS interval), true) RETURNING id"
+            ),
+            {"ago": finished_ago},
+        ).scalar_one()
+    try:
+        skew_app_clock(monkeypatch, metrics, by=skew)
+        with _Console() as console:
+            body = client.get("/admin/dashboard", headers=console.headers()).json()
+        assert body["rollup"]["id"] == str(run_id), "another run is newer -- the test is not reading its own"
+        assert body["rollup_is_stale"] is stale
+    finally:
+        with rollup_session() as session:
+            session.execute(text("DELETE FROM rollup_runs WHERE id = :id"), {"id": str(run_id)})

@@ -1383,7 +1383,7 @@ def dashboard(
         "queues": _queue_depths(),
         "worker": _worker_heartbeat(),
         "rollup_stale_hours": ROLLUP_STALE_HOURS,
-        "rollup_is_stale": metrics.is_stale(data["rollup"], hours=ROLLUP_STALE_HOURS),
+        "rollup_is_stale": metrics.is_stale(data["rollup"]),
     }
 
 

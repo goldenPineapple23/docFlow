@@ -403,7 +403,7 @@ def test_the_dashboard_reads_the_rollup_and_reports_its_freshness(client, queue)
             # applied to the actual last run -- rather than assuming no run
             # has ever happened on this database.
             with platform_session() as session:
-                expected_stale = metrics.is_stale(metrics.last_run(session), hours=36)
+                expected_stale = metrics.is_stale(metrics.last_run(session))
             assert body["rollup_is_stale"] is expected_stale
             assert set(body["queues"]) == {"interactive", "bulk"}
 
