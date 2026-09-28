@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { type Page, type Route } from "@playwright/test";
+import { expect, test } from "./networkGuard";
 
 /**
  * The Console's MFA in the browser (DECISIONS.md D-151, D-177), against a
@@ -86,6 +87,32 @@ test("with enforcement on, a sign-in without a code sees only the authenticator 
   await expect(page.getByTestId("usage")).toHaveCount(0);
   await expect(page.getByTestId("console-mfa-banner")).toHaveCount(0);
 });
+
+for (const [how, answer] of [
+  ["refuses", (route: Route) => route.fulfill({ status: 403, json: { code: "no_authorization", msg: "refused" } })],
+  ["doesn't answer", (route: Route) => route.abort("connectionrefused")],
+] as const) {
+  test(`an enrolment Supabase ${how} shows AUTH-009, not a network message`, async ({ page }) => {
+    // Supabase is stubbed, never reached: the browser would otherwise send the
+    // enrolment to the real project in .env, and the test would depend on it.
+    let enrolAttempts = 0;
+    await page.route(/\/auth\/v1\/factors/, (route) => {
+      enrolAttempts += 1;
+      return answer(route);
+    });
+    await stubConsole(page, { enforced: true, aal: "aal1" });
+    await page.goto(`/admin/tenants/${T}/quarantine`);
+
+    await page.getByRole("button", { name: "Set up an authenticator" }).click();
+    const error = page.getByTestId("catalog-error");
+    await expect(error).toContainText("The new authenticator couldn't be set up");
+    await expect(error).toContainText("Any authenticator you already have still works.");
+    await expect(error).toContainText("If this is your first authenticator, sign out and back in, then try again.");
+    await expect(error).not.toContainText("couldn't reach DocFlow");
+    await expect(page.getByRole("button", { name: "Set up an authenticator" })).toBeEnabled();
+    expect(enrolAttempts).toBe(1);
+  });
+}
 
 test("a destructive action refused for want of a fresh code opens the code dialog; a wrong code is AUTH-008", async ({ page }) => {
   await stubConsole(page, { enforced: true, aal: "aal2" });

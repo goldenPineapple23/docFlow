@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./networkGuard";
 
 /**
  * The founder Console in a real browser (CLAUDE.md Section 7.15), API

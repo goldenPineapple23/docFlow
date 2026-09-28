@@ -1,4 +1,5 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { type Page, type Route } from "@playwright/test";
+import { expect, test } from "./networkGuard";
 
 /**
  * The Team page (slice 5.8d, D-132) against a stubbed API: the admin sees who is

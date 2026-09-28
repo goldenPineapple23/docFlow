@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { CatalogErrorBox } from "@/components/admin/CatalogErrorBox";
-import { AUTH_008 } from "@/lib/catalogMirror";
+import { AUTH_008, AUTH_009 } from "@/lib/catalogMirror";
 import { confirmCode, confirmWithAnyFactor, startEnrolment, verifiedFactorId, type Enrolment } from "@/lib/mfa";
-import { UNEXPECTED, type CatalogError } from "@/lib/review";
+import type { CatalogError } from "@/lib/review";
 
 /**
  * Enrol an authenticator app, or enter a code from one (DECISIONS.md D-151,
@@ -44,10 +44,12 @@ export function AuthenticatorSetup({
   async function begin() {
     setBusy(true);
     setError(null);
-    const started = await startEnrolment();
+    // Supabase reports most failures as a value, but a thrown one must not
+    // leave the button stuck busy with nothing shown.
+    const started = await startEnrolment().catch(() => null);
     setBusy(false);
     if (started === null) {
-      setError(UNEXPECTED);
+      setError(AUTH_009);
       return;
     }
     setEnrolment(started);

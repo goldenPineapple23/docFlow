@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./networkGuard";
 
 /**
  * The Console's Billing card and plan change (slice 5.9, D-138) against a

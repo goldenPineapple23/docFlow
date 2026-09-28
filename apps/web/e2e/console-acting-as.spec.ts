@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./networkGuard";
 import { DOCUMENT_ID, detail } from "./fixtures/review";
 
 /**

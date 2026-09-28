@@ -656,6 +656,26 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="info",
         audience="founder",
     ),
+    # Also raised in the browser, mirrored and kept identical the same way. The
+    # failure the Console first showed as "couldn't reach DocFlow" (a duplicate
+    # factor name, since fixed): DocFlow was reachable, Supabase had refused.
+    "AUTH-009": ErrorCatalogEntry(
+        code="AUTH-009",
+        title="The new authenticator couldn't be set up",
+        message=(
+            "DocFlow asked its sign-in service to start a new authenticator, and it refused or "
+            "didn't answer, so no authenticator was added. Any authenticator you already have "
+            "still works."
+        ),
+        action=(
+            "Reload the page and try again. If it fails a second time and you already have an "
+            "authenticator, sign out, sign back in with its code, and try once more. If this is "
+            "your first authenticator, sign out and back in, then try again. If it still fails, "
+            "nothing has changed on your account; check Supabase's status page and try later."
+        ),
+        severity="warning",
+        audience="founder",
+    ),
     # ── BIL-0xx · plan changes from the Console (slice 5.9, D-138) ───────────
     "BIL-001": ErrorCatalogEntry(
         code="BIL-001",
