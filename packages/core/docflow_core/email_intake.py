@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import re
 from dataclasses import dataclass, field
 from uuid import UUID, uuid4
@@ -42,10 +43,12 @@ from docflow_core.config import get_settings
 
 # Named constants (Section 7.15.4) are defined once, in docflow_core.constants.
 from docflow_core.constants import MAX_ATTACHMENTS_PER_EMAIL, UNKNOWN_SENDER_HOURLY_LIMIT
-from docflow_core.db import tenant_session, token_lookup_session
+from docflow_core.db import intake_refusal_session, tenant_session, token_lookup_session
 from docflow_core.duplicates import find_content_duplicate_at_ingest
 from docflow_core.errors import render_error
 from docflow_core.storage import save_file
+
+logger = logging.getLogger(__name__)
 
 # Public mail providers: a buyer using one of these does not make the whole
 # domain "known" (see is_known_sender).
@@ -380,6 +383,50 @@ def resolve_tenant_by_token(token: str) -> tuple[UUID, str] | None:
     if row is None:
         return None
     return UUID(str(row["tenant_id"])), row["status"]
+
+
+# ── A refused webhook request (D-171) ─────────────────────────────────────────
+
+# The fixed words `app.deps.check_inbound_webhook_credentials` refuses with.
+# Anything else is not raised as an alert (it would mean a caller passed
+# something taken from the request).
+WEBHOOK_REFUSAL_REASONS = ("not_configured", "no_credentials", "not_basic", "undecodable", "mismatch")
+
+
+def alert_webhook_refused(reason: str) -> bool:
+    """
+    Raise the high-severity `intake_webhook_refused` founder alert for a
+    refused inbound webhook request. Returns True when a new alert was
+    written, False when one is already open for this reason or it could not
+    be written.
+
+    A refusal is, from outside, either a misconfigured cutover or an attacker,
+    and the first means no customer's mail arrives at all -- so the founder is
+    told, not just a log line (D-171; the blocking condition on the RUNBOOK 2.1
+    cutover). One open alert per reason: a flood of probes is one alert until
+    acknowledged, not thousands.
+
+    Never raises. The caller is refusing the request, and an alert that can't
+    be written must never turn that 401 into a 500; the failure is logged with
+    its error type only. The payload is the reason word only -- never the
+    credential, the token or the source address (Section 7.10: it is emailed).
+    """
+    if reason not in WEBHOOK_REFUSAL_REASONS:
+        logger.error("intake_webhook_refused alert skipped: unknown reason")
+        return False
+    try:
+        with intake_refusal_session() as session:
+            return founder_alerts.raise_alert(
+                session,
+                alert_type="intake_webhook_refused",
+                severity="high",
+                tenant_id=None,
+                payload={"reason": reason},
+                dedupe_key=f"intake_webhook_refused:{reason}",
+            )
+    except Exception as exc:  # noqa: BLE001 -- see docstring: never raises
+        logger.error("intake_webhook_refused alert could not be raised: %s", type(exc).__name__)
+        return False
 
 
 # ── Raw-email forensic record ───────────────────────────────────────────────

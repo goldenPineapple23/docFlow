@@ -3,7 +3,7 @@ Who can switch on a narrow RLS flag (DECISIONS.md D-158 follow-up).
 
 Several policies open a table when a transaction carries a flag:
 `app.is_platform_admin`, `app.rollup`, `app.lifecycle`, `app.scheduler`,
-`app.stripe_webhook`, `app.pipeline_sweep`, plus the lookups by intake token
+`app.stripe_webhook`, `app.pipeline_sweep`, `app.intake_refusal`, plus the lookups by intake token
 and sign-in id. Postgres lets any connected role set a custom `app.*` setting,
 so the database alone does not decide who carries a flag -- this code does:
 
@@ -51,6 +51,7 @@ ALLOWED_USERS = {
     "scheduler_session": {"packages/core/docflow_core/scheduled_jobs.py"},
     "stripe_webhook_session": {"packages/core/docflow_core/billing_webhooks.py"},
     "token_lookup_session": {"packages/core/docflow_core/email_intake.py"},
+    "intake_refusal_session": {"packages/core/docflow_core/email_intake.py"},
     "identity_lookup_session": {"apps/api/app/deps.py"},
     "platform_session": {"packages/core/docflow_core/admin_data_access.py"},
 }
