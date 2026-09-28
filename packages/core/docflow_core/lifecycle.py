@@ -308,21 +308,25 @@ def claim_for_suspend(session: Session, tenant_id: UUID) -> SuspendClaim | None:
     if row["cancellation_effective_at"] is None or row["cancellation_effective_at"] > datetime.now(UTC):
         return None
 
-    deletion_at = datetime.now(UTC) + timedelta(days=EXPORT_WINDOW_DAYS)
-    session.execute(
+    # The database stamps the deletion date, because the database is the clock
+    # that later decides the tenant is due: the sweep, the delete guard and the
+    # reminder text all compare it with now() (D-170 #2).
+    stamped = session.execute(
         text(
             """
             UPDATE tenants SET
                 status = 'pending_deletion',
                 status_changed_at = now(),
                 intake_address_active = false,
-                deletion_scheduled_at = :deletion_at,
+                deletion_scheduled_at = now() + make_interval(days => :window),
                 updated_at = now()
             WHERE id = :id
+            RETURNING now() AS suspended_at, deletion_scheduled_at
             """
         ),
-        {"id": str(tenant_id), "deletion_at": deletion_at},
-    )
+        {"id": str(tenant_id), "window": EXPORT_WINDOW_DAYS},
+    ).mappings().one()
+    deletion_at = stamped["deletion_scheduled_at"]
 
     cconsts = constants_in_effect("EXPORT_WINDOW_DAYS", "REMINDER_DAYS")
     # Nobody clicked anything: the sweep did it, and says so (D-165).

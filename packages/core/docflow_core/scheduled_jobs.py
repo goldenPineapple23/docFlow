@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -234,7 +233,13 @@ def _pending_deletion_reminder(session: Session, job: Job) -> None:
     ready_to_delete_alert), not this job's concern."""
     assert job.tenant_id is not None
     tenant = session.execute(
-        text("SELECT name, status, deletion_scheduled_at FROM tenants WHERE id = :id"),
+        # Days left by the database's clock, the one that stamped the date
+        # (D-170 #2); whole days, rounded down, never negative.
+        text(
+            "SELECT name, status, deletion_scheduled_at, "
+            "GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (deletion_scheduled_at - now())) / 86400))::int "
+            "AS days_remaining FROM tenants WHERE id = :id"
+        ),
         {"id": str(job.tenant_id)},
     ).mappings().first()
     if tenant is None or tenant["status"] != "pending_deletion" or tenant["deletion_scheduled_at"] is None:
@@ -248,7 +253,6 @@ def _pending_deletion_reminder(session: Session, job: Job) -> None:
     ).first()
     if owner is None:
         return
-    remaining = max((tenant["deletion_scheduled_at"] - datetime.now(UTC)).days, 0)
     email_outbox.enqueue(
         session,
         tenant_id=job.tenant_id,
@@ -257,7 +261,7 @@ def _pending_deletion_reminder(session: Session, job: Job) -> None:
         params={
             "tenant_name": tenant["name"],
             "deletion_date": tenant["deletion_scheduled_at"].date().isoformat(),
-            "days_remaining": remaining,
+            "days_remaining": tenant["days_remaining"],
         },
         related_type="scheduled_job",
         related_id=job.id,

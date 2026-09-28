@@ -27,7 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -1488,18 +1488,16 @@ def delete_tenant(
     with platform_session() as session:
         row = session.execute(
             text(
-                "SELECT name, status, deletion_scheduled_at FROM tenants "
+                # Due by the database's clock, the one that stamped the date
+                # and that the ready-to-delete list reads (D-170 #2).
+                "SELECT name, status, deletion_scheduled_at <= now() AS due FROM tenants "
                 "WHERE id = :id FOR UPDATE"
             ),
             {"id": str(tenant_id)},
         ).mappings().first()
         if row is None:
             raise ConsoleError("CON-001")
-        if (
-            row["status"] != "pending_deletion"
-            or row["deletion_scheduled_at"] is None
-            or row["deletion_scheduled_at"] > datetime.now(timezone.utc)
-        ):
+        if row["status"] != "pending_deletion" or not row["due"]:
             raise ConsoleError("LIFE-006")
         if confirm_name.strip() != row["name"]:
             raise ConsoleError("LIFE-005")
