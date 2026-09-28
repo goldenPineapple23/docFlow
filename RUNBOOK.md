@@ -193,6 +193,14 @@ separate in your head because only one of them is a secret:
 > mail arrives at all. Until 2c raises a founder alert on refusal, the only
 > signal is step 4's log line — which nobody is watching in real time. Staging
 > and a test address are fine now; a production intake address waits.
+>
+> **2c builds that alert** (D-175): every refusal raises a high-severity
+> `intake_webhook_refused` founder alert naming the reason, one open alert per
+> reason. The condition is met for an address once migration `0029` is applied
+> to the database behind it and the 2c code is deployed there. After a
+> cutover, a refusal you did not expect shows up in the Console's attention
+> panel -- `not_configured` or `no_credentials` means one of steps 1–3 went wrong;
+> `mismatch` means the credential in Postmark's URL and the one deployed differ.
 
 
 **Do these in order.** Step 3 is what makes mail flow; steps 1–2 are what makes

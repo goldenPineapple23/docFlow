@@ -156,6 +156,7 @@ def _reset_rls_settings(session: Session) -> None:
     session.execute(text("RESET app.lifecycle"))
     session.execute(text("RESET app.pipeline_sweep"))
     session.execute(text("RESET app.stripe_webhook"))
+    session.execute(text("RESET app.intake_refusal"))
 
 
 @contextmanager
@@ -316,19 +317,44 @@ def scheduler_session() -> Iterator[Session]:
 @contextmanager
 def stripe_webhook_session() -> Iterator[Session]:
     """
-    Used only by the Stripe webhook handler (app/routers/stripe_webhooks.py)
-    to record the event id for idempotency (migration 0019's `webhook_access`
-    policy on `stripe_webhook_events`) and to look up which tenant a
-    `stripe_customer_id`/`stripe_subscription_id` belongs to (`
-    stripe_webhook_lookup`, SELECT only). The actual update to that tenant's
-    subscription status happens in a normal tenant_session() once the
-    tenant_id is known. Not the Section 7.15.1 admin bypass.
+    Used only by the Stripe webhook handler (docflow_core.billing_webhooks)
+    to look up which tenant a `stripe_customer_id` belongs to (0019's
+    `stripe_webhook_lookup`, SELECT only). It can no longer write
+    `stripe_webhook_events`: migration 0029 dropped that policy, and the
+    event id is recorded only by `record_stripe_subscription_event()`, called
+    from the tenant's own tenant_session() in the same transaction as the
+    update it stands for (H11, D-173). Not the Section 7.15.1 admin bypass.
     """
     session_factory = get_session_factory()
     session = session_factory()
     try:
         _reset_rls_settings(session)
         session.execute(text("SET LOCAL app.stripe_webhook = 'true'"))
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@contextmanager
+def intake_refusal_session() -> Iterator[Session]:
+    """
+    Used only by `docflow_core.email_intake.alert_webhook_refused` to raise the
+    `intake_webhook_refused` founder alert when the inbound webhook refuses a
+    request (D-171). The request was refused before its token was read, so
+    there is no tenant. Migration 0029's `intake_refusal_raise` and
+    `intake_refusal_enqueue` policies let this session insert exactly that
+    alert type with no tenant, and the founder-alert email with it -- and read
+    nothing, on any table. Not the Section 7.15.1 admin bypass.
+    """
+    session_factory = get_session_factory()
+    session = session_factory()
+    try:
+        _reset_rls_settings(session)
+        session.execute(text("SET LOCAL app.intake_refusal = 'true'"))
         yield session
         session.commit()
     except Exception:

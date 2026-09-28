@@ -2450,3 +2450,31 @@ The rule is derived from the warning's own payload rather than from a list of co
 **Until Phase 6:** the branch still exists but is unreachable wherever `SUPABASE_JWT_SECRET` is blank -- as it now is on the founder's machine against staging. CI keeps setting a throwaway test secret because the tests still mint HS256 tokens. SETUP.md and `.env.example` now say to leave the secret blank and to use the new-format keys, so `docflow-prod` is set up the retired way from the start.
 
 **Related:** D-015, D-088, D-163, D-167; Section 7.12.
+
+## D-175 — Stage 2c as built: what D-173 did not already decide (H11, clock items #3 and #6, 2a's deferred alert)
+
+**Context:** D-173 fixed the design before any code existed. This entry records the calls made while building it, each of which a reviewer could reasonably have made differently. Migration `0029`; `docflow_core/billing_webhooks.py`; `email_intake.alert_webhook_refused`.
+
+**1. Supabase grants EXECUTE on every new `public` function to `anon` and `authenticated` -- so 0029 revokes from them too, not only from PUBLIC.** D-173 said `REVOKE EXECUTE FROM PUBLIC`. On Supabase that is not enough: its default privileges give the browser-facing roles EXECUTE on new functions in `public`, which makes a function callable from the public key through the REST API. A SECURITY DEFINER function exposed that way is exactly the thing D-173 exists to prevent. 0029 revokes from `anon`, `authenticated` and `service_role` (each only if the role exists, so CI and staging both run it), and a test asserts that neither `anon` nor `authenticated` can execute it and that no PUBLIC grant exists.
+
+**2. `webhook_access` is dropped, not narrowed, and platform admins may read the table.** No session can write `stripe_webhook_events` any more -- the function is the only writer, and a test asserts both a tenant session and the lookup session are refused. A `platform_admin_read` SELECT policy is added: the table holds event ids and types, no customer data, and being able to see what was recorded is what lets the tests (and the founder, from a SQL session) confirm an id was or was not recorded.
+
+**3. Non-subscription events are no longer recorded.** Before 2c every signed event's id was stored, including events DocFlow ignores. Recording now happens inside a tenant's session, and an ignored event has no tenant; recording it would need a second writer path, and a retry of an event that does nothing is harmless. Unmatched events (no tenant has that customer) are not recorded either, for the same reason.
+
+**4. An event without `created` is ignored and logged, not guessed at.** Every real Stripe event carries it; a signed payload without it cannot be ordered, so it is not applied. `ignored` rather than an error, because a 4xx/5xx would make Stripe retry a payload that can never succeed.
+
+**5. `unpaid` keeps `first_past_due_at` and does not start it.** The agreed rule was "not reset by unpaid". If `unpaid` arrives with no saved first notice (a missed `past_due`), the timestamp stays NULL rather than taking `unpaid`'s time: 7.15.4's cancel form already handles a missing timestamp by using now + `CURE_PERIOD_DAYS` and *flagging it*, which is more honest than silently starting the clock late.
+
+**6. A stale event is recorded as seen.** An event older than the saved state is not applied, and its id is recorded so Stripe's retries of it are no-ops. The same holds for a same-second event whose fetch was overtaken (`superseded`).
+
+**7. Outcome words changed.** The endpoint answers `applied`, `refetched`, `duplicate`, `stale`, `superseded`, `unmatched` or `ignored` (was `processed` / `duplicate` / `unmatched` / `ignored`). Only tests and logs read them.
+
+**8. The refusal alert uses a narrow flag session, `app.intake_refusal` -- a flag policy, with the flag-policy caveat.** D-173 moved Stripe off a flag policy because a flag is enforced by our code, not the database (D-159). The refusal alert follows 0017's `rollup_raise` pattern regardless, as D-171 planned: the request has no tenant, and the policies bound what the flag can do to *insert one alert type with no tenant, and its founder-alert email* -- nothing readable, nothing tenant-scoped. The worst a misuse can do is raise a spurious "webhook refused" alert. F-1 (Stage 3) moves this to a database login like the others. `test_rls_flags.py` pins the session to `email_intake.py`.
+
+**9. One open alert per refusal reason, and the alert never changes the 401.** Dedupe key `intake_webhook_refused:<reason>` over the five fixed reasons, so a probe flood is one alert per reason until acknowledged, and a misconfiguration (`not_configured`) is distinguishable from a probe (`mismatch`) at a glance. The payload is the reason word only. `alert_webhook_refused` never raises; a test breaks its session and asserts the response is still 401, and another keeps the reason list in step with `deps.check_inbound_webhook_credentials`. **Cost, named:** each refused request now makes one database round trip (an insert attempt the dedupe index refuses). Per-IP rate limiting is Phase 6; until then a flood costs the database that, and no more.
+
+**10. Tests that send refused requests clean up the alerts they raise** (`cleans_up_refusal_alerts`, applied to the 2a suite as well), removing only alerts created during the test, never ones that existed before -- otherwise every staging run would put test noise in the founder's attention panel.
+
+**What satisfies the blocking condition (D-171, RUNBOOK 2.1):** the alert exists once 0029 is applied to the database behind an intake address and this code is deployed. On staging that is when the founder applies 0029; on production, when `docflow-prod` is created (0029 is in its migrations).
+
+**Related:** D-159, D-165, D-170, D-171, D-173; review H8, H11; Sections 7.9, 7.10, 7.12, 7.15.4.

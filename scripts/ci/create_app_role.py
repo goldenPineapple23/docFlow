@@ -43,6 +43,11 @@ def main() -> int:
             # role is created after the migrations ran, so it is set again
             # (D-165). The two values must match (test_system_actors.py).
             "ALTER ROLE docflow_app SET idle_in_transaction_session_timeout = '5min'",
+            # Migration 0029 grants this only if docflow_app already exists,
+            # which it doesn't in CI -- so it is granted again here (D-173).
+            # The signature must match the migration's (test_stripe_events.py).
+            "GRANT EXECUTE ON FUNCTION record_stripe_subscription_event"
+            "(text, text, timestamptz, text, text, timestamptz, text) TO docflow_app",
         ):
             conn.execute(statement)
 

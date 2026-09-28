@@ -468,6 +468,19 @@ def cancel_subscription(subscription_id: str) -> None:
         raise ExternalServiceError("stripe", f"subscription cancel returned {response.status_code}")
 
 
+def retrieve_subscription(subscription_id: str) -> SubscriptionResult:
+    """
+    The subscription as Stripe holds it now. Used by the webhook handler when
+    an event cannot be ordered against the saved state (same `created` second,
+    D-173): it saves what Stripe says rather than guessing. Called with no
+    database transaction open.
+    """
+    response = _stripe("GET", f"subscriptions/{subscription_id}")
+    if response.status_code >= 300:
+        raise ExternalServiceError("stripe", f"subscription retrieve returned {response.status_code}")
+    return _subscription_result(response.json())
+
+
 def void_pending_setup_fee(*, customer_id: str, tenant_id: UUID) -> None:
     """
     Cleanup for a tenant cancelled during its trial (D-125): the setup-fee
