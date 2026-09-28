@@ -93,11 +93,17 @@ def raise_alert(
     tenant_id: UUID | None,
     payload: dict[str, Any] | None = None,
     dedupe_key: str | None = None,
+    dedupe_per_utc_day: bool = False,
 ) -> bool:
     """
     Raise an alert. Returns False when an open alert with the same dedupe key
     already exists (nothing is written). Works in a tenant session for that
     tenant (0011's `tenant_raise` policy) or a platform session.
+
+    `dedupe_per_utc_day` makes it one alert per condition per day: the INSERT
+    appends ":YYYY-MM-DD" to the key, the UTC date by the database's clock --
+    the clock that stamps the rows the key dedupes, so the day can't disagree
+    with them near midnight (D-170 #7).
     """
     if alert_type not in ALERT_TYPES:
         raise ValueError(f"unknown alert type {alert_type!r}")
@@ -140,7 +146,10 @@ def raise_alert(
                 INSERT INTO founder_alerts
                     (id, type, severity, tenant_id, payload, dedupe_key, email_outbox_id)
                 VALUES
-                    (:id, :type, :severity, :tenant_id, CAST(:payload AS jsonb), :dedupe_key,
+                    (:id, :type, :severity, :tenant_id, CAST(:payload AS jsonb),
+                     CASE WHEN :per_day
+                          THEN CAST(:dedupe_key AS text) || ':' || (now() AT TIME ZONE 'UTC')::date::text
+                          ELSE CAST(:dedupe_key AS text) END,
                      :email_outbox_id)
                 """
             ),
@@ -151,6 +160,7 @@ def raise_alert(
                 "tenant_id": str(tenant_id) if tenant_id else None,
                 "payload": json.dumps(payload, sort_keys=True),
                 "dedupe_key": dedupe_key,
+                "per_day": dedupe_per_utc_day,
                 "email_outbox_id": str(outbox_id) if outbox_id else None,
             },
         )
@@ -192,7 +202,6 @@ def raise_for_failure(
     if alert_type is None:
         return False
     entry = get_error(error_code or "")
-    day = datetime.now(timezone.utc).date().isoformat()
     payload: dict[str, Any] = {"error_code": entry.code}
     if document_id is not None:
         payload["first_document_id"] = str(document_id)
@@ -207,7 +216,8 @@ def raise_for_failure(
             severity=entry.severity,
             tenant_id=tenant_id,
             payload=payload,
-            dedupe_key=f"{alert_type}:{tenant_id}:{entry.code}:{day}",
+            dedupe_key=f"{alert_type}:{tenant_id}:{entry.code}",
+            dedupe_per_utc_day=True,
         )
     except Exception:
         savepoint.rollback()
