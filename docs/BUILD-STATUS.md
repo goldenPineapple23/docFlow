@@ -185,10 +185,85 @@ are D-149 – D-153.
 |---|---|---|---|
 | 0 | Safety net: push, CI green, `main` protected (done before 5.5 began); **CI database and the unapproved-skip check** (H7 part 2); core type-checked and pinned in CI | DONE (PR #3, merged 2026-09-25) | D-148 |
 | 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents. **Plus the two defects the founder's walkthrough found on the real stack (2026-09-27): the review screen said nothing when an edit raised a check (D-166), and a session token one second ahead of this clock was refused as "signed out" (D-167).** | **CHECKPOINT DONE 2026-09-26, awaiting "go"** (`CHECKPOINTS.md`: C1, H1, H3, M1, M3, H2, M4, M5 all closed). 1a DONE (PR #4, D-156); 1b DONE (PR #6, migration `0027`, D-158 – D-160); 1c DONE (PR #7: golden rename, M1 streaming measured, H2/M4/M5, one read budget, every paid call costed, Audit tab on one clock; D-159, D-161 – D-164); named system actors DONE (PR #8, migration `0028` applied and verified on staging 2026-09-26: 3 system actors, no blank lifecycle actor, idle-transaction cap 5 min; D-165); Stage 1 checkpoint run on `b04f16d`; walkthrough fixes DONE (D-166 the review screen, D-167 clock skew, D-169 the line table marking the rows and numbers a check is about, and the live end-to-end suite that catches this class of defect) | D-149, D-154 – D-169 |
-| 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events (record the event in the same transaction as its effect; ignore an event older than the state already saved; **an event in the same second as the saved state can't be ordered by `created` (one-second resolution), so it re-fetches the subscription from Stripe and saves that, never guesses** -- a webhook-side fetch, not a page-load one, so within 7.15.3 (founder, 2026-09-26); the Phase 6 plan-change reconcile reuses this guard). **Plus two clock items folded in from the D-170 sweep:** `first_past_due_at` written from Stripe's event time rather than the app clock, and tests that a stale and a future-dated Stripe webhook signature are both refused (the 300 s tolerance is real but untested today). **Also carries 2a's deferred `intake_webhook_refused` alert** and the `founder_alerts` insert policy it needs (the `rollup_raise` pattern from 0017), since `0029` is the migration already planned (D-171). **2a (H8) BUILT, awaiting the stage's other sub-slices:** the inbound webhook now authenticates the provider with Postmark's HTTP Basic credentials, checked before the payload is parsed and before the token is resolved; the per-tenant token identifies the tenant and no longer authenticates the request. A blank credential refuses all inbound mail on purpose (D-171), so RUNBOOK 2.1's cutover order is a requirement: credentials set and deployed, *then* Postmark pointed at the URL carrying them. A refusal logs which reason it was, and **raises a high-severity `intake_webhook_refused` alert in 2c, not 2a** -- a tenant-less alert needs its own RLS insert policy, which needs a migration, and 2c already has `0029`; `test_rls_flags.py` caught the attempt to raise it from the router and located the right home (D-171). **Blocking condition (founder, 2026-09-27): credential enforcement must not go live on an address real customers send to until 2c's alert lands.** A refused request is, from outside, either a misconfigured cutover or an attacker, and the first means no mail arrives at all -- so until the alert exists, the only signal is a log line nobody is watching. Staging and a test address are fine; the RUNBOOK 2.1 cutover on a production intake address waits for 2c. The IP allowlist is log-only with no enforcing branch (D-155); RUNBOOK 2.3 is the confirm-then-enforce procedure and 2.2 the rotation procedure. 12 tests; 10 of them fail with the credential check disabled | 2a BUILT, 2b-2d PLANNED | D-151, D-170, D-171 |
-| 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation, H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval). **H6 note: signed URLs become cross-clock** -- minted and verified on the app clock today (`signed_urls.py`), one clock because one service does both; on Supabase Storage the expiry is Supabase's clock, so D-170 applies (a named tolerance and a test, or the expiry decided in one place) | PLANNED | D-150, D-159, D-170 |
+| 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events (record the event in the same transaction as its effect; ignore an event older than the state already saved; **an event in the same second as the saved state can't be ordered by `created` (one-second resolution), so it re-fetches the subscription from Stripe and saves that, never guesses** -- a webhook-side fetch, not a page-load one, so within 7.15.3 (founder, 2026-09-26); the Phase 6 plan-change reconcile reuses this guard). **Plus two clock items folded in from the D-170 sweep:** `first_past_due_at` written from Stripe's event time rather than the app clock, and tests that a stale and a future-dated Stripe webhook signature are both refused (the 300 s tolerance is real but untested today). **Also carries 2a's deferred `intake_webhook_refused` alert** and the `founder_alerts` insert policy it needs (the `rollup_raise` pattern from 0017), since `0029` is the migration already planned (D-171). **2a (H8) BUILT, awaiting the stage's other sub-slices:** the inbound webhook now authenticates the provider with Postmark's HTTP Basic credentials, checked before the payload is parsed and before the token is resolved; the per-tenant token identifies the tenant and no longer authenticates the request. A blank credential refuses all inbound mail on purpose (D-171), so RUNBOOK 2.1's cutover order is a requirement: credentials set and deployed, *then* Postmark pointed at the URL carrying them. A refusal logs which reason it was, and **raises a high-severity `intake_webhook_refused` alert in 2c, not 2a** -- a tenant-less alert needs its own RLS insert policy, which needs a migration, and 2c already has `0029`; `test_rls_flags.py` caught the attempt to raise it from the router and located the right home (D-171). **Blocking condition (founder, 2026-09-27): credential enforcement must not go live on an address real customers send to until 2c's alert lands.** A refused request is, from outside, either a misconfigured cutover or an attacker, and the first means no mail arrives at all -- so until the alert exists, the only signal is a log line nobody is watching. Staging and a test address are fine; the RUNBOOK 2.1 cutover on a production intake address waits for 2c. The IP allowlist is log-only with no enforcing branch (D-155); RUNBOOK 2.3 is the confirm-then-enforce procedure and 2.2 the rotation procedure. 12 tests; 10 of them fail with the credential check disabled **2b (H10) BUILT:** a suspended or pending-deletion tenant can no longer upload -- refused with a new `INT-010` before the file is validated or stored, so it costs nothing; read and export stay open, asserted against `/home`, the order history, one order in full and its export history, in both blocked states (7.14). `cancelling` deliberately does not block. One predicate, `intake_gate.blocks_new_intake`, is shared by both intake channels so the lifecycle answer cannot drift -- which is how the defect existed. Two departures from the review's proposed fix, reasoned in D-172: a new catalog entry rather than reusing INT-006 (whose reader is a buyer whose mail bounced, not the tenant's own user), and the gate reads lifecycle status rather than `intake_address_active` (which is also false before go-live). The refused attempt is recorded in `intake_rejections` (the file is not), so a customer who keeps trying is visible -- a retention signal, not only an audit one. Three drift tests beyond the shared predicate: both real endpoints asserted to agree across four states, a structural test forbidding the status pair inside any condition, and the invariant that the suspend transition sets `status` and clears `intake_address_active` together (they are different columns and only the transition keeps them in step). 14 tests; 3 fail with the gate disabled | 2a, 2b BUILT; 2c-2d PLANNED | D-151, D-170, D-171, D-172 |
+| 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation, H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) -- **including a login for the Stripe webhook that holds EXECUTE on 2c's event function, with EXECUTE then revoked from `docflow_app`**, which closes the residual risk D-173 names. **H6 note: signed URLs become cross-clock** -- minted and verified on the app clock today (`signed_urls.py`), one clock because one service does both; on Supabase Storage the expiry is Supabase's clock, so D-170 applies (a named tolerance and a test, or the expiry decided in one place) | PLANNED | D-150, D-159, D-170, D-173 |
 | 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items | PLANNED | D-152 |
 | 5 | Remaining findings, doc/code contradictions, proposed CLAUDE.md additions; **audit every test that counts a whole table** (the `deal7` pattern) and move each one to data only that test can see, after which staging suites may run concurrently again (RUNBOOK 1.4); **robust test cleanup** (every test that creates data cleans it up in a fixture or `finally`, so a failing test still leaves nothing); **a staging sweep script** that lists tenants named "Acme Test ..." older than a day, with what each holds, and deletes one only on the founder's per-action OK (a stopped run always strands something); **triage the API suite's warnings** (425 on the 2026-09-26 run): list each kind, say which are harmless library deprecations and which point at a real problem in our code -- listed, not fixed (triage done 2026-09-26, D-163: all 439 are test-only; 438 are PyJWT's `InsecureKeyLengthWarning` from short test signing keys); **use a test JWT secret of at least 32 bytes** to clear that noise (founder); **a test that expects the database to refuse a write** must run in a transaction that is always rolled back, or on data it owns, so it can't leave a row behind when the refusal doesn't happen (D-165 incident); *low priority, not a blocker:* **count rows in spreadsheet and CSV orders for free before extraction** (no model call needed), so an oversized order is caught before a paid read (founder, D-163) | PLANNED | D-160, D-163, D-165 |
+
+### Stage 2c and 2d -- agreed with the founder before building (2026-09-27)
+
+Written here so they survive a context reset; until now they lived only in the
+working conversation.
+
+**2c (H11, plus clock items #3 and #6, plus 2a's deferred alert):**
+
+- **A SECURITY DEFINER function records the event, checks the ordering guard and
+  applies the update, in one transaction** (founder's proposal, adopted over a
+  tenant-scoped RLS policy on `stripe_webhook_events`). Why: under the policy
+  design any tenant-scoped code could insert an event id for its tenant, marking
+  a real Stripe event as seen so Stripe's retry becomes a no-op -- a way to
+  suppress a billing event. With the function, only one audited function writes
+  the idempotency table. It is also the F-1 direction: a flag policy is enforced
+  by our code (the app role can set any flag, D-159), a function grant by the
+  database (as 0028 did).
+  - Called from **inside the tenant session**, after the existing SELECT-only
+    lookup resolves the tenant, so the past-due alert is raised by the existing
+    Python `raise_alert` in the same transaction under the existing
+    `tenant_raise` policy. The function cross-checks the Stripe customer id
+    against the session's tenant and never takes a tenant id from the caller
+    (7.5).
+  - `SET search_path` on the function; `REVOKE EXECUTE FROM PUBLIC`; the grant to
+    `docflow_app` wrapped in 0028's `if exists (pg_roles ...)` guard because CI
+    creates that role after migrations run, mirrored in
+    `scripts/ci/create_app_role.py` and its agreement test.
+  - Test: a tenant session **cannot** insert into `stripe_webhook_events`, run in
+    a transaction that is always rolled back (D-165).
+- **The same-second Stripe fetch happens outside any database transaction**:
+  a short transaction decides (and on same-second records nothing), the fetch
+  runs with no transaction open, a second short transaction re-reads and saves.
+  That is the `change_tier` bug, not repeated. Tests: a lock probe (another
+  connection takes `FOR UPDATE NOWAIT` on the tenant row during the fake fetch),
+  a crash between fetch and save (event not recorded, status unchanged, replay
+  applies), and a negative check that moving the fetch inside the transaction
+  makes the probe fail.
+- **The second transaction re-checks the ordering guard, not just the saved
+  state** (founder): if a newer event was applied while the fetch was in flight,
+  the fetched state is not written over it -- the event id is recorded as seen.
+  When the write does happen, the event id is recorded in the **same transaction
+  as the status write**. Test: a newer event applied during the fetch is not
+  overwritten.
+- **Residual risk, named (D-173):** while `docflow_app` holds EXECUTE, any code
+  running as it can call the function with a fabricated event id. Closed by F-1
+  in Stage 3, below.
+- A NULL `stripe_status_event_at` (every existing tenant) **applies** the first
+  event, and a test says so.
+- `first_past_due_at` from Stripe's event time, and **not reset by `unpaid`**:
+  today an `unpaid` event clears it, restarting the cure clock just as retries
+  run out.
+- Stale and future-dated Stripe signature timestamps are refused, with tests
+  (the 300 s tolerance is real and untested today).
+- Migration `0029` touches **four** tables -- `tenants`, `stripe_webhook_events`,
+  `founder_alerts`, `email_outbox` -- so the backup covers all four, including
+  the two that only gain a policy (the founder's standing rule). Deletes
+  nothing. The backup SQL, row-count check and "don't merge until verified on
+  staging" lead 2c's message, before the PR link.
+
+**2d (H9, MFA and step-up per D-151):**
+
+- A RUNBOOK procedure for a **platform admin who loses their TOTP device**,
+  tested on staging, not only written.
+- Step-up enforcement switches on **only after the founder's own account is
+  enrolled and has passed a challenge** -- never before, so the founder cannot
+  lock themselves out of the Console by merging it.
+- If enrolling the founder's existing account needs a manual Supabase dashboard
+  step, **stop and tell the founder** before building any workaround (D-151).
+- The 5-minute freshness check compares GoTrue's time with ours, so it is a
+  foreign clock under D-170: a named tolerance, its cost stated, and a test.
+  Which claim carries the challenge time is read from a real token after a real
+  challenge, not assumed (RUNBOOK 1.6).
+
+**Then, before any real tenant:** the D-170 clock PR -- #2 first, then #1, #4,
+#5, #7.
 
 ### Open items parked during the Stage 1 walkthrough (2026-09-27)
 

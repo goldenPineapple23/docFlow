@@ -24,6 +24,7 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from docflow_core import founder_alerts, usage
@@ -34,6 +35,66 @@ from docflow_core.constants import (
 )
 
 HoldReason = Literal["abuse_ceiling", "cost_breaker"]
+
+
+# ── The lifecycle gate (Section 7.14; review finding H10) ───────────────────
+#
+# 7.14, on entering `suspended`: "the upload endpoint and API return a clear
+# error, not a 404 or a silent failure." Until Stage 2b only email intake
+# refused, and it refused for a different reason -- it reads
+# `intake_address_active`, which the suspend transition clears
+# (`lifecycle.py:312`) and which is *also* false before go-live. So a cancelled
+# customer could keep uploading through the app and keep spending the founder's
+# model budget, which is both the 7.14 breach and a cost leak.
+#
+# **One source of truth for the lifecycle question, not one gate for both
+# channels.** The two channels genuinely refuse different things and collapsing
+# them would be wrong:
+#
+#   * email also refuses a *not yet live* address (INT-005), because mail to an
+#     address that isn't reading yet has to be answered;
+#   * upload must NOT refuse before go-live -- the Console's own test batch and
+#     an invited user trying the app both arrive that way, and nothing asks for
+#     those to be blocked.
+#
+# What both must agree on is "does this tenant's lifecycle state stop new work",
+# and that is `blocks_new_intake` below: one predicate, used by both, so the
+# answer cannot drift between them.
+
+# NOT the same thing as `lifecycle.REACTIVATABLE`, which holds the same two
+# states today and answers a different question: which states a tenant may be
+# reactivated *from*. They are free to diverge -- a future state could block new
+# intake without being reactivatable, or the reverse -- so each is named where it
+# is meant and neither is defined in terms of the other. Do not collapse them.
+LIFECYCLE_BLOCKED_STATUSES = ("suspended", "pending_deletion")
+
+
+def blocks_new_intake(tenant_status: str | None) -> bool:
+    """
+    Whether this lifecycle state stops new documents arriving (7.14).
+
+    `suspended` and `pending_deletion` only. Deliberately NOT `cancelling`: 7.14
+    is explicit that everything keeps working until the effective date, so a
+    tenant who has given notice keeps processing orders to the last day. And
+    deliberately not a read/export check of any kind -- a suspended tenant keeps
+    full read and export access, which 7.14 calls the wrong incentive to build
+    into a company whose pitch is trust.
+    """
+    return tenant_status in LIFECYCLE_BLOCKED_STATUSES
+
+
+def lifecycle_block(session: Session, tenant_id: UUID) -> str | None:
+    """
+    The catalog code to refuse an upload with, or None to carry on.
+
+    INT-010 rather than email's INT-006: INT-006 is written for a buyer whose
+    mail bounced ("this email was logged", "contact this company directly"), and
+    the reader here is the tenant's own user, who *is* the company (D-172).
+    """
+    status = session.execute(
+        text("SELECT status FROM tenants WHERE id = :id"), {"id": str(tenant_id)}
+    ).scalar_one_or_none()
+    return "INT-010" if blocks_new_intake(status) else None
 
 
 def hold_reason(session: Session, tenant_id: UUID) -> HoldReason | None:

@@ -48,6 +48,12 @@ from docflow_core.constants import (
 REASONS = ("customer_requested", "non_payment", "for_cause")
 # A tenant may only be cancelled from 'active'; may only be reactivated from
 # one of these.
+#
+# Same two states as `intake_gate.LIFECYCLE_BLOCKED_STATUSES`, and deliberately a
+# separate constant: that one answers "does this state stop new documents
+# arriving", this one answers "can this tenant be brought back". They coincide
+# today and are free to diverge. Neither is defined in terms of the other, so a
+# change to one cannot silently change the other.
 REACTIVATABLE = ("suspended", "pending_deletion")
 
 

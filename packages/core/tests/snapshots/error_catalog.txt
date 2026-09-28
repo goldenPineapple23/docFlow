@@ -330,6 +330,10 @@ INT-009 [warning/tenant] Held: sender isn't on your approved list
   what+why: This account only accepts orders from approved senders, and this sender isn't on the list, so we're holding the document instead of processing it.
   next:     Tick it and release it, or ask DocFlow to add the sender to your list.
 
+INT-010 [warning/both] This account isn't accepting new orders
+  what+why: DocFlow has stopped processing new orders for this account. Everything already here stays available to open, review and export.
+  next:     Resume billing to start processing again -- nothing has been deleted and no re-setup is needed. Contact DocFlow if you think this is wrong.
+
 LIFE-001 [warning/founder] This tenant can't be cancelled from here
   what+why: Cancel only applies to an active tenant. This one is already cancelling, suspended, pending deletion or deleted.
   next:     Check the tenant's current status on the Lifecycle tab.
