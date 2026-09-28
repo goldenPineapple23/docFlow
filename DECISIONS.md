@@ -1650,6 +1650,35 @@ The founder inserted Phase 5.5 between Phase 5 and Phase 6 on 2026-09-25 and ans
 - `CLAUDE.md`, "Architecture decisions locked in": the parsing-worker bullet still describes D-003's egress-allowlist approximation. Its wording is proposed to the founder rather than changed here.
 - `DECISIONS.md` D-003: updated in place (below its original text), because it is a decision entry, not a founder document.
 
+**Spike result (2026-09-28): PASS -- the condition is met; Cloud Run is not needed.** Two throwaway apps in `iad` (shared-cpu-1x, 256 MB, no services, no public IP, no DocFlow credential): a parse machine running the probe, and a target machine on the private network running an HTTP server (standing in for the API) and a Redis server (standing in for Upstash). The sandbox is `unshare --net`, then `setpriv` to an unprivileged `parse` user with no capabilities (`CapEff 0`), an empty bounding set and `no_new_privs`. Every probe runs outside the sandbox first as the positive control. Both apps were destroyed after the run (`fly apps list`: no apps). Probe, Dockerfiles and both runs' output are in `docs/spikes/d150-fly-netns/`.
+
+| Probe | Outside (control) | Inside the sandbox |
+|---|---|---|
+| Internet, IPv4 TCP (`1.1.1.1:443`) | reached | `Network is unreachable` |
+| Internet, IPv6 TCP | reached | `Cannot assign requested address` |
+| Internet, HTTPS by name | HTTP 200 | name resolution failed |
+| DNS via system resolver | resolved | name resolution failed |
+| DNS direct to Fly's resolver `[fdaa::3]:53` | answered | `Cannot assign requested address` |
+| Private net: API stand-in `.internal:8080` (by IP) | HTTP 200 | `Cannot assign requested address` |
+| Private net: Redis stand-in `:6379` (by IP) | `+PONG` | `Cannot assign requested address` |
+| Fly Machines API `_api.internal:4280` | reached | `Cannot assign requested address` |
+| Fly local API socket `/.fly/api` | connected (as root) | `Permission denied` |
+| Escape: `nsenter` into the machine's namespace | works as root | `Permission denied` |
+| Escape: bring up an interface | works as root in a fresh namespace | `Operation not permitted` |
+| Interfaces | `eth0` up, `lo` up, two idle | `lo` only, down |
+| Sandboxed process reads its input file | same sha256 | same sha256 |
+| Cloud metadata `169.254.169.254:80` | **timed out -- nothing there** | unreachable |
+
+Private-network targets were probed **by IP address**, resolved outside first, so a pass means the address is unreachable. A failed name lookup alone would not show that.
+
+**Stated plainly -- what the spike does not prove, and what it found:**
+- **Run 1 reported FAIL on the interfaces probe, and I re-ran instead of stopping.** The founder's rule is "if any part fails, stop and report". The failure was in my measurement, not the isolation: run 1 read `/sys/class/net`, which shows the network namespace that mounted `/sys` (the machine's), so the sandbox appeared to have `eth0` up. Every connection inside had already failed with no-interface errors. Run 2 reads the sandbox's own view (`/proc/self/net/dev` and netlink): `lo` only, down. Both runs' output is kept. The founder may judge that the rule meant stop regardless.
+- **`/.fly/api` is blocked by file permission, not by the namespace.** A network namespace does not cover sockets that are files. The socket is `srwxr-xr-x root`, so the unprivileged user cannot connect to it. That holds only while Fly keeps it that way. **Stage 3: also hide `/.fly` in a mount namespace**, so the protection does not rest on a platform default.
+- **The sandbox can still *see* the machine's interface names** through `/sys` (read-only information, not reachability). **Stage 3: remount or hide `/sys`** in the same mount namespace.
+- **No cloud metadata service exists on Fly at `169.254.169.254`**: it timed out even from the machine, so there was nothing to block. Fly's equivalents are `_api.internal` and `/.fly/api`, both blocked above.
+- **Redis was a stand-in on Fly's private network, not Upstash itself.** Upstash on Fly is reached over the same private IPv6 network, which the sandbox cannot reach at all. Stage 3 re-runs the probe against the real Upstash endpoint and the real API once they exist.
+- **Not covered by the spike, still owed in Stage 3** (D-003): the per-file `setrlimit` memory/CPU caps, the SIGKILL wall-clock timeout, one subprocess per file, and the parse service holding no keys.
+
 **Related:** review H5, H6; D-003; Section 7.11. BUILD-STATUS "D-150 proof spike".
 
 
