@@ -49,6 +49,15 @@ MAX_PROCESSING_ATTEMPTS = 3
 STAGING_TTL_DAYS = 90
 FIRST_WEEK_CHECKIN_DAYS = 7
 ROLLUP_STALE_HOURS = 36
+# The Console's step-up (D-151, D-177): a destructive action needs a TOTP
+# challenge passed at most this long ago. Read from the session token's `amr`
+# entry for `totp`, whose timestamp is GoTrue's clock.
+MFA_STEP_UP_MAX_AGE_SECONDS = 300
+# How far GoTrue's clock may differ from ours when judging that age (D-170).
+# The same allowance as the session token's own leeway (D-167). Cost: a
+# challenge up to MFA_STEP_UP_MAX_AGE_SECONDS + this old can pass (5 min 30 s),
+# and one stamped up to this far in our future is accepted.
+MFA_CLOCK_TOLERANCE_SECONDS = 30
 # The "needs review" digest (slice 5.8c, D-131): at most one email per tenant
 # per this many minutes, sent this long after the first new order that starts
 # it. A 500-document backfill is one or two emails, not 500.

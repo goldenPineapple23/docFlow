@@ -11,6 +11,7 @@ current session to a local identity (tenant, role, platform-admin status).
 from __future__ import annotations
 
 from docflow_core import team
+from docflow_core.config import get_settings
 from docflow_core.db import tenant_session
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
@@ -46,4 +47,11 @@ def get_me(identity: AuthenticatedIdentity = Depends(get_current_identity)) -> d
         # nothing, in the catalog's words rather than its own (AUTH-004).
         "access_removed": identity.access_removed,
         "refusal": catalog_detail("AUTH-004") if identity.access_removed else None,
+        # The Console's gate and banner (D-177). Platform admins only: nobody
+        # else is told whether the Console enforces MFA.
+        "console_mfa": (
+            {"enforced": get_settings().console_mfa_enforced, "aal": identity.aal}
+            if identity.is_platform_admin
+            else None
+        ),
     }

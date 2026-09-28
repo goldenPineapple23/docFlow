@@ -26,13 +26,15 @@ import base64
 import binascii
 import hmac
 import logging
+import time
 from dataclasses import dataclass
 from uuid import UUID
 
 import jwt
 from docflow_core.config import get_settings
+from docflow_core.constants import MFA_CLOCK_TOLERANCE_SECONDS, MFA_STEP_UP_MAX_AGE_SECONDS
 from docflow_core.db import identity_lookup_session
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header, HTTPException
 from jwt import PyJWKClient
 from sqlalchemy import text
 
@@ -62,6 +64,13 @@ class AuthenticatedIdentity:
     # The sign-in is valid but the account's admin removed this person (D-132).
     # They get no tenant and no role, and a catalog answer saying why (AUTH-004).
     access_removed: bool = False
+    # From the session token (D-151, D-177): `aal` is "aal2" once a TOTP
+    # challenge has been passed in this session, and `totp_verified_at` is that
+    # challenge's time -- the `amr` entry whose method is "totp", in GoTrue's
+    # clock (unix seconds). Read from a real token after a real challenge on
+    # staging, not assumed (RUNBOOK 1.6).
+    aal: str | None = None
+    totp_verified_at: int | None = None
 
 
 # The only algorithms a Supabase session token is ever signed with. An
@@ -186,6 +195,8 @@ def _resolve_identity(authorization: str | None) -> AuthenticatedIdentity | None
         return None
     auth_user_id = claims["sub"]
     email = claims.get("email", "")
+    aal = claims.get("aal")
+    totp_verified_at = _totp_verified_at(claims)
 
     with identity_lookup_session(auth_user_id) as session:
         user_row = session.execute(
@@ -206,6 +217,8 @@ def _resolve_identity(authorization: str | None) -> AuthenticatedIdentity | None
                 role=None,
                 is_platform_admin=False,
                 access_removed=True,
+                aal=aal,
+                totp_verified_at=totp_verified_at,
             )
         is_admin_row = session.execute(
             text("SELECT 1 FROM platform_admins WHERE user_id = :user_id AND revoked_at IS NULL"),
@@ -219,7 +232,20 @@ def _resolve_identity(authorization: str | None) -> AuthenticatedIdentity | None
         tenant_id=user_row["tenant_id"] if user_row else None,
         role=user_row["role"] if user_row else None,
         is_platform_admin=bool(is_admin_row),
+        aal=aal,
+        totp_verified_at=totp_verified_at,
     )
+
+
+def _totp_verified_at(claims: dict) -> int | None:
+    """The latest TOTP challenge time in the token's `amr`, or None."""
+    times = [
+        entry.get("timestamp")
+        for entry in claims.get("amr") or []
+        if isinstance(entry, dict) and entry.get("method") == "totp"
+    ]
+    stamps = [t for t in times if isinstance(t, int) and not isinstance(t, bool)]
+    return max(stamps) if stamps else None
 
 
 def get_current_identity(authorization: str | None = Header(default=None)) -> AuthenticatedIdentity:
@@ -316,7 +342,54 @@ def require_platform_admin(authorization: str | None = Header(default=None)) -> 
     identity = _resolve_identity(authorization)
     if identity is None or not identity.is_platform_admin:
         raise HTTPException(status_code=404)
+    # Only a real platform admin gets this far, so answering with a catalog
+    # code instead of a 404 reveals nothing to anyone else (7.15.1).
+    if get_settings().console_mfa_enforced and identity.aal != "aal2":
+        from app.errors import catalog_error
+
+        raise catalog_error("AUTH-006", status_code=403)
     return identity
+
+
+@dataclass(frozen=True)
+class StepUp:
+    """A platform admin, cleared for a destructive Console action (D-151)."""
+
+    identity: AuthenticatedIdentity
+    # Seconds since the TOTP challenge, by this server's clock; None while
+    # enforcement is off and no challenge is on the token. Recorded in the
+    # action's admin_actions payload so the audit shows the step-up happened.
+    challenge_age_seconds: int | None
+
+    def audit(self) -> dict:
+        return {"mfa_challenge_age_seconds": self.challenge_age_seconds}
+
+
+def require_recent_mfa(identity: AuthenticatedIdentity = Depends(require_platform_admin)) -> StepUp:
+    """
+    Dependency for a destructive Console action (D-151, D-177): hard delete,
+    clear quarantine, cancel, intake-address rotation, buyer merge, go live and
+    tier change. On top of the Console's aal2 gate, the TOTP challenge on the
+    token must be at most MFA_STEP_UP_MAX_AGE_SECONDS old.
+
+    GoTrue stamps the challenge on its clock, so the comparison allows
+    MFA_CLOCK_TOLERANCE_SECONDS either way (D-170): a challenge up to five and
+    a half minutes old passes, and one stamped further than the tolerance in
+    our future does not -- that is a clock fault, not a fresh challenge.
+    """
+    stamp = identity.totp_verified_at
+    age = int(time.time()) - stamp if stamp is not None else None
+    if not get_settings().console_mfa_enforced:
+        return StepUp(identity=identity, challenge_age_seconds=age)
+    fresh = (
+        age is not None
+        and -MFA_CLOCK_TOLERANCE_SECONDS <= age <= MFA_STEP_UP_MAX_AGE_SECONDS + MFA_CLOCK_TOLERANCE_SECONDS
+    )
+    if not fresh:
+        from app.errors import catalog_error
+
+        raise catalog_error("AUTH-007", status_code=403)
+    return StepUp(identity=identity, challenge_age_seconds=age)
 
 
 # ── The inbound-mail webhook's own credentials (review finding H8) ──────────

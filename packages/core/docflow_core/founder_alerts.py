@@ -62,6 +62,8 @@ ALERT_TYPES: dict[str, str] = {
     "intake_webhook_refused": "The inbound email webhook refused a request",
     # D-176: a Stripe event stamped beyond the clock tolerance; not applied.
     "stripe_event_future_dated": "A Stripe event was stamped in the future and was not applied",
+    # D-177: the Console accepts password-only sessions until this is fixed.
+    "console_mfa_enforcement_off": "Console MFA enforcement is off (CONSOLE_MFA_ENFORCED=false)",
 }
 
 # Failure codes whose catalog text promises the reader that DocFlow has been

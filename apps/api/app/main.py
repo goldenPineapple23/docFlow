@@ -1,5 +1,7 @@
 import logging
 import traceback
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from docflow_core.config import get_settings
 from fastapi import Depends, FastAPI, Request
@@ -24,8 +26,32 @@ from app.routers import (
     team,
 )
 
-app = FastAPI(title="DocFlow API")
 logger = logging.getLogger("docflow.api")
+
+
+def console_mfa_startup_check() -> bool:
+    """
+    Warn at startup while the Console's MFA enforcement is off (D-177; the
+    founder's condition for shipping CONSOLE_MFA_ENFORCED off by default).
+    Returns whether it is on. docflow-prod is never deployed with it off after
+    the founder has enrolled (RUNBOOK section 4).
+    """
+    if get_settings().console_mfa_enforced:
+        return True
+    logger.warning(
+        "console_mfa_enforcement_off: the Console accepts sessions without an authenticator "
+        "code (CONSOLE_MFA_ENFORCED=false). Turn it on once the founder has enrolled -- RUNBOOK 4."
+    )
+    return False
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    console_mfa_startup_check()
+    yield
+
+
+app = FastAPI(title="DocFlow API", lifespan=_lifespan)
 
 
 class _CatchUnexpected(BaseHTTPMiddleware):

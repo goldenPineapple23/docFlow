@@ -343,3 +343,88 @@ list is the checks that sit around them. Phase 6 completes it.
     15 minutes and about $1.40. Tell the prospect before go-live that orders
     this long must be keyed by hand for now, and record it in your onboarding
     notes. Splitting long orders across several reads is deferred (D-158).
+
+---
+
+## 4. Console MFA (D-151, D-177)
+
+The Console needs a code from an authenticator app as well as a password, once
+`CONSOLE_MFA_ENFORCED` is on. With it on:
+
+- every `/admin` page needs a sign-in confirmed with a code (an `aal2` session);
+  until then the Console shows only the authenticator screen;
+- **hard delete, clear quarantine, cancel, intake-address rotation, buyer merge,
+  go live and tier change** also need a code entered in the last five minutes
+  (`MFA_STEP_UP_MAX_AGE_SECONDS`, 300 s, plus `MFA_CLOCK_TOLERANCE_SECONDS`,
+  30 s, for Supabase's clock). The Console asks for one and then carries on.
+
+It ships **off**, so you can enrol before it can lock anyone out. While it is
+off, three things say so: a warning in the API's startup log, an amber banner
+on every Console page, and a high-severity founder alert ("Console MFA
+enforcement is off") raised on the first Console request after each API start.
+
+### 4.1 Switching it on, the first time
+
+Do these in order. Don't turn it on before step 3 is confirmed.
+
+1. **Enrol.** Sign in to the Console, open **/admin/security** (the banner
+   links to it), choose **Set up an authenticator**, scan the QR code with an
+   authenticator app, and enter the code it shows. The page then says "This
+   sign-in is confirmed with your authenticator."
+2. **Add a backup.** On the same page choose **Add a second authenticator
+   (backup)** and enrol a second one -- in a password manager, or on another
+   device. Supabase gives no backup codes (recovery codes were considered and
+   left out, founder 2026-09-28), so a second authenticator is what gets you in
+   if the phone is lost without needing 4.3.
+3. **Confirm.** Tell Claude (or check in the Supabase dashboard under
+   Authentication → Users → your user) that your account shows at least one
+   **verified** TOTP factor.
+4. **Turn it on.** Set `CONSOLE_MFA_ENFORCED=true` in the environment the API
+   runs with (the root `.env` locally; the host's environment settings when
+   deployed) and restart the API. The startup warning and the banner stop.
+5. **Check it.** Sign out and in again: the Console should ask for a code
+   before showing anything. Enter it. Then, more than five minutes later, try
+   a destructive action (e.g. rotate a test tenant's intake address): it
+   should ask for a fresh code first.
+
+**Emergency lever.** If something is wrong and you are locked out of the
+Console, set `CONSOLE_MFA_ENFORCED=false` and restart the API. The banner,
+the startup warning and the founder alert come back while it is off -- that
+is intended; turn it back on as soon as the cause is fixed.
+
+### 4.2 docflow-prod: never deployed with it off after enrolment
+
+**Once you have enrolled, `docflow-prod` is never deployed with
+`CONSOLE_MFA_ENFORCED` off** (founder, 2026-09-28). The only exception is the
+emergency lever above, used deliberately, for as short a time as it takes.
+Check the deploy's environment settings for it as part of every production
+deploy. In `docflow-prod`, also remember to turn public signup off (SETUP.md
+Step 1.7) -- the two together are what keep the Console closed.
+
+### 4.3 A lost or broken authenticator
+
+If you still have your backup authenticator (4.1 step 2), sign in with it and
+use /admin/security to add a replacement. Otherwise:
+
+1. **Supabase dashboard** → the project → **Authentication** → **Users** →
+   click your user → scroll to **Danger zone** → **Remove MFA factors** →
+   confirm. **Not** "Ban user" and **not** "Delete user", which sit just below
+   it. (Anyone who can reach this page can remove MFA from any account -- so
+   your Supabase account itself must have MFA on, and so must the GitHub
+   account that can deploy. They are the root of trust for this procedure.)
+
+   **This removes every authenticator on the account at once** -- the
+   dashboard has no per-factor delete -- so your backup goes too.
+2. **Sign in to the Console again.** With enforcement on, it shows the
+   authenticator screen with **Set up an authenticator**. Enrol a new one,
+   **and a new backup**, as in 4.1 steps 1-2.
+3. The lost device's codes stopped working at step 1; nothing else needs
+   revoking. The founder alert log and `admin_actions` show nothing for this,
+   because it happens in Supabase, not in DocFlow -- note it in your own
+   records.
+
+**Tested on staging, 2026-09-28** (D-177): a throwaway platform admin with a
+verified authenticator; the founder used **Remove MFA factors** in the
+dashboard exactly as written above; the account then had no authenticator,
+signed in with its password alone, enrolled a replacement and passed a real
+challenge with it. The account was then revoked and deleted.

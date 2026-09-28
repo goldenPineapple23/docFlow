@@ -405,3 +405,20 @@ def cleans_up_refusal_alerts():
             ).scalar()
             if outbox_id is not None:
                 session.execute(text("DELETE FROM email_outbox WHERE id = :id"), {"id": outbox_id})
+
+
+@pytest.fixture(autouse=True)
+def _console_mfa_notice_already_raised(monkeypatch, request):
+    """
+    While CONSOLE_MFA_ENFORCED is off, the first Console request of a process
+    raises a real founder alert (D-177). In a test run that would be whichever
+    Console test happens to go first, leaving an alert behind on staging -- so
+    every test starts with the notice marked as already raised. The tests that
+    are about the notice (marked `console_mfa_notice`) reset it themselves and
+    remove what they raise.
+    """
+    if request.node.get_closest_marker("console_mfa_notice"):
+        return
+    from app.routers import admin
+
+    monkeypatch.setattr(admin, "_console_mfa_off_noticed", True)

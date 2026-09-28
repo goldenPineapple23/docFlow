@@ -110,3 +110,28 @@ def test_catalog_snapshot_matches():
         "only after reviewing it."
     )
     assert rendered == SNAPSHOT_PATH.read_text(encoding="utf-8")
+
+
+def test_the_web_apps_mirrored_entries_are_word_for_word_the_catalogs():
+    """
+    Failures that happen in the browser -- a wrong authenticator code, which
+    Supabase refuses before our API sees anything -- are rendered from a copy
+    of their catalog entry in apps/web/src/lib/catalogMirror.ts (D-177). A
+    copy can drift; this fails the build the moment it does, so the wording is
+    changed in the catalog and copied, never edited in one place only.
+    """
+    mirror = (REPO_ROOT / "apps" / "web" / "src" / "lib" / "catalogMirror.ts").read_text(encoding="utf-8")
+    blocks = re.findall(r"export const (AUTH_\d{3}): CatalogError = \{(.*?)\n\};", mirror, re.DOTALL)
+    assert blocks, "no mirrored entries found in catalogMirror.ts"
+    for name, body in blocks:
+        fields = {
+            key: re.sub(r'"\s*\+\s*"', "", value)
+            for key, value in re.findall(r'(\w+):\s*"((?:[^"\\]|\\.)*)"', body)
+        }
+        entry = get_error(name.replace("_", "-"))
+        assert fields == {
+            "code": entry.code,
+            "title": entry.title,
+            "message": entry.message,
+            "action": entry.action,
+        }, name
