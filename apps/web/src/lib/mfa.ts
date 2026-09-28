@@ -8,7 +8,8 @@ import { supabase } from "./supabase";
  * `totp`).
  *
  * Every failure is reported as `false` or `null`, never as Supabase's own
- * message: the page shows catalog entry AUTH-008 instead (Section 7.16.5).
+ * message: the page shows a catalog entry instead (Section 7.16.5) -- AUTH-008
+ * for a refused code, AUTH-009 for an enrolment that didn't start.
  */
 
 export type Enrolment = {
