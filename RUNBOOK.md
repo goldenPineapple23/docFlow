@@ -377,20 +377,25 @@ Step 1.7) -- the two together are what keep the Console closed.
 If you still have your backup authenticator (4.1 step 2), sign in with it and
 use /admin/security to add a replacement. Otherwise:
 
-1. **Supabase dashboard** → project → **Authentication** → **Users** → find your
-   user → the **MFA factors** section → **delete** the lost factor. (Anyone who
-   can reach this page can remove MFA from any account -- so your Supabase
-   account itself must have MFA on, and so must the GitHub account that can
-   deploy. They are the root of trust for this procedure.)
+1. **Supabase dashboard** → the project → **Authentication** → **Users** →
+   click your user → scroll to **Danger zone** → **Remove MFA factors** →
+   confirm. **Not** "Ban user" and **not** "Delete user", which sit just below
+   it. (Anyone who can reach this page can remove MFA from any account -- so
+   your Supabase account itself must have MFA on, and so must the GitHub
+   account that can deploy. They are the root of trust for this procedure.)
+
+   **This removes every authenticator on the account at once** -- the
+   dashboard has no per-factor delete -- so your backup goes too.
 2. **Sign in to the Console again.** With enforcement on, it shows the
-   authenticator screen with **Set up an authenticator**. Enrol a new one, and
-   a backup, as in 4.1 steps 1-2.
+   authenticator screen with **Set up an authenticator**. Enrol a new one,
+   **and a new backup**, as in 4.1 steps 1-2.
 3. The lost device's codes stopped working at step 1; nothing else needs
    revoking. The founder alert log and `admin_actions` show nothing for this,
    because it happens in Supabase, not in DocFlow -- note it in your own
    records.
 
-**Not yet tested.** The 2d plan requires this procedure to be *tested on
-staging, not only written*, with a throwaway platform admin, before 2d
-merges. The drill and its result go in D-177, and this line changes when it
-has been done.
+**Tested on staging, 2026-09-28** (D-177): a throwaway platform admin with a
+verified authenticator; the founder used **Remove MFA factors** in the
+dashboard exactly as written above; the account then had no authenticator,
+signed in with its password alone, enrolled a replacement and passed a real
+challenge with it. The account was then revoked and deleted.

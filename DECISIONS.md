@@ -2530,6 +2530,10 @@ The rule is derived from the warning's own payload rather than from a list of co
 
 **Tests:** `apps/api/tests/test_console_mfa.py`, 24 -- with the gate and the step-up disabled, **11 fail** (the gate, all seven destructive routes, the three refused ages). `apps/web/src/lib/stepUp.test.ts`, 4; `apps/web/e2e/console-mfa.spec.ts`, 4 (banner, no banner, gate, step-up dialog with a wrong code showing AUTH-008 and a cancel that does not retry); the catalog mirror test; the snapshot diff for AUTH-006/007/008.
 
-**Still owed before 2d merges:** the lost-device drill on staging (RUNBOOK 4.3) with a throwaway platform admin -- it needs the founder's dashboard steps -- and its result recorded here.
+**Lost-device drill, staging, 2026-09-28 -- PASSED** (the 2d condition "tested on staging, not only written"; founder approved the throwaway admin and its deletion beforehand):
+1. `mfa-drill@example.test` created as a platform admin (`scripts/seed_platform_admin.py`, random password never shown); signed in (`aal1`), enrolled TOTP, passed a real challenge (`aal2`, `amr` = totp + password). Admin API: `[('totp', 'verified', 'DocFlow drill phone')]`.
+2. The founder, following RUNBOOK 4.3: Authentication → Users → the user → **Danger zone → Remove MFA factors** → confirm. **Finding:** the dashboard has no per-factor delete; this button removes *every* factor on the account, so a backup authenticator is removed too. RUNBOOK 4.3 now says so and names the button, and warns off the "Ban user" / "Delete user" buttons beside it. (The SQL-editor fallback prepared in case the panel lacked an MFA section was not needed.)
+3. Admin API afterwards: `[]`. Password sign-in gave `aal1`; enrolling a replacement and its first challenge gave `aal2`. Admin API: `[('totp', 'verified', 'DocFlow drill replacement')]`.
+4. Cleanup: its `platform_admins` row revoked (0 active rows), its Supabase sign-in account deleted (lookup now 404). Its DocFlow `users` row and the revoked `platform_admins` row are kept as the record of the drill; neither can sign in.
 
 **Related:** D-151, D-167, D-170, D-174; Sections 7.12, 7.15.1, 7.16.5; review H9.
