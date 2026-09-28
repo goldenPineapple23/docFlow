@@ -18,6 +18,18 @@ AUTH-005 [info/tenant] You're signed out
   what+why: This browser isn't signed in to DocFlow, or your sign-in has expired, so DocFlow can't show this page. Nothing was changed.
   next:     Sign in again; DocFlow will bring you back to this page.
 
+AUTH-006 [warning/founder] The Console needs your authenticator
+  what+why: The Console can change and delete customer accounts, so it only opens for a sign-in confirmed with an authenticator app. This sign-in hasn't been.
+  next:     Enter the code from your authenticator app, or set one up if you haven't yet. Nothing was changed.
+
+AUTH-007 [info/founder] Confirm with your authenticator code
+  what+why: This action changes a customer's account or billing in a way that's hard to reverse, so it needs an authenticator code entered in the last five minutes. Yours is older than that, so nothing was done yet.
+  next:     Enter the current code from your authenticator app, then the action goes ahead.
+
+AUTH-008 [info/founder] That code didn't match
+  what+why: The code wasn't accepted. Authenticator codes change every 30 seconds, so it may have expired while you typed it. Nothing was changed.
+  next:     Enter the code your authenticator app is showing now.
+
 BIL-001 [info/founder] This tenant has no subscription yet
   what+why: A plan change moves a live Stripe subscription. This tenant isn't live, so its plan is still part of the deal terms.
   next:     Change the tier in Deal terms on the Overview; go-live bills whatever is set there.

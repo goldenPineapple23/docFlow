@@ -3,8 +3,13 @@
 import { useEffect, useState } from "react";
 import { notFound, usePathname } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { AuthenticatorSetup } from "@/components/admin/AuthenticatorSetup";
+import { ConsoleMfaBanner } from "@/components/admin/ConsoleMfaBanner";
 import { ConsoleNav } from "@/components/admin/ConsoleNav";
+import { StepUpDialog } from "@/components/admin/StepUpDialog";
 import { consoleTenantFromPath } from "@/lib/reviewScope";
+
+type ConsoleMfa = { enforced: boolean; aal: string | null } | null;
 
 /**
  * Gate for every /admin/* page. The real security boundary is the backend
@@ -15,9 +20,16 @@ import { consoleTenantFromPath } from "@/lib/reviewScope";
  * unreachable, not just hidden, for the API; a fuller server-rendered
  * check (avoiding the brief blank-render-then-404 this causes) is Phase 5
  * work once the Console's real layout exists -- see DECISIONS.md.
+ *
+ * MFA (D-151, D-177): with enforcement on, a session that hasn't passed an
+ * authenticator challenge sees only the enrol/confirm screen -- the API
+ * refuses every Console call with AUTH-006 anyway. With it off, every page
+ * carries a banner saying so. The step-up dialog is mounted here for the
+ * destructive actions.
  */
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<"checking" | "allowed" | "denied">("checking");
+  const [mfa, setMfa] = useState<ConsoleMfa>(null);
   const pathname = usePathname();
 
   useEffect(() => {
@@ -35,6 +47,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           setStatus("denied");
           return;
         }
+        setMfa(data.console_mfa ?? null);
         setStatus("allowed");
       })
       .catch(() => {
@@ -57,9 +70,24 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     notFound();
   }
 
+  if (mfa?.enforced && mfa.aal !== "aal2") {
+    return (
+      <main className="mx-auto max-w-lg p-6" data-testid="console-mfa-gate">
+        <h1 className="text-xl font-semibold">Confirm it&apos;s you</h1>
+        <p className="mt-1 mb-4 text-sm text-gray-600">
+          The Console needs a code from your authenticator app as well as your password.
+        </p>
+        {/* A fresh page load picks up the upgraded session everywhere. */}
+        <AuthenticatorSetup onDone={() => window.location.reload()} />
+      </main>
+    );
+  }
+
   return (
     <>
+      {mfa && !mfa.enforced ? <ConsoleMfaBanner /> : null}
       <ConsoleNav />
+      <StepUpDialog />
       {/* The review screen sets its own (much wider) width: the document and
           its fields side by side don't fit the Console's reading column. */}
       {reviewing ? children : <main className="mx-auto max-w-6xl p-6">{children}</main>}

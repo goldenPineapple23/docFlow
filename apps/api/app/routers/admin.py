@@ -18,6 +18,7 @@ user-facing failure (Section 7.16.5).
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 from uuid import UUID
@@ -59,11 +60,31 @@ from pydantic import BaseModel, EmailStr, Field
 
 from app.actor import Actor
 from app.celery_client import celery_client
-from app.deps import AuthenticatedIdentity, require_platform_admin
+from app.deps import AuthenticatedIdentity, StepUp, require_platform_admin, require_recent_mfa
 from app.errors import catalog_error
 from app.routers.documents import ingest_upload
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+logger = logging.getLogger("docflow.api")
+
+# D-177: while CONSOLE_MFA_ENFORCED is false the founder is alerted. Once per
+# API process, on the first Console request -- not on every request, which
+# would add an audit row and an alert attempt to each page load.
+_console_mfa_off_noticed = False
+
+
+def _console_mfa_notice(identity: AuthenticatedIdentity = Depends(require_platform_admin)) -> None:
+    global _console_mfa_off_noticed
+    if get_settings().console_mfa_enforced or _console_mfa_off_noticed:
+        return
+    _console_mfa_off_noticed = True
+    try:
+        admin_data_access.note_console_mfa_enforcement_off(platform_admin_user_id=_admin_id(identity))
+    except Exception as exc:  # noqa: BLE001 -- a notice must never block the Console
+        _console_mfa_off_noticed = False  # try again on the next request
+        logger.error("console_mfa_enforcement_off alert could not be raised: %s", type(exc).__name__)
+
+
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(_console_mfa_notice)])
 
 # Same cap as customer uploads: a prospect's file is untrusted (Section 7.11).
 _MAX_UPLOAD_BYTES = file_types.MAX_FILE_SIZE_BYTES
@@ -302,13 +323,17 @@ class TierChangeBody(BaseModel):
 def change_tier(
     tenant_id: UUID,
     body: TierChangeBody,
-    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+    step_up: StepUp = Depends(require_recent_mfa),
 ) -> dict:
     """A live tenant's plan change, founder only (Section 7.16.1; D-138).
-    Before go-live the plan is part of the deal terms instead (BIL-001)."""
+    Before go-live the plan is part of the deal terms instead (BIL-001).
+    Destructive: needs a recent authenticator code (D-177)."""
     try:
         result = admin_data_access.change_tier(
-            platform_admin_user_id=_admin_id(identity), tenant_id=tenant_id, tier_code=body.tier
+            platform_admin_user_id=_admin_id(step_up.identity),
+            tenant_id=tenant_id,
+            tier_code=body.tier,
+            audit=step_up.audit(),
         )
     except ConsoleError as exc:
         raise _console_error(exc) from exc
@@ -793,7 +818,7 @@ def go_live_plan(
 @router.post("/tenants/{tenant_id}/go-live")
 def go_live(
     tenant_id: UUID,
-    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+    step_up: StepUp = Depends(require_recent_mfa),
 ) -> dict:
     """
     Step 9, in an order that is safe to retry at any point:
@@ -812,7 +837,11 @@ def go_live(
     usable immediately, but Stripe generates no invoice -- for the first
     month or the setup fee -- until TRIAL_PERIOD_DAYS after this moment.
     """
-    admin_id = _console_act(identity, tenant_id, "go_live", target_type="tenant", target_id=tenant_id)
+    # Destructive: starts billing, so it needs a recent authenticator code (D-177).
+    identity = step_up.identity
+    admin_id = _console_act(
+        identity, tenant_id, "go_live", target_type="tenant", target_id=tenant_id, payload=step_up.audit()
+    )
     with tenant_session(tenant_id) as session:
         try:
             plan = onboarding.plan_go_live(session, tenant_id)
@@ -901,14 +930,15 @@ class CancelRequest(BaseModel):
 def cancel_tenant(
     tenant_id: UUID,
     body: CancelRequest,
-    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+    step_up: StepUp = Depends(require_recent_mfa),
 ) -> dict:
     """Section 7.15.4's cancel form: the effective date is computed from the
     reason and shown before confirmation; the founder may only push it
-    later, never earlier (LIFE-003)."""
+    later, never earlier (LIFE-003). Destructive: needs a recent
+    authenticator code (D-151)."""
     admin_id = _console_act(
-        identity, tenant_id, "cancel", target_type="tenant", target_id=tenant_id,
-        payload={"reason": body.reason},
+        step_up.identity, tenant_id, "cancel", target_type="tenant", target_id=tenant_id,
+        payload={"reason": body.reason, **step_up.audit()},
     )
     with tenant_session(tenant_id) as session:
         try:
@@ -1022,16 +1052,18 @@ class DeleteTenantRequest(BaseModel):
 def delete_tenant(
     tenant_id: UUID,
     body: DeleteTenantRequest,
-    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+    step_up: StepUp = Depends(require_recent_mfa),
 ) -> dict:
     """Section 7.14: type-to-confirm, irreversible. Only reachable for a
-    tenant already in the Ready to delete queue (LIFE-006)."""
+    tenant already in the Ready to delete queue (LIFE-006). Needs a recent
+    authenticator code (D-151)."""
     try:
         admin_data_access.delete_tenant(
-            platform_admin_user_id=_admin_id(identity),
+            platform_admin_user_id=_admin_id(step_up.identity),
             tenant_id=tenant_id,
             confirm_name=body.confirm_name,
             reason=body.reason,
+            audit=step_up.audit(),
         )
     except ConsoleError as exc:
         raise _console_error(exc) from exc
@@ -1074,15 +1106,17 @@ def merge_buyers(
     tenant_id: UUID,
     candidate_id: UUID,
     body: MergeRequest,
-    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+    step_up: StepUp = Depends(require_recent_mfa),
 ) -> dict:
+    # Destructive: re-points foreign keys for good, so it needs a recent
+    # authenticator code (D-177).
     admin_id = _console_act(
-        identity,
+        step_up.identity,
         tenant_id,
         "buyer_merge",
         target_type="buyer_merge_candidate",
         target_id=candidate_id,
-        payload={"keep_buyer_id": str(body.keep_buyer_id)},
+        payload={"keep_buyer_id": str(body.keep_buyer_id), **step_up.audit()},
     )
     with tenant_session(tenant_id) as session:
         try:
@@ -1488,11 +1522,12 @@ class QuarantineClear(BaseModel):
 def clear_quarantine(
     tenant_id: UUID,
     body: QuarantineClear,
-    identity: AuthenticatedIdentity = Depends(require_platform_admin),
+    step_up: StepUp = Depends(require_recent_mfa),
 ) -> dict:
+    # Destructive: needs a recent authenticator code (D-151).
     _console_act(
-        identity, tenant_id, "quarantine_clear", target_type="tenant", target_id=tenant_id,
-        payload={"count": len(body.document_ids)},
+        step_up.identity, tenant_id, "quarantine_clear", target_type="tenant", target_id=tenant_id,
+        payload={"count": len(body.document_ids), **step_up.audit()},
     )
     with tenant_session(tenant_id) as session:
         try:
@@ -1503,11 +1538,12 @@ def clear_quarantine(
 
 
 @router.post("/tenants/{tenant_id}/intake-address/rotate")
-def rotate_intake_address(
-    tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
-) -> dict:
+def rotate_intake_address(tenant_id: UUID, step_up: StepUp = Depends(require_recent_mfa)) -> dict:
+    # Destructive: the old address stops working after its grace period, so it
+    # needs a recent authenticator code (D-151).
     admin_id = _console_act(
-        identity, tenant_id, "intake_address_rotate", target_type="tenant", target_id=tenant_id
+        step_up.identity, tenant_id, "intake_address_rotate", target_type="tenant", target_id=tenant_id,
+        payload=step_up.audit(),
     )
     with tenant_session(tenant_id) as session:
         try:

@@ -615,6 +615,47 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="info",
         audience="tenant",
     ),
+    # ── AUTH-006/007 · the Console's MFA (D-151, D-177) ─────────────────────
+    "AUTH-006": ErrorCatalogEntry(
+        code="AUTH-006",
+        title="The Console needs your authenticator",
+        message=(
+            "The Console can change and delete customer accounts, so it only opens for a "
+            "sign-in confirmed with an authenticator app. This sign-in hasn't been."
+        ),
+        action=(
+            "Enter the code from your authenticator app, or set one up if you haven't yet. "
+            "Nothing was changed."
+        ),
+        severity="warning",
+        audience="founder",
+    ),
+    "AUTH-007": ErrorCatalogEntry(
+        code="AUTH-007",
+        title="Confirm with your authenticator code",
+        message=(
+            "This action changes a customer's account or billing in a way that's hard to reverse, "
+            "so it needs an authenticator code entered in the last five minutes. Yours is older "
+            "than that, so nothing was done yet."
+        ),
+        action="Enter the current code from your authenticator app, then the action goes ahead.",
+        severity="info",
+        audience="founder",
+    ),
+    # Raised in the browser, where Supabase checks the code -- so the web app
+    # renders a mirror of this entry (apps/web/src/lib/catalogMirror.ts) and a
+    # test keeps the two identical (D-177). Supabase's own text is never shown.
+    "AUTH-008": ErrorCatalogEntry(
+        code="AUTH-008",
+        title="That code didn't match",
+        message=(
+            "The code wasn't accepted. Authenticator codes change every 30 seconds, so it may "
+            "have expired while you typed it. Nothing was changed."
+        ),
+        action="Enter the code your authenticator app is showing now.",
+        severity="info",
+        audience="founder",
+    ),
     # ── BIL-0xx · plan changes from the Console (slice 5.9, D-138) ───────────
     "BIL-001": ErrorCatalogEntry(
         code="BIL-001",

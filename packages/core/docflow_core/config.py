@@ -93,6 +93,13 @@ class Settings(BaseSettings):
     postmark_inbound_ip_allowlist: str = ""
 
     founder_alert_email: str = ""
+    # D-151 / D-177: the Console requires an aal2 (TOTP-verified) session, and
+    # destructive actions a challenge under MFA_STEP_UP_MAX_AGE_SECONDS old --
+    # but only once this is true. Off by default so the founder can enrol
+    # before it can lock anyone out; while it is off the API logs a warning at
+    # startup, the Console shows a banner and a founder alert is raised.
+    # RUNBOOK: docflow-prod is never deployed with this off after enrolment.
+    console_mfa_enforced: bool = False
 
     sentry_dsn: str = ""
     llm_observability_api_key: str = ""

@@ -34,7 +34,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import RowMapping, text
 
-from docflow_core import deal_terms, system_actors
+from docflow_core import deal_terms, founder_alerts, system_actors
 from docflow_core.db import platform_session, rowcount
 
 logger = logging.getLogger(__name__)
@@ -964,7 +964,9 @@ def update_deal_terms(
 # ── Plan change for a live tenant (Section 7.16.1; slice 5.9, D-138) ─────────
 
 
-def change_tier(*, platform_admin_user_id: UUID, tenant_id: UUID, tier_code: str) -> dict[str, Any]:
+def change_tier(
+    *, platform_admin_user_id: UUID, tenant_id: UUID, tier_code: str, audit: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """
     Move a live customer to another plan, or to the current version of their
     own (Section 7.15.2: "existing tenants keep their version until the
@@ -1098,7 +1100,8 @@ def change_tier(*, platform_admin_user_id: UUID, tenant_id: UUID, tier_code: str
             target_tenant_id=tenant_id,
             target_type="tenant",
             target_id=tenant_id,
-            payload=payload,
+            # `audit` is the step-up evidence (D-177): recorded, not returned.
+            payload={**payload, **(audit or {})},
         )
     return {**payload, "subscription_status": result.status}
 
@@ -1285,6 +1288,32 @@ def record_console_action(
     return True
 
 
+def note_console_mfa_enforcement_off(*, platform_admin_user_id: UUID) -> bool:
+    """
+    Raise the founder alert that the Console's MFA enforcement is off (D-177),
+    with this request's `admin_actions` row. The admin router calls it on the
+    first Console request of each API process while CONSOLE_MFA_ENFORCED is
+    false -- the founder's condition for shipping the setting off by default.
+    One open alert at a time (dedupe); returns True when a new one was raised.
+    """
+    with platform_session() as session:
+        _record_admin_action(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            action="console_mfa_enforcement_off_noticed",
+            target_type="platform",
+            payload={"console_mfa_enforced": False},
+        )
+        return founder_alerts.raise_alert(
+            session,
+            alert_type="console_mfa_enforcement_off",
+            severity="high",
+            tenant_id=None,
+            payload={"setting": "CONSOLE_MFA_ENFORCED", "value": "false"},
+            dedupe_key="console_mfa_enforcement_off",
+        )
+
+
 def record_platform_action(
     *,
     platform_admin_user_id: UUID,
@@ -1430,7 +1459,12 @@ _PURGE_TABLES = (
 
 
 def delete_tenant(
-    *, platform_admin_user_id: UUID, tenant_id: UUID, confirm_name: str, reason: str
+    *,
+    platform_admin_user_id: UUID,
+    tenant_id: UUID,
+    confirm_name: str,
+    reason: str,
+    audit: dict[str, Any] | None = None,
 ) -> None:
     """
     Section 7.14's hard delete: "The founder confirmation requires typing
@@ -1531,7 +1565,7 @@ def delete_tenant(
             target_tenant_id=tenant_id,
             target_type="tenant",
             target_id=tenant_id,
-            payload={"reason": reason, "rows_deleted": counts},
+            payload={"reason": reason, "rows_deleted": counts, **(audit or {})},
         )
 
     from docflow_core.storage import delete_tenant_storage
