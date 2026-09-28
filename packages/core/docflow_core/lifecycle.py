@@ -360,7 +360,7 @@ def claim_for_suspend(session: Session, tenant_id: UUID) -> SuspendClaim | None:
             related_id=tenant_id,
         )
     for day in REMINDER_DAYS:
-        _schedule_reminder(session, tenant_id, run_at=datetime.now(UTC) + timedelta(days=day))
+        _schedule_reminder(session, tenant_id, day=day)
 
     founder_alerts.raise_alert(
         session,
@@ -380,21 +380,24 @@ def claim_for_suspend(session: Session, tenant_id: UUID) -> SuspendClaim | None:
     )
 
 
-def _schedule_reminder(session: Session, tenant_id: UUID, *, run_at: datetime) -> None:
+def _schedule_reminder(session: Session, tenant_id: UUID, *, day: int) -> None:
+    # run_at, and the date in its dedupe key, are the database's, computed in
+    # this statement: the job sweep compares run_at with now() (D-170 #4). In
+    # the suspend transaction, now() is the instant the export window began.
     session.execute(
         text(
             """
             INSERT INTO scheduled_jobs (id, tenant_id, job_type, run_at, dedupe_key)
-            VALUES (:id, :tenant_id, 'pending_deletion_reminder', :run_at, :dedupe)
+            VALUES (
+                :id, CAST(:tenant_id AS uuid), 'pending_deletion_reminder',
+                now() + make_interval(days => :day),
+                'pending_deletion_reminder:' || CAST(:tenant_id AS text) || ':'
+                    || ((now() + make_interval(days => :day)) AT TIME ZONE 'UTC')::date::text
+            )
             ON CONFLICT (dedupe_key) DO NOTHING
             """
         ),
-        {
-            "id": str(uuid4()),
-            "tenant_id": str(tenant_id),
-            "run_at": run_at,
-            "dedupe": f"pending_deletion_reminder:{tenant_id}:{run_at.date().isoformat()}",
-        },
+        {"id": str(uuid4()), "tenant_id": str(tenant_id), "day": day},
     )
 
 

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -428,14 +428,16 @@ def schedule_first_week_checkin(session: Session, tenant_id: UUID) -> UUID:
         text(
             """
             INSERT INTO scheduled_jobs (id, tenant_id, job_type, run_at, dedupe_key)
-            VALUES (:id, :tenant_id, 'first_week_checkin', :run_at, :dedupe)
+            VALUES (:id, :tenant_id, 'first_week_checkin', now() + make_interval(days => :days), :dedupe)
             ON CONFLICT (dedupe_key) DO NOTHING
             """
         ),
+        # run_at is the database's: the job sweep compares it with now()
+        # (D-170 #4).
         {
             "id": str(job_id),
             "tenant_id": str(tenant_id),
-            "run_at": datetime.now(UTC) + timedelta(days=FIRST_WEEK_CHECKIN_DAYS),
+            "days": FIRST_WEEK_CHECKIN_DAYS,
             "dedupe": f"first_week_checkin:{tenant_id}",
         },
     )
