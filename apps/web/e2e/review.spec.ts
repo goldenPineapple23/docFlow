@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./networkGuard";
 
 /**
  * The review flow, end to end in a real browser (CLAUDE.md Section 6, Phase 3).

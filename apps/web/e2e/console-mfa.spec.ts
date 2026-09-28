@@ -1,4 +1,5 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { type Page, type Route } from "@playwright/test";
+import { expect, test } from "./networkGuard";
 
 /**
  * The Console's MFA in the browser (DECISIONS.md D-151, D-177), against a
@@ -106,6 +107,7 @@ for (const [how, answer] of [
     const error = page.getByTestId("catalog-error");
     await expect(error).toContainText("The new authenticator couldn't be set up");
     await expect(error).toContainText("Any authenticator you already have still works.");
+    await expect(error).toContainText("If this is your first authenticator, sign out and back in, then try again.");
     await expect(error).not.toContainText("couldn't reach DocFlow");
     await expect(page.getByRole("button", { name: "Set up an authenticator" })).toBeEnabled();
     expect(enrolAttempts).toBe(1);

@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./networkGuard";
 
 /**
  * Deal terms at Create tenant (D-117): the price agreed before onboarding is

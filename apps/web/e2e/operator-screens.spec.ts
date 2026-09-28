@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
+import { expect, test } from "./networkGuard";
 
 /**
  * Slice 5.4's operator screens (D-119), driven in the browser against a

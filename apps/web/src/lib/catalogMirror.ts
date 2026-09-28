@@ -25,5 +25,5 @@ export const AUTH_009: CatalogError = {
   message:
     "DocFlow asked its sign-in service to start a new authenticator, and it refused or didn't answer, so no authenticator was added. Any authenticator you already have still works.",
   action:
-    "Reload the page and try again. If it fails a second time, sign out, sign back in with a code from your current authenticator, and try once more.",
+    "Reload the page and try again. If it fails a second time and you already have an authenticator, sign out, sign back in with its code, and try once more. If this is your first authenticator, sign out and back in, then try again. If it still fails, nothing has changed on your account; check Supabase's status page and try later.",
 };

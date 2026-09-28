@@ -668,8 +668,10 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
             "still works."
         ),
         action=(
-            "Reload the page and try again. If it fails a second time, sign out, sign back in "
-            "with a code from your current authenticator, and try once more."
+            "Reload the page and try again. If it fails a second time and you already have an "
+            "authenticator, sign out, sign back in with its code, and try once more. If this is "
+            "your first authenticator, sign out and back in, then try again. If it still fails, "
+            "nothing has changed on your account; check Supabase's status page and try later."
         ),
         severity="warning",
         audience="founder",

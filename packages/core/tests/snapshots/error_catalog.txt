@@ -32,7 +32,7 @@ AUTH-008 [info/founder] That code didn't match
 
 AUTH-009 [warning/founder] The new authenticator couldn't be set up
   what+why: DocFlow asked its sign-in service to start a new authenticator, and it refused or didn't answer, so no authenticator was added. Any authenticator you already have still works.
-  next:     Reload the page and try again. If it fails a second time, sign out, sign back in with a code from your current authenticator, and try once more.
+  next:     Reload the page and try again. If it fails a second time and you already have an authenticator, sign out, sign back in with its code, and try once more. If this is your first authenticator, sign out and back in, then try again. If it still fails, nothing has changed on your account; check Supabase's status page and try later.
 
 BIL-001 [info/founder] This tenant has no subscription yet
   what+why: A plan change moves a live Stripe subscription. This tenant isn't live, so its plan is still part of the deal terms.
