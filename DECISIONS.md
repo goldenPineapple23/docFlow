@@ -22,7 +22,8 @@ Every judgment call made during the build: what was ambiguous, what was chosen, 
 **Context:** Section 7.11 requires the parsing/conversion worker to have "no network access." True per-job network-namespace denial needs `CAP_NET_ADMIN`, which typical PaaS containers (Railway/Render) don't grant.
 **Decision (confirmed by founder):** Enforce this as a service-level egress firewall (the worker service can reach only the Anthropic API, Supabase, and the email provider's API — nothing else), layered with per-file subprocess limits: hard memory/CPU ceiling (`resource.setrlimit`), a hard wall-clock timeout with SIGKILL, an unprivileged OS user, and one subprocess per file (never reused).
 **What this gives up:** this is weaker than true per-job network denial — a compromised parsing subprocess could still, in principle, reach the small allowlisted set of hosts. Documented here explicitly rather than silently substituted, per the founder's own request to see this named plainly.
-**Related:** Section 7.11.
+**Update (2026-09-28, D-150):** the premise above was about Railway and Render, where a container can't create a network namespace. The founder chose Fly.io, where each machine is a small VM with root, so **per-job network denial is the target again**: each parse process runs in its own network namespace with no interfaces, as an unprivileged user, with the `setrlimit` / SIGKILL-timeout / one-subprocess-per-file limits above unchanged. The service-level egress allowlist stops being the network control for parsing, and the parse process is not given the allowlisted hosts either. **Conditional on the D-150 proof spike**: if the spike fails, the fallback is Cloud Run (platform-level egress denial for a separate parse service), not a return to this entry's allowlist. Also note: review H5 found that none of this entry's controls were ever built. Stage 3 builds them.
+**Related:** Section 7.11; D-150.
 
 ## D-004 — `users.tenant_id` made nullable for platform-admin-only accounts
 
@@ -1620,11 +1621,36 @@ The founder inserted Phase 5.5 between Phase 5 and Phase 6 on 2026-09-25 and ans
 **Related:** review C1; Section 7.1, 7.4, 10. Built in Phase 5.5 Stage 1.
 
 
-## D-150 -- Worker hosting is not decided (founder's answer 2)
+## D-150 -- Worker hosting: Fly.io, conditional on a network-isolation proof spike (founder's answer 2; settled 2026-09-28)
 
-Options are presented in Phase 5.5 Stage 3 (parsing isolation enforced by the platform or OS, with cost and operational burden), then the build stops for the founder's choice.
+*Originally recorded as:* options are presented in Phase 5.5 Stage 3 (parsing isolation enforced by the platform or OS, with cost and operational burden), then the build stops for the founder's choice. The founder settled it earlier than that, on 2026-09-28, so that Stage 3 does not wait on it.
 
-**Related:** review H5, H6; D-003.
+**Answer (founder, 2026-09-28):** **Fly.io for the API, the Celery worker and the parser; Redis via Upstash** (Fly's managed Redis). Conditional on a proof spike, done early -- in parallel with 2c or right after it, not at the start of Stage 3:
+
+1. **A throwaway Fly app.** A parse process launched in its own network namespace (`unshare --net` or equivalent) must fail to reach: the public internet; Fly's private network (other apps' `.internal` addresses, including Redis and the API); and the metadata and DNS endpoints. **The test reports its own evidence** (RUNBOOK 1.6).
+2. **Isolation is per parse process, not per machine.** The parsing machine itself sits on Fly's private network. Only the process that touches the untrusted file has no network.
+3. **If any part of 1 fails, stop and report. The fallback is Google Cloud Run** (the parse service gets no route to the internet at the platform level).
+
+**Why Fly and not Railway or Render** (the hosting doc's original choice): neither documents a way to cut outbound network access, and D-003 conceded that a PaaS container can't create a network namespace. On Railway or Render a compromised parser would therefore reach the internet, holding no secrets but still able to call out. A Fly Machine is a small VM in which the app has root, so a parse process can be given a namespace with no interfaces at all. That is per-job network denial, which D-003 said was out of reach. Keeping the API, the worker and the parser on one provider, rather than splitting the parser off, means one deploy model and one private network.
+
+**What the spike must also show (my additions, inside the founder's item 1; the founder can strike them):**
+- **A positive control for every probe.** The same probe is run from the same machine *outside* the namespace and must succeed. Without it a "blocked" result proves nothing: a probe to a name that never resolved, or a port nobody listens on, fails either way. Each line of evidence names the target, the method, the result in both places, and the exact error inside (e.g. `Network is unreachable`).
+- **IPv6 as well as IPv4.** Fly's private network is IPv6 (the `fdaa::` range) and its internal DNS resolver is an IPv6 address. A probe that tests only IPv4 would pass while the private network stays reachable.
+- **Unix sockets.** A network namespace does not cover sockets that exist as files. If the machine exposes Fly's local API socket (`/.fly/api`, as I understand Fly's machine API; the spike checks whether it exists), the parse process must be shown unable to connect to it. This counts under "metadata endpoints".
+- **No way back out.** The parse process drops to an unprivileged user after the namespace is created, and is shown unable to join the machine's namespace again (`nsenter` / `setns`) or to bring up an interface in its own.
+
+**What the throwaway app never holds:** customer data, or any DocFlow credential. It is deleted when the spike is reported.
+
+**Needs the founder first:** a Fly.io account with a payment method, and `flyctl` installed and logged in on this machine. Creating the throwaway app is a paid (cents-scale) outward action, taken only once those exist.
+
+**Documents this makes out of date** (listed, not edited here):
+- `docs/docflow-deployment-hosting.docx`: the hosting table ("Backend API + background workers: Railway or Render"), CI/CD ("deploy on Vercel and Railway/Render"), secrets ("each host's dashboard (Vercel, Railway)").
+- `docs/docflow-tech-stack-costs.docx`: the Hosting row ("Vercel (frontend) + Railway or Render (API + workers)"). The Background jobs row (Celery + Redis) still holds; Upstash is the Redis provider.
+- `docs/docflow-claude-code-build-prompt-v2.docx`: the deploy line ("deployed to Vercel (and Railway/Render if ...)"). This is the founder's master prompt, so it is the founder's to change.
+- `CLAUDE.md`, "Architecture decisions locked in": the parsing-worker bullet still describes D-003's egress-allowlist approximation. Its wording is proposed to the founder rather than changed here.
+- `DECISIONS.md` D-003: updated in place (below its original text), because it is a decision entry, not a founder document.
+
+**Related:** review H5, H6; D-003; Section 7.11. BUILD-STATUS "D-150 proof spike".
 
 
 ## D-151 -- Destructive Console actions need MFA enrolment and a fresh MFA challenge (founder's answer 3)
