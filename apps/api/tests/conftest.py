@@ -357,6 +357,21 @@ def intake_webhook_headers(
 
 
 @pytest.fixture(autouse=True)
+def _console_mfa_off_unless_a_test_asks(monkeypatch):
+    """
+    Every test starts with CONSOLE_MFA_ENFORCED off, whatever the developer's
+    .env says; the tests about enforcement turn it on themselves (the
+    `enforced` fixture in test_console_mfa.py, which runs after this). With it
+    read from .env, switching it on locally (RUNBOOK 4.1) failed 134 Console
+    tests with AUTH-006 while CI, which doesn't set it, stayed green.
+    """
+    monkeypatch.setenv("CONSOLE_MFA_ENFORCED", "false")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 def _inbound_webhook_credentials(monkeypatch):
     monkeypatch.setenv("POSTMARK_WEBHOOK_USERNAME", INTAKE_WEBHOOK_USERNAME)
     monkeypatch.setenv("POSTMARK_WEBHOOK_PASSWORD", INTAKE_WEBHOOK_PASSWORD)

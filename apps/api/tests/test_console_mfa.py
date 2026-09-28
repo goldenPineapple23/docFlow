@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import time
+from types import SimpleNamespace
 from uuid import uuid4
 
 import jwt
@@ -60,8 +61,21 @@ def not_enforced(monkeypatch):
     get_settings.cache_clear()
 
 
-def _headers(auth_user_id: str, *, aal: str = "aal1", totp_age: int | None = None) -> dict:
+@pytest.fixture(autouse=True)
+def _one_clock(monkeypatch):
+    """
+    The age is judged to the second, so the API reads the same clock the token
+    was stamped with. Otherwise a second can tick over between the two on a
+    slow runner, and the -31 s case is read as -30 s -- inside the allowance
+    -- and passes (CI, 2026-09-28; reproduced by setting the API's clock one
+    second late).
+    """
     now = int(time.time())
+    monkeypatch.setattr(deps, "time", SimpleNamespace(time=lambda: now))
+
+
+def _headers(auth_user_id: str, *, aal: str = "aal1", totp_age: int | None = None) -> dict:
+    now = int(deps.time.time())
     amr = [{"method": "password", "timestamp": now - 600}]
     if totp_age is not None:
         amr.insert(0, {"method": "totp", "timestamp": now - totp_age})
@@ -210,7 +224,7 @@ def test_a_destructive_action_with_a_fresh_code_runs_and_records_the_codes_age(
             "WHERE platform_admin_user_id = :u AND action = 'intake_address_rotate'",
             u=str(console.user_id),
         )
-    assert 10 <= age <= 15
+    assert age == 10
 
 
 # ── Enforcement off (the default) ─────────────────────────────────────────────

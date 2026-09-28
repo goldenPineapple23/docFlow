@@ -2550,3 +2550,51 @@ The rule is derived from the warning's own payload rather than from a list of co
 4. Cleanup: its `platform_admins` row revoked (0 active rows), its Supabase sign-in account deleted (lookup now 404). Its DocFlow `users` row and the revoked `platform_admins` row are kept as the record of the drill; neither can sign in.
 
 **Related:** D-151, D-167, D-170, D-174; Sections 7.12, 7.15.1, 7.16.5; review H9.
+
+## D-178 — Second lost-device drill, with enforcement on; two audit-trail findings (founder, 2026-09-28)
+
+**Context:** Before switching `CONSOLE_MFA_ENFORCED` on, the founder asked for the lost-device drill evidence: a backup-only sign-in and one step-up, the dashboard removal leaving only enrolment, re-enrolment, and the `admin_actions` rows. The first drill (D-177) covered enrol, dashboard removal and re-enrol only, with enforcement off. This one ran on staging on 2026-09-28 with the throwaway platform admin `mfa-drill-2@example.test`, against a drill-only API process with enforcement on (port 8001). The founder's own API stayed off until the drill passed.
+
+**Phase 1 (accepted by the founder):**
+```
+[20:49:15Z] Console GET /admin/tenants (password only, no authenticator yet): 403 AUTH-006
+[20:49:18Z] factors now (admin API): [('totp', 'verified', 'Drill primary'), ('totp', 'verified', 'Drill backup')]
+[20:49:18Z] password sign-in (new session): aal aal1
+[20:49:19Z] Console GET /admin/tenants (aal1, before the backup code): 403 AUTH-006
+[20:49:20Z] challenge with BACKUP 'Drill backup': 200/200 -> aal aal2, amr ['totp', 'password']
+[20:49:22Z] Console GET /admin/tenants (after the backup code): 200
+[20:55:08Z] step-up action POST intake-address/rotate (stale backup challenge; challenge 347s old): 403 AUTH-007
+[20:55:09Z] challenge with BACKUP 'Drill backup' again (the step-up): 200/200 -> aal aal2
+[20:55:10Z] step-up action POST intake-address/rotate (fresh backup challenge; challenge 0s old): 409 QUA-004
+```
+The fresh backup challenge passed the step-up. The rotation then stopped at `QUA-004` because the test tenant used ("Acme Test Sweep A") never went live and has no address. So the step-up is proven, but no destructive action completed. Completing one would mean rotating a live test tenant's address; the founder was asked and had not chosen when this was written.
+
+**Phase 2 (after the founder's dashboard removal, RUNBOOK 4.3):**
+```
+[21:00:41Z] factors after the dashboard removal (admin API): []
+[21:00:41Z] password sign-in (new session): aal aal1
+[21:00:42Z] /auth/me console_mfa: {'enforced': True, 'aal': 'aal1'}
+[21:00:42Z] Console GET /admin/tenants (no authenticator left): 403 AUTH-006
+[21:00:44Z] step-up action POST intake-address/rotate (no authenticator left; no challenge on token): 403 AUTH-006
+[21:00:44Z] enrol 'Drill replacement': 200
+[21:00:45Z] challenge with new factor 'Drill replacement': 200/200 -> aal aal2, amr ['totp', 'password']
+[21:00:46Z] Console GET /admin/tenants (after re-enrolling): 200
+[21:00:47Z] factors now (admin API): [('totp', 'verified', 'Drill replacement')]
+```
+**`admin_actions` rows for the drill admin:** three. `read tenant_list` (20:49:22), `intake_address_rotate` on tenant `73602e07` with `mfa_challenge_age_seconds: 0` (20:55:11), and `read tenant_list` (21:00:47).
+
+**Cleanup (founder-approved):** the `platform_admins` row was revoked (granted 20:49:04Z, revoked 21:02:52Z; 0 active rows) and the Supabase sign-in account was deleted (admin API lookup 404; 0 accounts with that email). The DocFlow `users` row is kept as the record, and it cannot sign in.
+
+**Enforcement switched on afterwards:** the API on port 8000 was restarted with no override. `.env` reads `console_mfa_enforced = True`, the startup log has no enforcement-off warning, and a live probe against the running process gave `/auth/me console_mfa: {'enforced': True, 'aal': 'aal1'}` and `GET /admin/tenants: 403 AUTH-006` for an `aal1` platform admin.
+
+**Two findings (founder: to be fixed before any pilot, with tests):**
+1. **Refused Console and step-up attempts leave no trace.** The three refusals above (`AUTH-006` twice, `AUTH-007` once) wrote no `admin_actions` row, because the gate refuses before anything is recorded. Required: refused attempts (AUTH-006/007/008) are recorded, and repeated refusals raise a founder alert.
+2. **An `admin_actions` row does not say whether the action happened.** The rotate row is written before the action runs, so a rotation that failed (`QUA-004`) reads exactly like one that succeeded. Required: each row records its outcome, either succeeded or failed with its catalog code. A failed action must not read as done.
+
+Where they land in the plan, and the open design questions, are in BUILD-STATUS (Phase 5.5, Stage 5).
+
+**Also found and fixed during this work: a timing race in `test_console_mfa.py`.** One CI run failed `test_the_challenge_age_is_judged_with_gotrues_clock_allowance[-31-False]` with `{"detail":"Not Found"}`; the other run on the same commit passed. The test stamped the token at `int(time.time())`, and the API read its clock after a database lookup. When a second ticked over in between, the −31 s case was read as −30 s, which is inside the allowance, so it passed and the route 404'd the made-up tenant. Reproduced by setting the API's clock one second late (same case, same message), and again with a real 1.1 s pause inside the request. The fix pins the API's clock to the token's in that test module; with the same 1.1 s pause, all 5 cases pass. The code under test was right. Only the test was racing.
+
+**And a test-isolation defect that switching enforcement on exposed.** The first local API run after the switch gave `134 failed, 367 passed`. Thirty-two failures carried `AUTH-006`, and every failure was a Console-facing test. The suite read `CONSOLE_MFA_ENFORCED` from the developer's `.env`, so turning it on locally (RUNBOOK 4.1) refused every Console test that signs in without a code. CI, which doesn't set the flag, stayed green. `apps/api/tests/conftest.py` now starts every test with it off; the enforcement tests turn it on themselves.
+
+**Related:** D-151, D-170, D-177; RUNBOOK 1.6, 4.1, 4.3; Section 7.15.1.
