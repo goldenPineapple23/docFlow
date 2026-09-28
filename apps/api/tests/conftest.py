@@ -395,19 +395,13 @@ def cleans_up_refusal_alerts():
     created = existing() - before
     if not created:
         return
+    # One row at a time: a bound Python list is sent as JSON by this engine,
+    # which Postgres will not cast to uuid[] (found on CI's first run).
     with platform_session() as session:
-        outbox_ids = [
-            row[0]
-            for row in session.execute(
-                text(
-                    "DELETE FROM founder_alerts WHERE id = ANY(CAST(:ids AS uuid[])) "
-                    "RETURNING email_outbox_id"
-                ),
-                {"ids": sorted(created)},
-            )
-            if row[0] is not None
-        ]
-        if outbox_ids:
-            session.execute(
-                text("DELETE FROM email_outbox WHERE id = ANY(:ids)"), {"ids": outbox_ids}
-            )
+        for alert_id in sorted(created):
+            outbox_id = session.execute(
+                text("DELETE FROM founder_alerts WHERE id = :id RETURNING email_outbox_id"),
+                {"id": alert_id},
+            ).scalar()
+            if outbox_id is not None:
+                session.execute(text("DELETE FROM email_outbox WHERE id = :id"), {"id": outbox_id})

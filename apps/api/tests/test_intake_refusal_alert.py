@@ -79,6 +79,12 @@ def _open_alerts(dedupe_key: str) -> list[dict]:
 
 @requires_database
 def test_a_refused_request_raises_one_high_severity_alert_with_no_tenant(client):
+    already_open = _open_alerts(MISMATCH_KEY)
+    assert already_open == [], (
+        "An open intake_webhook_refused:mismatch alert already exists, so this test cannot "
+        "show that a refusal raises one. Acknowledge it in the Console and re-run. "
+        f"Alert ids: {[str(a['id']) for a in already_open]}"
+    )
     assert _refuse(client).status_code == 401
     assert _refuse(client).status_code == 401  # a repeat collapses into the open alert
 
