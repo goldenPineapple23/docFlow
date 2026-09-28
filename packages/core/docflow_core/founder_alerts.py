@@ -60,6 +60,8 @@ ALERT_TYPES: dict[str, str] = {
     "pipeline_step_failed": "An automatic step didn't finish on a document",
     # Phase 5.5 Stage 2c (D-171): the inbound webhook refused a request.
     "intake_webhook_refused": "The inbound email webhook refused a request",
+    # D-176: a Stripe event stamped beyond the clock tolerance; not applied.
+    "stripe_event_future_dated": "A Stripe event was stamped in the future and was not applied",
 }
 
 # Failure codes whose catalog text promises the reader that DocFlow has been

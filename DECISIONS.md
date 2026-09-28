@@ -2478,3 +2478,31 @@ The rule is derived from the warning's own payload rather than from a list of co
 **What satisfies the blocking condition (D-171, RUNBOOK 2.1):** the alert exists once 0029 is applied to the database behind an intake address and this code is deployed. On staging that is when the founder applies 0029; on production, when `docflow-prod` is created (0029 is in its migrations).
 
 **Related:** D-159, D-165, D-170, D-171, D-173; review H8, H11; Sections 7.9, 7.10, 7.12, 7.15.4.
+
+## D-176 — Stripe's clock against ours: one named tolerance (300 s), enforced twice, and a future-dated event is refused (D-170 applied to the cure clock)
+
+**Context (founder's question, 2026-09-28):** 2c made `first_past_due_at` Stripe's event time. The non-payment effective date is that time plus `CURE_PERIOD_DAYS` (0 today, D-125), and the suspend sweep compares the effective date with the database's `now()`. That is a comparison across two clocks, and D-170 requires a named tolerance with its cost stated and a test -- or a recorded reason none is needed. D-175 had neither.
+
+**Where the two clocks meet, and where they don't:**
+- **The ordering guard compares Stripe's time only with Stripe's time** (`stripe_status_event_at` is itself a Stripe `created`). One clock; no tolerance is needed, and none is applied.
+- **The cure clock** starts at a Stripe time and ends when the database's clock passes it. Two clocks.
+- **An event stamped in the future** would be saved as `stripe_status_event_at`, and every genuine event after it would be "stale" until our clock caught up -- silently freezing that tenant's billing state. Two clocks.
+
+**The tolerance: `STRIPE_CLOCK_TOLERANCE_SECONDS = 300`** (`constants.py`, with the other thresholds). It is not a guess: every accepted webhook already proves Stripe's clock is within 300 s of ours, because the signature carries Stripe's send time and `verify_webhook_signature` refuses one stamped further than that in either direction (tested since 2c, both directions). The signature check now reads its default from this constant, and a static test holds the two together.
+
+**Enforced twice:**
+1. At the signature (existing), on the app's clock.
+2. At the event time, **on the database's clock** (D-170): inside the tenant's transaction, before the function runs, an event whose `created` is more than 300 s after the database's `now()` is **not applied and not recorded** -- so a corrected redelivery can still apply -- and a high-severity `stripe_event_future_dated` founder alert is raised (one open per tenant), because that tenant's billing state is now waiting on someone. Outcome `future_dated`.
+
+**Cost, stated:** a non-payment effective date can be up to five minutes earlier or later than Stripe's exact instant. With `CURE_PERIOD_DAYS = 0` that is five minutes on a date the founder confirms by hand in the cancel form (7.15.4); the founder may move it later, never earlier, and the rule is unchanged. No tolerance is added to the effective-date comparison itself: the skew is already bounded by the check above, and widening the sweep's comparison would only move the same five minutes around.
+
+**Tests:** an event 10 minutes past the tolerance is `future_dated`, leaves status and `stripe_status_event_at` untouched, is not recorded, and raises one alert; an event 2 minutes inside it applies; the signature's default tolerance equals the constant.
+
+**Also recorded here -- where 0029 goes beyond the founder's 2c checklist item 4** ("the only new object is the SECURITY DEFINER function"). 0029 is applied on staging; none of these is silent:
+- **`tenants.stripe_status_event_at`** -- the column the ordering guard needs. Agreed in BUILD-STATUS ("a NULL `stripe_status_event_at` applies the first event").
+- **`intake_refusal_raise` / `intake_refusal_enqueue`** policies on `founder_alerts` / `email_outbox` -- 2a's deferred alert, agreed in the Stage 2 row and D-171 (why the backup covers those two tables).
+- **`platform_admin_read`** on `stripe_webhook_events` -- **not in the agreed plan.** A SELECT policy for platform admins only, no tenant policy of any kind (the checklist's actual constraint). It lets tests and the founder see whether an id was recorded. If the founder wants the table readable by nothing, a follow-up migration drops it and the tests check recording through replays (`duplicate`) instead.
+- **REVOKE from `anon`, `authenticated`, `service_role`**, in addition to PUBLIC -- Supabase's default grants would otherwise expose the function through the REST API (D-175 §1).
+- The grant-agreement test now lives in `test_ci_guards.py`, as the checklist asked; the other static checks stay in `test_stripe_events.py`.
+
+**Related:** D-125, D-170, D-173, D-175; Section 7.15.4.

@@ -17,6 +17,8 @@ What this proves:
   the save records nothing, and a newer event saved during the fetch is not
   overwritten;
 - first_past_due_at is Stripe's event time, and `unpaid` does not reset it;
+- an event stamped further into the future than the clock tolerance (D-176)
+  is not applied and alerts the founder; one inside it applies;
 - no tenant session can write `stripe_webhook_events`, and the function
   refuses a customer that is not the session's tenant's.
 """
@@ -33,6 +35,7 @@ from uuid import UUID, uuid4
 import pytest
 from docflow_core import billing_webhooks, external_services
 from docflow_core.config import get_settings
+from docflow_core.constants import STRIPE_CLOCK_TOLERANCE_SECONDS
 from docflow_core.db import stripe_webhook_session, tenant_session
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError
@@ -258,6 +261,71 @@ def test_an_event_older_than_the_saved_state_is_recorded_and_not_applied(client,
         # Recorded as seen, so Stripe's retry of it is a no-op too.
         assert _recorded(older["id"])
         assert _post(client, older).json()["outcome"] == "duplicate"
+
+
+@requires_lifecycle_schema
+def test_the_event_id_is_recorded_in_the_same_transaction_as_the_status_write(client, stripe, _environment):
+    """H11's defect was an id committed in one transaction and the update in
+    another. Here the function has applied the event inside a transaction that
+    is then rolled back: neither the status nor the event id survives. Committed,
+    both land. They cannot come apart."""
+    with _Console() as console:
+        tenant_id, customer = _tenant(client, console)
+        event = _ev("atomic", customer, "past_due", int(time.time()))
+
+        with pytest.raises(_ForceRollback):
+            with tenant_session(UUID(tenant_id)) as session:
+                outcome = session.execute(
+                    text(
+                        "SELECT record_stripe_subscription_event("
+                        ":e, 'customer.subscription.updated', :c, :cust, 'past_due', NULL, 'event')"
+                    ),
+                    {"e": event["id"], "c": _at(event["created"]), "cust": customer},
+                ).scalar_one()
+                assert outcome == "applied"
+                raise _ForceRollback
+        assert _column(tenant_id, "stripe_subscription_status") != "past_due"
+        assert not _recorded(event["id"])
+
+        assert billing_webhooks.process_event(event) == "applied"
+        assert _column(tenant_id, "stripe_subscription_status") == "past_due"
+        assert _recorded(event["id"])
+
+
+# ── Stripe's clock against ours (D-170, D-176) ────────────────────────────────
+
+
+@requires_lifecycle_schema
+def test_an_event_stamped_beyond_the_clock_tolerance_is_not_applied_and_the_founder_is_told(
+    client, stripe, _environment
+):
+    """Every accepted delivery proves Stripe's clock is within
+    STRIPE_CLOCK_TOLERANCE_SECONDS of ours, so an event from further in the
+    future is not a real one -- and saving its time would make every genuine
+    event "stale" until our clock caught up. Checked on the database's clock."""
+    with _Console() as console:
+        tenant_id, customer = _tenant(client, console)
+        future = int(time.time()) + STRIPE_CLOCK_TOLERANCE_SECONDS + 300
+        event = _ev("future", customer, "canceled", future)
+
+        assert _post(client, event).json()["outcome"] == "future_dated"
+        assert _column(tenant_id, "stripe_subscription_status") != "canceled"
+        assert _column(tenant_id, "stripe_status_event_at") is None
+        assert not _recorded(event["id"])  # a corrected redelivery can still apply
+        alerts = _scalar(
+            "SELECT count(*) FROM founder_alerts WHERE tenant_id = :t AND type = 'stripe_event_future_dated'",
+            t=tenant_id,
+        )
+        assert alerts == 1
+
+
+@requires_lifecycle_schema
+def test_an_event_inside_the_clock_tolerance_applies(client, stripe, _environment):
+    with _Console() as console:
+        tenant_id, customer = _tenant(client, console)
+        slightly_ahead = int(time.time()) + STRIPE_CLOCK_TOLERANCE_SECONDS - 120
+        assert _post(client, _ev("ahead", customer, "active", slightly_ahead)).json()["outcome"] == "applied"
+        assert _column(tenant_id, "stripe_status_event_at") == _at(slightly_ahead)
 
 
 # ── first_past_due_at ─────────────────────────────────────────────────────────

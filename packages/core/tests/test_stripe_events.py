@@ -4,10 +4,8 @@ behaviour is tested against the real database in
 apps/api/tests/test_stripe_webhook_api.py; these hold the parts a reader can't
 see from there:
 
-- CI creates `docflow_app` after the migrations run, so the migration's grant is
-  skipped there and scripts/ci/create_app_role.py grants it again. The two must
-  name the same signature, or CI tests a function the app can't call (or one
-  staging can't).
+- (The migration's grant and scripts/ci/create_app_role.py's are kept in step
+  by test_ci_guards.py, with the other checks on what CI sets up.)
 - The function hygiene D-173 requires: SECURITY DEFINER with a pinned
   search_path; EXECUTE revoked from PUBLIC and from Supabase's anon and
   authenticated roles.
@@ -21,7 +19,6 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 MIGRATION = REPO / "supabase" / "migrations" / "0029_stripe_event_function.sql"
-CI_ROLE = REPO / "scripts" / "ci" / "create_app_role.py"
 APPLICATION_CODE = [
     REPO / "packages" / "core" / "docflow_core",
     REPO / "apps" / "api" / "app",
@@ -37,17 +34,6 @@ def _collapse(source: str) -> str:
     whitespace, so a statement split across lines reads as one."""
     joined = re.sub(r"['\"]\s*\n?\s*['\"]", "", source)
     return re.sub(r"\s+", " ", joined)
-
-
-def test_the_migration_and_ci_grant_the_same_function_signature_to_the_app_role():
-    grant = re.compile(
-        r"grant execute on function record_stripe_subscription_event\s*(\([^)]*\))\s*to docflow_app",
-        re.IGNORECASE,
-    )
-    in_migration = grant.findall(_collapse(MIGRATION.read_text(encoding="utf-8")))
-    in_ci = grant.findall(_collapse(CI_ROLE.read_text(encoding="utf-8")))
-    assert in_migration == [SIGNATURE]
-    assert in_ci == [SIGNATURE]
 
 
 def test_the_function_is_security_definer_with_a_pinned_search_path():
@@ -76,3 +62,19 @@ def test_nothing_but_the_function_writes_the_idempotency_table():
         if writes.search(line)
     ]
     assert offenders == [], offenders
+
+
+def test_the_signature_check_and_the_event_time_check_share_one_tolerance():
+    """D-176: the bound on Stripe's clock that the signature check enforces is
+    the same one the event-time guard relies on. One constant, so they cannot
+    drift apart."""
+    import inspect
+
+    from docflow_core import external_services
+    from docflow_core.constants import STRIPE_CLOCK_TOLERANCE_SECONDS
+
+    parameters = inspect.signature(external_services.verify_webhook_signature).parameters
+    default = parameters["tolerance_seconds"].default
+    assert default == STRIPE_CLOCK_TOLERANCE_SECONDS == 300
+    source = (REPO / "packages" / "core" / "docflow_core" / "billing_webhooks.py").read_text(encoding="utf-8")
+    assert "STRIPE_CLOCK_TOLERANCE_SECONDS" in source

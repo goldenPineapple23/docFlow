@@ -27,6 +27,18 @@ CURE_PERIOD_DAYS = 0
 EXPORT_WINDOW_DAYS = 30  # ToS placeholder
 REMINDER_DAYS = (1, 15, 25)
 
+# ── Clocks (D-170) ───────────────────────────────────────────────────────────
+# How far Stripe's clock may disagree with ours (D-176). Every accepted webhook
+# already proves the two agree to within this: its signature carries Stripe's
+# send time, and a signature stamped further than this from our clock, in
+# either direction, is refused. So a Stripe event time -- the cure clock's
+# start (first_past_due_at) -- is at most this far off our clock, and an event
+# stamped further than this into the future is not a real Stripe event and is
+# not applied (it would otherwise freeze the ordering guard until our clock
+# caught up). Cost: a non-payment effective date can be up to five minutes
+# earlier or later than Stripe's exact instant.
+STRIPE_CLOCK_TOLERANCE_SECONDS = 300
+
 # ── Alerting and the Console (Section 7.15.3) ───────────────────────────────
 REVIEW_BACKLOG_ALERT_DAYS = 3
 CONFIDENCE_DRIFT_MARGIN = 0.05

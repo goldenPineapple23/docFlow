@@ -32,7 +32,11 @@ and event order was ignored. Now:
    not written over it.
 
 The event's own time, never this server's clock, is what is compared and what
-starts the non-payment cure clock (D-170).
+starts the non-payment cure clock (D-170). The ordering guard compares Stripe's
+time only with Stripe's time, so it needs no tolerance. Where Stripe's time
+meets ours -- the cure clock, and a stamp from the future -- the tolerance is
+STRIPE_CLOCK_TOLERANCE_SECONDS, the same bound the signature check already
+enforces (D-176).
 """
 
 from __future__ import annotations
@@ -43,8 +47,10 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from docflow_core import external_services, founder_alerts
+from docflow_core.constants import STRIPE_CLOCK_TOLERANCE_SECONDS
 from docflow_core.db import stripe_webhook_session, tenant_session
 
 logger = logging.getLogger(__name__)
@@ -62,6 +68,8 @@ def process_event(event: dict[str, Any]) -> str:
       superseded  same-second event whose fetch was overtaken by a newer event
       unmatched   no tenant has this Stripe customer
       ignored     not a subscription event, or missing an id or timestamp
+      future_dated  stamped further into the future than STRIPE_CLOCK_TOLERANCE_SECONDS
+                  by the database's clock; not applied or recorded, founder alerted
     Raises only when the database or Stripe cannot be reached -- the router
     then answers 500 and Stripe retries, and nothing has been recorded.
     """
@@ -133,6 +141,23 @@ def _record(
     mode: str,
 ) -> str:
     with tenant_session(tenant_id) as session:
+        if mode == "event" and _beyond_clock_tolerance(session, created):
+            # Not a real Stripe event (every accepted delivery proves Stripe's
+            # clock is within the tolerance of ours), and saving its time would
+            # make every genuine event "stale" until our clock caught up. Not
+            # applied, not recorded -- so a corrected redelivery still applies
+            # -- and the founder is told, because the tenant's billing state is
+            # now waiting on someone.
+            logger.warning("stripe_webhook_future_dated event=%s tenant=%s", event_id, tenant_id)
+            founder_alerts.raise_alert(
+                session,
+                alert_type="stripe_event_future_dated",
+                severity="high",
+                tenant_id=tenant_id,
+                payload={"event_id": event_id},
+                dedupe_key=f"stripe_event_future_dated:{tenant_id}",
+            )
+            return "future_dated"
         outcome = session.execute(
             text(
                 "SELECT record_stripe_subscription_event("
@@ -158,6 +183,16 @@ def _record(
                 dedupe_key=f"stripe_subscription_past_due:{tenant_id}",
             )
     return str(outcome)
+
+
+def _beyond_clock_tolerance(session: Session, created: datetime) -> bool:
+    # Compared by the database, on the database's clock (D-170).
+    return bool(
+        session.execute(
+            text("SELECT CAST(:created AS timestamptz) > now() + make_interval(secs => :tolerance)"),
+            {"created": created, "tolerance": STRIPE_CLOCK_TOLERANCE_SECONDS},
+        ).scalar_one()
+    )
 
 
 def _event_created(event: dict[str, Any]) -> datetime | None:

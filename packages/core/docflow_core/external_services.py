@@ -27,6 +27,7 @@ from uuid import UUID
 import httpx
 
 from docflow_core.config import get_settings
+from docflow_core.constants import STRIPE_CLOCK_TOLERANCE_SECONDS
 
 TIMEOUT_SECONDS = 15
 
@@ -503,7 +504,7 @@ def void_pending_setup_fee(*, customer_id: str, tenant_id: UUID) -> None:
 
 
 def verify_webhook_signature(
-    payload: bytes, sig_header: str, secret: str, *, tolerance_seconds: int = 300
+    payload: bytes, sig_header: str, secret: str, *, tolerance_seconds: int = STRIPE_CLOCK_TOLERANCE_SECONDS
 ) -> dict:
     """
     Stripe's documented signature scheme (no `stripe` SDK dependency in this
