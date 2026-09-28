@@ -2430,3 +2430,23 @@ The rule is derived from the warning's own payload rather than from a list of co
 **Function hygiene, not optional:** `SET search_path` on the function (leaving it unset is the classic privilege-escalation route for a definer function); `REVOKE EXECUTE FROM PUBLIC`; the grant to `docflow_app` wrapped in 0028's `if exists (pg_roles ...)` guard because CI creates that role after migrations run, mirrored in `scripts/ci/create_app_role.py` and its agreement test; and a test that a tenant session **cannot** insert into `stripe_webhook_events`, run in a transaction that is always rolled back (D-165).
 
 **Related:** Sections 7.5, 7.12, 7.15.4; review H11; D-159 (F-1), D-165, D-170.
+
+## D-174 — Retire HS256: session tokens are verified only against Supabase's published keys (founder, 2026-09-28)
+
+**Context:** since D-015 / D-088 the API verifies a session token by its `alg`: HS256 against the project's "Legacy JWT Secret" (`SUPABASE_JWT_SECRET`), ES256/RS256 against the JWKS public keys. Staging has issued ES256 all along, so the HS256 branch was accepted by the API but used by no real sign-in -- and every API test exercises it, because tests mint HS256 tokens with a local secret. The founder asked for keep-or-retire; nothing waits on it until Phase 6.
+
+**Evidence gathered before deciding (2026-09-28):**
+- Both keys DocFlow uses are the new kind: `NEXT_PUBLIC_SUPABASE_ANON_KEY` starts `sb_publishable_`, `SUPABASE_SERVICE_ROLE_KEY` starts `sb_secret_` (founder read the prefixes; values never shown). Old-format `eyJ…` keys are signed with the legacy secret and would break when it is revoked; neither is in use.
+- `SUPABASE_JWT_SECRET` was filled in, which is the only thing that made the HS256 branch live: anyone holding that value could mint a token the API accepts as any user, including the founder, and reach the Console. No real sign-in needed it.
+- The founder blanked it in the root `.env`. Checked the same day: a real password sign-in to staging returned an **ES256** token, and `GET /auth/me` with it returned **200** with the secret blank (`/home` 403 `AUTH-003` for that reviewer account, as designed; no token 401).
+
+**Decision (founder): retire HS256.**
+
+**What happens, in this order -- Phase 6, not now:**
+1. Remove the HS256 branch from `apps/api/app/deps.py`, and `SUPABASE_JWT_SECRET` from config, `.env.example` and SETUP.md.
+2. Move the tests to an ES256 key pair generated locally (`test_token_verification.py` already does this for the asymmetric path), which also clears D-163's `InsecureKeyLengthWarning` noise from short HS256 test secrets.
+3. Then, and only then, the founder revokes the legacy secret in the Supabase dashboard (**Project Settings → JWT Keys**). It goes last because it cannot easily be undone, and the code must no longer refer to it first.
+
+**Until Phase 6:** the branch still exists but is unreachable wherever `SUPABASE_JWT_SECRET` is blank -- as it now is on the founder's machine against staging. CI keeps setting a throwaway test secret because the tests still mint HS256 tokens. SETUP.md and `.env.example` now say to leave the secret blank and to use the new-format keys, so `docflow-prod` is set up the retired way from the start.
+
+**Related:** D-015, D-088, D-163, D-167; Section 7.12.

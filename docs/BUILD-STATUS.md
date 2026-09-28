@@ -325,6 +325,8 @@ hooks; RLS audit; log-redaction check; web-baseline checks (7.12);
 `docflow-prod` created with migrations applied staging-first; backup restore
 drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 
+- **Retire HS256 (D-174):** remove the HS256 verification branch and `SUPABASE_JWT_SECRET`,
+  move the tests to a local ES256 key pair, then the founder revokes the legacy secret -- in that order.
 - **Exit:** every test in `docflow-uat-plan.docx` executed; zero open
   Critical/High defects; restore drill succeeded; the Section 12 checklist is
   fully true.
@@ -416,6 +418,10 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   says the same (founder's document); `CLAUDE.md`'s parsing-worker bullet still describes D-003's
   egress allowlist (wording proposed to the founder, not changed). The spike
   has passed, so the proposed wording no longer needs its "conditional" clause.
+- **HS256 retired (founder, 2026-09-28, D-174):** both keys in use are the new `sb_` kind and
+  `SUPABASE_JWT_SECRET` is now blank on staging (real ES256 sign-in verified with it blank). Phase 6
+  removes the HS256 branch and moves the tests to a local ES256 key pair; the founder revokes the
+  legacy secret in the dashboard **last**.
 - **M16 closed on staging (2026-09-28):** the founder turned off "Allow new users to sign up";
   `/auth/v1/settings` now returns `disable_signup: true`. SETUP.md Step 1 now says to do it, so
   `docflow-prod` gets it at creation. The automated check the review suggested (startup or CI
