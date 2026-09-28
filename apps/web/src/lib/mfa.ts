@@ -45,18 +45,36 @@ export async function confirmWithAnyFactor(code: string): Promise<boolean> {
   return false;
 }
 
+/**
+ * A name for a new authenticator that none of the account's others has.
+ * Supabase refuses a second factor with the same name (422), which is how the
+ * first backup authenticator failed on the day its original was enrolled.
+ */
+export function uniqueFactorName(taken: string[], today: Date = new Date()): string {
+  const base = `DocFlow Console ${today.toISOString().slice(0, 10)}`;
+  const names = new Set(taken);
+  if (!names.has(base)) return base;
+  for (let n = 2; ; n += 1) {
+    const candidate = `${base} (${n})`;
+    if (!names.has(candidate)) return candidate;
+  }
+}
+
 /** Start enrolling an authenticator. Unverified leftovers are removed first,
  * so an abandoned attempt never blocks a new one. */
 export async function startEnrolment(): Promise<Enrolment | null> {
   const listed = await supabase.auth.mfa.listFactors();
+  const kept: string[] = [];
   for (const factor of listed.data?.all ?? []) {
     if (factor.factor_type === "totp" && factor.status === "unverified") {
       await supabase.auth.mfa.unenroll({ factorId: factor.id });
+    } else if (factor.friendly_name) {
+      kept.push(factor.friendly_name);
     }
   }
   const { data, error } = await supabase.auth.mfa.enroll({
     factorType: "totp",
-    friendlyName: `DocFlow Console ${new Date().toISOString().slice(0, 10)}`,
+    friendlyName: uniqueFactorName(kept),
   });
   if (error || !data) return null;
   return { factorId: data.id, qrCode: data.totp.qr_code, secret: data.totp.secret };
