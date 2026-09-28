@@ -1679,7 +1679,20 @@ Private-network targets were probed **by IP address**, resolved outside first, s
 - **Redis was a stand-in on Fly's private network, not Upstash itself.** Upstash on Fly is reached over the same private IPv6 network, which the sandbox cannot reach at all. Stage 3 re-runs the probe against the real Upstash endpoint and the real API once they exist.
 - **Not covered by the spike, still owed in Stage 3** (D-003): the per-file `setrlimit` memory/CPU caps, the SIGKILL wall-clock timeout, one subprocess per file, and the parse service holding no keys.
 
-**Related:** review H5, H6; D-003; Section 7.11. BUILD-STATUS "D-150 proof spike".
+**Follow-up (founder, 2026-09-28): the fixed interfaces check, run against its positive control.** Run 2's pass rested on a corrected check that had not yet been shown to fail anywhere. On a fresh throwaway machine, the same P13 function (`only_loopback_and_down`, now one function used in both places) was run on the machine itself and inside the sandbox:
+
+```
+### 1. On the machine itself (root, machine's network namespace) -- must FAIL:
+uid=0 interfaces: dummy0(down), eth0(UP), lo(UP), teql0(down)
+P13 only-loopback-and-down: FAIL
+### 2. Inside the sandbox (unshare --net + setpriv to parse, no caps, no_new_privs) -- must PASS:
+uid=10001 interfaces: lo(down)
+P13 only-loopback-and-down: PASS
+```
+
+The check fails where it must, so the spike's PASS stands. The app was destroyed afterwards (`fly apps list`: no apps). Output: `docs/spikes/d150-fly-netns/evidence-run3-interfaces-control.txt`. The rule this produced is RUNBOOK 1.7: an isolation failure means stop and report; a measurement bug may be fixed and re-run only when the fixed check is shown to fail against the positive control, with both runs kept. `CLAUDE.md`'s parsing-worker bullet now states what the spike proved (network isolation only) and what Stage 3 still owes, in the founder's wording.
+
+**Related:** review H5, H6; D-003; Section 7.11. BUILD-STATUS "D-150 proof spike". RUNBOOK 1.7.
 
 
 ## D-151 -- Destructive Console actions need MFA enrolment and a fresh MFA challenge (founder's answer 3)
