@@ -1,0 +1,58 @@
+Connecting to fdaa:cb:76d5:a7b:256:f964:5175:2...
+====================================================================================================
+D-150 PROOF SPIKE -- evidence
+machine: region=iad machine=28655529b97518 kernel=6.12.105-fly user=0
+resolver (from /etc/resolv.conf): fdaa::3
+docflow-spike-target-89e467.internal -> fdaa:cb:76d5:a7b:255:8e12:7a59:2   _api.internal -> fdaa::3
+exit 0 unshare from util-linux 2.41.5
+sandbox: unshare --net -- setpriv --reuid=parse --regid=parse --init-groups --no-new-privs --inh-caps=-all --bounding-set=-all python3 /app/probe.py inside '<ctx>'
+sandbox identity: uid=10001 gid=999 euid=10001; CapEff:	0000000000000000; NoNewPrivs:	1
+interfaces OUTSIDE: dummy0(down), eth0(UP), lo(UP), teql0(down)
+interfaces INSIDE : dummy0(down), eth0(UP), lo(UP), teql0(down)
+====================================================================================================
+[   PASS    ] P1 internet IPv4 (1.1.1.1:443, TCP)
+              outside: REACHED  TCP connect succeeded
+              inside : blocked  OSError: [Errno 101] Network is unreachable
+[   PASS    ] P2 internet IPv6 ([2606:4700:4700::1111]:443, TCP)
+              outside: REACHED  TCP connect succeeded
+              inside : blocked  OSError: [Errno 99] Cannot assign requested address
+[   PASS    ] P3 internet HTTPS by name (https://example.com)
+              outside: REACHED  HTTP 200
+              inside : blocked  URLError: <urlopen error [Errno -3] Temporary failure in name resolution>
+[   PASS    ] P4 DNS via system resolver (example.com)
+              outside: REACHED  resolved to 104.20.23.154, 172.66.147.243, 2606:4700:10::6814:179a, 2606:4700:10::ac42:93f3
+              inside : blocked  gaierror: [Errno -3] Temporary failure in name resolution
+[   PASS    ] P5 DNS direct to Fly resolver [fdaa::3]:53
+              outside: REACHED  resolver answered, 1 answer record(s)
+              inside : blocked  OSError: [Errno 99] Cannot assign requested address
+[   PASS    ] P6 private net: API stand-in [fdaa:cb:76d5:a7b:255:8e12:7a59:2]:8080 (HTTP)
+              outside: REACHED  HTTP 200
+              inside : blocked  URLError: <urlopen error [Errno 99] Cannot assign requested address>
+[   PASS    ] P7 private net: Redis stand-in [fdaa:cb:76d5:a7b:255:8e12:7a59:2]:6379 (PING)
+              outside: REACHED  reply b'+PONG\r\n'
+              inside : blocked  OSError: [Errno 99] Cannot assign requested address
+[   PASS    ] P8 Fly Machines API _api.internal [fdaa::3]:4280 (TCP)
+              outside: REACHED  TCP connect succeeded
+              inside : blocked  OSError: [Errno 99] Cannot assign requested address
+[NO CONTROL ] P9 cloud metadata 169.254.169.254:80 (TCP)
+              outside: blocked  TimeoutError: timed out
+              inside : blocked  OSError: [Errno 101] Network is unreachable
+[   PASS    ] P10 Fly local API socket /.fly/api (unix)
+              outside: REACHED  connect succeeded (mode srwxr-xr-x uid 0 gid 0)
+              inside : blocked  PermissionError: [Errno 13] Permission denied (mode srwxr-xr-x uid 0 gid 0)
+[   PASS    ] P11 escape: nsenter into machine netns
+              outside: REACHED  exit 0
+              inside : blocked  exit 1 nsenter: cannot open /proc/1/ns/net: Permission denied
+[   PASS    ] P12 escape: bring up an interface (ip link set lo up)
+              outside: REACHED  exit 0
+              inside : blocked  exit 2 RTNETLINK answers: Operation not permitted
+[   PASS    ] P14 sandboxed process can read its input file
+              outside: REACHED  read 63 bytes, sha256 8d727b95fda56eb3
+              inside : REACHED  read 63 bytes, sha256 8d727b95fda56eb3
+[   FAIL    ] P13 inside has only a loopback interface, and it is down
+====================================================================================================
+passed: P1 P2 P3 P4 P5 P6 P7 P8 P10 P11 P12 P14
+not passed (no positive control / not present): P9
+failed: P13
+VERDICT: FAIL -- P13
+Error: ssh shell: Process exited with status 1

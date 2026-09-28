@@ -1,0 +1,10 @@
+# Throwaway app for the D-150 proof spike. No services, no public IP, no secrets.
+app = "docflow-spike-target-<suffix>"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
