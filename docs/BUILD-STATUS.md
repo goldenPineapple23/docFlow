@@ -273,7 +273,11 @@ machine's view) and was re-run rather than stopped on -- stated in D-150.
 Two findings go to Stage 3: `/.fly/api` is blocked by file permission, not
 the namespace, and `/sys` shows the machine's interface names -- hide both
 in a mount namespace. Both apps were destroyed. Evidence:
-`docs/spikes/d150-fly-netns/`.
+`docs/spikes/d150-fly-netns/`. **Follow-up (2026-09-28):** the fixed
+interfaces check was run against its positive control -- FAIL on the
+machine, PASS in the sandbox (run 3) -- so the PASS stands; RUNBOOK 1.7 now
+holds the stop-and-report rule, and `CLAUDE.md`'s parsing-worker bullet says
+what the spike proved and what Stage 3 still owes.
 
 The plan as agreed:
 
@@ -413,9 +417,8 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   offered.
 - **Hosting documents out of date after D-150 (2026-09-28):** `docflow-deployment-hosting.docx`
   and `docflow-tech-stack-costs.docx` still say Railway or Render; the build prompt's deploy line
-  says the same (founder's document); `CLAUDE.md`'s parsing-worker bullet still describes D-003's
-  egress allowlist (wording proposed to the founder, not changed). The spike
-  has passed, so the proposed wording no longer needs its "conditional" clause.
+  says the same (founder's document). `CLAUDE.md`'s parsing-worker bullet was updated 2026-09-28
+  in the founder's wording.
 - **M16 closed on staging (2026-09-28):** the founder turned off "Allow new users to sign up";
   `/auth/v1/settings` now returns `disable_signup: true`. SETUP.md Step 1 now says to do it, so
   `docflow-prod` gets it at creation. The automated check the review suggested (startup or CI
