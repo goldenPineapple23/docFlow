@@ -273,7 +273,11 @@ machine's view) and was re-run rather than stopped on -- stated in D-150.
 Two findings go to Stage 3: `/.fly/api` is blocked by file permission, not
 the namespace, and `/sys` shows the machine's interface names -- hide both
 in a mount namespace. Both apps were destroyed. Evidence:
-`docs/spikes/d150-fly-netns/`.
+`docs/spikes/d150-fly-netns/`. **Follow-up (2026-09-28):** the fixed
+interfaces check was run against its positive control -- FAIL on the
+machine, PASS in the sandbox (run 3) -- so the PASS stands; RUNBOOK 1.7 now
+holds the stop-and-report rule, and `CLAUDE.md`'s parsing-worker bullet says
+what the spike proved and what Stage 3 still owes.
 
 The plan as agreed:
 

@@ -354,6 +354,6 @@ The intake address is unguessable (7.2) until the customer forwards it to a buye
 ## Architecture decisions locked in for this build (see `DECISIONS.md` for full reasoning)
 
 - **Path B**: Next.js (TypeScript) frontend + FastAPI (Python) backend/worker monorepo, Supabase (Postgres + Auth + Storage), Celery + Redis for the job queue.
-- Isolated parsing worker is a separate deployable service from the web API; Tier 2 conversion (LibreOffice headless, image libs, `.msg` parsing) runs inside it. "No network access" (7.11) is approximated via a service-level egress allowlist + per-file resource/time limits, not true per-job network denial — see `DECISIONS.md` D-003.
+- Isolated parsing worker is a separate deployable service from the web API; Tier 2 conversion (LibreOffice headless, image libs, .msg parsing) runs inside it. Hosted on Fly.io (D-150). Each parse process runs in its own network namespace with no network access; the D-150 spike proved this network isolation only. Still to be built and tested in Stage 3: unprivileged user, per-file memory/CPU/time limits, one process per file, no keys in the parse service, /.fly hidden from the sandbox. See DECISIONS.md D-150 and D-003.
 - `users.tenant_id` is nullable to support platform-admin-only accounts — see `DECISIONS.md` D-004.
 - Setup fees default to automatic Stripe charge at go-live — see `DECISIONS.md` D-005.

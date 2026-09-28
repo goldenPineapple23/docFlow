@@ -150,6 +150,13 @@ def interfaces() -> dict:
     return {"names": names, "detail": detail, "up_non_lo": up_non_lo, "sysfs": sysfs}
 
 
+def only_loopback_and_down(ifaces: dict) -> bool:
+    """The P13 check: the namespace has a loopback interface and nothing else,
+    and the loopback is down. One function, used both inside the sandbox and
+    (as its positive control) on the machine itself, where it must fail."""
+    return ifaces["names"] == ["lo"] and not ifaces["up_non_lo"] and "lo(down)" in ifaces["detail"]
+
+
 def read_input(path: str) -> dict:
     try:
         data = open(path, "rb").read()
@@ -267,8 +274,7 @@ def main_run(target: str) -> int:
         print(f"              outside: {'REACHED ' if o['reached'] else 'blocked '} {o['detail']}")
         print(f"              inside : {'REACHED ' if i['reached'] else 'blocked '} {i['detail']}")
 
-    iface_ok = inside["_ifaces"]["names"] == ["lo"] and not inside["_ifaces"]["up_non_lo"] \
-        and "lo(down)" in inside["_ifaces"]["detail"]
+    iface_ok = only_loopback_and_down(inside["_ifaces"])
     print(f"[{'PASS' if iface_ok else 'FAIL':^11}] P13 inside has only a loopback interface, and it is down")
     (passes if iface_ok else fails).append("P13")
 
@@ -287,5 +293,12 @@ def main_run(target: str) -> int:
 if __name__ == "__main__":
     if sys.argv[1] == "inside":
         inside_main(json.loads(sys.argv[2]))
+    elif sys.argv[1] == "interfaces-check":
+        # The P13 check on its own, against whatever namespace this process is
+        # in. On the machine it must print FAIL (the positive control); inside
+        # the sandbox it must print PASS.
+        ifaces = interfaces()
+        print(f"uid={os.getuid()} interfaces: {ifaces['detail']}")
+        print(f"P13 only-loopback-and-down: {'PASS' if only_loopback_and_down(ifaces) else 'FAIL'}")
     elif sys.argv[1] == "run":
         sys.exit(main_run(sys.argv[2]))

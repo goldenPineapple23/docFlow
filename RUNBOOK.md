@@ -171,6 +171,35 @@ more than the bug it is hiding.
 
 **Related:** D-166, D-167; §1.4 on how a run is reported.
 
+### 1.7 Standing rule: an isolation failure means stop and report
+
+**When a check of an isolation boundary fails -- a sandbox, a tenant boundary,
+a network or permission control -- stop and report it. Do not fix it and
+re-run first.** (Founder, 2026-09-28, after the D-150 spike.)
+
+The one exception is a bug in the *measurement*, not the boundary. A
+measurement may be fixed and the check re-run **only if**:
+
+1. the fixed check is shown to **fail against the positive control** -- run it
+   where the boundary is absent (outside the sandbox, as the privileged user,
+   in the other tenant) and quote it failing there. A check that cannot fail
+   proves nothing when it passes; and
+2. **both runs' output is kept** -- the failing run and the re-run -- next to
+   the result, so a reader can judge the call.
+
+If either cannot be done, the failure stands and is reported as a failure.
+
+**Why:** in the D-150 spike, run 1's interfaces check failed because it read
+`/sys/class/net`, which shows the machine's interfaces, not the sandbox's. The
+fix was right, but it was re-run before the corrected check had been shown to
+fail anywhere -- so for a while "PASS" rested on a check nobody had seen
+fail. The positive-control run was done afterwards
+(`docs/spikes/d150-fly-netns/evidence-run3-interfaces-control.txt`: FAIL on
+the machine, PASS in the sandbox). The order is the rule: show it can fail,
+then trust it passing.
+
+**Related:** D-150; §1.6.
+
 ---
 
 ## 2. Inbound email (Postmark)

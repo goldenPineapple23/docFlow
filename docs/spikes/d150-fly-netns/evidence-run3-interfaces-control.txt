@@ -1,0 +1,7 @@
+### D-150 follow-up (2026-09-28): the fixed P13 check against its positive control
+### 1. On the machine itself (root, machine's network namespace) -- must FAIL:
+uid=0 interfaces: dummy0(down), eth0(UP), lo(UP), teql0(down)
+P13 only-loopback-and-down: FAIL
+### 2. Inside the sandbox (unshare --net + setpriv to parse, no caps, no_new_privs) -- must PASS:
+uid=10001 interfaces: lo(down)
+P13 only-loopback-and-down: PASS
