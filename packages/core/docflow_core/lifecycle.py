@@ -143,17 +143,21 @@ def compute_effective_at(session: Session, tenant_id: UUID, reason: str) -> Effe
     cancellation, the cure period from the first past-due event for
     non-payment, immediate for cause.
     """
+    # "Immediate" is the database's now, read in the same statement: the
+    # sweep later compares the stored date with the database's clock, so that
+    # clock sets it (D-170 #1). now() is the transaction's start, so cancel()'s
+    # UPDATE in the same transaction stamps status_changed_at with this value.
     row = session.execute(
         text(
-            "SELECT stripe_subscription_id, stripe_current_period_end, first_past_due_at "
-            "FROM tenants WHERE id = :id"
+            "SELECT stripe_subscription_id, stripe_current_period_end, first_past_due_at, "
+            "now() AS db_now FROM tenants WHERE id = :id"
         ),
         {"id": str(tenant_id)},
     ).mappings().first()
     if row is None:
         raise LifecycleError("CON-001")
 
-    now = datetime.now(UTC)
+    now = row["db_now"]
     if reason == "customer_requested":
         if row["stripe_subscription_id"] is None:
             return EffectiveDatePlan(now, "no subscription yet: immediate", False)
@@ -296,7 +300,9 @@ def claim_for_suspend(session: Session, tenant_id: UUID) -> SuspendClaim | None:
     """
     row = session.execute(
         text(
-            "SELECT name, status, cancellation_effective_at, stripe_subscription_id, "
+            # Due by the database's clock, the one the sweep's claim query used
+            # to pick this tenant (D-170 #1).
+            "SELECT name, status, cancellation_effective_at <= now() AS due, stripe_subscription_id, "
             "stripe_customer_id FROM tenants WHERE id = :id FOR UPDATE"
         ),
         {"id": str(tenant_id)},
@@ -305,7 +311,7 @@ def claim_for_suspend(session: Session, tenant_id: UUID) -> SuspendClaim | None:
         return None
     if row["status"] != "cancelling":
         return None
-    if row["cancellation_effective_at"] is None or row["cancellation_effective_at"] > datetime.now(UTC):
+    if not row["due"]:
         return None
 
     # The database stamps the deletion date, because the database is the clock

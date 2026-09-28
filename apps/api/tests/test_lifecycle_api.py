@@ -95,8 +95,12 @@ def _backdate_cancellation(tenant_id: str, *, minutes: int = 1) -> None:
     `cancel()` to do something the real API must refuse."""
     with platform_session() as session:
         session.execute(
-            text("UPDATE tenants SET cancellation_effective_at = :t WHERE id = :id"),
-            {"id": tenant_id, "t": datetime.now(UTC) - timedelta(minutes=minutes)},
+            # The database's clock, which the sweep compares it with (D-170).
+            text(
+                "UPDATE tenants SET cancellation_effective_at = now() - make_interval(mins => :m) "
+                "WHERE id = :id"
+            ),
+            {"id": tenant_id, "m": minutes},
         )
 
 
@@ -694,3 +698,74 @@ def test_the_reminder_counts_the_days_left_on_the_database_clock(
             t=tenant_id,
         )
         assert subject.startswith("DocFlow: 10 days left"), subject
+
+
+def _cancelling(tenant_id: str, console, *, due_in: str) -> None:
+    """A cancelled tenant whose effective date is `due_in` from the database's
+    now (a Postgres interval)."""
+    with tenant_session(tenant_id) as session:
+        lifecycle.cancel(
+            session, tenant_id, reason="for_cause",
+            note="a reason at least twenty characters long", actor_user_id=console.user_id,
+        )
+    with platform_session() as session:
+        session.execute(
+            text(
+                "UPDATE tenants SET cancellation_effective_at = now() + CAST(:due_in AS interval) "
+                "WHERE id = :id"
+            ),
+            {"id": tenant_id, "due_in": due_in},
+        )
+
+
+@requires_lifecycle_schema
+@pytest.mark.parametrize(
+    "skew,due_in,suspended",
+    [
+        # The app thinks the date has passed; the database says an hour to go.
+        (AHEAD, "1 hour", False),
+        # The database says it has passed; the app thinks not yet.
+        (BEHIND, "-1 hour", True),
+    ],
+    ids=["app-clock-ahead", "app-clock-behind"],
+)
+def test_the_sweep_suspends_on_the_database_clock(
+    client, stripe, _environment, monkeypatch, skew, due_in, suspended
+):
+    """D-170 #1: the sweep's query picks due tenants by the database's clock,
+    and the claim's re-check must agree with it, not with the app's."""
+    with _Console() as console:
+        tenant_id = console.create_tenant(client).json()["tenant_id"]
+        _activate(tenant_id)
+        _cancelling(tenant_id, console, due_in=due_in)
+
+        skew_app_clock(monkeypatch, lifecycle, by=skew)
+        with tenant_session(tenant_id) as session:
+            claim = lifecycle.claim_for_suspend(session, tenant_id)
+
+        assert (claim is not None) is suspended
+        status = _scalar("SELECT status FROM tenants WHERE id = :t", t=tenant_id)
+        assert status == ("pending_deletion" if suspended else "cancelling")
+
+
+@requires_lifecycle_schema
+@pytest.mark.parametrize("skew", [AHEAD, BEHIND], ids=["app-clock-ahead", "app-clock-behind"])
+def test_an_immediate_cancellation_is_dated_by_the_database(client, stripe, _environment, monkeypatch, skew):
+    """D-170 #1, the "immediate" date (founder, 2026-09-28): for cause, no
+    subscription yet, or no billing period on record, the effective date is
+    the database's now -- the same instant as status_changed_at, which the
+    same transaction stamps."""
+    with _Console() as console:
+        tenant_id = console.create_tenant(client).json()["tenant_id"]
+        _activate(tenant_id)
+
+        skew_app_clock(monkeypatch, lifecycle, by=skew)
+        response = client.post(
+            f"/admin/tenants/{tenant_id}/cancel", headers=console.headers(),
+            json={"reason": "for_cause", "note": "a reason at least twenty characters long"},
+        )
+        assert response.status_code == 200, response.text
+        gap = _scalar(
+            "SELECT cancellation_effective_at - status_changed_at FROM tenants WHERE id = :t", t=tenant_id
+        )
+        assert gap == timedelta(0)
