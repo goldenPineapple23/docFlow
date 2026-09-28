@@ -21,6 +21,7 @@ import base64
 import logging
 from uuid import uuid4
 
+import pytest
 from docflow_core.config import get_settings
 from docflow_core.db import platform_session
 from sqlalchemy import text
@@ -33,6 +34,9 @@ from tests.conftest import (
     requires_email_intake_schema,
 )
 from tests.test_email_intake import _pm_attachment, _pm_payload, _TestIntakeTenant
+
+# Refused requests raise real founder alerts now (D-171); remove the ones made here.
+pytestmark = pytest.mark.usefixtures("cleans_up_refusal_alerts")
 
 # A body claiming every authentication check passed. Before H8 was fixed this
 # was enough, by itself, to be treated as a verified buyer.
@@ -232,10 +236,9 @@ def test_a_refusal_says_which_kind_of_refusal_it_was(client, caplog):
     and someone probing -- and the first means no mail arrives at all
     (RUNBOOK 1.6).
 
-    **A founder alert on refusal arrives in Stage 2c** (D-171): it needs an RLS
-    insert policy for a tenant-less alert, which needs a migration, and 2c has
-    one. Until then this log line is the whole of the signal, which is why it
-    names the reason rather than just the refusal.
+    Since Stage 2c a refusal also raises a founder alert naming the reason
+    (D-171, `test_intake_refusal_alert.py`); the log line stays, because it is
+    what a log search for a customer's report finds.
     """
     cases = {
         None: "no_credentials",

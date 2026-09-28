@@ -57,16 +57,15 @@ def _refuse(reason: str, client_host: str | None) -> HTTPException:
     line or the response (Section 7.10). `reason` is one of a fixed set of words
     from `deps`, and the response body is empty.
 
-    **A founder alert on refusal arrives with Stage 2c, not here** (D-171). It is
-    wanted -- a misconfigured credential and an attacker look identical from
-    outside, and the first means no mail arrives at all -- but a tenant-less
-    alert needs its own RLS insert policy, which needs a migration, and 2c
-    already has one. Raising it from this router instead would mean reaching for
-    the cross-tenant session helper outside the one module allowed to hold it,
-    which `packages/core/tests/test_rls_flags.py` refuses -- correctly, and it
-    is what caught this.
+    **And the founder is alerted** (D-171, Stage 2c): a misconfigured
+    credential and an attacker look identical from outside, and the first means
+    no mail arrives at all. `email_intake.alert_webhook_refused` raises one
+    high-severity alert per reason (collapsed while open) through migration
+    0029's narrow insert policies, and never raises -- so this stays a 401 even
+    if the alert cannot be written.
     """
     logger.warning("intake_webhook_refused reason=%s", reason)
+    email_intake.alert_webhook_refused(reason)
     if client_host is not None:
         # Recorded only alongside a refusal, where it helps tell a
         # misconfiguration from a probe. Never a reason to refuse (D-155).

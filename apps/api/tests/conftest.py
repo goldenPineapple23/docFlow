@@ -363,3 +363,45 @@ def _inbound_webhook_credentials(monkeypatch):
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture
+def cleans_up_refusal_alerts():
+    """
+    A refused inbound request raises a real `intake_webhook_refused` founder
+    alert (D-171). On staging that lands in the founder's attention panel, so a
+    test that sends refused requests removes the alerts -- and their emails --
+    that it created, and nothing that existed before it ran. A no-op when there
+    is no database.
+    """
+    from docflow_core.db import platform_session
+    from sqlalchemy import text
+
+    def existing() -> set[str]:
+        with platform_session() as session:
+            return {
+                str(row[0])
+                for row in session.execute(
+                    text("SELECT id FROM founder_alerts WHERE type = 'intake_webhook_refused'")
+                )
+            }
+
+    try:
+        before = existing()
+    except Exception:
+        yield
+        return
+    yield
+    created = existing() - before
+    if not created:
+        return
+    # One row at a time: a bound Python list is sent as JSON by this engine,
+    # which Postgres will not cast to uuid[] (found on CI's first run).
+    with platform_session() as session:
+        for alert_id in sorted(created):
+            outbox_id = session.execute(
+                text("DELETE FROM founder_alerts WHERE id = :id RETURNING email_outbox_id"),
+                {"id": alert_id},
+            ).scalar()
+            if outbox_id is not None:
+                session.execute(text("DELETE FROM email_outbox WHERE id = :id"), {"id": outbox_id})

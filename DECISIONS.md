@@ -2443,3 +2443,79 @@ The rule is derived from the warning's own payload rather than from a list of co
 **Function hygiene, not optional:** `SET search_path` on the function (leaving it unset is the classic privilege-escalation route for a definer function); `REVOKE EXECUTE FROM PUBLIC`; the grant to `docflow_app` wrapped in 0028's `if exists (pg_roles ...)` guard because CI creates that role after migrations run, mirrored in `scripts/ci/create_app_role.py` and its agreement test; and a test that a tenant session **cannot** insert into `stripe_webhook_events`, run in a transaction that is always rolled back (D-165).
 
 **Related:** Sections 7.5, 7.12, 7.15.4; review H11; D-159 (F-1), D-165, D-170.
+
+## D-174 — Retire HS256: session tokens are verified only against Supabase's published keys (founder, 2026-09-28)
+
+**Context:** since D-015 / D-088 the API verifies a session token by its `alg`: HS256 against the project's "Legacy JWT Secret" (`SUPABASE_JWT_SECRET`), ES256/RS256 against the JWKS public keys. Staging has issued ES256 all along, so the HS256 branch was accepted by the API but used by no real sign-in -- and every API test exercises it, because tests mint HS256 tokens with a local secret. The founder asked for keep-or-retire; nothing waits on it until Phase 6.
+
+**Evidence gathered before deciding (2026-09-28):**
+- Both keys DocFlow uses are the new kind: `NEXT_PUBLIC_SUPABASE_ANON_KEY` starts `sb_publishable_`, `SUPABASE_SERVICE_ROLE_KEY` starts `sb_secret_` (founder read the prefixes; values never shown). Old-format `eyJ…` keys are signed with the legacy secret and would break when it is revoked; neither is in use.
+- `SUPABASE_JWT_SECRET` was filled in, which is the only thing that made the HS256 branch live: anyone holding that value could mint a token the API accepts as any user, including the founder, and reach the Console. No real sign-in needed it.
+- The founder blanked it in the root `.env`. Checked the same day: a real password sign-in to staging returned an **ES256** token, and `GET /auth/me` with it returned **200** with the secret blank (`/home` 403 `AUTH-003` for that reviewer account, as designed; no token 401).
+
+**Decision (founder): retire HS256.**
+
+**What happens, in this order -- Phase 6, not now:**
+1. Remove the HS256 branch from `apps/api/app/deps.py`, and `SUPABASE_JWT_SECRET` from config, `.env.example` and SETUP.md.
+2. Move the tests to an ES256 key pair generated locally (`test_token_verification.py` already does this for the asymmetric path), which also clears D-163's `InsecureKeyLengthWarning` noise from short HS256 test secrets.
+3. Then, and only then, the founder revokes the legacy secret in the Supabase dashboard (**Project Settings → JWT Keys**). It goes last because it cannot easily be undone, and the code must no longer refer to it first.
+
+**Until Phase 6:** the branch still exists but is unreachable wherever `SUPABASE_JWT_SECRET` is blank -- as it now is on the founder's machine against staging. CI keeps setting a throwaway test secret because the tests still mint HS256 tokens. SETUP.md and `.env.example` now say to leave the secret blank and to use the new-format keys, so `docflow-prod` is set up the retired way from the start.
+
+**Related:** D-015, D-088, D-163, D-167; Section 7.12.
+
+## D-175 — Stage 2c as built: what D-173 did not already decide (H11, clock items #3 and #6, 2a's deferred alert)
+
+**Context:** D-173 fixed the design before any code existed. This entry records the calls made while building it, each of which a reviewer could reasonably have made differently. Migration `0029`; `docflow_core/billing_webhooks.py`; `email_intake.alert_webhook_refused`.
+
+**1. Supabase grants EXECUTE on every new `public` function to `anon` and `authenticated` -- so 0029 revokes from them too, not only from PUBLIC.** D-173 said `REVOKE EXECUTE FROM PUBLIC`. On Supabase that is not enough: its default privileges give the browser-facing roles EXECUTE on new functions in `public`, which makes a function callable from the public key through the REST API. A SECURITY DEFINER function exposed that way is exactly the thing D-173 exists to prevent. 0029 revokes from `anon`, `authenticated` and `service_role` (each only if the role exists, so CI and staging both run it), and a test asserts that neither `anon` nor `authenticated` can execute it and that no PUBLIC grant exists.
+
+**2. `webhook_access` is dropped, not narrowed, and platform admins may read the table.** No session can write `stripe_webhook_events` any more -- the function is the only writer, and a test asserts both a tenant session and the lookup session are refused. A `platform_admin_read` SELECT policy is added: the table holds event ids and types, no customer data, and being able to see what was recorded is what lets the tests (and the founder, from a SQL session) confirm an id was or was not recorded.
+
+**3. Non-subscription events are no longer recorded.** Before 2c every signed event's id was stored, including events DocFlow ignores. Recording now happens inside a tenant's session, and an ignored event has no tenant; recording it would need a second writer path, and a retry of an event that does nothing is harmless. Unmatched events (no tenant has that customer) are not recorded either, for the same reason.
+
+**4. An event without `created` is ignored and logged, not guessed at.** Every real Stripe event carries it; a signed payload without it cannot be ordered, so it is not applied. `ignored` rather than an error, because a 4xx/5xx would make Stripe retry a payload that can never succeed.
+
+**5. `unpaid` keeps `first_past_due_at` and does not start it.** The agreed rule was "not reset by unpaid". If `unpaid` arrives with no saved first notice (a missed `past_due`), the timestamp stays NULL rather than taking `unpaid`'s time: 7.15.4's cancel form already handles a missing timestamp by using now + `CURE_PERIOD_DAYS` and *flagging it*, which is more honest than silently starting the clock late.
+
+**6. A stale event is recorded as seen.** An event older than the saved state is not applied, and its id is recorded so Stripe's retries of it are no-ops. The same holds for a same-second event whose fetch was overtaken (`superseded`).
+
+**7. Outcome words changed.** The endpoint answers `applied`, `refetched`, `duplicate`, `stale`, `superseded`, `unmatched` or `ignored` (was `processed` / `duplicate` / `unmatched` / `ignored`). Only tests and logs read them.
+
+**8. The refusal alert uses a narrow flag session, `app.intake_refusal` -- a flag policy, with the flag-policy caveat.** D-173 moved Stripe off a flag policy because a flag is enforced by our code, not the database (D-159). The refusal alert follows 0017's `rollup_raise` pattern regardless, as D-171 planned: the request has no tenant, and the policies bound what the flag can do to *insert one alert type with no tenant, and its founder-alert email* -- nothing readable, nothing tenant-scoped. The worst a misuse can do is raise a spurious "webhook refused" alert. F-1 (Stage 3) moves this to a database login like the others. `test_rls_flags.py` pins the session to `email_intake.py`.
+
+**9. One open alert per refusal reason, and the alert never changes the 401.** Dedupe key `intake_webhook_refused:<reason>` over the five fixed reasons, so a probe flood is one alert per reason until acknowledged, and a misconfiguration (`not_configured`) is distinguishable from a probe (`mismatch`) at a glance. The payload is the reason word only. `alert_webhook_refused` never raises; a test breaks its session and asserts the response is still 401, and another keeps the reason list in step with `deps.check_inbound_webhook_credentials`. **Cost, named:** each refused request now makes one database round trip (an insert attempt the dedupe index refuses). Per-IP rate limiting is Phase 6; until then a flood costs the database that, and no more.
+
+**10. Tests that send refused requests clean up the alerts they raise** (`cleans_up_refusal_alerts`, applied to the 2a suite as well), removing only alerts created during the test, never ones that existed before -- otherwise every staging run would put test noise in the founder's attention panel.
+
+**What satisfies the blocking condition (D-171, RUNBOOK 2.1):** the alert exists once 0029 is applied to the database behind an intake address and this code is deployed. On staging that is when the founder applies 0029; on production, when `docflow-prod` is created (0029 is in its migrations).
+
+**Related:** D-159, D-165, D-170, D-171, D-173; review H8, H11; Sections 7.9, 7.10, 7.12, 7.15.4.
+
+## D-176 — Stripe's clock against ours: one named tolerance (300 s), enforced twice, and a future-dated event is refused (D-170 applied to the cure clock)
+
+**Context (founder's question, 2026-09-28):** 2c made `first_past_due_at` Stripe's event time. The non-payment effective date is that time plus `CURE_PERIOD_DAYS` (0 today, D-125), and the suspend sweep compares the effective date with the database's `now()`. That is a comparison across two clocks, and D-170 requires a named tolerance with its cost stated and a test -- or a recorded reason none is needed. D-175 had neither.
+
+**Where the two clocks meet, and where they don't:**
+- **The ordering guard compares Stripe's time only with Stripe's time** (`stripe_status_event_at` is itself a Stripe `created`). One clock; no tolerance is needed, and none is applied.
+- **The cure clock** starts at a Stripe time and ends when the database's clock passes it. Two clocks.
+- **An event stamped in the future** would be saved as `stripe_status_event_at`, and every genuine event after it would be "stale" until our clock caught up -- silently freezing that tenant's billing state. Two clocks.
+
+**The tolerance: `STRIPE_CLOCK_TOLERANCE_SECONDS = 300`** (`constants.py`, with the other thresholds). It is not a guess: every accepted webhook already proves Stripe's clock is within 300 s of ours, because the signature carries Stripe's send time and `verify_webhook_signature` refuses one stamped further than that in either direction (tested since 2c, both directions). The signature check now reads its default from this constant, and a static test holds the two together.
+
+**Enforced twice:**
+1. At the signature (existing), on the app's clock.
+2. At the event time, **on the database's clock** (D-170): inside the tenant's transaction, before the function runs, an event whose `created` is more than 300 s after the database's `now()` is **not applied and not recorded** -- so a corrected redelivery can still apply -- and a high-severity `stripe_event_future_dated` founder alert is raised (one open per tenant), because that tenant's billing state is now waiting on someone. Outcome `future_dated`.
+
+**Cost, stated:** a non-payment effective date can be up to five minutes earlier or later than Stripe's exact instant. With `CURE_PERIOD_DAYS = 0` that is five minutes on a date the founder confirms by hand in the cancel form (7.15.4); the founder may move it later, never earlier, and the rule is unchanged. No tolerance is added to the effective-date comparison itself: the skew is already bounded by the check above, and widening the sweep's comparison would only move the same five minutes around.
+
+**Tests:** an event 10 minutes past the tolerance is `future_dated`, leaves status and `stripe_status_event_at` untouched, is not recorded, and raises one alert; an event 2 minutes inside it applies; the signature's default tolerance equals the constant.
+
+**Also recorded here -- where 0029 goes beyond the founder's 2c checklist item 4** ("the only new object is the SECURITY DEFINER function"). 0029 is applied on staging; none of these is silent:
+- **`tenants.stripe_status_event_at`** -- the column the ordering guard needs. Agreed in BUILD-STATUS ("a NULL `stripe_status_event_at` applies the first event").
+- **`intake_refusal_raise` / `intake_refusal_enqueue`** policies on `founder_alerts` / `email_outbox` -- 2a's deferred alert, agreed in the Stage 2 row and D-171 (why the backup covers those two tables).
+- **`platform_admin_read`** on `stripe_webhook_events` -- **not in the agreed plan.** A SELECT policy for platform admins only, no tenant policy of any kind (the checklist's actual constraint). It lets tests and the founder see whether an id was recorded. If the founder wants the table readable by nothing, a follow-up migration drops it and the tests check recording through replays (`duplicate`) instead.
+- **REVOKE from `anon`, `authenticated`, `service_role`**, in addition to PUBLIC -- Supabase's default grants would otherwise expose the function through the REST API (D-175 §1).
+- The grant-agreement test now lives in `test_ci_guards.py`, as the checklist asked; the other static checks stay in `test_stripe_events.py`.
+
+**Related:** D-125, D-170, D-173, D-175; Section 7.15.4.
