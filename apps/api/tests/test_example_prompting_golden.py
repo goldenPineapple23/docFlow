@@ -46,7 +46,7 @@ from docflow_core.extraction import (
     extract_document,
 )
 
-from tests.test_golden_fixture import _assert_matches_section_8_3
+from tests.test_golden_fixture import _assert_matches_section_8_3, report_live_cost
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SAMPLE_PO_PATH = Path(__file__).parent / "fixtures" / "golden" / "sample_po.txt"
@@ -300,10 +300,11 @@ def _live_client():
 
 
 @pytest.mark.live_api
-def test_live_golden_fixture_still_extracts_exactly_with_examples():
+def test_live_golden_fixture_still_extracts_exactly_with_examples(capsys):
     examples = load_examples()
     text_value = SAMPLE_PO_PATH.read_text(encoding="utf-8")
     result = extract_document(_live_client(), build_text_content(text_value), examples=examples)
+    report_live_cost(capsys, "golden_with_examples", result)
 
     _assert_matches_section_8_3(result)
     _assert_no_example_value_leaked(result, examples, EXPECTED_GOLDEN_PATH)
@@ -311,10 +312,11 @@ def test_live_golden_fixture_still_extracts_exactly_with_examples():
 
 
 @pytest.mark.live_api
-def test_live_contamination_no_example_value_appears():
+def test_live_contamination_no_example_value_appears(capsys):
     examples = load_examples()
     text_value = CONTAMINATION_PO_PATH.read_text(encoding="utf-8")
     result = extract_document(_live_client(), build_text_content(text_value), examples=examples)
+    report_live_cost(capsys, "contamination", result)
 
     _assert_contamination_po(result)
     _assert_no_example_value_leaked(result, examples, EXPECTED_CONTAMINATION_PATH)

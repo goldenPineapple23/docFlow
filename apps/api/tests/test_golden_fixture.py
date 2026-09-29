@@ -94,6 +94,21 @@ class _FakeAnthropicClient:
         self.messages = _FakeMessagesResource(response_payload)
 
 
+def report_live_cost(capsys, test_name: str, result) -> None:
+    """One line per live call: model, tokens, estimated cost and latency, so a
+    checkpoint run reports what it spent (founder, 2026-09-29). Printed before
+    the asserts, so a failed call still reports; `capsys.disabled()` shows it
+    in a plain `pytest -m live_api` run, without `-s`."""
+    with capsys.disabled():
+        print()
+        print(
+            f"LIVE COST {test_name}: model={result.model_id} ok={result.ok} "
+            f"input_tokens={result.input_tokens} output_tokens={result.output_tokens} "
+            f"example_input_tokens={result.example_input_tokens} "
+            f"est_cost_usd={result.est_cost_usd} latency_ms={result.latency_ms}"
+        )
+
+
 def _assert_matches_section_8_3(result) -> None:
     assert result.ok, result.error
     header = result.header
@@ -192,7 +207,7 @@ def test_recorded_response_matches_section_8_3():
 
 
 @pytest.mark.live_api
-def test_live_extraction_matches_section_8_3():
+def test_live_extraction_matches_section_8_3(capsys):
     """
     Makes one real call to the pinned extraction model. Excluded from the
     default test run (see apps/api/pyproject.toml addopts); run explicitly
@@ -210,5 +225,6 @@ def test_live_extraction_matches_section_8_3():
     sample_text = SAMPLE_PO_PATH.read_text(encoding="utf-8")
     content = build_text_content(sample_text)
     result = extract_document(client, content)
+    report_live_cost(capsys, "golden", result)
 
     _assert_matches_section_8_3(result)
