@@ -45,6 +45,10 @@ ALERT_TYPES: dict[str, str] = {
     "tenant_entered_pending_deletion": "A tenant entered the pending-deletion window",
     "tenant_ready_to_delete": "A tenant's deletion window has elapsed",
     "stripe_cancel_failed": "Cancelling a tenant's Stripe subscription failed",
+    "exports_not_finishing": "A tenant's exports keep stopping before they finish",
+    "reactivation_invoices_to_review": (
+        "A reactivated tenant's old subscription has invoices to collect, void or refund"
+    ),
     # Slice 5.7 (Section 7.16)
     "allowance_reached": "A tenant used its whole monthly allowance",
     "abuse_ceiling_tripped": "A tenant hit the abuse ceiling; new documents are held",
@@ -189,14 +193,20 @@ def raise_for_failure(
     tenant_id: UUID,
     error_code: str | None,
     document_id: UUID | None = None,
+    cause: str | None = None,
+    detail: dict[str, Any] | None = None,
 ) -> bool:
     """
     Raise the alert a failure's catalog message promises, if it promises one
     (D-145). Returns False when the code promises nothing, or when an open
-    alert for the same tenant, code and day already exists: a flood of broken
-    files is one alert, not a thousand.
+    alert for the same tenant, code (and cause, when given) and day already
+    exists: a flood of broken files is one alert, not a thousand.
 
-    The payload is the code and ids only (Section 7.10: it is emailed).
+    `cause` splits one code's alerts by why it happened -- DOC-022's
+    `timeout` against `worker_stopped` (Stage 3a) -- so the first cause of
+    the day can't hide the other. `detail` adds numbers to the payload.
+
+    The payload is codes, ids and numbers only (Section 7.10: it is emailed).
     """
     alert_type = FAILURE_ALERTS.get(error_code or "")
     if alert_type is None:
@@ -205,6 +215,10 @@ def raise_for_failure(
     payload: dict[str, Any] = {"error_code": entry.code}
     if document_id is not None:
         payload["first_document_id"] = str(document_id)
+    if cause is not None:
+        payload["cause"] = cause
+    if detail:
+        payload.update(detail)
     # Its own savepoint: the caller is recording the failure itself (a
     # refusal, a hold), and an alert that can't be written must never undo
     # that record. It is logged instead, with the code and ids only.
@@ -216,7 +230,7 @@ def raise_for_failure(
             severity=entry.severity,
             tenant_id=tenant_id,
             payload=payload,
-            dedupe_key=f"{alert_type}:{tenant_id}:{entry.code}",
+            dedupe_key=f"{alert_type}:{tenant_id}:{entry.code}" + (f":{cause}" if cause else ""),
             dedupe_per_utc_day=True,
         )
     except Exception:

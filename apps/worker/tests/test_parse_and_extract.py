@@ -134,6 +134,18 @@ class _FakeSession:
             return _FakeResult({"id": "claimed"})
         return _FakeResult(None)
 
+    def begin_nested(self):
+        """The savepoint around the digest note (Stage 3a)."""
+        return _FakeSavepoint()
+
+
+class _FakeSavepoint:
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
 
 def _to(session, status):
     """The status changes the task asked for (document_status.transition)."""
@@ -333,8 +345,16 @@ def _drive_successful_task(monkeypatch, *, buyer_id, matcher):
     monkeypatch.setattr(
         mod.founder_alerts, "raise_alert", lambda _session, **kwargs: session.alerts.append(kwargs)
     )
+    session.digest_notes = []  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        mod.review_digest, "note_needs_review", lambda _session, tid, did: session.digest_notes.append(did)
+    )
 
     mod.parse_and_extract(str(uuid4()), str(uuid4()))
+    # Every drive is a success: a stub missing something the task reads must
+    # fail here, not turn quietly into a failed document (Stage 3a CI lesson).
+    assert _to(session, "needs_review") and not _to(session, "failed"), _to(session, "failed")
+    assert len(session.digest_notes) == 1
     return session
 
 
@@ -661,3 +681,4 @@ def test_a_planning_failure_means_no_examples_never_a_lost_document(monkeypatch)
 class _NoMatches:
     lines_considered = 0
     lines_matched = 0
+    rules_applied: dict = {}

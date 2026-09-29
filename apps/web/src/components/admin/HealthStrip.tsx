@@ -17,10 +17,20 @@ const LINKS: Array<{ label: string; href: string; what: string }> = [
   { label: "Stripe", href: "https://dashboard.stripe.com/", what: "billing" },
 ];
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: "warn" | "bad" }) {
+function Stat({
+  label,
+  value,
+  tone,
+  testId,
+}: {
+  label: string;
+  value: string;
+  tone?: "warn" | "bad";
+  testId?: string;
+}) {
   const colour = tone === "bad" ? "text-red-700" : tone === "warn" ? "text-amber-700" : "text-slate-900";
   return (
-    <div className="min-w-[8rem]">
+    <div className="min-w-[8rem]" data-testid={testId}>
       <dt className="text-[11px] uppercase tracking-wide text-gray-500">{label}</dt>
       <dd className={`mt-0.5 text-lg font-semibold tabular-nums ${colour}`}>{value}</dd>
     </div>
@@ -85,6 +95,14 @@ export function HealthStrip({ data, onRecomputed }: { data: Dashboard; onRecompu
           label="Model errors (1h)"
           value={health.model_calls_hour ? `${failureRate}%` : "—"}
           tone={failureRate >= 20 ? "bad" : failureRate > 0 ? "warn" : undefined}
+        />
+        {/* EXP-009 carries no alert per export, so the day's count lives here
+            (Stage 3a); a tenant past the daily threshold also raises one. */}
+        <Stat
+          label="Exports stopped today"
+          value={`${health.exports_not_finished_today}`}
+          tone={health.exports_not_finished_today > 0 ? "warn" : undefined}
+          testId="exports-not-finished"
         />
         <Stat label="AI spend today" value={usd(health.spend_today)} />
         <Stat label="Yesterday" value={usd(health.spend_yesterday)} />

@@ -100,6 +100,7 @@ async function stub(page: Page, over: { stale?: boolean } = {}) {
           needs_review: 7,
           model_calls_hour: 50,
           model_failures_hour: 1,
+          exports_not_finished_today: 4,
           spend_today: "1.2300",
           spend_yesterday: "2.3400",
           last_document_processed_at: new Date().toISOString(),
@@ -138,6 +139,8 @@ test("the home page answers healthy, who needs attention, and how business is do
   await expect(strip).toContainText("answering");
   await expect(strip).toContainText("2%"); // 1 failure in 50 calls
   await expect(strip).toContainText("$1.23");
+  await expect(page.getByTestId("exports-not-finished")).toContainText("Exports stopped today");
+  await expect(page.getByTestId("exports-not-finished")).toContainText("4");
   await expect(strip.getByRole("link", { name: "Sentry" })).toBeVisible();
   await expect(page.getByTestId("rollup-state")).not.toContainText("may be behind");
 

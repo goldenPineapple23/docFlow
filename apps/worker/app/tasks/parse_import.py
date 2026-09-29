@@ -13,10 +13,11 @@ from __future__ import annotations
 from uuid import UUID
 
 from docflow_core.catalog_import import run_parse
+from docflow_core.constants import IMPORT_TASK_TIME_LIMIT_SECONDS
 
 from app.celery_app import celery_app
 
 
-@celery_app.task(name="docflow.parse_import")
+@celery_app.task(name="docflow.parse_import", time_limit=IMPORT_TASK_TIME_LIMIT_SECONDS)
 def parse_import(tenant_id: str, import_id: str) -> str:
     return run_parse(UUID(tenant_id), UUID(import_id))

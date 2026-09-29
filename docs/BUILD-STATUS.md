@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-09-29** (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29, 3a next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
+commit as the slice. Statuses below are as of **2026-09-29** (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a built (D-179), migration `0030` applied to staging 2026-09-29 (backup `backup_0030` first) and the staging suites green**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -186,7 +186,7 @@ are D-149 – D-153.
 | 0 | Safety net: push, CI green, `main` protected (done before 5.5 began); **CI database and the unapproved-skip check** (H7 part 2); core type-checked and pinned in CI | DONE (PR #3, merged 2026-09-25) | D-148 |
 | 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents. **Plus the two defects the founder's walkthrough found on the real stack (2026-09-27): the review screen said nothing when an edit raised a check (D-166), and a session token one second ahead of this clock was refused as "signed out" (D-167).** | **CHECKPOINT DONE 2026-09-26, awaiting "go"** (`CHECKPOINTS.md`: C1, H1, H3, M1, M3, H2, M4, M5 all closed). 1a DONE (PR #4, D-156); 1b DONE (PR #6, migration `0027`, D-158 – D-160); 1c DONE (PR #7: golden rename, M1 streaming measured, H2/M4/M5, one read budget, every paid call costed, Audit tab on one clock; D-159, D-161 – D-164); named system actors DONE (PR #8, migration `0028` applied and verified on staging 2026-09-26: 3 system actors, no blank lifecycle actor, idle-transaction cap 5 min; D-165); Stage 1 checkpoint run on `b04f16d`; walkthrough fixes DONE (D-166 the review screen, D-167 clock skew, D-169 the line table marking the rows and numbers a check is about, and the live end-to-end suite that catches this class of defect) | D-149, D-154 – D-169 |
 | 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events (record the event in the same transaction as its effect; ignore an event older than the state already saved; **an event in the same second as the saved state can't be ordered by `created` (one-second resolution), so it re-fetches the subscription from Stripe and saves that, never guesses** -- a webhook-side fetch, not a page-load one, so within 7.15.3 (founder, 2026-09-26); the Phase 6 plan-change reconcile reuses this guard). **Plus two clock items folded in from the D-170 sweep:** `first_past_due_at` written from Stripe's event time rather than the app clock, and tests that a stale and a future-dated Stripe webhook signature are both refused (the 300 s tolerance is real but untested today). **Also carries 2a's deferred `intake_webhook_refused` alert** and the `founder_alerts` insert policy it needs (the `rollup_raise` pattern from 0017), since `0029` is the migration already planned (D-171). **2a (H8) DONE (PR #14):** the inbound webhook now authenticates the provider with Postmark's HTTP Basic credentials, checked before the payload is parsed and before the token is resolved; the per-tenant token identifies the tenant and no longer authenticates the request. A blank credential refuses all inbound mail on purpose (D-171), so RUNBOOK 2.1's cutover order is a requirement: credentials set and deployed, *then* Postmark pointed at the URL carrying them. A refusal logs which reason it was, and **raises a high-severity `intake_webhook_refused` alert in 2c, not 2a** -- a tenant-less alert needs its own RLS insert policy, which needs a migration, and 2c already has `0029`; `test_rls_flags.py` caught the attempt to raise it from the router and located the right home (D-171). **Blocking condition (founder, 2026-09-27): credential enforcement must not go live on an address real customers send to until 2c's alert lands.** A refused request is, from outside, either a misconfigured cutover or an attacker, and the first means no mail arrives at all -- so until the alert exists, the only signal is a log line nobody is watching. Staging and a test address are fine; the RUNBOOK 2.1 cutover on a production intake address waits for 2c. The IP allowlist is log-only with no enforcing branch (D-155); RUNBOOK 2.3 is the confirm-then-enforce procedure and 2.2 the rotation procedure. 12 tests; 10 of them fail with the credential check disabled **2b (H10) DONE (PR #15):** a suspended or pending-deletion tenant can no longer upload -- refused with a new `INT-010` before the file is validated or stored, so it costs nothing; read and export stay open, asserted against `/home`, the order history, one order in full and its export history, in both blocked states (7.14). `cancelling` deliberately does not block. One predicate, `intake_gate.blocks_new_intake`, is shared by both intake channels so the lifecycle answer cannot drift -- which is how the defect existed. Two departures from the review's proposed fix, reasoned in D-172: a new catalog entry rather than reusing INT-006 (whose reader is a buyer whose mail bounced, not the tenant's own user), and the gate reads lifecycle status rather than `intake_address_active` (which is also false before go-live). The refused attempt is recorded in `intake_rejections` (the file is not), so a customer who keeps trying is visible -- a retention signal, not only an audit one. Three drift tests beyond the shared predicate: both real endpoints asserted to agree across four states, a structural test forbidding the status pair inside any condition, and the invariant that the suspend transition sets `status` and clears `intake_address_active` together (they are different columns and only the transition keeps them in step). 14 tests; 3 fail with the gate disabled **2c (H11, clock items #3 and #6, 2a's deferred alert) BUILT, migration `0029` not yet applied to staging:** Stripe events go through `record_stripe_subscription_event()`, a SECURITY DEFINER function called inside the tenant's own session, which records the event id in the same transaction as the status write, applies the ordering guard (older events recorded, not applied; a NULL saved time applies), and cross-checks the customer against the session's tenant. A same-second event fetches Stripe's state with no transaction open and re-checks the guard before saving. `first_past_due_at` is Stripe's event time and `unpaid` no longer resets it. No session can write `stripe_webhook_events` any more; EXECUTE is revoked from PUBLIC **and from Supabase's `anon`/`authenticated`** (which get it by default -- found while building, D-175). A refused inbound webhook now raises a high-severity `intake_webhook_refused` alert, one per reason, never changing the 401 -- **which satisfies 2a's blocking condition once 0029 is applied** (RUNBOOK 2.1). Stripe's clock against ours has one named tolerance, `STRIPE_CLOCK_TOLERANCE_SECONDS` (300 s), enforced at the signature and, on the database's clock, at the event time: an event stamped beyond it is not applied and alerts the founder (D-176). 29 new API tests (22 webhook, 7 refusal alert) plus 5 static core tests | 2a, 2b DONE; **2c DONE** (PR #18; `0029` applied to staging 2026-09-28; on `b540433`: API 477 passed / 3 deselected, core 547 passed, worker 107 passed; CI green); **2d (H9) DONE** (PR #20; lost-device drill passed on staging 2026-09-28, D-177): the Console needs an aal2 session (AUTH-006); seven destructive actions -- hard delete, clear quarantine, cancel, address rotation, buyer merge, go live, tier change -- need a TOTP challenge under 5 min old (AUTH-007, 30 s GoTrue allowance); a wrong code is AUTH-008, mirrored in the web app and kept in step by a test; `CONSOLE_MFA_ENFORCED` ships off, with a startup warning, a Console banner and a founder alert while off; enrol and add a backup at /admin/security; RUNBOOK section 4. No migration. 24 API tests (11 fail with the checks disabled), 4 Vitest, 4 e2e. **Founder enrolled 2026-09-28: two authenticators, both verified** (checked through the Supabase admin API). The backup first failed: Supabase refuses a second factor with the same name (422), and both were named after the date -- fixed in PR #21 (each new authenticator gets a name not already taken; 2 Vitest). A failed enrolment now shows its own catalog entry, **`AUTH-009`** (PR #22), mirrored in the web app and drift-tested like AUTH-008, instead of the generic "We couldn't reach DocFlow" (founder, 2026-09-28, who also set its next-step wording; 2 e2e). **The e2e suite now fails any test whose browser reaches a host other than this machine** (`apps/web/e2e/networkGuard.ts`, every spec imports it and a check fails the suite if one doesn't) -- one AUTH-009 test draft had reached real staging; shown failing with a test pointed at staging. **Second lost-device drill with enforcement on PASSED 2026-09-28 (D-178)**: backup-only sign-in, stale step-up refused, fresh one accepted, dashboard removal leaving only enrolment, re-enrol; drill admin revoked and deleted. **`CONSOLE_MFA_ENFORCED` is on** for the local API (`.env` and the running process agree). A CI timing race in `test_console_mfa.py` was found and fixed (D-178) | D-151, D-170, D-171, D-172, D-173, D-175, D-176, D-177 |
-| 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation (**host settled, D-150: Fly.io, each parse process in its own network namespace; proof spike PASSED 2026-09-28. Carried in from the spike: hide `/.fly` and `/sys` in a mount namespace, and re-run the probe against the real Upstash and API**), H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) -- **including a login for the Stripe webhook that holds EXECUTE on 2c's event function, with EXECUTE then revoked from `docflow_app`**, which closes the residual risk D-173 names. **Also moves with it (founder, 2026-09-28): 0029's `platform_admin_read` policy on `stripe_webhook_events`** -- a flag policy on `app.is_platform_admin`, so it goes to real login separation with D-173's function grant; likewise 0029's `app.intake_refusal` policies (D-175 §8). **H6 note: signed URLs become cross-clock** -- minted and verified on the app clock today (`signed_urls.py`), one clock because one service does both; on Supabase Storage the expiry is Supabase's clock, so D-170 applies (a named tolerance and a test, or the expiry decided in one place) -- **settled 2026-09-29: the expiry is decided in one place, our own signed links with the API streaming from Storage.** **Also carried from the Stage 1 checkpoint (D-163):** a run row before the model call, so a worker killed mid-call still records the call's cost | **IN PROGRESS** -- design agreed 2026-09-29 ("Stage 3 -- agreed with the founder before building", below); order 3a -> 3e; 3a's specifics and the D-163 item's placement await the founder | D-003, D-150, D-159, D-163, D-170, D-173 |
+| 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation (**host settled, D-150: Fly.io, each parse process in its own network namespace; proof spike PASSED 2026-09-28. Carried in from the spike: hide `/.fly` and `/sys` in a mount namespace, and re-run the probe against the real Upstash and API**), H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) -- **including a login for the Stripe webhook that holds EXECUTE on 2c's event function, with EXECUTE then revoked from `docflow_app`**, which closes the residual risk D-173 names. **Also moves with it (founder, 2026-09-28): 0029's `platform_admin_read` policy on `stripe_webhook_events`** -- a flag policy on `app.is_platform_admin`, so it goes to real login separation with D-173's function grant; likewise 0029's `app.intake_refusal` policies (D-175 §8). **H6 note: signed URLs become cross-clock** -- minted and verified on the app clock today (`signed_urls.py`), one clock because one service does both; on Supabase Storage the expiry is Supabase's clock, so D-170 applies (a named tolerance and a test, or the expiry decided in one place) -- **settled 2026-09-29: the expiry is decided in one place, our own signed links with the API streaming from Storage.** **Also carried from the Stage 1 checkpoint (D-163):** a run row before the model call, so a worker killed mid-call still records the call's cost | **IN PROGRESS** -- design agreed 2026-09-29 ("Stage 3 -- agreed with the founder before building", below); order 3a -> 3e. **3a BUILT** (D-179; branch `phase55/stage3a-task-limits`, migration `0030`), including reactivation option C; `0030` applied to staging 2026-09-29 after the founder's backup (`backup_0030`: documents, tenants, RLS on). Staging suites on `621141f`: worker 134 passed / 2 skipped (the two prefork tests, Linux only; they pass in CI), API 518 passed / 1 failed / 3 deselected, core 564 passed. The one API failure, `test_a_failed_tenant_creation_rolls_back_everything_including_the_file_move`, counts every tenant on staging and saw the count fall from 20 to 19 during the test -- something else was writing to staging at that moment; a failed creation cannot remove a tenant. Rerun alone: the file 13 passed, the test 3 of 3 passed. D-163 moved to 3c | D-003, D-150, D-159, D-163, D-170, D-173 |
 | 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items. **Also (founder, 2026-09-29): audit the ~23 broad `except` blocks on the document path.** Each one turns *any* exception into a data outcome -- DOC-005 (parsing, conversion), DOC-021 (saving, validation) or VAL-016 (buyer identification, matching, duplicate detection) -- so a real bug in our code can be shown as a problem with the customer's file. After the audit only the exceptions each block expects get a catalog code; anything else fails loudly as our error. Found while designing 3a's timeouts, not in 3a's scope | PLANNED | D-152 |
 | 5 | Remaining findings, doc/code contradictions, proposed CLAUDE.md additions; **audit every test that counts a whole table** (the `deal7` pattern) and move each one to data only that test can see, after which staging suites may run concurrently again (RUNBOOK 1.4); **robust test cleanup** (every test that creates data cleans it up in a fixture or `finally`, so a failing test still leaves nothing); **a staging sweep script** that lists tenants named "Acme Test ..." older than a day, with what each holds, and deletes one only on the founder's per-action OK (a stopped run always strands something); **triage the API suite's warnings** (425 on the 2026-09-26 run): list each kind, say which are harmless library deprecations and which point at a real problem in our code -- listed, not fixed (triage done 2026-09-26, D-163: all 439 are test-only; 438 are PyJWT's `InsecureKeyLengthWarning` from short test signing keys); **use a test JWT secret of at least 32 bytes** to clear that noise (founder); **a test that expects the database to refuse a write** must run in a transaction that is always rolled back, or on data it owns, so it can't leave a row behind when the refusal doesn't happen (D-165 incident); **two audit-trail findings from the second lost-device drill (D-178; founder: fixed before any pilot, with tests; design settled 2026-09-28)** -- (1) refused Console and step-up attempts are recorded server-side (AUTH-006/007); AUTH-008 is never browser-reported, and Supabase's database audit log was checked and records nothing on this project, so that gap is documented and Supabase's rate limit covers wrong-code guessing (its behaviour measured with the test account at build time); 5 refusals in 15 min for one account raise one high-severity founder alert per window, set only after measuring what a normal sign-in and step-up produce; (2) the outcome is a second, append-only `admin_actions` row referencing the intent row (succeeded, or failed with its code; no migration), and an intent with no outcome is shown in the Console as crashed midway, never as done; *low priority, not a blocker:* **count rows in spreadsheet and CSV orders for free before extraction** (no model call needed), so an oversized order is caught before a paid read (founder, D-163) | PLANNED | D-160, D-163, D-165, D-178 |
 
@@ -300,8 +300,36 @@ Agreed 2026-09-29 (founder's answers to my proposal):
     a sweep over the cap stops taking tenants, and the next tick picks up the
     rest.
   - **Exports left `pending` and imports left `parsing`** are marked failed
-    by the stuck sweep, with a catalog code. **The codes and their wording go
-    to the founder before they are added.**
+    by the stuck sweep, with a catalog code. **Approved and built
+    (founder, 2026-09-29):** **EXP-009** "This export didn't finish"
+    (tenant) and **IMP-009** "Reading this file didn't finish" (founder;
+    imports are Console-only, confirmed: the import task is enqueued only
+    from `admin.py`). **30 minutes from creation**, not the 5-minute job
+    limit, because `pending` includes waiting in the queue. No alert per
+    export; the day's EXP-009 count is on the health strip ("Exports stopped
+    today"), and **more than 3 in a UTC day for one tenant raises one
+    `exports_not_finishing` alert** that day. A late export no longer marks
+    the document `exported` after the sweep has failed it. D-179.
+  - **Reactivation and a cancel that never went through (founder:
+    option C, 2026-09-29).** Correction: reactivation already reuses the
+    tenant's Stripe subscription unless Stripe has it `canceled` or
+    `incomplete_expired` (`external_services.start_subscription`); it never
+    creates a second one alongside a live one. **Decided and built
+    (founder, 2026-09-29):** reuse any status Stripe hasn't ended (`active`,
+    `trialing`, `past_due`, `unpaid`). When an old subscription is reused
+    after a suspension, one high-severity
+    `reactivation_invoices_to_review` alert lists its invoices in two
+    sections, each with amounts and a total: **"Before suspension (service
+    delivered, collect)"** (open invoices) and **"During suspension (void
+    drafts/open, refund paid)"** (draft, open and paid ones). DocFlow changes
+    nothing at Stripe. If Stripe's list can't be read, the alert says so
+    and the reactivation still goes ahead. **Also fixed:** go-live and
+    reactivation shared one Stripe idempotency key per tenant, so a
+    reactivation within 24 hours of go-live was refused. Each action now has
+    its own key. Tests: no second subscription is created, the alert's
+    sections and totals, and reactivating within 24 hours of go-live
+    succeeds. **Two partial indexes on `exports`** (pending, and EXP-009)
+    were added to `0030`. D-179.
   - Rollup, scheduled jobs and the stuck sweep leave nothing that needs
     fixing: the rollup is overwritten by its next run, a job's writes commit
     with its "done" mark, and a repeated enqueue is harmless.
@@ -606,6 +634,151 @@ per document for:
 Report them the same way (mean, median and max, by type), with the models
 used and every call in the total. This needs paid runs, so its budget goes
 to the founder first.
+
+**Card billing with a 7-day trial -- required before the first pilot.
+DECIDED (founder, 2026-09-29): D1, D3, D4, D5 and D6 as recommended below;
+D2 split by customer type (below). D4's banner wording goes to the founder
+before it is added. Build order: after the 3a PR merges and before 3b,
+including a walkthrough in Stripe test mode.** The founder's pilot model is "customer signs, 7 days free, then Stripe charges
+their card automatically". Today nothing charges a card:
+- Go-live creates a `send_invoice` subscription with a 7-day trial (D-125).
+  At the trial's end Stripe emails an invoice (month one plus the setup fee,
+  D-113), payable within `INVOICE_DAYS_UNTIL_DUE`.
+- The customer pays it on Stripe's invoice page. Unpaid, the subscription
+  goes `past_due` only when the due date passes.
+- Suspension is always the founder's decision: a `non_payment` cancel whose
+  effective date is the first `past_due` notice plus `CURE_PERIOD_DAYS` (0,
+  D-125).
+
+What switching to `charge_automatically` would take (facts from Stripe's
+documentation, read 2026-09-29; the items marked *verify* get checked in test
+mode before building):
+
+1. **Collecting the card.** There is no public signup (Section 3). The owner
+   exists from tenant creation and is invited. Card details never touch
+   DocFlow: Stripe's hosted pages collect them, and Stripe saves the card on
+   the tenant's existing Stripe customer. Two hosted options, used together:
+   - **Stripe Checkout in setup mode** for the first card. DocFlow creates the
+     session server-side and sends the link with the invite or the go-live
+     email. A webhook (`checkout.session.completed`) sets the card as the
+     customer's default and records it on the tenant (*verify* the exact
+     event fields).
+   - **Stripe's Customer Portal** for later changes: an "Update card" link on
+     the owner's billing page (owner and admin only). The portal must first
+     be configured once in the Stripe dashboard.
+   - **Decision D1: when is a card required?**
+     - (i) **Recommended: before Go live is enabled.** Step 9's gate gains
+       "card on file", so every trial ends with a card to charge.
+     - (ii) The trial starts without a card. Stripe supports that, and ends
+       the trial by pausing or cancelling the subscription if no card has
+       been added. DocFlow would need a "trial ended with no card" alert, and
+       its handling of a `paused` subscription.
+2. **The trial.** Unchanged: `trial_end` 7 days after go-live. Stripe can
+   send its own trial-ending reminder, and emits
+   `customer.subscription.trial_will_end` three days before. The
+   subscription is `trialing` until the first successful charge, then
+   `active`. MRR already shows trials beside it, not in it (D-135).
+3. **The setup fee. Decision D2 -- decided (founder, 2026-09-29): it depends
+   on the customer.** Both paths:
+   - **Founding customers: charged with month one when the trial ends.**
+     - The card page is Stripe Checkout in **setup mode**: it saves the card
+       and charges nothing.
+     - At go-live the setup fee is added as a pending invoice item, exactly as
+       today. Stripe puts it on the first invoice at the trial's end and
+       charges it with month one, in one charge.
+     - If that charge fails, the normal failed-payment path applies (item 4).
+   - **Standard customers: charged at signing.**
+     - "Signing" is the customer completing the card page DocFlow sends them.
+       That page is Stripe Checkout in **payment mode**, for the tier's setup
+       fee, and it saves the same card for later charges (*verify* the exact
+       parameters in test mode).
+     - A webhook records that the fee is paid and the card is on file.
+     - At go-live the subscription starts with the 7-day trial and **no**
+       setup-fee item, because it's already paid.
+     - A declined card: Stripe's page tells the customer, and nothing is
+       charged or saved. The same link can be used again, or re-sent.
+   - **What this changes in the flow:**
+     - Founding or standard has to be known when the card page is sent, not
+       only at go-live, where the founding choice is made today. The Console
+       action that sends the card link asks for it, and the go-live form shows
+       what was chosen.
+     - The go-live gate (D1) is "card on file" for founding customers, and
+       "card on file and setup fee paid" for standard customers. Either gate
+       is met by `invoiced_manually`, which stays available for both.
+     - The fee amount always comes from the tenant's tier version, never
+       typed in (Section 7.15.2).
+   - **For the founder, not blocking:** if a standard customer pays at
+     signing and never goes live, any refund is the founder's decision,
+     made in Stripe. DocFlow does nothing automatically.
+4. **When a charge fails.** The subscription goes `past_due` on the **first**
+   failed charge. That's day 7, not day 22 as with invoices due in 15 days.
+   - **Retries:** Stripe retries on the retry schedule set in the dashboard.
+   - **Customer emails:** Stripe can email the customer about a failed charge
+     or an expiring card (dashboard settings). For a card that needs 3D
+     Secure off-session, it can email a link to authenticate.
+   - **After the final retry**, Stripe does what the dashboard says: cancel,
+     mark `unpaid`, or leave `past_due`. **It must not be "cancel".** A
+     Stripe-side cancel bypasses DocFlow's lifecycle and leaves an active
+     DocFlow tenant with no billing. This is already an open item: set it to
+     "leave past due" before the first real customer.
+   - **The founder sees** the existing `stripe_subscription_past_due` alert,
+     as today.
+   - **Decision D4: what the tenant sees.** Today, nothing in the product.
+     Proposed: a banner for owners and admins while the subscription is
+     `past_due`: the last payment didn't go through, update your card
+     (portal link). It needs a new catalog entry, whose wording goes to the
+     founder first.
+   - **Decision D3: when suspension can start.** Unchanged in mechanism: the
+     founder confirms a `non_payment` cancel. But with `CURE_PERIOD_DAYS = 0`
+     the computed date is the first failed charge, while Stripe is still
+     retrying. **Recommended: set `CURE_PERIOD_DAYS` to cover the retry
+     window**, e.g. 14 days; the ToS placeholder is 15.
+5. **How it meets what 3a built:**
+   - **Suspension's cancel:** cancelling a subscription also stops Stripe
+     collecting its unpaid invoices (documented), so no retry charges a
+     suspended customer. **An owed cancel matters more with cards:** until it
+     goes through, Stripe charges the card, not just emails an invoice. The
+     sweep retries it every tick (D-179), and the reactivation invoice alert
+     lists anything charged.
+   - **Reactivation reusing a live `past_due` subscription:** Stripe keeps
+     retrying its open invoices. **The card may be charged for the
+     before-suspension invoices straight after reactivation.** The alert
+     lists them. If the founder wants them voided first, that's done in
+     Stripe before clicking Reactivate.
+   - **Reactivation with a new subscription** (the old one cancelled): the
+     saved card stays on the Stripe customer (cancelling a subscription
+     doesn't remove it). With no trial on reactivation (D-125), the first
+     month is charged at once.
+   - **Decision D5: what if that first charge fails?**
+     - **Recommended: refuse the reactivation.** Stripe's
+       `payment_behavior=error_if_incomplete` (*verify*) makes the create
+       fail. The tenant stays suspended, and the founder sees a catalog
+       message saying the card was declined.
+     - The alternative, an `incomplete` subscription on an active tenant,
+       would lapse to `incomplete_expired` after 23 hours.
+6. **Decision D6: can both methods coexist, per tenant?** Yes.
+   `collection_method` belongs to each Stripe subscription, not the account.
+   A subscription can be switched later (only invoices created after the
+   switch use the new method, and it needs a default card first).
+   - **Recommended:** a `billing_method` on the tenant (`card` | `invoice`),
+     chosen at go-live, with card the default for pilots. Invoice billing
+     stays for a customer who pays by bank transfer.
+   - Reuse, the owed cancel and the invoice alert work the same for both.
+7. **What building it touches:**
+   - one migration (`tenants.billing_method`, and when a card was put on
+     file);
+   - `external_services`: Checkout and portal sessions, the collection method
+     and payment behaviour on create;
+   - the go-live gate;
+   - an owner billing page (update card; the past-due banner);
+   - webhook handling for the new events;
+   - catalog entries (card needed, payment failed, reactivation declined);
+   - Stripe dashboard settings (retry schedule, customer emails, after the
+     final retry = leave past due, the portal);
+   - tests, including a walkthrough in Stripe test mode with Stripe's test
+     cards (one that is declined, one that needs authentication).
+   About the size of slice 5.9. Stripe charges its standard card fees; no
+   new service is needed.
 
 **3e -- F-1, separate database logins.** Approved as proposed:
 - **`docflow_api`**: tenant requests, plus the intake-token, sign-in-identity
@@ -971,11 +1144,14 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   - a provider outage makes documents wait, not fail (built in 3d; design
     under "Stage 3 -- agreed with the founder before building");
   - cost per document measured on scanned PDFs, image and photo POs, and
-    multi-page (5+ pages) orders, on staging.
+    multi-page (5+ pages) orders, on staging;
+  - **card billing with a 7-day trial**, decided 2026-09-29 (under "Card
+    billing with a 7-day trial"). Built after the 3a PR merges and before
+    3b, with a Stripe test-mode walkthrough.
 - **Before the first real customer:** an email provider (the founder is setting one up with the domain). Until then every invite, notice and digest waits in the Console Outbox and must be sent by hand, and the inbound intake address cannot receive real mail.
 - Digest opt-out per person: decided yes, but later (needs a settings page).
 - `RUNBOOK.md` exists since Phase 5.5 with the migration backup procedure (section 1). Still to add in Phase 6: the constants (CLAUDE.md 7.15.4; `constants.py` is their single home until then), tier price changes (`scripts/new_tier_version.py`, D-137), the restore drill and the parser-upgrade process.
-- **Stripe setting, before the first real customer:** the account currently cancels a subscription after 90 days of an unpaid invoice (seen on Acme Test Prospect: "Auto-cancels Dec 18"). Policy is that the founder decides suspension (D-125), so set Settings → Billing → Subscriptions and emails → failed/past-due invoices to leave the subscription past due. Only the founder can change it.
+- **Stripe setting, before the first real customer:** the account currently cancels a subscription after 90 days of an unpaid invoice (seen on Acme Test Prospect: "Auto-cancels Dec 18"). Policy is that the founder decides suspension (D-125), so set it to leave the subscription past due, **both for invoices sent to customers and for failed card payments** (card billing, decided 2026-09-29). Only the founder can change it. Now on the RUNBOOK section 3 checklist ("Once, before the first real customer").
 - Sandbox leftover: Acme Test Prospect's founding coupon was created before the invoice-count fix (D-138) and discounts one extra invoice (19 Dec). Test data only; correct it in Stripe or leave it.
 
 - **Phase 5.5 open items (2026-09-25):**

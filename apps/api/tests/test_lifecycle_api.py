@@ -769,3 +769,211 @@ def test_an_immediate_cancellation_is_dated_by_the_database(client, stripe, _env
             "SELECT cancellation_effective_at - status_changed_at FROM tenants WHERE id = :t", t=tenant_id
         )
         assert gap == timedelta(0)
+
+
+# ── Reactivation after a cancel that never went through (Stage 3a, option C) ─
+
+
+def _stage3a_schema_available() -> bool:
+    try:
+        with platform_session() as session:
+            session.execute(text("SELECT stripe_cancel_pending_at FROM tenants LIMIT 0"))
+        return True
+    except Exception:
+        return False
+
+
+requires_stage3a_schema = pytest.mark.skipif(
+    not _stage3a_schema_available(),
+    reason="supabase/migrations/0030_timeouts_and_stripe_cancel.sql has not been applied yet -- see D-179.",
+)
+
+
+class _HttpStripe:
+    """Stripe's HTTP API, faked at `httpx.request`, so the real
+    `start_subscription` and `invoices_to_review` run. Like Stripe, a reused
+    idempotency key replays its first answer with the same parameters and is
+    refused (400) with different ones."""
+
+    def __init__(self):
+        self.subscriptions: list[dict] = []
+        self.invoices: list[dict] = []
+        self.idempotency: dict[str, dict | None] = {}
+        self.created: list[str] = []
+
+    def __call__(self, method, url, *, auth, data=None, params=None, headers=None, timeout=None):
+        import httpx
+
+        path = url.removeprefix("https://api.stripe.com/v1/")
+        key = (headers or {}).get("Idempotency-Key")
+        if key in self.idempotency and self.idempotency[key] != data:
+            return httpx.Response(400, json={"error": {"type": "idempotency_error"}})
+        if key:
+            self.idempotency[key] = data
+        if method == "POST" and path in ("products", "coupons"):
+            return httpx.Response(400, json={"error": {"code": "resource_already_exists"}})
+        if method == "GET" and path == "subscriptions":
+            return httpx.Response(200, json={"data": self.subscriptions})
+        if method == "POST" and path == "subscriptions":
+            sub = {
+                "id": f"sub_new_{len(self.created) + 1}",
+                "status": "active",
+                "metadata": {"docflow_tenant_id": data["metadata[docflow_tenant_id]"]},
+                "items": {"data": [{"current_period_end": 1_795_000_000}]},
+            }
+            self.created.append(sub["id"])
+            self.subscriptions.append(sub)
+            return httpx.Response(200, json=sub)
+        if method == "GET" and path == "invoices":
+            mine = [i for i in self.invoices if i["subscription"] == params["subscription"]]
+            return httpx.Response(200, json={"data": mine, "has_more": False})
+        return httpx.Response(500, json={})
+
+
+@pytest.fixture
+def http_stripe(monkeypatch):
+    fake = _HttpStripe()
+    monkeypatch.setattr(external_services.httpx, "request", fake)
+    monkeypatch.setattr(external_services, "_stripe_key", lambda: "sk_test_fake")
+    return fake
+
+
+def _suspend(tenant_id: str, actor_user_id) -> datetime:
+    """Cancelled for cause and claimed by the sweep -- whose Stripe cancel
+    then never happens, so the old subscription stays live. Returns when the
+    suspension began (its lifecycle event)."""
+    with tenant_session(tenant_id) as session:
+        lifecycle.cancel(
+            session, tenant_id, reason="for_cause",
+            note="a reason at least twenty characters long", actor_user_id=actor_user_id,
+        )
+    _backdate_cancellation(tenant_id)
+    with tenant_session(tenant_id) as session:
+        lifecycle.claim_for_suspend(session, tenant_id)
+    return _scalar(
+        "SELECT max(created_at) FROM tenant_lifecycle_events "
+        "WHERE tenant_id = :t AND event_type = 'suspended'",
+        t=tenant_id,
+    )
+
+
+def _invoice(n, status, created, cents, sub="sub_old_live"):
+    field = {"paid": "amount_paid", "open": "amount_remaining"}.get(status, "amount_due")
+    return {
+        "id": f"in_test_{n}",
+        "number": f"ACME-TEST-{n:04d}",
+        "subscription": sub,
+        "status": status,
+        "created": created,
+        "amount_due": 0,
+        "amount_remaining": 0,
+        "amount_paid": 0,
+        field: cents,
+    }
+
+
+def _invoice_alerts(tenant_id: str) -> list[dict]:
+    with platform_session() as session:
+        return [
+            row[0]
+            for row in session.execute(
+                text(
+                    "SELECT payload FROM founder_alerts WHERE tenant_id = :t "
+                    "AND type = 'reactivation_invoices_to_review'"
+                ),
+                {"t": tenant_id},
+            )
+        ]
+
+
+@requires_lifecycle_schema
+@requires_stage3a_schema
+def test_reactivation_reuses_a_still_live_subscription_and_lists_invoices_to_collect_void_or_refund(
+    client, stripe, http_stripe, _environment
+):
+    with _Console() as console:
+        tenant_id = console.create_tenant(client).json()["tenant_id"]
+        _activate(tenant_id, subscription_id="sub_old_live", status="past_due")
+        http_stripe.subscriptions.append(
+            {
+                "id": "sub_old_live",
+                "status": "past_due",
+                "metadata": {"docflow_tenant_id": tenant_id},
+                "items": {"data": [{"current_period_end": 1_795_000_000}]},
+            }
+        )
+        suspended = int(_suspend(tenant_id, console.user_id).timestamp())
+        day = 86_400
+        http_stripe.invoices = [
+            _invoice(1, "paid", suspended - 60 * day, 29900),  # settled: not listed
+            _invoice(2, "open", suspended - 30 * day, 29900),  # delivered: collect
+            _invoice(3, "void", suspended - 20 * day, 29900),  # nothing owed: not listed
+            _invoice(4, "draft", suspended + 1 * day, 29900),  # during: void
+            _invoice(5, "open", suspended + 2 * day, 29900),  # during: void
+            _invoice(6, "paid", suspended + 3 * day, 29900),  # during: refund
+        ]
+
+        response = client.post(f"/admin/tenants/{tenant_id}/reactivate", headers=console.headers())
+        assert response.status_code == 200, response.text
+
+        # No second subscription: the old one, still live, is the tenant's again.
+        assert http_stripe.created == []
+        row = _scalar(
+            "SELECT row_to_json(t) FROM (SELECT status, stripe_subscription_id, "
+            "stripe_cancel_pending_at FROM tenants WHERE id = :t) t",
+            t=tenant_id,
+        )
+        assert row == {
+            "status": "active",
+            "stripe_subscription_id": "sub_old_live",
+            "stripe_cancel_pending_at": None,
+        }
+
+        (alert,) = _invoice_alerts(tenant_id)
+        assert alert["stripe_subscription_id"] == "sub_old_live"
+        assert alert["subscription_status"] == "past_due"
+        assert alert["before_suspension"].startswith(
+            "Before suspension (service delivered, collect): 1 invoice, total $299.00"
+        )
+        assert "in_test_2" in alert["before_suspension"]
+        assert alert["before_suspension_total"] == "299.00"
+        assert alert["during_suspension"].startswith(
+            "During suspension (void drafts/open, refund paid): 3 invoices, total $897.00"
+        )
+        for listed in (
+            "in_test_4 #ACME-TEST-0004 draft",
+            "in_test_5",
+            "in_test_6 #ACME-TEST-0006 paid $299.00",
+        ):
+            assert listed in alert["during_suspension"]
+        assert alert["during_suspension_total"] == "897.00"
+        text_of_alert = alert["before_suspension"] + alert["during_suspension"]
+        assert "in_test_1" not in text_of_alert and "in_test_3" not in text_of_alert
+
+
+@requires_lifecycle_schema
+@requires_stage3a_schema
+def test_reactivating_within_24_hours_of_go_live_succeeds(client, stripe, http_stripe, _environment):
+    """Go-live's subscription request is still inside Stripe's 24-hour
+    idempotency window. The fake holds it under both the key go-live uses now
+    and the single key both actions used before Stage 3a, so this fails if
+    reactivation ever shares a key with go-live again."""
+    with _Console() as console:
+        tenant_id = console.create_tenant(client).json()["tenant_id"]
+        _activate(tenant_id, subscription_id="sub_golive", status="active")
+        go_live_request = {"customer": "cus_test", "trial_end": 1_795_000_000}
+        http_stripe.idempotency[f"docflow-subscription-{tenant_id}"] = go_live_request
+        http_stripe.idempotency[f"docflow-subscription-{tenant_id}-golive"] = go_live_request
+        # The suspension's cancel went through.
+        http_stripe.subscriptions.append(
+            {"id": "sub_golive", "status": "canceled", "metadata": {"docflow_tenant_id": tenant_id}}
+        )
+        _suspend(tenant_id, console.user_id)
+
+        response = client.post(f"/admin/tenants/{tenant_id}/reactivate", headers=console.headers())
+        assert response.status_code == 200, response.text
+
+        assert http_stripe.created == ["sub_new_1"]
+        assert _scalar("SELECT stripe_subscription_id FROM tenants WHERE id = :t", t=tenant_id) == "sub_new_1"
+        # A fresh subscription: nothing was billed during the suspension, so no alert.
+        assert _invoice_alerts(tenant_id) == []

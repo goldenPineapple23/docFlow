@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import calendar
 import functools
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from decimal import ROUND_CEILING, Decimal
 from typing import Any
@@ -117,6 +117,10 @@ class SubscriptionResult:
     # When the founding discount stops applying (unix seconds), or None when
     # there is none (D-139). Read from Stripe's own answer.
     founding_ends_at: int | None = None
+    # True when this is the tenant's existing subscription, returned instead
+    # of creating one (a retried go-live, or a reactivation whose old
+    # subscription Stripe still holds live -- Stage 3a, option C).
+    reused: bool = False
 
 
 def _cents(amount: Decimal) -> int:
@@ -147,6 +151,14 @@ def _stripe(
         headers=headers,
         timeout=TIMEOUT_SECONDS,
     )
+
+
+# Stripe subscription statuses that have ended: nothing more is billed, and
+# the subscription can't be resumed. Any other status (active, trialing,
+# past_due, unpaid, and incomplete or paused, which DocFlow's send_invoice
+# subscriptions never reach) is live, so go-live and reactivation reuse it
+# rather than create a second one beside it (founder, 2026-09-29).
+ENDED_SUBSCRIPTION_STATUSES = ("canceled", "incomplete_expired")
 
 
 # Stripe refuses a coupon or product name longer than this (found in the 5.9
@@ -196,6 +208,7 @@ def start_subscription(
     promo_months: int | None,
     setup_fee: Decimal | None,
     days_until_due: int,
+    idempotency_scope: str,
     trial_end: int | None = None,
 ) -> SubscriptionResult:
     """
@@ -216,8 +229,14 @@ def start_subscription(
     after Stripe succeeded must never bill twice:
       * the product and coupon have fixed ids per tier version;
       * the setup fee is added only if no pending one for this tenant exists;
-      * an existing live subscription for this tenant is returned, not duplicated;
-      * every create also carries an idempotency key.
+      * an existing live subscription for this tenant is returned, not duplicated
+        (live = any status Stripe hasn't ended: not `canceled` or
+        `incomplete_expired`; founder, 2026-09-29);
+      * every create also carries an idempotency key, scoped to the action by
+        `idempotency_scope` ("golive", or one per reactivation). Stripe keeps
+        a key for 24 hours and refuses it with different parameters, so one
+        fixed key per tenant made a reactivation within a day of go-live fail
+        (Stage 3a).
     Prices come from the tiers table the caller read -- never typed in here.
     """
     product_id = f"docflow_tier_{tier_id.hex}"
@@ -247,10 +266,9 @@ def start_subscription(
         raise ExternalServiceError("stripe", f"subscription list returned {existing.status_code}")
     for sub in existing.json().get("data", []):
         if sub.get("metadata", {}).get("docflow_tenant_id") == str(tenant_id) and sub.get("status") not in (
-            "canceled",
-            "incomplete_expired",
+            ENDED_SUBSCRIPTION_STATUSES
         ):
-            return _subscription_result(sub)
+            return replace(_subscription_result(sub), reused=True)
 
     if setup_fee is not None and setup_fee > 0:
         pending = _stripe(
@@ -295,7 +313,10 @@ def start_subscription(
     if trial_end:
         data["trial_end"] = trial_end
     response = _stripe(
-        "POST", "subscriptions", data=data, idempotency_key=f"docflow-subscription-{tenant_id}"
+        "POST",
+        "subscriptions",
+        data=data,
+        idempotency_key=f"docflow-subscription-{tenant_id}-{idempotency_scope}",
     )
     if response.status_code >= 300:
         raise ExternalServiceError("stripe", f"subscription create returned {response.status_code}")
@@ -455,6 +476,74 @@ def change_subscription_tier(
             "stripe", f"subscription update returned {response.status_code}: {_stripe_error(response)}"
         )
     return _subscription_result(response.json()), months
+
+
+# ── Invoices to review when a reactivation reuses the old subscription ──────
+# (Stage 3a, option C; founder 2026-09-29). With a live subscription kept
+# through a suspension, Stripe went on invoicing. The founder decides what to
+# collect, void or refund; DocFlow lists it and changes nothing at Stripe.
+
+BEFORE_SUSPENSION_HEADING = "Before suspension (service delivered, collect)"
+DURING_SUSPENSION_HEADING = "During suspension (void drafts/open, refund paid)"
+_INVOICE_PAGES_MAX = 10
+
+
+@dataclass(frozen=True)
+class ReviewInvoice:
+    invoice_id: str
+    number: str | None
+    status: str  # draft | open | paid
+    amount: Decimal  # dollars: paid -> paid, open -> still owed, draft -> due
+    created: int  # unix seconds
+
+
+@dataclass(frozen=True)
+class InvoiceReview:
+    # Open invoices created before the suspension: service was delivered.
+    before_suspension: list[ReviewInvoice]
+    # Draft, open or paid invoices created since the suspension began.
+    during_suspension: list[ReviewInvoice]
+
+
+def _review_invoice(invoice: dict) -> ReviewInvoice:
+    status = str(invoice.get("status"))
+    field = {"paid": "amount_paid", "open": "amount_remaining"}.get(status, "amount_due")
+    cents = int(invoice.get(field) or 0)
+    return ReviewInvoice(
+        invoice_id=str(invoice["id"]),
+        number=invoice.get("number"),
+        status=status,
+        amount=(Decimal(cents) / 100).quantize(Decimal("0.01")),
+        created=int(invoice["created"]),
+    )
+
+
+def invoices_to_review(subscription_id: str, suspended_at: int) -> InvoiceReview:
+    """Every invoice on the subscription, sorted into the founder's two
+    sections by when Stripe created it against `suspended_at` (unix seconds).
+    Void and uncollectible invoices are left out: nothing is owed on them.
+    Called with no database transaction open."""
+    invoices: list[dict] = []
+    params: dict[str, Any] = {"subscription": subscription_id, "limit": 100}
+    for _ in range(_INVOICE_PAGES_MAX):
+        response = _stripe("GET", "invoices", params=params)
+        if response.status_code >= 300:
+            raise ExternalServiceError("stripe", f"invoice list returned {response.status_code}")
+        body = response.json()
+        page = body.get("data", [])
+        invoices.extend(page)
+        if not body.get("has_more") or not page:
+            break
+        params = {**params, "starting_after": page[-1]["id"]}
+    before, during = [], []
+    for invoice in sorted(invoices, key=lambda i: (int(i["created"]), str(i["id"]))):
+        status = invoice.get("status")
+        if int(invoice["created"]) < suspended_at:
+            if status == "open":
+                before.append(_review_invoice(invoice))
+        elif status in ("draft", "open", "paid"):
+            during.append(_review_invoice(invoice))
+    return InvoiceReview(before_suspension=before, during_suspension=during)
 
 
 def cancel_subscription(subscription_id: str) -> None:

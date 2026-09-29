@@ -28,6 +28,7 @@ inside a session this module is handed.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -55,6 +56,8 @@ REASONS = ("customer_requested", "non_payment", "for_cause")
 # today and are free to diverge. Neither is defined in terms of the other, so a
 # change to one cannot silently change the other.
 REACTIVATABLE = ("suspended", "pending_deletion")
+
+logger = logging.getLogger(__name__)
 
 
 class LifecycleError(Exception):
@@ -325,6 +328,13 @@ def claim_for_suspend(session: Session, tenant_id: UUID) -> SuspendClaim | None:
                 status_changed_at = now(),
                 intake_address_active = false,
                 deletion_scheduled_at = now() + make_interval(days => :window),
+                -- Stage 3a: Stripe is called after this commits, so the
+                -- cancel is marked as owed in the same transaction. A worker
+                -- killed before Stripe confirms leaves the mark, and the next
+                -- sweep retries (`process_pending_cancel`).
+                stripe_cancel_pending_at = CASE
+                    WHEN stripe_subscription_id IS NOT NULL OR stripe_customer_id IS NOT NULL
+                    THEN now() END,
                 updated_at = now()
             WHERE id = :id
             RETURNING now() AS suspended_at, deletion_scheduled_at
@@ -401,6 +411,92 @@ def _schedule_reminder(session: Session, tenant_id: UUID, *, day: int) -> None:
     )
 
 
+def pending_cancels(session: Session, *, limit: int = 100) -> list[UUID]:
+    """Tenants whose Stripe cancel is still owed (`lifecycle_session()` only
+    -- read-only, cross-tenant), oldest first. Each is then handled in its own
+    tenant_session by `process_pending_cancel`."""
+    rows = session.execute(
+        text(
+            """
+            SELECT id FROM tenants
+            WHERE stripe_cancel_pending_at IS NOT NULL
+            ORDER BY stripe_cancel_pending_at
+            LIMIT :limit
+            """
+        ),
+        {"limit": limit},
+    ).all()
+    return [UUID(str(r[0])) for r in rows]
+
+
+def process_pending_cancel(tenant_id: UUID) -> str:
+    """
+    Cancel a suspended tenant's Stripe billing, if it is still owed. One of:
+    "none" (nothing owed), "skipped" (the tenant is no longer suspended --
+    reactivated, say -- so the mark is cleared and Stripe is not called),
+    "cancelled", or "failed" (the mark stays, the founder is alerted, and
+    the next sweep tries again).
+
+    The tenant row is locked and its state re-checked immediately before the
+    Stripe calls, and the lock is HELD across them (founder, Stage 3a). That
+    is deliberate, and the opposite of the webhook's fetch-outside-a-
+    transaction rule (D-173): releasing it would let a reactivation commit
+    between the check and the call, and the cancel would then hit the
+    tenant's live subscription. A reactivation that arrives meanwhile waits
+    for the lock. The wait is bounded by the Stripe timeouts (at most three
+    calls of TIMEOUT_SECONDS each), well inside the 5-minute idle-transaction
+    cap on docflow_app (0028).
+    """
+    from docflow_core.db import tenant_session
+    from docflow_core.external_services import (
+        ExternalServiceError,
+        cancel_subscription,
+        void_pending_setup_fee,
+    )
+
+    with tenant_session(tenant_id) as session:
+        row = session.execute(
+            text(
+                "SELECT status, stripe_subscription_id, stripe_customer_id, stripe_cancel_pending_at "
+                "FROM tenants WHERE id = :id FOR UPDATE"
+            ),
+            {"id": str(tenant_id)},
+        ).mappings().first()
+        if row is None or row["stripe_cancel_pending_at"] is None:
+            return "none"
+        if row["status"] not in REACTIVATABLE:
+            _clear_pending_cancel(session, tenant_id)
+            return "skipped"
+        try:
+            if row["stripe_subscription_id"]:
+                cancel_subscription(row["stripe_subscription_id"])
+            if row["stripe_customer_id"]:
+                # A tenant cancelled mid-trial (D-125) may still have a
+                # pending, never-invoiced setup-fee item -- clear it so it
+                # can't land on some unrelated future invoice.
+                void_pending_setup_fee(customer_id=row["stripe_customer_id"], tenant_id=tenant_id)
+        except ExternalServiceError as exc:
+            logger.error("stripe_cancel_failed tenant_id=%s error=%s", tenant_id, type(exc).__name__)
+            founder_alerts.raise_alert(
+                session,
+                alert_type="stripe_cancel_failed",
+                severity="high",
+                tenant_id=tenant_id,
+                payload={"subscription_id": row["stripe_subscription_id"]},
+                dedupe_key=f"stripe_cancel_failed:{tenant_id}",
+            )
+            return "failed"
+        _clear_pending_cancel(session, tenant_id)
+        return "cancelled"
+
+
+def _clear_pending_cancel(session: Session, tenant_id: UUID) -> None:
+    session.execute(
+        text("UPDATE tenants SET stripe_cancel_pending_at = NULL, updated_at = now() WHERE id = :id"),
+        {"id": str(tenant_id)},
+    )
+
+
 def due_for_suspend(session: Session, *, limit: int = 100) -> list[UUID]:
     """Tenant ids the sweep should attempt (`lifecycle_session()` only --
     read-only, cross-tenant). Each is then claimed, one at a time, in its own
@@ -469,14 +565,29 @@ class ReactivatePlan:
     tier_name: str
     monthly_price: Decimal
     document_allowance: int
+    # When the tenant's status last changed (it was suspended, or entered
+    # pending deletion). Unchanged until this reactivation commits, so it
+    # names this reactivation in the Stripe idempotency key: a retried click
+    # reuses the key, a later reactivation gets a new one (Stage 3a).
+    status_changed_at: datetime | None = None
+    # When the current suspension began (its `suspended` lifecycle event):
+    # the line between the founder's two invoice sections (Stage 3a).
+    suspended_at: datetime | None = None
+
+    @property
+    def idempotency_scope(self) -> str:
+        changed = self.status_changed_at
+        return f"reactivate-{int(changed.timestamp() * 1_000_000) if changed else 0}"
 
 
 def plan_reactivate(session: Session, tenant_id: UUID) -> ReactivatePlan:
     row = session.execute(
         text(
             """
-            SELECT t.name, t.status, t.stripe_customer_id,
-                   tr.id AS tier_id, tr.name AS tier_name, tr.monthly_price, tr.document_allowance
+            SELECT t.name, t.status, t.stripe_customer_id, t.status_changed_at,
+                   tr.id AS tier_id, tr.name AS tier_name, tr.monthly_price, tr.document_allowance,
+                   (SELECT max(e.created_at) FROM tenant_lifecycle_events e
+                     WHERE e.tenant_id = t.id AND e.event_type = 'suspended') AS suspended_at
             FROM tenants t
             LEFT JOIN tiers tr ON tr.id = t.tier_id
             WHERE t.id = :id
@@ -497,6 +608,71 @@ def plan_reactivate(session: Session, tenant_id: UUID) -> ReactivatePlan:
         tier_name=row["tier_name"],
         monthly_price=Decimal(row["monthly_price"]),
         document_allowance=row["document_allowance"],
+        status_changed_at=row["status_changed_at"],
+        suspended_at=row["suspended_at"],
+    )
+
+
+def _invoice_section(heading: str, invoices: list[Any]) -> tuple[str, str]:
+    """One section of the reactivation invoice alert, as text (the email and
+    the Console show payload values as plain strings), and its total."""
+    total = sum((i.amount for i in invoices), Decimal("0.00"))
+    lines = "; ".join(
+        f"{i.invoice_id}"
+        + (f" #{i.number}" if i.number else "")
+        + f" {i.status} ${i.amount}"
+        + f" (created {datetime.fromtimestamp(i.created, tz=UTC):%Y-%m-%d})"
+        for i in invoices
+    )
+    count = f"{len(invoices)} invoice{'' if len(invoices) == 1 else 's'}"
+    return f"{heading}: {count}, total ${total}" + (f" -- {lines}" if lines else ""), f"{total}"
+
+
+def raise_reactivation_invoice_alert(
+    session: Session,
+    tenant_id: UUID,
+    *,
+    subscription_id: str,
+    subscription_status: str,
+    suspended_at: datetime,
+    review: Any | None,
+) -> bool:
+    """
+    Reactivation kept the old subscription because Stripe still held it live
+    after the suspension (Stage 3a, option C; founder 2026-09-29). Lists what
+    the founder has to act on at Stripe, in two sections with a total each:
+    open invoices from before the suspension (service delivered: collect),
+    and draft, open or paid ones since (void, or refund). `review` is None
+    when Stripe couldn't be asked -- the alert then says so rather than
+    staying quiet. Nothing to act on: no alert. Returns whether one was raised.
+    """
+    from docflow_core.external_services import BEFORE_SUSPENSION_HEADING, DURING_SUSPENSION_HEADING
+
+    payload: dict[str, Any] = {
+        "stripe_subscription_id": subscription_id,
+        "subscription_status": subscription_status,
+        "suspended_at": suspended_at.astimezone(UTC).isoformat(timespec="seconds"),
+    }
+    if review is None:
+        payload["invoices"] = "Stripe's invoice list could not be read -- check this subscription in Stripe"
+    else:
+        if not review.before_suspension and not review.during_suspension:
+            return False
+        before, before_total = _invoice_section(BEFORE_SUSPENSION_HEADING, review.before_suspension)
+        during, during_total = _invoice_section(DURING_SUSPENSION_HEADING, review.during_suspension)
+        payload.update(
+            before_suspension=before,
+            before_suspension_total=before_total,
+            during_suspension=during,
+            during_suspension_total=during_total,
+        )
+    return founder_alerts.raise_alert(
+        session,
+        alert_type="reactivation_invoices_to_review",
+        severity="high",
+        tenant_id=tenant_id,
+        payload=payload,
+        dedupe_key=f"reactivation_invoices:{tenant_id}:{subscription_id}:{int(suspended_at.timestamp())}",
     )
 
 
@@ -550,6 +726,10 @@ def complete_reactivate(
                 -- D-139: the founding price is a go-live perk; a reactivated
                 -- subscription is at list price.
                 founding_price_ends_at = NULL,
+                -- Stage 3a: in the same transaction as the status change, so
+                -- a sweep retrying an owed cancel can never cancel the
+                -- reactivated tenant's billing.
+                stripe_cancel_pending_at = NULL,
                 updated_at = now()
             WHERE id = :id
             """

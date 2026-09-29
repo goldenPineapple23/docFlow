@@ -357,6 +357,12 @@ class MatchingSummary:
     lines_matched: int = 0
     by_method: dict[str, int] = field(default_factory=dict)
     skipped_human_edited: int = 0
+    # How many times each learned rule fired on this document. Reported, not
+    # counted here: `learned_rules.times_applied` is added to once, by the
+    # caller, in the transaction that moves the document to review, so a
+    # worker killed after matching and before that move never counts a
+    # document twice when it is resumed (Stage 3a).
+    rules_applied: dict[UUID, int] = field(default_factory=dict)
 
 
 # ── The pure resolution step ────────────────────────────────────────────────
@@ -608,11 +614,13 @@ def load_uom_rules(session: Session, tenant_id: UUID, buyer_id: UUID | None) -> 
     return rules
 
 
-def _bump_times_applied(session: Session, counts: dict[UUID, int]) -> None:
+def bump_times_applied(session: Session, counts: dict[UUID, int]) -> None:
     """
-    `learned_rules.times_applied` is what the Section 7.13 "mapping reuse
-    rate" metric is built on, so it is incremented every time a rule actually
-    fires -- not when it is merely loaded.
+    Add each rule's firings to `learned_rules.times_applied`, the count the
+    Console's Rules page shows (the mapping-reuse KPI counts matched lines,
+    not this). Incremented when a rule actually fired, never when it is
+    merely loaded -- and only by the document task, once per document, in
+    the transaction that moves it to review (Stage 3a).
     """
     for rule_id, count in counts.items():
         session.execute(
@@ -730,7 +738,7 @@ def match_document_lines(
             },
         )
 
-    _bump_times_applied(session, applied)
+    summary.rules_applied = applied
     return summary
 
 

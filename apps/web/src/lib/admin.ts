@@ -663,6 +663,8 @@ export type Dashboard = {
     needs_review: number;
     model_calls_hour: number;
     model_failures_hour: number;
+    // Exports the stuck sweep gave up on today (EXP-009, Stage 3a).
+    exports_not_finished_today: number;
     spend_today: string;
     spend_yesterday: string;
     last_document_processed_at: string | null;

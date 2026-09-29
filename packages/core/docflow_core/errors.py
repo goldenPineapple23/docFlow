@@ -1071,6 +1071,22 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="founder",
     ),
+    # The stuck sweep's code for an import still `parsing` long after its job
+    # should have finished (Stage 3a). Founder-only: imports are Console-only.
+    "IMP-009": ErrorCatalogEntry(
+        code="IMP-009",
+        title="Reading this file didn't finish",
+        message=(
+            "The worker reading this file stopped before it finished (a time limit, a restart, or"
+            " running out of memory), so nothing was imported. The file itself may be fine."
+        ),
+        action=(
+            "Start the import again from the same file. If it stops again, check the worker log for"
+            " this import's ID."
+        ),
+        severity="warning",
+        audience="founder",
+    ),
     "CAT-001": ErrorCatalogEntry(
         code="CAT-001",
         title="Rows with no SKU",
@@ -1524,6 +1540,21 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
             "Check those lines in QuickBooks after importing, or download the order as CSV or "
             "Excel, which keep every digit."
         ),
+        severity="warning",
+        audience="tenant",
+    ),
+    # The stuck sweep's code for an export still `pending` long after its job
+    # should have finished (Stage 3a). No per-export alert, so no promise of
+    # one; the founder sees the day's count on the health strip, and one alert
+    # when a tenant has more than EXPORTS_NOT_FINISHED_ALERT_PER_DAY in a day.
+    "EXP-009": ErrorCatalogEntry(
+        code="EXP-009",
+        title="This export didn't finish",
+        message=(
+            "DocFlow started building this file, but the job stopped before it was done, so "
+            "there's nothing to download. Nothing is wrong with the approved order."
+        ),
+        action="Start the export again. It usually takes a few seconds.",
         severity="warning",
         audience="tenant",
     ),
