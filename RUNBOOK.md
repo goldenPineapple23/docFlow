@@ -354,17 +354,42 @@ list is the checks that sit around them. Phase 6 completes it.
 
 - [ ] **Stripe must never cancel a subscription by itself.** Suspension is
   your decision (D-125), taken through DocFlow's lifecycle; a cancel on
-  Stripe's side skips it and leaves an active tenant with no billing. In the
-  Stripe dashboard: **Settings** (gear icon, top right) → **Billing** →
-  **Subscriptions and emails** (direct link:
-  `https://dashboard.stripe.com/settings/billing/automatic`; in test mode,
-  `https://dashboard.stripe.com/test/settings/billing/automatic`). Change the
-  subscription outcome to **leave the subscription past due** in both
-  sections:
-  - **invoices sent to customers** (DocFlow's invoice billing): today it
-    cancels 90 days after the due date;
-  - **failed payments** (card billing, after the last retry).
-  Do it in test mode and in live mode; they are separate settings.
+  Stripe's side skips it and leaves an active tenant with no billing. Two
+  settings, on two different pages, both set to **leave the subscription past
+  due**:
+  - **Failed card payments, after the last retry** (card billing): **Billing**
+    → **Revenue recovery** → **Retries**
+    (`https://dashboard.stripe.com/revenue_recovery/retries`), the outcome
+    "if all retries for a payment fail". This is the one found still on
+    "cancel" in the sandbox on 2026-09-29, after it had been changed on the
+    other page: a test subscription was cancelled after its last retry.
+  - **Invoices sent to customers** (invoice billing): **Settings** (gear
+    icon) → **Billing** → **Subscriptions and emails**
+    (`https://dashboard.stripe.com/settings/billing/automatic`). Today it
+    cancels 90 days after the due date.
+- [ ] **Retry schedule: Smart Retries, 8 tries within 1 week** (founder,
+  2026-09-29), on the same Retries page. The last retry then lands by day 7,
+  well before day 14, the earliest date a past-due tenant may be suspended
+  (`CURE_PERIOD_DAYS`); from then until the owner updates the card, DocFlow
+  charges the new card itself when it is added (D-181).
+- [ ] **Check the account before saving.** A sandbox is an account of its
+  own: the account switcher (top left) must show the account DocFlow's key
+  belongs to, and a link scoped to it carries its id
+  (`https://dashboard.stripe.com/<account id>/test/...`). Each setting exists
+  separately in test mode, in each sandbox, and in live mode; do live mode
+  before the first real customer. To confirm in test mode, ask for the
+  "retries exhausted" check (a Stripe test clock): the subscription must end
+  `past_due`, never `canceled`.
+- [ ] **The webhook endpoint sends card billing's events** (D-181), besides
+  the `customer.subscription.*` events it already sends:
+  `checkout.session.completed` (a card saved, a setup fee paid at signing)
+  and `customer.updated` (a card changed; DocFlow charges a past-due
+  account's open invoice to it). In Stripe: **Developers** → **Webhooks** →
+  the DocFlow endpoint → **Select events**.
+- [ ] **The customer portal is on**, for the owner's "Update card" (D-181):
+  **Settings** → **Billing** → **Customer portal**. Allow updating payment
+  methods. The sandbox's default configuration already works (test mode,
+  2026-09-29).
 
 **For each new tenant:**
 
