@@ -333,6 +333,24 @@ credentials, it does not replace them.
 The Console walks you through the nine setup steps (Intake → Go live). This
 list is the checks that sit around them. Phase 6 completes it.
 
+**Once, before the first real customer (account-wide):**
+
+- [ ] **Stripe must never cancel a subscription by itself.** Suspension is
+  your decision (D-125), taken through DocFlow's lifecycle; a cancel on
+  Stripe's side skips it and leaves an active tenant with no billing. In the
+  Stripe dashboard: **Settings** (gear icon, top right) → **Billing** →
+  **Subscriptions and emails** (direct link:
+  `https://dashboard.stripe.com/settings/billing/automatic`; in test mode,
+  `https://dashboard.stripe.com/test/settings/billing/automatic`). Change the
+  subscription outcome to **leave the subscription past due** in both
+  sections:
+  - **invoices sent to customers** (DocFlow's invoice billing): today it
+    cancels 90 days after the due date;
+  - **failed payments** (card billing, after the last retry).
+  Do it in test mode and in live mode; they are separate settings.
+
+**For each new tenant:**
+
 - [ ] **Check the line count of the prospect's largest sample order.** Open
   the biggest purchase order in their intake files and count its line items
   (or look at the line number of the last item).

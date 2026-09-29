@@ -635,9 +635,11 @@ Report them the same way (mean, median and max, by type), with the models
 used and every call in the total. This needs paid runs, so its budget goes
 to the founder first.
 
-**OPEN DECISION -- required before the first pilot: card billing with a
-7-day trial (founder, 2026-09-29). Design only; nothing is built.** The
-founder's pilot model is "customer signs, 7 days free, then Stripe charges
+**Card billing with a 7-day trial -- required before the first pilot.
+DECIDED (founder, 2026-09-29): D1, D3, D4, D5 and D6 as recommended below;
+D2 split by customer type (below). D4's banner wording goes to the founder
+before it is added. Build order: after the 3a PR merges and before 3b,
+including a walkthrough in Stripe test mode.** The founder's pilot model is "customer signs, 7 days free, then Stripe charges
 their card automatically". Today nothing charges a card:
 - Go-live creates a `send_invoice` subscription with a 7-day trial (D-125).
   At the trial's end Stripe emails an invoice (month one plus the setup fee,
@@ -676,12 +678,38 @@ mode before building):
    `customer.subscription.trial_will_end` three days before. The
    subscription is `trialing` until the first successful charge, then
    `active`. MRR already shows trials beside it, not in it (D-135).
-3. **The setup fee. Decision D2:**
-   - **Recommended: charged with month one when the trial ends**, one charge.
-     This is what the pending invoice item already does today. Stripe sweeps
-     it onto the first invoice, which it would now charge automatically.
-   - Or charged at go-live, as a separate one-off charge.
-   - `invoiced_manually` stays available either way.
+3. **The setup fee. Decision D2 -- decided (founder, 2026-09-29): it depends
+   on the customer.** Both paths:
+   - **Founding customers: charged with month one when the trial ends.**
+     - The card page is Stripe Checkout in **setup mode**: it saves the card
+       and charges nothing.
+     - At go-live the setup fee is added as a pending invoice item, exactly as
+       today. Stripe puts it on the first invoice at the trial's end and
+       charges it with month one, in one charge.
+     - If that charge fails, the normal failed-payment path applies (item 4).
+   - **Standard customers: charged at signing.**
+     - "Signing" is the customer completing the card page DocFlow sends them.
+       That page is Stripe Checkout in **payment mode**, for the tier's setup
+       fee, and it saves the same card for later charges (*verify* the exact
+       parameters in test mode).
+     - A webhook records that the fee is paid and the card is on file.
+     - At go-live the subscription starts with the 7-day trial and **no**
+       setup-fee item, because it's already paid.
+     - A declined card: Stripe's page tells the customer, and nothing is
+       charged or saved. The same link can be used again, or re-sent.
+   - **What this changes in the flow:**
+     - Founding or standard has to be known when the card page is sent, not
+       only at go-live, where the founding choice is made today. The Console
+       action that sends the card link asks for it, and the go-live form shows
+       what was chosen.
+     - The go-live gate (D1) is "card on file" for founding customers, and
+       "card on file and setup fee paid" for standard customers. Either gate
+       is met by `invoiced_manually`, which stays available for both.
+     - The fee amount always comes from the tenant's tier version, never
+       typed in (Section 7.15.2).
+   - **For the founder, not blocking:** if a standard customer pays at
+     signing and never goes live, any refund is the founder's decision,
+     made in Stripe. DocFlow does nothing automatically.
 4. **When a charge fails.** The subscription goes `past_due` on the **first**
    failed charge. That's day 7, not day 22 as with invoices due in 15 days.
    - **Retries:** Stripe retries on the retry schedule set in the dashboard.
@@ -1117,13 +1145,13 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
     under "Stage 3 -- agreed with the founder before building");
   - cost per document measured on scanned PDFs, image and photo POs, and
     multi-page (5+ pages) orders, on staging;
-  - **open decision: card billing with a 7-day trial** (decisions D1-D6
-    under "OPEN DECISION -- required before the first pilot: card billing"),
-    then built and walked through in Stripe test mode.
+  - **card billing with a 7-day trial**, decided 2026-09-29 (under "Card
+    billing with a 7-day trial"). Built after the 3a PR merges and before
+    3b, with a Stripe test-mode walkthrough.
 - **Before the first real customer:** an email provider (the founder is setting one up with the domain). Until then every invite, notice and digest waits in the Console Outbox and must be sent by hand, and the inbound intake address cannot receive real mail.
 - Digest opt-out per person: decided yes, but later (needs a settings page).
 - `RUNBOOK.md` exists since Phase 5.5 with the migration backup procedure (section 1). Still to add in Phase 6: the constants (CLAUDE.md 7.15.4; `constants.py` is their single home until then), tier price changes (`scripts/new_tier_version.py`, D-137), the restore drill and the parser-upgrade process.
-- **Stripe setting, before the first real customer:** the account currently cancels a subscription after 90 days of an unpaid invoice (seen on Acme Test Prospect: "Auto-cancels Dec 18"). Policy is that the founder decides suspension (D-125), so set Settings → Billing → Subscriptions and emails → failed/past-due invoices to leave the subscription past due. Only the founder can change it.
+- **Stripe setting, before the first real customer:** the account currently cancels a subscription after 90 days of an unpaid invoice (seen on Acme Test Prospect: "Auto-cancels Dec 18"). Policy is that the founder decides suspension (D-125), so set it to leave the subscription past due, **both for invoices sent to customers and for failed card payments** (card billing, decided 2026-09-29). Only the founder can change it. Now on the RUNBOOK section 3 checklist ("Once, before the first real customer").
 - Sandbox leftover: Acme Test Prospect's founding coupon was created before the invoice-count fix (D-138) and discounts one extra invoice (19 Dec). Test data only; correct it in Stripe or leave it.
 
 - **Phase 5.5 open items (2026-09-25):**
