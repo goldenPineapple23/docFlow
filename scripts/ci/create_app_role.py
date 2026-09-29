@@ -48,6 +48,9 @@ def main() -> int:
             # The signature must match the migration's (test_ci_guards.py).
             "GRANT EXECUTE ON FUNCTION record_stripe_subscription_event"
             "(text, text, timestamptz, text, text, timestamptz, text) TO docflow_app",
+            # Migration 0031's card-event function, the same way (D-181).
+            "GRANT EXECUTE ON FUNCTION record_stripe_card_event"
+            "(text, text, text, text, bigint) TO docflow_app",
         ):
             conn.execute(statement)
 

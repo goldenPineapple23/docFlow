@@ -63,11 +63,24 @@ def test_every_approved_skip_has_a_reason():
         assert entry.split()[0] in PYTHON_JOBS, f"unknown suite in {raw!r}"
 
 
-def test_the_stripe_event_function_is_granted_the_same_way_in_the_migration_and_in_ci():
-    """CI creates `docflow_app` after the migrations run, so migration 0029's
+@pytest.mark.parametrize(
+    ("function", "migration_file", "signature"),
+    [
+        (
+            "record_stripe_subscription_event",
+            "0029_stripe_event_function.sql",
+            "(text, text, timestamptz, text, text, timestamptz, text)",
+        ),
+        ("record_stripe_card_event", "0031_card_billing.sql", "(text, text, text, text, bigint)"),
+    ],
+)
+def test_each_stripe_event_function_is_granted_the_same_way_in_the_migration_and_in_ci(
+    function, migration_file, signature
+):
+    """CI creates `docflow_app` after the migrations run, so a migration's
     guarded grant is skipped there and scripts/ci/create_app_role.py grants it
-    again (D-173). The two must name the same signature, or CI would test a
-    function the app can't call on staging -- or the reverse."""
+    again (D-173, D-181). The two must name the same signature, or CI would
+    test a function the app can't call on staging -- or the reverse."""
 
     def collapse(source: str) -> str:
         # Join adjacent string literals and squeeze whitespace, so a statement
@@ -75,11 +88,10 @@ def test_the_stripe_event_function_is_granted_the_same_way_in_the_migration_and_
         return re.sub(r"\s+", " ", re.sub(r"['\"]\s*\n?\s*['\"]", "", source))
 
     grant = re.compile(
-        r"grant execute on function record_stripe_subscription_event\s*(\([^)]*\))\s*to docflow_app",
+        rf"grant execute on function {function}\s*(\([^)]*\))\s*to docflow_app",
         re.IGNORECASE,
     )
-    migration = REPO / "supabase" / "migrations" / "0029_stripe_event_function.sql"
+    migration = REPO / "supabase" / "migrations" / migration_file
     ci_role = REPO / "scripts" / "ci" / "create_app_role.py"
-    signature = "(text, text, timestamptz, text, text, timestamptz, text)"
     assert grant.findall(collapse(migration.read_text(encoding="utf-8"))) == [signature]
     assert grant.findall(collapse(ci_role.read_text(encoding="utf-8"))) == [signature]
