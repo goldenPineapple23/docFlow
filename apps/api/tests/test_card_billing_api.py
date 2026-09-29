@@ -272,7 +272,9 @@ def test_a_failed_charge_leaves_the_event_unrecorded_and_the_redelivery_pays(cli
 # ── Past due: the owner's email and the reminder ─────────────────────────────
 
 
-def _past_due(client, monkeypatch, tenant: _Tenant, customer: str, *, label: str = "pd") -> dict:
+def _past_due(
+    client, monkeypatch, tenant: _Tenant, customer: str, *, label: str = "pd", later: int = 0
+) -> dict:
     fetched: list[str] = []
 
     def amount(subscription_id: str) -> int:
@@ -281,7 +283,7 @@ def _past_due(client, monkeypatch, tenant: _Tenant, customer: str, *, label: str
 
     monkeypatch.setattr(external_services, "latest_invoice_amount_cents", amount)
     event = _subscription_event(
-        event_id=_event_id(label), customer=customer, status="past_due", created=int(time.time())
+        event_id=_event_id(label), customer=customer, status="past_due", created=int(time.time()) + later
     )
     response = _post(client, event)
     assert response.status_code == 200, response.text
@@ -317,8 +319,10 @@ def test_a_card_tenants_first_past_due_emails_the_owner_and_schedules_the_remind
         assert (reminder["run_at"] - reminder["first_past_due_at"]).days == 11
         assert reminder["payload"]["amount_cents"] == 29900
 
-        # A later past_due event of the same episode repeats neither.
-        _past_due(client, monkeypatch, tenant, customer, label="pd2")
+        # A later past_due event of the same episode repeats neither. Stamped
+        # seconds later: an event in the same second as the saved state is
+        # re-fetched from Stripe instead (D-173), which isn't this test's subject.
+        _past_due(client, monkeypatch, tenant, customer, label="pd2", later=2)
         assert len(_emails(tenant.tenant_id, "payment_failed")) == 1
         assert len(_reminders(tenant.tenant_id)) == 1
 
