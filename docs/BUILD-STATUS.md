@@ -251,9 +251,60 @@ Agreed 2026-09-29 (founder's answers to my proposal):
   value follows the worker machine size.
 - **Production runs Celery's prefork pool.** Time limits do nothing under the
   `solo` pool used on Windows.
-- **The six other tasks** (export, catalog import, rollup, scheduled jobs,
-  lifecycle sweep, stuck sweep): limits sized to their measured worst case.
-  **The measurements go to the founder before any limit is set.**
+- **The six other tasks: hard limits only, approved by the founder
+  2026-09-29 from these measurements.**
+  - How the numbers were taken: from this machine against staging, where
+    each database transaction costs about 300 ms over the internet (less on
+    Fly, in the database's region). Staging's tenants hold little data, so
+    the rollup at full per-tenant volume is left to the Phase 6 load test.
+
+  | Task | Measured | Estimated at 50 tenants | Hard limit |
+  |---|---|---|---|
+  | Export (one document, 1,000 lines) | `.xlsx` 0.83 s, others 0.01 s | about 2 s | 5 min |
+  | Catalog import (50,000 rows) | parse `.xlsx` 5.16 s, `.xls` 0.61 s, `.csv` 0.24 s; save 1.01 s | about 7 s | 5 min |
+  | Rollup (2 days) | 7.86 s for 18 tenants | about 22 s | 15 min |
+  | Scheduled jobs (up to 25) | 0.3 s per transaction | under 1 min | 10 min (must stay below the 30-minute release of `running` jobs) |
+  | Lifecycle sweep | queries 0.40 s; Stripe 516-844 ms per call, 15 s timeout, up to 3 calls per suspend | about 15 s; about 5 min with 100 due at once; about 75 min if Stripe hangs | 10 min, plus a 4-minute time box |
+  | Stuck sweep | 322 ms per tenant | about 16 s | 4 min (it runs every 5 min) |
+
+  - Hard-only for the same reason as the document task: the sweeps' broad
+    `except` blocks ("one tenant never stops the sweep") would catch a soft
+    limit.
+- **What a kill left behind, and the fixes (founder, 2026-09-29, all in 3a):**
+  - **Lifecycle sweep: a tenant suspended in DocFlow, but still billed by
+    Stripe.** The suspension commits first and Stripe is called after, so a
+    kill or crash between them left the subscription active: charged after
+    suspension, no alert, never retried.
+    - **`tenants.stripe_cancel_pending_at`**, in migration `0030` with
+      `timeout_attempts`. Both tables are backed up first, and both row
+      counts go in the PR message. It is set in the same transaction as the
+      suspension.
+    - Every sweep retries pending cancels; a cancel is idempotent. The
+      existing `stripe_cancel_failed` alert covers failures.
+    - **Reactivation clears the mark in the same transaction as the status
+      change.**
+    - **The retry re-checks, under a row lock and immediately before calling
+      Stripe, that the tenant is still in a cancelled state**, and skips and
+      clears the mark if not. The lock is held across the Stripe call on
+      purpose: releasing it first would let a reactivation commit between
+      the check and the call, and the cancel would then hit the resumed
+      subscription. Holding it is bounded by the Stripe timeouts (3 x 15 s),
+      well inside the 5-minute idle-transaction cap (0028). A reactivation
+      arriving during that window waits for it.
+    - Test (founder): suspend -> the cancel fails -> reactivate -> the next
+      sweep does **not** cancel.
+  - **Lifecycle sweep: a 4-minute time box**
+    (`LIFECYCLE_SWEEP_TIME_BOX_SECONDS`). The sweep takes no new tenant after
+    4 minutes and leaves the rest to the next tick, so the 10-minute limit
+    can't land in the middle of a tenant in normal running. Test (founder):
+    a sweep over the cap stops taking tenants, and the next tick picks up the
+    rest.
+  - **Exports left `pending` and imports left `parsing`** are marked failed
+    by the stuck sweep, with a catalog code. **The codes and their wording go
+    to the founder before they are added.**
+  - Rollup, scheduled jobs and the stuck sweep leave nothing that needs
+    fixing: the rollup is overwritten by its next run, a job's writes commit
+    with its "done" mark, and a repeated enqueue is harmless.
 - **Tests:**
   - **Linux CI, a real prefork worker** (the CI worker job already has Redis),
     with shortened limits. A task that hangs and ignores signals must be:

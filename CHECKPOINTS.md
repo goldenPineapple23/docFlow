@@ -38,6 +38,21 @@ On staging, one at a time (RUNBOOK 1.4), as pytest printed them:
 
   The failure is recorded, not treated as flaky: a provider outage fails the
   golden run, and the checkpoint waits for a pass.
+  - The failures match Anthropic's incident "Elevated errors on claude.ai,
+    Claude Code, Claude Cowork and the Claude API" (status.claude.com: first
+    posted 14:21 UTC, services normal from 14:59 UTC, **resolved 16:27
+    UTC**). The founder asked for a re-run once it was resolved, before the
+    checkpoint was pushed.
+  - **Re-run after resolution, 16:28 UTC: `3 passed, 517 deselected, 1
+    warning in 26.36s`**, with the live tests now printing each call's cost:
+
+    | Test | Input tokens | Output tokens | Est. cost |
+    |---|---|---|---|
+    | golden | 2,621 | 888 | $0.0141 |
+    | golden with examples | 5,218 (2,604 of them examples) | 731 | $0.0177 |
+    | contamination | 5,156 (2,604 of them examples) | 883 | $0.0191 |
+
+    All three on `claude-sonnet-5`; $0.051 for the run.
 
 Also:
 
@@ -90,8 +105,9 @@ table was checked on 2026-09-29 against the claude-api skill's model table:
   multi-page TIFF**, so there is no split by page count and nothing on
   visual reads. Long orders were measured in D-161: 300 lines $0.41, 600
   lines $0.81.
-- Today's golden calls were not recorded (the live tests keep no cost). At
-  2,400-5,400 input tokens they are the same size as the rows above.
+- The post-resolution golden run measured the same range: $0.0141 without
+  examples, $0.0177 and $0.0191 with them (the table under Test runs). The
+  live tests print each call's cost from now on.
 
 ### Open, carried forward
 
