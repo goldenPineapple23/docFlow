@@ -6,6 +6,22 @@ def database_available() -> bool:
     return bool(get_settings().database_url)
 
 
+# ── One test run at a time against a shared database (tests/suite_lock.py) ──
+# A refused run writes no JUnit report; the lock's own annotation says why.
+def pytest_sessionstart(session):
+    if session.config.option.collectonly or not database_available():
+        return
+    from tests import suite_lock
+
+    suite_lock.session_start(get_settings().database_url, suite="worker")
+
+
+def pytest_sessionfinish(session, exitstatus):
+    from tests import suite_lock
+
+    suite_lock.session_finish()
+
+
 def documents_schema_available() -> bool:
     """
     True once supabase/migrations/0002_documents.sql has actually been
