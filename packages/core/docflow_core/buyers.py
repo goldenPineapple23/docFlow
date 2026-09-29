@@ -388,13 +388,8 @@ def identify_or_create_buyer(
     alias = find_buyer_by_alias(session, normalized_name)
     if alias is not None:
         aliased_buyer, rule_id = alias
-        session.execute(
-            text(
-                "UPDATE learned_rules SET times_applied = times_applied + 1, updated_at = now() "
-                "WHERE id = :id"
-            ),
-            {"id": str(rule_id)},
-        )
+        # The rule's `times_applied` is added to by the document task, once,
+        # when the document moves to review -- not here (Stage 3a).
         return BuyerIdentification(
             buyer_id=aliased_buyer, created=False, matched_on="buyer_alias", rule_id=rule_id
         )

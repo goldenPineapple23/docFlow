@@ -41,6 +41,7 @@ from docflow_core import (
 )
 from docflow_core.buyers import identify_and_link_buyer
 from docflow_core.config import get_settings
+from docflow_core.constants import DOCUMENT_TASK_TIME_LIMIT_SECONDS
 from docflow_core.db import tenant_session
 from docflow_core.duplicates import detect_document_relationships
 from docflow_core.example_prompting import ExamplePlan
@@ -52,7 +53,7 @@ from docflow_core.extraction import (
     wrap_document_content,
 )
 from docflow_core.field_schema import FieldSchema
-from docflow_core.matching import match_document_lines
+from docflow_core.matching import bump_times_applied, match_document_lines
 from docflow_core.numbers import plain_or_none
 from docflow_core.storage import read_file, save_file
 from docflow_core.validation import validate_document
@@ -569,7 +570,11 @@ def _overall_confidence(header_confidence: dict, schema: FieldSchema) -> Decimal
     return schema.overall_confidence(header_confidence)
 
 
-@celery_app.task(name="docflow.parse_and_extract")
+@celery_app.task(
+    name="docflow.parse_and_extract",
+    time_limit=DOCUMENT_TASK_TIME_LIMIT_SECONDS,
+    Request="app.timeouts:DocumentTaskRequest",
+)
 def parse_and_extract(tenant_id: str, document_id: str) -> None:
     """
     Read one document and put it in front of a reviewer -- once, and only
@@ -840,6 +845,9 @@ def _finish(tid: UUID, did: UUID) -> None:
         schema = field_schema.at_version(session, tid, field_schema_version)
 
     issues: list[str] = []
+    # Learned rules that fired, added to `times_applied` once, in the move to
+    # review below -- so a resumed document is never counted twice (Stage 3a).
+    rules_applied: dict[UUID, int] = {}
 
     # Buyer identification runs first, because Section 7.6's learned mappings
     # are scoped to a buyer. Own transaction (D-058): a failure here must never
@@ -848,13 +856,16 @@ def _finish(tid: UUID, did: UUID) -> None:
     buyer_id: UUID | None = None
     try:
         with tenant_session(tid) as session:
-            buyer_id = identify_and_link_buyer(
+            identification = identify_and_link_buyer(
                 session,
                 tid,
                 did,
                 buyer_name=header.get("buyer_name") if header else None,
                 buyer_contact_email=header.get("buyer_contact_email") if header else None,
-            ).buyer_id
+            )
+            buyer_id = identification.buyer_id
+            if identification.rule_id is not None:
+                rules_applied[identification.rule_id] = rules_applied.get(identification.rule_id, 0) + 1
     except Exception as exc:  # noqa: BLE001 -- recorded as a pipeline issue
         # No exception message: a database error's text can carry bound
         # parameters, which here are customer data (Section 7.10).
@@ -866,6 +877,8 @@ def _finish(tid: UUID, did: UUID) -> None:
     try:
         with tenant_session(tid) as session:
             summary = match_document_lines(session, tid, did, buyer_id=buyer_id)
+        for rule_id, count in summary.rules_applied.items():
+            rules_applied[rule_id] = rules_applied.get(rule_id, 0) + count
         logger.info(
             "matching_complete document_id=%s considered=%d matched=%d",
             did,
@@ -922,6 +935,20 @@ def _finish(tid: UUID, did: UUID) -> None:
                     payload={"document_id": str(did), "steps": issues},
                     dedupe_key=f"pipeline_step_failed:{did}",
                 )
+            # Exactly once per document: this transaction is the only one
+            # that moves it to review (compare-and-set above).
+            bump_times_applied(session, rules_applied)
+            # The "needs review" digest (slice 5.8c, D-131), in the same
+            # transaction so a worker killed straight after the commit can't
+            # leave the order out of the digest -- behind a savepoint, so a
+            # notification that fails can never cost the document its checks.
+            digest = session.begin_nested()
+            try:
+                review_digest.note_needs_review(session, tid, did)
+                digest.commit()
+            except Exception as exc:  # noqa: BLE001 -- a notification, not the document
+                digest.rollback()
+                logger.error("review_digest_failed document_id=%s error_type=%s", did, type(exc).__name__)
         # Counts only -- never a value (Section 7.10).
         logger.info(
             "validation_complete document_id=%s warnings=%d created=%d resolved=%d issues=%d",
@@ -938,15 +965,6 @@ def _finish(tid: UUID, did: UUID) -> None:
         logger.error("validation_failed document_id=%s error_type=%s", did, type(exc).__name__)
         _fail_after_extraction(tid, did, "DOC-021")
         return
-
-    # The "needs review" digest (slice 5.8c, D-131). Last, in its own
-    # transaction: a document in review must never lose its checks over a
-    # notification.
-    try:
-        with tenant_session(tid) as session:
-            review_digest.note_needs_review(session, tid, did)
-    except Exception as exc:  # noqa: BLE001 -- a notification, not the document
-        logger.error("review_digest_failed document_id=%s error_type=%s", did, type(exc).__name__)
 
 
 class _AlreadyMovedOn(Exception):

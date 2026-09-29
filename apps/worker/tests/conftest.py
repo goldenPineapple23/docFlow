@@ -41,3 +41,31 @@ requires_documents_schema = pytest.mark.skipif(
         "-- see SETUP.md Step 5 / DECISIONS.md."
     ),
 )
+
+
+def timeout_schema_available() -> bool:
+    """True once supabase/migrations/0030_timeouts_and_stripe_cancel.sql has
+    been applied (documents.timeout_attempts, tenants.stripe_cancel_pending_at).
+    Applied by hand on staging like every migration (D-013); CI applies it
+    itself, so these tests never skip there."""
+    if not database_available():
+        return False
+    from docflow_core.db import get_engine
+    from sqlalchemy import text
+
+    try:
+        with get_engine().connect() as conn:
+            conn.execute(text("SELECT timeout_attempts FROM documents LIMIT 0"))
+            conn.execute(text("SELECT stripe_cancel_pending_at FROM tenants LIMIT 0"))
+        return True
+    except Exception:
+        return False
+
+
+requires_timeout_schema = pytest.mark.skipif(
+    not timeout_schema_available(),
+    reason=(
+        "supabase/migrations/0030_timeouts_and_stripe_cancel.sql has not been applied "
+        "to this database yet."
+    ),
+)

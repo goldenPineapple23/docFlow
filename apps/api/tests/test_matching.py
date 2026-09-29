@@ -469,7 +469,7 @@ def test_a_learned_rule_wins_over_an_exact_sku_match():
         )
 
         with tenant_session(tenant.tenant_id) as session:
-            match_document_lines(session, tenant.tenant_id, document, buyer_id=buyer)
+            summary = match_document_lines(session, tenant.tenant_id, document, buyer_id=buyer)
 
         line = tenant.lines(document)[0]
         assert UUID(str(line["matched_item_id"])) == ethiopian
@@ -477,8 +477,10 @@ def test_a_learned_rule_wins_over_an_exact_sku_match():
         assert line["match_method"] == "learned_rule"
         assert line["match_score"] == LEARNED_RULE_MATCH_SCORE
         assert _provenance(line)["matched_item_id"] == f"learned_rule:{rule_id}"
-        # Section 7.13's "mapping reuse rate" is built on this counter.
-        assert tenant.rule(rule_id)["times_applied"] == 1
+        # Matching reports the firing; the document task adds it to the
+        # rule's count once, when the document moves to review (Stage 3a).
+        assert summary.rules_applied == {rule_id: 1}
+        assert tenant.rule(rule_id)["times_applied"] == 0
         # The extracted values themselves are untouched (Section 7.1).
         assert line["sku"] == "CF-1001"
         assert line["description"] == "House Blend Beans"
@@ -632,14 +634,14 @@ def test_a_correction_on_document_one_auto_matches_document_two_from_the_same_bu
             buyer_id=buyer, lines=[{"sku": "BCH-77", "description": "House Blend Beans"}]
         )
         with tenant_session(tenant.tenant_id) as session:
-            match_document_lines(session, tenant.tenant_id, second, buyer_id=buyer)
+            summary = match_document_lines(session, tenant.tenant_id, second, buyer_id=buyer)
 
         line = tenant.lines(second)[0]
         assert UUID(str(line["matched_item_id"])) == colombian
         assert line["match_method"] == "learned_rule"
         assert line["match_score"] == LEARNED_RULE_MATCH_SCORE
         assert _provenance(line)["matched_item_id"] == f"learned_rule:{rule_id}"
-        assert tenant.rule(rule_id)["times_applied"] == 1
+        assert summary.rules_applied == {rule_id: 1}
 
 
 @requires_sku_matching_schema
@@ -804,7 +806,7 @@ def test_a_uom_alias_rule_records_a_suggestion_without_touching_the_extracted_un
         )
 
         with tenant_session(tenant.tenant_id) as session:
-            match_document_lines(session, tenant.tenant_id, document)
+            summary = match_document_lines(session, tenant.tenant_id, document)
 
         line = tenant.lines(document)[0]
         assert line["unit"] == "CS", "the extracted unit must never be rewritten"
@@ -812,7 +814,7 @@ def test_a_uom_alias_rule_records_a_suggestion_without_touching_the_extracted_un
         assert _provenance(line)["matched_uom"] == f"learned_rule:{rule_id}"
         # The alias resolved the difference, so there is nothing to flag.
         assert line["uom_mismatch"] is False
-        assert tenant.rule(rule_id)["times_applied"] == 1
+        assert summary.rules_applied == {rule_id: 1}
 
 
 @requires_sku_matching_schema
