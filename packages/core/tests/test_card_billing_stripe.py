@@ -205,3 +205,71 @@ def test_the_update_card_page_opens_on_the_card_step(stripe):
     assert es.create_card_update_page(customer_id="cus_1", return_url="https://a/billing") == "https://portal.example/s"
     (sent,) = stripe.posted("billing_portal/sessions")
     assert sent["flow_data[type]"] == "payment_method_update"
+
+
+# ── Charging the open invoice after a card update (founder, 2026-09-29) ──────
+
+
+class InvoiceStripe:
+    """A fake with open invoices whose pay requests answer as scripted."""
+
+    def __init__(self, answers: dict[str, tuple[int, dict]], status_after: dict[str, str]):
+        self.answers = answers
+        self.status_after = status_after
+        self.paid_requests: list[str] = []
+
+    def __call__(self, method, url, *, auth, data=None, params=None, headers=None, timeout=None):
+        path = url.removeprefix("https://api.stripe.com/v1/")
+        if method == "GET" and path == "invoices":
+            return httpx.Response(200, json={"data": [{"id": i} for i in self.answers]})
+        if method == "POST" and path.endswith("/pay"):
+            invoice_id = path.split("/")[1]
+            self.paid_requests.append(invoice_id)
+            status, body = self.answers[invoice_id]
+            return httpx.Response(status, json=body)
+        if method == "GET" and path.startswith("invoices/"):
+            return httpx.Response(200, json={"status": self.status_after[path.split("/")[1]]})
+        raise AssertionError(f"unexpected Stripe call {method} {path}")
+
+
+def _pay(monkeypatch, answers, status_after=None):
+    fake = InvoiceStripe(answers, status_after or {})
+    monkeypatch.setattr(es.httpx, "request", fake)
+    monkeypatch.setattr(es, "_stripe_key", lambda: "sk_test_fake")
+    return es.pay_open_invoices("sub_1"), fake
+
+
+def test_paying_the_open_invoice_charges_the_new_card(monkeypatch):
+    result, fake = _pay(monkeypatch, {"in_1": (200, {"status": "paid"})})
+    assert result == es.OpenInvoicesPaid(paid=1, declined=0, needs_customer=0)
+    assert fake.paid_requests == ["in_1"]
+
+
+def test_an_invoice_stripes_own_retry_already_paid_counts_as_success(monkeypatch):
+    # Stripe's real answer, test mode 2026-09-29: a plain 400, no error code.
+    already = (400, {"error": {"type": "invalid_request_error", "message": "Invoice is already paid"}})
+    result, _ = _pay(monkeypatch, {"in_1": already}, {"in_1": "paid"})
+    assert result == es.OpenInvoicesPaid(paid=1, declined=0, needs_customer=0)
+
+
+@pytest.mark.parametrize("status", [409, 429])
+def test_an_invoice_being_paid_by_another_request_counts_as_success(monkeypatch, status):
+    result, _ = _pay(monkeypatch, {"in_1": (status, {"error": {"code": "lock_timeout"}})})
+    assert result == es.OpenInvoicesPaid(paid=1, declined=0, needs_customer=0)
+
+
+def test_a_declined_new_card_is_an_outcome_not_an_error(monkeypatch):
+    declined = (402, {"error": {"type": "card_error", "code": "card_declined"}})
+    result, _ = _pay(monkeypatch, {"in_1": declined}, {"in_1": "open"})
+    assert result == es.OpenInvoicesPaid(paid=0, declined=1, needs_customer=0)
+
+
+def test_a_card_needing_the_customer_is_an_outcome_not_an_error(monkeypatch):
+    action = (402, {"error": {"type": "card_error", "code": "authentication_required"}})
+    result, _ = _pay(monkeypatch, {"in_1": action}, {"in_1": "open"})
+    assert result == es.OpenInvoicesPaid(paid=0, declined=0, needs_customer=1)
+
+
+def test_stripe_failing_otherwise_raises_so_the_event_is_redelivered(monkeypatch):
+    with pytest.raises(es.ExternalServiceError):
+        _pay(monkeypatch, {"in_1": (500, {})}, {"in_1": "open"})

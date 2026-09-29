@@ -893,12 +893,17 @@ def update_deal_terms(
     -- a live customer's plan is a tier change, with billing. Writes
     `admin_actions` and a `tenant_lifecycle_events` row holding the before
     and after, so a price that moved after the first conversation shows.
+
+    Card billing (founder, 2026-09-29): once the customer has paid the setup
+    fee at signing, its preset, amount and billing are locked (ONB-017), so
+    the record can't drift from what Stripe collected. The rest of the deal
+    stays editable until go-live.
     """
     with platform_session() as session:
         row = session.execute(
             text(
                 "SELECT onboarding_status, tier_id, setup_fee_preset_id, setup_fee_amount, "
-                "setup_fee_billing, founding_price FROM tenants WHERE id = :id FOR UPDATE"
+                "setup_fee_billing, founding_price, setup_fee_paid_at FROM tenants WHERE id = :id FOR UPDATE"
             ),
             {"id": str(tenant_id)},
         ).mappings().first()
@@ -915,6 +920,15 @@ def update_deal_terms(
             )
         except deal_terms.DealTermsError as exc:
             raise ConsoleError(exc.code, exc.detail) from exc
+        if row["setup_fee_paid_at"] is not None:
+            after = resolved.columns()
+            fee_changes = (
+                str(after["setup_fee_preset_id"]) != str(row["setup_fee_preset_id"])
+                or Decimal(str(after["setup_fee_amount"])) != Decimal(row["setup_fee_amount"])
+                or after["setup_fee_billing"] != row["setup_fee_billing"]
+            )
+            if fee_changes:
+                raise ConsoleError("ONB-017")
         before = {
             "tier_id": str(row["tier_id"]) if row["tier_id"] else None,
             "setup_fee_preset_id": str(row["setup_fee_preset_id"]) if row["setup_fee_preset_id"] else None,

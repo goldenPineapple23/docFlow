@@ -573,6 +573,9 @@ class ReactivatePlan:
     # When the current suspension began (its `suspended` lifecycle event):
     # the line between the founder's two invoice sections (Stage 3a).
     suspended_at: datetime | None = None
+    # 'card' | 'invoice' (migration 0031). A card-billed tenant is charged at
+    # once on reactivation, and a declined card refuses it (D5).
+    billing_method: str = "invoice"
 
     @property
     def idempotency_scope(self) -> str:
@@ -584,7 +587,7 @@ def plan_reactivate(session: Session, tenant_id: UUID) -> ReactivatePlan:
     row = session.execute(
         text(
             """
-            SELECT t.name, t.status, t.stripe_customer_id, t.status_changed_at,
+            SELECT t.name, t.status, t.stripe_customer_id, t.status_changed_at, t.billing_method,
                    tr.id AS tier_id, tr.name AS tier_name, tr.monthly_price, tr.document_allowance,
                    (SELECT max(e.created_at) FROM tenant_lifecycle_events e
                      WHERE e.tenant_id = t.id AND e.event_type = 'suspended') AS suspended_at
@@ -610,6 +613,7 @@ def plan_reactivate(session: Session, tenant_id: UUID) -> ReactivatePlan:
         document_allowance=row["document_allowance"],
         status_changed_at=row["status_changed_at"],
         suspended_at=row["suspended_at"],
+        billing_method=row["billing_method"],
     )
 
 

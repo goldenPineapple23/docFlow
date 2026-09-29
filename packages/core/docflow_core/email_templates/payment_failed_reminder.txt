@@ -1,0 +1,13 @@
+Subject: Reminder: please update your card by $suspension_date
+
+Hello,
+
+Your last DocFlow payment ($amount) still hasn't gone through. Your
+documents keep processing as normal for now.
+
+Update your card here: $billing_url
+We'll charge the new card right away.
+
+If the card isn't updated, processing may be paused from $suspension_date.
+
+-- DocFlow

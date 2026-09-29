@@ -26,6 +26,7 @@ from uuid import UUID
 from docflow_core import (
     admin_data_access,
     buyer_merge,
+    card_billing,
     catalog_import,
     deal_terms,
     example_prompting,
@@ -351,6 +352,20 @@ def send_invite(tenant_id: UUID, identity: AuthenticatedIdentity = Depends(requi
     except ExternalServiceError as exc:
         raise catalog_error("CON-006", status_code=502, extra={"service": exc.service}) from exc
     return {"email_outbox_id": str(result["email_outbox_id"]), "held": result["held"]}
+
+
+@router.post("/tenants/{tenant_id}/card-request")
+def request_card(tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)) -> dict:
+    """Card billing's "Ask for a card" (D1): email the owner a link to their
+    Billing page, where each click opens a fresh Stripe card page (Checkout
+    links expire after 24 hours). The wording follows the deal: the setup fee
+    at signing (standard), with month one (founding), or none to charge."""
+    _console_act(identity, tenant_id, "card_request", target_type="tenant", target_id=tenant_id)
+    with tenant_session(tenant_id) as session:
+        outbox_id, template = card_billing.request_card(session, tenant_id)
+    if outbox_id is None:
+        raise catalog_error("CON-001", status_code=409, extra={"reason": "no owner"})
+    return {"email_outbox_id": str(outbox_id), "template": template}
 
 
 # ── Attention panel and outbox (Section 7.9 / 7.15.3) ───────────────────────
@@ -812,12 +827,26 @@ def go_live_plan(
         "setup_fee_note": plan.setup_fee_note,
         "setup_fee_preset_name": plan.setup_fee_preset_name,
         "founding_price": plan.founding_price,
+        # Card billing (D1, D2): what choosing "card" at go-live needs.
+        "founding_customer": plan.founding_customer,
+        "card_on_file": plan.card_on_file,
+        "setup_fee_paid": plan.setup_fee_paid,
+        "card_needs_fee_paid_at_signing": (
+            not plan.founding_customer and plan.setup_fee_billing == "stripe" and plan.setup_fee_amount > 0
+        ),
     }
+
+
+class GoLiveRequest(BaseModel):
+    # D6: chosen at go-live. The Console form starts on "card" for pilots; a
+    # request with no body is invoice billing, exactly as before card billing.
+    billing_method: Literal["card", "invoice"] = "invoice"
 
 
 @router.post("/tenants/{tenant_id}/go-live")
 def go_live(
     tenant_id: UUID,
+    body: GoLiveRequest | None = None,
     step_up: StepUp = Depends(require_recent_mfa),
 ) -> dict:
     """
@@ -836,7 +865,13 @@ def go_live(
     The subscription starts on a trial (D-125): the tenant is fully live and
     usable immediately, but Stripe generates no invoice -- for the first
     month or the setup fee -- until TRIAL_PERIOD_DAYS after this moment.
+
+    Card billing (founder, 2026-09-29): with `billing_method` "card", a card
+    must be on file (ONB-015) and a standard customer's setup fee paid at
+    signing (ONB-016); Stripe then charges the card when the trial ends. A
+    fee already paid at signing is not added to the first invoice.
     """
+    billing_method = (body or GoLiveRequest()).billing_method
     # Destructive: starts billing, so it needs a recent authenticator code (D-177).
     identity = step_up.identity
     admin_id = _console_act(
@@ -844,11 +879,10 @@ def go_live(
     )
     with tenant_session(tenant_id) as session:
         try:
-            plan = onboarding.plan_go_live(session, tenant_id)
+            plan = onboarding.plan_go_live(session, tenant_id, billing_method=billing_method)
         except onboarding.OnboardingError as exc:
             raise _onboarding_error(exc) from exc
     founding = plan.founding_price
-    fee = plan.setup_fee_amount
     if plan.customer_id is None:
         raise catalog_error("ONB-008", status_code=502, extra={"reason": "no Stripe customer"})
 
@@ -862,10 +896,11 @@ def go_live(
             monthly_price=plan.monthly_price,
             promo_monthly_price=plan.promo_monthly_price if founding else None,
             promo_months=plan.promo_months if founding else None,
-            setup_fee=fee if plan.setup_fee_billing == "stripe" and fee > 0 else None,
+            setup_fee=plan.setup_fee_on_first_invoice,
             days_until_due=INVOICE_DAYS_UNTIL_DUE,
             idempotency_scope="golive",
             trial_end=trial_end,
+            charge_card=plan.billing_method == "card",
         )
     except ExternalServiceError as exc:
         raise catalog_error("ONB-008", status_code=502) from exc
@@ -1011,7 +1046,14 @@ def reactivate_tenant(
             days_until_due=INVOICE_DAYS_UNTIL_DUE,
             idempotency_scope=plan.idempotency_scope,
             trial_end=None,  # D-125's trial is a go-live perk, not a reactivation one
+            # A card-billed tenant is charged at once; a declined card refuses
+            # the reactivation (D5) instead of leaving an `incomplete`
+            # subscription on an active tenant.
+            charge_card=plan.billing_method == "card",
+            refuse_if_declined=plan.billing_method == "card",
         )
+    except external_services.CardDeclined as exc:
+        raise catalog_error("BIL-007", status_code=409) from exc
     except ExternalServiceError as exc:
         raise catalog_error("CON-006", status_code=502) from exc
 

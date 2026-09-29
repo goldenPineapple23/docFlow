@@ -801,6 +801,83 @@ def create_card_update_page(*, customer_id: str, return_url: str) -> str:
     return str(response.json()["url"])
 
 
+@dataclass(frozen=True)
+class OpenInvoicesPaid:
+    """What asking Stripe to pay a subscription's open invoices came to."""
+
+    paid: int  # paid now, or found already paid / being paid (a race with Stripe's own retry)
+    declined: int  # the new card was declined too; the invoice stays open
+    needs_customer: int  # the card needs the customer (3D Secure); Stripe asks them
+
+
+def pay_open_invoices(subscription_id: str) -> OpenInvoicesPaid:
+    """
+    After a card-billed customer updates their card while past due (founder,
+    2026-09-29): ask Stripe to charge the new card for every open invoice now.
+    Stripe itself does not after its final retry ("After the final payment
+    attempt, we make no further payment attempts"; checked in test mode --
+    two days after a card update the invoice was still open, and paying it
+    through the API collected it at once).
+
+    Stripe's own retry can reach the same invoice at the same moment. Whenever
+    a pay request fails, the invoice is read back, and **already paid counts
+    as success** -- Stripe answers a second payment with a plain 400 ("Invoice
+    is already paid", no error code, test mode 2026-09-29), so the answer is
+    taken from the invoice, never from the message text. A 409 or 429 means
+    another request holds the invoice (it is being paid) and also counts as
+    success: whichever request wins, the invoice ends up paid or open, and an
+    open one is left to Stripe's retries and the banner. A declined card, or
+    one needing the customer's authentication, is an outcome, not an error --
+    nobody is waiting on this answer; the owner still sees the banner. Only
+    Stripe being unreachable raises, so the webhook answers 500 and Stripe
+    re-delivers.
+    """
+    listed = _stripe(
+        "GET", "invoices", params={"subscription": subscription_id, "status": "open", "limit": 20}
+    )
+    if listed.status_code >= 300:
+        raise ExternalServiceError("stripe", f"invoice list returned {listed.status_code}")
+    paid = declined = needs_customer = 0
+    for invoice in listed.json().get("data", []):
+        invoice_id = str(invoice["id"])
+        response = _stripe("POST", f"invoices/{invoice_id}/pay")
+        if response.status_code < 300:
+            paid += 1
+            continue
+        if response.status_code in (409, 429):
+            paid += 1  # being paid by another request right now
+            continue
+        again = _stripe("GET", f"invoices/{invoice_id}")
+        if again.status_code >= 300:
+            raise ExternalServiceError("stripe", f"invoice retrieve returned {again.status_code}")
+        if again.json().get("status") in ("paid", "void"):
+            paid += 1  # Stripe's retry got there first, or the founder voided it
+            continue
+        code = _stripe_error(response)
+        if response.status_code == 402:
+            if "authentication_required" in code or "requires_action" in code:
+                needs_customer += 1
+            else:
+                declined += 1
+            continue
+        raise ExternalServiceError("stripe", f"invoice pay returned {response.status_code}: {code}")
+    return OpenInvoicesPaid(paid=paid, declined=declined, needs_customer=needs_customer)
+
+
+def latest_invoice_amount_cents(subscription_id: str) -> int | None:
+    """What the subscription's latest invoice asks for, in cents: the amount a
+    failed charge was for, named in the owner's past-due email. None if the
+    subscription has no invoice."""
+    response = _stripe("GET", f"subscriptions/{subscription_id}", params={"expand[0]": "latest_invoice"})
+    if response.status_code >= 300:
+        raise ExternalServiceError("stripe", f"subscription retrieve returned {response.status_code}")
+    invoice = response.json().get("latest_invoice")
+    if not isinstance(invoice, dict):
+        return None
+    amount = invoice.get("amount_due")
+    return int(amount) if isinstance(amount, int) else None
+
+
 def verify_webhook_signature(
     payload: bytes, sig_header: str, secret: str, *, tolerance_seconds: int = STRIPE_CLOCK_TOLERANCE_SECONDS
 ) -> dict:

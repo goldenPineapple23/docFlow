@@ -154,6 +154,12 @@ INVOICE_DAYS_UNTIL_DUE = 15
 # the setup fee onto one invoice, due INVOICE_DAYS_UNTIL_DUE days later.
 TRIAL_PERIOD_DAYS = 7
 
+# Card billing (founder, 2026-09-29): a card-billed owner whose subscription
+# goes past due is emailed at once, and again this many days before the date
+# from which the tenant may be suspended (first past-due notice +
+# CURE_PERIOD_DAYS). The job skips itself if the payment has gone through.
+PAST_DUE_REMINDER_DAYS_BEFORE = 3
+
 
 def constants_in_effect(*names: str) -> dict[str, Any]:
     """The named constants' current values, for a lifecycle event's

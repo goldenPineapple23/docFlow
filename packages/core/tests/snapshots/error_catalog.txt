@@ -54,6 +54,22 @@ BIL-005 [warning/founder] Stripe didn't make the plan change
   what+why: Stripe refused or didn't answer, so the subscription and DocFlow's record are both unchanged. The failure has been logged.
   next:     Try again in a few minutes; check the customer in Stripe if it keeps failing.
 
+BIL-006 [warning/tenant] Your last payment didn't go through
+  what+why: We couldn't charge the card on file for your DocFlow subscription. Your documents keep processing as normal. If the card isn't updated, processing may be paused from {suspension_date}.
+  next:     Update your card on the Billing page. We'll charge the new card right away.
+
+BIL-007 [warning/founder] The card was declined; still suspended
+  what+why: Stripe declined the first month's charge, so no subscription was created and nothing changed in DocFlow.
+  next:     Ask the owner to update their card on the Billing page, then reactivate again.
+
+BIL-008 [warning/tenant] We couldn't open the card page
+  what+why: Stripe didn't answer, so the card page couldn't open. Nothing was charged.
+  next:     Try again in a minute. DocFlow has already logged the problem.
+
+BIL-009 [warning/tenant] Your payment is overdue
+  what+why: Your payment is overdue, and processing may be paused.
+  next:     Update your card to avoid any interruption.
+
 BUY-001 [warning/founder] Rows with no customer name
   what+why: These rows have no name, so there is no customer to create.
   next:     Add the name, or remove the row.
@@ -453,6 +469,18 @@ ONB-013 [warning/founder] Say why in the note
 ONB-014 [warning/founder] That setup fee option isn't available
   what+why: There is no current version of the chosen setup fee preset in the presets table.
   next:     Choose Founding, Standard, Complex, Waived or Custom; if one is missing, check setup_fee_presets.
+
+ONB-015 [warning/founder] Add a card before going live
+  what+why: This tenant is billed by card, and no card is on file yet.
+  next:     Use Ask for a card on the Overview, or choose invoice billing for this go-live.
+
+ONB-016 [warning/founder] The setup fee hasn't been paid yet
+  what+why: This is a standard customer, whose setup fee is charged when they add their card, and Stripe hasn't reported that payment.
+  next:     Wait for the owner to add their card, or mark the fee as invoiced by hand in Deal terms.
+
+ONB-017 [warning/founder] The setup fee is already paid
+  what+why: The customer paid this setup fee when they added their card, so its type and amount can't change.
+  next:     If the deal changed, settle the difference in Stripe.
 
 QUA-001 [info/tenant] Only DocFlow can release these documents
   what+why: These documents are held because of a surge in volume or a failed sender check, so only DocFlow can release them.

@@ -1,0 +1,14 @@
+Subject: Add a card for your DocFlow account
+
+Hello,
+
+To finish setting up $tenant_name on DocFlow, please add the card DocFlow
+should charge. Your card details go straight to Stripe, our payment
+provider; DocFlow never sees them.
+
+Nothing is charged now. Your 7-day free trial starts when DocFlow goes
+live, and your first month is charged when it ends.
+
+Add your card: $billing_url
+
+-- DocFlow

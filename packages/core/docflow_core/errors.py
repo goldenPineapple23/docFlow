@@ -726,6 +726,51 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="founder",
     ),
+    # ── Card billing (founder, 2026-09-29; D-181) ──────────────────────────
+    # BIL-006 and BIL-009: the banner owners and admins of a card-billed tenant
+    # see while its subscription is past due. Nothing pauses automatically:
+    # {suspension_date} is the earliest date the founder may confirm a
+    # non-payment cancel (first past-due notice + CURE_PERIOD_DAYS), so the
+    # wording says "may", never "will" (founder, 2026-09-29).
+    "BIL-006": ErrorCatalogEntry(
+        code="BIL-006",
+        title="Your last payment didn't go through",
+        message=(
+            "We couldn't charge the card on file for your DocFlow subscription. Your documents "
+            "keep processing as normal. If the card isn't updated, processing may be paused "
+            "from {suspension_date}."
+        ),
+        action="Update your card on the Billing page. We'll charge the new card right away.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "BIL-007": ErrorCatalogEntry(
+        code="BIL-007",
+        title="The card was declined; still suspended",
+        message=(
+            "Stripe declined the first month's charge, so no subscription was created and "
+            "nothing changed in DocFlow."
+        ),
+        action="Ask the owner to update their card on the Billing page, then reactivate again.",
+        severity="warning",
+        audience="founder",
+    ),
+    "BIL-008": ErrorCatalogEntry(
+        code="BIL-008",
+        title="We couldn't open the card page",
+        message="Stripe didn't answer, so the card page couldn't open. Nothing was charged.",
+        action="Try again in a minute. DocFlow has already logged the problem.",
+        severity="warning",
+        audience="tenant",
+    ),
+    "BIL-009": ErrorCatalogEntry(
+        code="BIL-009",
+        title="Your payment is overdue",
+        message="Your payment is overdue, and processing may be paused.",
+        action="Update your card to avoid any interruption.",
+        severity="warning",
+        audience="tenant",
+    ),
     # ── EXM-0xx · approved-example prompting (slice 5.10, D-141) ────────────
     "EXM-001": ErrorCatalogEntry(
         code="EXM-001",
@@ -1419,6 +1464,38 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
             "Choose Founding, Standard, Complex, Waived or Custom; if one is missing, check "
             "setup_fee_presets."
         ),
+        severity="warning",
+        audience="founder",
+    ),
+    # Card billing (founder, 2026-09-29; D-181): go-live's card gates (D1, D2)
+    # and the setup fee locked once it is paid at signing.
+    "ONB-015": ErrorCatalogEntry(
+        code="ONB-015",
+        title="Add a card before going live",
+        message="This tenant is billed by card, and no card is on file yet.",
+        action="Use Ask for a card on the Overview, or choose invoice billing for this go-live.",
+        severity="warning",
+        audience="founder",
+    ),
+    "ONB-016": ErrorCatalogEntry(
+        code="ONB-016",
+        title="The setup fee hasn't been paid yet",
+        message=(
+            "This is a standard customer, whose setup fee is charged when they add their card, "
+            "and Stripe hasn't reported that payment."
+        ),
+        action="Wait for the owner to add their card, or mark the fee as invoiced by hand in Deal terms.",
+        severity="warning",
+        audience="founder",
+    ),
+    "ONB-017": ErrorCatalogEntry(
+        code="ONB-017",
+        title="The setup fee is already paid",
+        message=(
+            "The customer paid this setup fee when they added their card, so its type and "
+            "amount can't change."
+        ),
+        action="If the deal changed, settle the difference in Stripe.",
         severity="warning",
         audience="founder",
     ),

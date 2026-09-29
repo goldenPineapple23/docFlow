@@ -49,6 +49,9 @@ ALERT_TYPES: dict[str, str] = {
     "reactivation_invoices_to_review": (
         "A reactivated tenant's old subscription has invoices to collect, void or refund"
     ),
+    # Card billing (founder, 2026-09-29; migration 0031's record_stripe_card_event)
+    "setup_fee_already_paid": "A tenant paid its setup fee a second time",
+    "setup_fee_amount_mismatch": "A setup-fee payment didn't match the tenant's fee",
     # Slice 5.7 (Section 7.16)
     "allowance_reached": "A tenant used its whole monthly allowance",
     "abuse_ceiling_tripped": "A tenant hit the abuse ceiling; new documents are held",

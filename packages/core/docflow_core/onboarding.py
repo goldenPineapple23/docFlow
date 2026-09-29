@@ -251,6 +251,32 @@ class GoLivePlan:
     setup_fee_note: str | None
     setup_fee_preset_name: str | None
     founding_price: bool
+    # Card billing (founder, 2026-09-29). The "Founding customer" box as
+    # ticked at Create tenant (D-117) -- `founding_price` above is that box
+    # AND a tier with a promo; the setup fee's timing follows the box alone.
+    founding_customer: bool = False
+    card_on_file: bool = False
+    setup_fee_paid: bool = False
+    billing_method: str = "invoice"  # 'card' | 'invoice' -- what this go-live will set
+
+    @property
+    def fee_at_signing(self) -> bool:
+        """A standard customer billed by card pays the setup fee when they add
+        their card, not with month one (D2)."""
+        return (
+            self.billing_method == "card"
+            and not self.founding_customer
+            and self.setup_fee_billing == "stripe"
+            and self.setup_fee_amount > 0
+        )
+
+    @property
+    def setup_fee_on_first_invoice(self) -> Decimal | None:
+        """The fee go-live adds to the first invoice: billed through Stripe,
+        not zero, and not already paid at signing."""
+        if self.setup_fee_billing != "stripe" or self.setup_fee_amount <= 0 or self.setup_fee_paid:
+            return None
+        return self.setup_fee_amount
 
     @property
     def promo_months(self) -> int | None:
@@ -259,11 +285,16 @@ class GoLivePlan:
         return -(-self.promo_days // 30) if self.promo_days else None
 
 
-def plan_go_live(session: Session, tenant_id: UUID) -> GoLivePlan:
+def plan_go_live(session: Session, tenant_id: UUID, *, billing_method: str | None = None) -> GoLivePlan:
+    """What go-live will bill. With `billing_method` (the go-live request) the
+    card-billing gates apply: a card on file (D1, ONB-015) and, for a fee paid
+    at signing, that payment (D2, ONB-016). Without it (the summary screen)
+    nothing is refused for billing, and the plan says what each method needs."""
     row = session.execute(
         text(
             """
             SELECT t.name, t.onboarding_status, t.stripe_customer_id, t.invite_sent_at,
+                   t.card_on_file_at, t.setup_fee_paid_at,
                    t.setup_fee_amount, t.setup_fee_billing, t.setup_fee_note, t.founding_price,
                    sp.name AS setup_fee_preset_name,
                    tr.id AS tier_id, tr.name AS tier_name, tr.monthly_price,
@@ -287,7 +318,7 @@ def plan_go_live(session: Session, tenant_id: UUID) -> GoLivePlan:
     if row["setup_fee_amount"] is None or row["setup_fee_billing"] is None:
         raise OnboardingError("ONB-010")
     promo = row["promo_monthly_price"]
-    return GoLivePlan(
+    plan = GoLivePlan(
         tenant_name=row["name"],
         customer_id=row["stripe_customer_id"],
         tier_id=UUID(str(row["tier_id"])),
@@ -305,7 +336,26 @@ def plan_go_live(session: Session, tenant_id: UUID) -> GoLivePlan:
         setup_fee_preset_name=row["setup_fee_preset_name"],
         # Only a tier with a promo has a founding price to give.
         founding_price=bool(row["founding_price"]) and promo is not None,
+        founding_customer=bool(row["founding_price"]),
+        card_on_file=row["card_on_file_at"] is not None,
+        setup_fee_paid=row["setup_fee_paid_at"] is not None,
+        billing_method=billing_method or "invoice",
     )
+    if billing_method == "card":
+        if not plan.card_on_file:
+            raise OnboardingError("ONB-015")
+        if plan.fee_at_signing and not plan.setup_fee_paid:
+            raise OnboardingError("ONB-016")
+    return plan
+
+
+# The go-live email's line about billing, by method (card billing, founder
+# 2026-09-29). Kept beside the template's other parameters, not in it, because
+# the template can't branch.
+GO_LIVE_BILLING_LINES = {
+    "invoice": "Your first invoice comes from Stripe by email.",
+    "card": "Your 7-day free trial starts today. The card on file is charged when it ends.",
+}
 
 
 @dataclass(frozen=True)
@@ -350,6 +400,7 @@ def complete_go_live(
                 stripe_subscription_id = :sub_id,
                 stripe_subscription_status = :sub_status,
                 stripe_current_period_end = :period_end,
+                billing_method = :billing_method,
                 -- When the founding price ends (D-139), so MRR can count
                 -- what a founding customer actually pays.
                 founding_price_ends_at = CASE WHEN :founding THEN coalesce(
@@ -365,6 +416,7 @@ def complete_go_live(
             "sub_id": billing.subscription_id,
             "sub_status": billing.subscription_status,
             "period_end": period_end,
+            "billing_method": plan.billing_method,
             "founding": bool(plan.founding_price and plan.promo_months and billing.subscription_id),
             "founding_end": billing.founding_ends_at,
             "promo_months": plan.promo_months or 0,
@@ -395,6 +447,7 @@ def complete_go_live(
                 "app_url": app_url,
                 "tier_name": plan.tier_name,
                 "document_allowance": f"{plan.document_allowance:,}",
+                "billing_line": GO_LIVE_BILLING_LINES[plan.billing_method],
             },
             related_type="tenant",
             related_id=tenant_id,
@@ -412,6 +465,8 @@ def complete_go_live(
             "setup_fee_amount": str(plan.setup_fee_amount),
             "setup_fee_billing": plan.setup_fee_billing,
             "founding_price": plan.founding_price,
+            "billing_method": plan.billing_method,
+            "setup_fee_paid_at_signing": plan.setup_fee_paid,
             "stripe_subscription_id": billing.subscription_id,
             "go_live_email_outbox_id": str(outbox_id) if outbox_id else None,
             "first_week_checkin_job_id": str(job_id),
