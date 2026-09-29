@@ -299,7 +299,15 @@ wording and reasoning in D-150.
   after the report.
 
 **Then, before any real tenant:** the D-170 clock PR -- #2 first, then #1, #4,
-#5, #7.
+#5, #7. **BUILT (branch `phase55/d170-clock`, 2026-09-28), awaiting merge.**
+One commit per item, in that order. Each makes the database's clock write what the database compares: the deletion date, the
+delete guard and the reminder's day count (#2); the sweep's re-check and the "immediate" effective date (#1, which the founder
+widened to include `lifecycle.py:156`); every job's `run_at` (#4); the rollup's staleness verdict (#5); and the once-a-day alert
+keys' date, computed inside the INSERT (#7). Every new test runs the module's app clock off the database's (`tests/app_clock.py`),
+both ways, and each was shown failing against the old code by exactly the skew (18 tests). No schema change, so no backup.
+The last commit is a CI check (`packages/core/tests/test_one_clock.py`): a database-access module may not pass the app's clock
+into SQL, except with a written reason on the call. It was shown failing on a planted case. It does not follow a value into a
+helper function or see a comparison made in Python; those stay review questions (D-170).
 
 ### Open items parked during the Stage 1 walkthrough (2026-09-27)
 

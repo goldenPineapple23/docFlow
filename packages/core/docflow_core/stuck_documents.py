@@ -27,7 +27,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import text
@@ -96,14 +95,14 @@ def sweep_tenant(
                 result.waiting.append(document_id)
 
         if result.waiting:
-            day = datetime.now(timezone.utc).date().isoformat()
             founder_alerts.raise_alert(
                 session,
                 alert_type="document_stuck",
                 severity="warning",
                 tenant_id=tenant_id,
                 payload={"waiting": len(result.waiting), "timeout_min": timeout_min},
-                dedupe_key=f"document_stuck:waiting:{tenant_id}:{day}",
+                dedupe_key=f"document_stuck:waiting:{tenant_id}",
+                dedupe_per_utc_day=True,
             )
 
     # After the commit: a job must never run against a state it can't see.

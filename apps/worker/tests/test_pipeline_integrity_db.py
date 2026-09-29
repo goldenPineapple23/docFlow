@@ -20,18 +20,20 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
-from docflow_core import db, document_status, stuck_documents
+from docflow_core import db, document_status, founder_alerts, stuck_documents
 from docflow_core.db import platform_session, tenant_session
 from docflow_core.review import Acknowledgement, approve_document
 from docflow_core.validation import open_warnings, validate_document
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
+from tests.app_clock import skew_app_clock
 from tests.conftest import requires_documents_schema
 from tests.db_helpers import FakeAnthropic, WorkerTestTenant, model_payload, run_extraction
 
@@ -344,6 +346,38 @@ def test_H3_a_document_waiting_in_pending_is_requeued_and_reported_never_failed(
         assert fresh not in queued
         assert _document(waiting)["status"] == "pending"
         assert _alerts(tenant, "document_stuck") == 1  # one per tenant per day
+
+
+@requires_documents_schema
+@pytest.mark.parametrize(
+    "skew", [timedelta(days=1), -timedelta(days=1)], ids=["app-clock-ahead", "app-clock-behind"]
+)
+def test_the_once_a_day_alert_keys_take_the_databases_date(monkeypatch, skew):
+    """D-170 #7: a once-a-day dedupe key must carry the UTC date by the clock
+    that stamps the rows it dedupes, the database's, so near midnight a skew
+    can neither double-send nor swallow a day. The date is computed inside
+    the INSERT; the app clock here is a whole day out, so the old way always
+    disagrees with created_at."""
+    with WorkerTestTenant("Acme Test Clock") as tenant:
+        waiting = tenant.create_pending_document()
+        give_up = tenant.create_pending_document()
+        _backdate(waiting, status="pending", attempts=0)  # stuck_documents' own daily alert
+        _backdate(give_up, status="processing", attempts=3)  # founder_alerts.raise_for_failure
+
+        skew_app_clock(monkeypatch, stuck_documents, by=skew)
+        skew_app_clock(monkeypatch, founder_alerts, by=skew)
+        stuck_documents.sweep_tenant(tenant.tenant_id, lambda _t, d: None)
+
+        keys = _count(
+            "SELECT count(*) FROM founder_alerts WHERE tenant_id = :t AND type = 'document_stuck'",
+            t=str(tenant.tenant_id),
+        )
+        on_the_databases_date = _count(
+            "SELECT count(*) FROM founder_alerts WHERE tenant_id = :t AND type = 'document_stuck' "
+            "AND dedupe_key LIKE '%:' || (created_at AT TIME ZONE 'UTC')::date::text",
+            t=str(tenant.tenant_id),
+        )
+        assert (keys, on_the_databases_date) == (2, 2)
 
 
 # ── pipeline_sweep_read (migration 0027): no tenant can list other tenants ──

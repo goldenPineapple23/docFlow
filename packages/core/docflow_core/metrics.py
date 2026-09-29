@@ -26,7 +26,7 @@ plain numbers (hours, dollars).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -307,21 +307,25 @@ def read_days(
 
 
 def last_run(session: Session) -> dict[str, Any] | None:
+    """The latest rollup run, with `stale` judged by the database: it stamped
+    finished_at, so its clock decides how long ago that was (D-170 #5)."""
     row = session.execute(
         text(
-            "SELECT id, started_at, finished_at, trigger, tenants, rows_written, ok, error "
+            "SELECT id, started_at, finished_at, trigger, tenants, rows_written, ok, error, "
+            "(finished_at IS NULL OR ok IS NOT TRUE "
+            " OR finished_at < now() - make_interval(hours => :hours)) AS stale "
             "FROM rollup_runs ORDER BY started_at DESC LIMIT 1"
-        )
+        ),
+        {"hours": ROLLUP_STALE_HOURS},
     ).mappings().first()
     return dict(row) if row else None
 
 
-def is_stale(run: dict[str, Any] | None, *, hours: int) -> bool:
+def is_stale(run: dict[str, Any] | None) -> bool:
     """Section 7.15.3: "a rollup that hasn't run in 36 hours is itself a
-    founder_alerts row"."""
-    if run is None or run.get("finished_at") is None or not run.get("ok"):
-        return True
-    return datetime.now(timezone.utc) - run["finished_at"] > timedelta(hours=hours)
+    founder_alerts row". A run that never happened is stale; otherwise the
+    verdict is the one last_run() had the database make."""
+    return run is None or bool(run["stale"])
 
 
 # ── Running the rollup ──────────────────────────────────────────────────────
@@ -393,7 +397,7 @@ def run_rollup(*, days: int = 2, trigger: str = "nightly", tenant_id: UUID | Non
             )
             # The run that just finished proves the job is alive; the one
             # before it is what tells us it had stopped (7.15.3).
-            if trigger == "nightly" and is_stale(previous, hours=ROLLUP_STALE_HOURS):
+            if trigger == "nightly" and is_stale(previous):
                 _raise_stale_alert(session, previous)
 
     return {

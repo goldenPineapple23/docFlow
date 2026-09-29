@@ -14,7 +14,6 @@ tests pin the definitions in Section 7.15.3 exactly:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from docflow_core.metrics import _median, _percentile, is_stale, summarise
@@ -122,10 +121,9 @@ def test_percentile_and_median_edges():
     assert _median(values) == Decimal("50.5")
 
 
-def test_a_rollup_is_stale_when_it_never_ran_failed_or_is_too_old():
-    now = datetime.now(timezone.utc)
-    assert is_stale(None, hours=36) is True
-    assert is_stale({"finished_at": None, "ok": None}, hours=36) is True
-    assert is_stale({"finished_at": now, "ok": False}, hours=36) is True
-    assert is_stale({"finished_at": now - timedelta(hours=40), "ok": True}, hours=36) is True
-    assert is_stale({"finished_at": now - timedelta(hours=2), "ok": True}, hours=36) is False
+def test_a_rollup_that_never_ran_is_stale_and_otherwise_the_databases_verdict_stands():
+    # How long ago a run finished is judged in SQL by last_run() (D-170 #5);
+    # apps/api/tests/test_d170_clock.py tests that verdict against the database.
+    assert is_stale(None) is True
+    assert is_stale({"stale": True}) is True
+    assert is_stale({"stale": False}) is False

@@ -143,17 +143,21 @@ def compute_effective_at(session: Session, tenant_id: UUID, reason: str) -> Effe
     cancellation, the cure period from the first past-due event for
     non-payment, immediate for cause.
     """
+    # "Immediate" is the database's now, read in the same statement: the
+    # sweep later compares the stored date with the database's clock, so that
+    # clock sets it (D-170 #1). now() is the transaction's start, so cancel()'s
+    # UPDATE in the same transaction stamps status_changed_at with this value.
     row = session.execute(
         text(
-            "SELECT stripe_subscription_id, stripe_current_period_end, first_past_due_at "
-            "FROM tenants WHERE id = :id"
+            "SELECT stripe_subscription_id, stripe_current_period_end, first_past_due_at, "
+            "now() AS db_now FROM tenants WHERE id = :id"
         ),
         {"id": str(tenant_id)},
     ).mappings().first()
     if row is None:
         raise LifecycleError("CON-001")
 
-    now = datetime.now(UTC)
+    now = row["db_now"]
     if reason == "customer_requested":
         if row["stripe_subscription_id"] is None:
             return EffectiveDatePlan(now, "no subscription yet: immediate", False)
@@ -296,7 +300,9 @@ def claim_for_suspend(session: Session, tenant_id: UUID) -> SuspendClaim | None:
     """
     row = session.execute(
         text(
-            "SELECT name, status, cancellation_effective_at, stripe_subscription_id, "
+            # Due by the database's clock, the one the sweep's claim query used
+            # to pick this tenant (D-170 #1).
+            "SELECT name, status, cancellation_effective_at <= now() AS due, stripe_subscription_id, "
             "stripe_customer_id FROM tenants WHERE id = :id FOR UPDATE"
         ),
         {"id": str(tenant_id)},
@@ -305,24 +311,28 @@ def claim_for_suspend(session: Session, tenant_id: UUID) -> SuspendClaim | None:
         return None
     if row["status"] != "cancelling":
         return None
-    if row["cancellation_effective_at"] is None or row["cancellation_effective_at"] > datetime.now(UTC):
+    if not row["due"]:
         return None
 
-    deletion_at = datetime.now(UTC) + timedelta(days=EXPORT_WINDOW_DAYS)
-    session.execute(
+    # The database stamps the deletion date, because the database is the clock
+    # that later decides the tenant is due: the sweep, the delete guard and the
+    # reminder text all compare it with now() (D-170 #2).
+    stamped = session.execute(
         text(
             """
             UPDATE tenants SET
                 status = 'pending_deletion',
                 status_changed_at = now(),
                 intake_address_active = false,
-                deletion_scheduled_at = :deletion_at,
+                deletion_scheduled_at = now() + make_interval(days => :window),
                 updated_at = now()
             WHERE id = :id
+            RETURNING now() AS suspended_at, deletion_scheduled_at
             """
         ),
-        {"id": str(tenant_id), "deletion_at": deletion_at},
-    )
+        {"id": str(tenant_id), "window": EXPORT_WINDOW_DAYS},
+    ).mappings().one()
+    deletion_at = stamped["deletion_scheduled_at"]
 
     cconsts = constants_in_effect("EXPORT_WINDOW_DAYS", "REMINDER_DAYS")
     # Nobody clicked anything: the sweep did it, and says so (D-165).
@@ -350,7 +360,7 @@ def claim_for_suspend(session: Session, tenant_id: UUID) -> SuspendClaim | None:
             related_id=tenant_id,
         )
     for day in REMINDER_DAYS:
-        _schedule_reminder(session, tenant_id, run_at=datetime.now(UTC) + timedelta(days=day))
+        _schedule_reminder(session, tenant_id, day=day)
 
     founder_alerts.raise_alert(
         session,
@@ -370,21 +380,24 @@ def claim_for_suspend(session: Session, tenant_id: UUID) -> SuspendClaim | None:
     )
 
 
-def _schedule_reminder(session: Session, tenant_id: UUID, *, run_at: datetime) -> None:
+def _schedule_reminder(session: Session, tenant_id: UUID, *, day: int) -> None:
+    # run_at, and the date in its dedupe key, are the database's, computed in
+    # this statement: the job sweep compares run_at with now() (D-170 #4). In
+    # the suspend transaction, now() is the instant the export window began.
     session.execute(
         text(
             """
             INSERT INTO scheduled_jobs (id, tenant_id, job_type, run_at, dedupe_key)
-            VALUES (:id, :tenant_id, 'pending_deletion_reminder', :run_at, :dedupe)
+            VALUES (
+                :id, CAST(:tenant_id AS uuid), 'pending_deletion_reminder',
+                now() + make_interval(days => :day),
+                'pending_deletion_reminder:' || CAST(:tenant_id AS text) || ':'
+                    || ((now() + make_interval(days => :day)) AT TIME ZONE 'UTC')::date::text
+            )
             ON CONFLICT (dedupe_key) DO NOTHING
             """
         ),
-        {
-            "id": str(uuid4()),
-            "tenant_id": str(tenant_id),
-            "run_at": run_at,
-            "dedupe": f"pending_deletion_reminder:{tenant_id}:{run_at.date().isoformat()}",
-        },
+        {"id": str(uuid4()), "tenant_id": str(tenant_id), "day": day},
     )
 
 

@@ -88,17 +88,17 @@ def test_the_order_holds_when_the_app_clock_runs_behind_the_database(client, mon
     measured on the development machine) was enough to list a Console action
     before the lifecycle event it caused. Here the app clock is an hour
     behind -- deterministic, whatever the real skew -- and the order must
-    still be exactly newest first."""
-    from datetime import datetime, timedelta, timezone
+    still be exactly newest first.
+
+    Since D-170 #2 the module reads no app clock at all, so there is nothing
+    to skew; the skew stays so that one brought back is caught here."""
+    from datetime import timedelta
 
     import docflow_core.admin_data_access as ada
 
-    class _AnHourBehind(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return datetime.now(tz or timezone.utc) - timedelta(hours=1)
+    from tests.app_clock import skew_app_clock
 
-    monkeypatch.setattr(ada, "datetime", _AnHourBehind)
+    skew_app_clock(monkeypatch, ada, by=-timedelta(hours=1))
 
     with _Console() as console, _Tenant("Acme Test Audit Clock") as t:
         url = f"/admin/tenants/{t.tenant_id}/example-prompting"
