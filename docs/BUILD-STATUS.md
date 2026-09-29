@@ -408,6 +408,154 @@ building; each point that changes existing sweep behaviour is marked
    - what triggers the dispatcher: beat, each completion, each upload, or all
      three.
 
+**3d also: when the model provider is down, documents wait instead of
+failing.** **Required before the first pilot** (founder, 2026-09-29). Built in
+3d. The requirements are the founder's; everything marked *proposed* is mine
+and waits for an answer.
+
+*Why.* Today a provider outage fails every document that arrives during it:
+- the SDK retries twice in a few seconds;
+- then the document is `failed` with DOC-008, and the customer has to
+  upload it again;
+- the founder gets one `document_failed` alert per tenant per day, which
+  never says the provider is down.
+
+Section 7.9's "retry with exponential backoff" and 7.15.3's "repeated
+model-API failure" alert are not met. Found during the 2026-09-29 Anthropic
+incident, which failed the Stage 2 golden run at 10:18.
+
+1. **What waits, and what still fails at once** (founder):
+   - **Waits:** HTTP 5xx, 529 (overloaded), 429 (rate limited), and
+     network, connect or silent-stream timeouts, including a connection
+     dropped mid-stream. Classified by status code, not by SDK class name,
+     so an SDK upgrade can't silently move a code between the groups.
+   - **Fails at once, as today:** every other 4xx (a bad request, a schema
+     error), a malformed answer (DOC-009) and the read deadline (DOC-020).
+   - *Question:* 401 and 403 mean our API key or account is broken. That
+     fails every document for every tenant. *Proposed:* they still fail the
+     document at once (founder's rule), but also raise the provider alert
+     with cause `our_credentials`, because one alert is more use than a
+     `document_failed` per tenant.
+2. **Waiting is recorded in the database, not in Celery.** Celery's delayed
+   tasks sit in a worker's memory and are lost with it.
+   - On a waiting error, the task moves the document `processing ->
+     pending`. That is a new transition in 0027's state machine, so it needs
+     a migration.
+   - It records, as *proposed* new columns on `documents`:
+     `provider_wait_started_at` (set on the first wait, kept until the
+     document leaves `pending`), `provider_retry_at`, and
+     `provider_last_error` (the status code only).
+   - The dispatcher skips the document until `provider_retry_at`.
+   - The return to `pending` subtracts the claim from
+     `processing_attempts`, so waiting never uses up the crash-retry budget
+     (DOC-022) and never looks like a timeout (3a).
+3. **Backoff and the maximum wait** (*proposed*):
+   - Retries at 1, 2, 4, 8 and 15 minutes, then every 15 minutes
+     (`PROVIDER_RETRY_MINUTES`).
+   - A 429 waits at least as long as the provider's `Retry-After`.
+   - **Maximum total wait: 6 hours** (`PROVIDER_MAX_WAIT_HOURS`), counted
+     from the first wait. Why 6: it covers provider incidents measured in
+     hours within one working day (today's was about 40 minutes of errors),
+     and the "delayed" state (point 5) tells the customer all along, so a
+     customer with an urgent order can enter it by hand without waiting for
+     a failure. Longer keeps a same-day order in limbo; shorter fails orders
+     that would have gone through.
+4. **After the maximum wait: failed, with a code that blames the provider,
+   not the file.** *Proposed* new catalog entry, **DOC-024** "The reading
+   service was unavailable":
+   - message: "DocFlow tried to read this order for 6 hours, but the service
+     it uses to read orders did not respond. Nothing is wrong with the file.";
+   - action: "Upload the same file again, or enter the order by hand if it
+     is urgent. DocFlow has already been alerted.";
+   - severity high, audience both.
+   - It goes in `FAILURE_ALERTS`, so the promise of an alert is kept.
+5. **The customer sees "delayed", not an error** (founder). *Proposed:* no
+   new status. A `pending` document with `provider_wait_started_at` set is
+   shown as **Delayed**, with a new info-level catalog entry, **DOC-023**
+   "Reading delayed":
+   - message: "The service DocFlow uses to read orders isn't responding
+     right now, so this order is waiting. Nothing is wrong with the file.";
+   - action: "Nothing to do. DocFlow retries automatically and has been
+     alerted. If it is still waiting after 6 hours, this page will say so.";
+   - one badge, reusing `PILL`.
+   - The Console's document list shows the same.
+6. **One provider-down alert across all tenants, and a recovery notice**
+   (founder). *Proposed:*
+   - A **global** table, `model_provider_state`, with one row per provider
+     and no `tenant_id`. It is named here as a genuinely global table
+     (Section 10) and written only by the worker. Its columns: status (up or
+     down), `down_since`, the last error, and the last success.
+   - The provider is marked **down** after 3 waiting-class failures within 5
+     minutes, from any tenants, with no success between them
+     (`PROVIDER_DOWN_FAILURES`, `PROVIDER_DOWN_WINDOW_MIN`).
+   - Being marked down raises **one** high-severity founder alert with no
+     tenant: the new type `model_api_failure` (7.9's "repeated model-API
+     failure"). Its dedupe key is the outage's `down_since`, so the outage is
+     one alert whatever its length. The payload carries the cause (`5xx`,
+     `overloaded`, `rate_limited`, `network`, `our_credentials`) and the
+     count of waiting documents.
+   - The **first success** marks it up and raises an info-level
+     `model_api_recovered` alert: how long it was down, how many documents
+     waited, and how many reached the 6-hour limit. Both are emailed from
+     their rows (7.9: one alert, one row, two channels). Acknowledging stays
+     a human action; recovery does not acknowledge the down alert.
+   - A tenant-less alert needs an insert policy. In 3d that is a flag
+     policy, as `rollup_raise` (0017) and `intake_refusal` (0029) are, and
+     3e moves it to the worker's login. **Sequencing note:** if 3e went
+     first, the policy would be granted to `docflow_worker` from the start.
+     The agreed order stays as is unless the founder moves it.
+7. **While the provider is down, the dispatcher holds everything and
+   probes.**
+   - It dispatches no document except one probe every 2 minutes
+     (`PROVIDER_PROBE_MINUTES`): the oldest waiting document, so there is no
+     made-up request. An error costs nothing, and a success is a real order
+     read.
+   - On recovery the backlog goes out through the normal turn-taking, so the
+     tenant with the biggest backlog does not go first.
+
+**How it fits with the rest:**
+- **Dispatcher (3d):** waiting documents are `pending` with a
+  `provider_retry_at` in the future. They take their turn once it passes.
+  While the provider is down, only the probe goes out. Interactive-first and
+  per-tenant turn-taking are unchanged.
+- **Stuck sweep:** a waiting document goes back to `pending` with
+  `dispatched_at` cleared, so it counts as *waiting*, not a lost job, and
+  the sweep leaves it alone. The sweep's "dispatcher has stopped" alert
+  (interplay point 2) must not fire while the dispatcher is deliberately
+  holding, so the dispatcher records its heartbeat on every pass, holding or
+  not. `processing` handling (retry, DOC-022, 3a's timeout rule) is
+  unchanged, because waiting never touches `processing_attempts` or
+  `timeout_attempts`.
+- **Allowance counter:** no change. Metering counts documents not `failed`
+  or `quarantined`, so a waiting document counts from arrival, as `pending`
+  does today, and one that ends as DOC-024 drops out of the count, as a
+  failed document does today.
+- **Cost circuit breaker:** errors are not billed and add nothing. A
+  connection dropped after the answer began was billed for its input; it
+  stays on the cost record as today (D-163) and counts. A retry pays again,
+  and that is on the record too.
+- **Example prompting:** a routing call that fails still means "no
+  examples". If only the routing model is down, extraction goes ahead
+  without examples, as today.
+- **Resumed documents (H3):** a document whose answer is already saved
+  makes no model call, so it never waits.
+- **Quarantine and test batches:** a release or "Run extraction" puts
+  documents into `pending`, and from there they follow the same path.
+- **Needs a migration:** the transition, the three columns, the global table
+  and the alert policy. Backup first, deletes nothing.
+
+**Before the first pilot: measure the cost of the documents that cost the
+most** (founder, 2026-09-29). The 18 documents in the Stage 2 checkpoint's
+cost figures are all short, one-page text orders. On staging, measure cost
+per document for:
+- scanned PDFs;
+- image and photo POs;
+- multi-page orders (5+ pages).
+
+Report them the same way (mean, median and max, by type), with the models
+used and every call in the total. This needs paid runs, so its budget goes
+to the founder first.
+
 **3e -- F-1, separate database logins.** Approved as proposed:
 - **`docflow_api`**: tenant requests, plus the intake-token, sign-in-identity
   and refusal-alert policies.
@@ -429,9 +577,10 @@ written.** Checked 2026-09-29:
   and mode combination"; two combinations at pool size 120 may form 120 each.
   Supabase Storage is one more combination with the same pool size.
 - **Staging's limit:** `max_connections` = 60 (read from the database), with 3
-  reserved for the superuser. That is Supabase's Nano or Micro size; the
-  memory settings point to Micro, and the plan shown in the dashboard is the
-  check. Supabase's own services held 13 connections at the time of reading.
+  reserved for the superuser. That is Supabase's Nano or Micro size. **The
+  dashboard shows Nano** (founder, 2026-09-29). My first reading, Micro from
+  the memory settings, was wrong. Supabase's own services held 13
+  connections at the time of reading.
 - **Headroom:**
   - After 3b and 3e there are five combinations: four logins plus Storage
     (`docflow_app` is retired by F-1).
@@ -443,18 +592,18 @@ written.** Checked 2026-09-29:
     pooling -> Default Pool Size), readable by the founder only.
 - **Options, for the founder:**
   - keep the compute and set the pool size to 4-5 (recommended for staging);
-  - upgrade staging to Small (90 connections, about $15/mo against Micro's
-    $10);
+  - upgrade staging to Small (90 connections, about $15/mo against Nano's
+    $0);
   - merge `docflow_stripe` into `docflow_api`, not recommended because it
     reopens D-173's risk.
 
-- **Decided (founder, 2026-09-29): keep Micro and set the pool size to 5.**
+- **Decided (founder, 2026-09-29): keep the compute (Nano) and set the pool size to 5.**
   Default Pool Size was **15** (founder, 2026-09-29). At 15, the five
   combinations could ask for 75 connections, more than the database's 60,
-  which is why it comes down. The founder changes it to 5 on 2026-09-29, after
-  the Stage 2 checkpoint run, so the change can't drop a running suite's
-  connections. Compute is recorded as **Micro, inferred from
-  `max_connections` = 60** (founder). Five combinations at 5 is 25 connections
+  which is why it comes down. **The founder changed it to 5 on 2026-09-29**,
+  after the Stage 2 checkpoint's database suites had finished, so the change
+  could not drop a running suite's connections. **Compute is Nano** (founder,
+  from the dashboard). Five combinations at 5 is 25 connections
   at most, against about 44 usable. The first staging suite run after the
   change shows whether 5 is enough for the tests that hold one connection
   while probing with another; the result is reported.
@@ -767,6 +916,11 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 
 - Test data: everything in staging is test data (leftover test tenants, five revoked test platform admins). The founder will clean up in a QA pass after all phases, alongside walkthroughs of every phase and slice.
 - Example prompting (D-141): orders approved before 2026-09-25 have no stored text, so they count towards a buyer's 10 but can't be shown as examples; `scripts/seed_example_history.py` builds a test buyer's history through the real pipeline. A second pass with examples for low-confidence orders was left out by founder decision.
+- **Before the first pilot (founder, 2026-09-29):**
+  - a provider outage makes documents wait, not fail (built in 3d; design
+    under "Stage 3 -- agreed with the founder before building");
+  - cost per document measured on scanned PDFs, image and photo POs, and
+    multi-page (5+ pages) orders, on staging.
 - **Before the first real customer:** an email provider (the founder is setting one up with the domain). Until then every invite, notice and digest waits in the Console Outbox and must be sent by hand, and the inbound intake address cannot receive real mail.
 - Digest opt-out per person: decided yes, but later (needs a settings page).
 - `RUNBOOK.md` exists since Phase 5.5 with the migration backup procedure (section 1). Still to add in Phase 6: the constants (CLAUDE.md 7.15.4; `constants.py` is their single home until then), tier price changes (`scripts/new_tier_version.py`, D-137), the restore drill and the parser-upgrade process.
