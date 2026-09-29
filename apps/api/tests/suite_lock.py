@@ -27,9 +27,11 @@ from __future__ import annotations
 
 import os
 import socket
+import sys
 from datetime import datetime, timezone
 
 import psycopg
+import pytest
 from sqlalchemy.engine import make_url
 
 # Any fixed bigint; shared by every DocFlow test suite that uses a database.
@@ -103,3 +105,36 @@ def release() -> None:
         finally:
             _held.close()
             _held = None
+
+
+def _annotate(level: str, message: str) -> None:
+    """A GitHub Actions annotation, so CI shows what happened (RUNBOOK 1.6:
+    CI job logs can't be read here, annotations can). Silent elsewhere."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        body = message.replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+        print(f"::{level} title=suite lock::{body}", flush=True)
+        sys.stdout.flush()
+
+
+def session_start(database_url: str, suite: str) -> None:
+    """pytest_sessionstart: take the lock, or stop the run naming the holder.
+    Any other failure stops the run too, with its type and message -- never
+    the URL, which carries the password."""
+    try:
+        acquire(database_url, suite)
+    except SuiteLockHeld as held:
+        _annotate("error", str(held))
+        pytest.exit(str(held), returncode=3)
+    except Exception as exc:  # noqa: BLE001 -- reported, then the run stops
+        message = f"Couldn't take the test-run lock: {type(exc).__name__}: {exc}"
+        _annotate("error", message)
+        pytest.exit(message, returncode=3)
+    _annotate("notice", f"taken by {suite} (pid {os.getpid()})")
+
+
+def session_finish() -> None:
+    """pytest_sessionfinish: release the lock; a failure is reported, never raised."""
+    try:
+        release()
+    except Exception as exc:  # noqa: BLE001 -- the lock goes with the process anyway
+        _annotate("warning", f"Couldn't release the test-run lock: {type(exc).__name__}: {exc}")

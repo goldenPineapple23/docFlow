@@ -88,6 +88,14 @@ def main(argv: list[str]) -> int:
         print(__doc__, file=sys.stderr)
         return 2
     suite, junit_path = argv[1], Path(argv[2])
+    if not junit_path.exists():
+        # pytest stopped before writing its report (a failure at startup or in
+        # collection). Say so on the run page instead of a bare traceback.
+        print(
+            f"::error title={suite}: no test report::pytest wrote no {junit_path.name}, so it stopped "
+            "before or while collecting tests. Look for an earlier annotation from the Test step."
+        )
+        return 1
     approvals_path = Path(argv[3]) if len(argv) == 4 else DEFAULT_APPROVALS
 
     annotate_failures(suite, failed_tests(junit_path))

@@ -17,21 +17,19 @@ def database_available() -> bool:
 
 
 # ── One test run at a time against a shared database (tests/suite_lock.py) ──
+# A refused run writes no JUnit report; the lock's own annotation says why.
 def pytest_sessionstart(session):
     if session.config.option.collectonly or not database_available():
         return
     from tests import suite_lock
 
-    try:
-        suite_lock.acquire(get_settings().database_url, suite="api")
-    except suite_lock.SuiteLockHeld as held:
-        pytest.exit(str(held), returncode=3)
+    suite_lock.session_start(get_settings().database_url, suite="api")
 
 
 def pytest_sessionfinish(session, exitstatus):
     from tests import suite_lock
 
-    suite_lock.release()
+    suite_lock.session_finish()
 
 
 requires_database = pytest.mark.skipif(
