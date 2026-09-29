@@ -74,9 +74,10 @@ def _owner_email(session: Session, tenant_id: UUID) -> str | None:
 def _past_due_state(session: Session, tenant_id: UUID) -> dict[str, Any] | None:
     """The tenant's past-due facts, with the date it may be paused from and the
     reminder's run time -- both computed here, on the database's clock."""
-    row = session.execute(
-        text(
-            """
+    row = (
+        session.execute(
+            text(
+                """
             SELECT name, timezone, billing_method, stripe_subscription_status, first_past_due_at,
                    first_past_due_at + make_interval(days => :cure) AS may_pause_at,
                    first_past_due_at + make_interval(days => :cure)
@@ -84,9 +85,12 @@ def _past_due_state(session: Session, tenant_id: UUID) -> dict[str, Any] | None:
                    first_past_due_at + make_interval(days => :cure) <= now() AS date_passed
               FROM tenants WHERE id = :id
             """
-        ),
-        {"id": str(tenant_id), "cure": CURE_PERIOD_DAYS, "before": PAST_DUE_REMINDER_DAYS_BEFORE},
-    ).mappings().first()
+            ),
+            {"id": str(tenant_id), "cure": CURE_PERIOD_DAYS, "before": PAST_DUE_REMINDER_DAYS_BEFORE},
+        )
+        .mappings()
+        .first()
+    )
     return dict(row) if row is not None else None
 
 
@@ -255,16 +259,20 @@ def request_card(session: Session, tenant_id: UUID) -> tuple[UUID | None, str]:
     """The Console's "Ask for a card": email the owner a link to their Billing
     page, worded for when the setup fee is charged. Returns the outbox row (None
     if the tenant has no owner yet) and the template used."""
-    tenant = session.execute(
-        text(
-            """
+    tenant = (
+        session.execute(
+            text(
+                """
             SELECT name, onboarding_status, setup_fee_amount, setup_fee_billing,
                    setup_fee_paid_at, founding_price
               FROM tenants WHERE id = :id
             """
-        ),
-        {"id": str(tenant_id)},
-    ).mappings().one()
+            ),
+            {"id": str(tenant_id)},
+        )
+        .mappings()
+        .one()
+    )
     at_signing = fee_due_at_signing(dict(tenant))
     fee = tenant["setup_fee_amount"]
     if at_signing is not None:

@@ -66,7 +66,11 @@ def stripe(monkeypatch):
 
 def _page(stripe, fee):
     return es.create_card_page(
-        tenant_id=TENANT, customer_id="cus_1", setup_fee=fee, success_url="https://a/ok", cancel_url="https://a/no"
+        tenant_id=TENANT,
+        customer_id="cus_1",
+        setup_fee=fee,
+        success_url="https://a/ok",
+        cancel_url="https://a/no",
     )
 
 
@@ -149,8 +153,12 @@ def test_a_paid_fee_page_reports_what_stripe_collected(stripe):
     [
         {"status": "open"},
         {"metadata": {}},
-        {"mode": "payment", "payment_status": "unpaid", "metadata": {"docflow_card_page": "setup_fee"},
-         "payment_intent": {"payment_method": "pm_3"}},
+        {
+            "mode": "payment",
+            "payment_status": "unpaid",
+            "metadata": {"docflow_card_page": "setup_fee"},
+            "payment_intent": {"payment_method": "pm_3"},
+        },
     ],
     ids=["not completed", "not a DocFlow page", "fee not paid"],
 )
@@ -202,7 +210,10 @@ def test_a_reactivation_with_a_declined_card_is_refused(stripe):
 
 
 def test_the_update_card_page_opens_on_the_card_step(stripe):
-    assert es.create_card_update_page(customer_id="cus_1", return_url="https://a/billing") == "https://portal.example/s"
+    assert (
+        es.create_card_update_page(customer_id="cus_1", return_url="https://a/billing")
+        == "https://portal.example/s"
+    )
     (sent,) = stripe.posted("billing_portal/sessions")
     assert sent["flow_data[type]"] == "payment_method_update"
 

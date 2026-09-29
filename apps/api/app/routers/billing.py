@@ -31,17 +31,21 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 
 def _tenant(tenant_id) -> dict:
     with tenant_session(tenant_id) as session:
-        row = session.execute(
-            text(
-                """
+        row = (
+            session.execute(
+                text(
+                    """
                 SELECT onboarding_status, billing_method, stripe_customer_id, stripe_subscription_status,
                        card_on_file_at, setup_fee_paid_at, setup_fee_amount, setup_fee_billing,
                        founding_price
                   FROM tenants WHERE id = :id
                 """
-            ),
-            {"id": str(tenant_id)},
-        ).mappings().one()
+                ),
+                {"id": str(tenant_id)},
+            )
+            .mappings()
+            .one()
+        )
         banner = card_billing.past_due_banner(session, tenant_id)
     return {**row, "banner": banner}
 

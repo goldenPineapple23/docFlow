@@ -364,7 +364,7 @@ def request_card(tenant_id: UUID, identity: AuthenticatedIdentity = Depends(requ
     with tenant_session(tenant_id) as session:
         outbox_id, template = card_billing.request_card(session, tenant_id)
     if outbox_id is None:
-        raise catalog_error("CON-001", status_code=409, extra={"reason": "no owner"})
+        raise catalog_error("CON-004", status_code=409)
     return {"email_outbox_id": str(outbox_id), "template": template}
 
 
