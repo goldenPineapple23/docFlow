@@ -40,7 +40,7 @@ from sqlalchemy import text
 from app.celery_app import celery_app
 from tests.conftest import requires_timeout_schema
 from tests.db_helpers import WorkerTestTenant
-from tests.prefork_app import HANG_MARKER
+from tests.prefork_constants import HANG_MARKER
 
 WORKER_ROOT = Path(__file__).resolve().parents[1]
 

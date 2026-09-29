@@ -9,6 +9,9 @@ made at import, before the worker forks its children:
   * the model is faked, so a normal file reaches needs_review with no key.
 
 Usage: python -m celery -A tests.prefork_app worker --pool=prefork -c 1 -Q <queue>
+
+Never import this module from a test: the changes above would apply to the
+pytest process too. Shared constants are in tests/prefork_constants.py.
 """
 
 from __future__ import annotations
@@ -19,9 +22,7 @@ from typing import Any
 import app.tasks.parse_and_extract as task_module
 from app.celery_app import celery_app
 from tests.db_helpers import FakeAnthropic, model_payload
-
-PREFORK_TEST_LIMIT_SECONDS = 3
-HANG_MARKER = b"PREFORK-TEST-HANG"
+from tests.prefork_constants import HANG_MARKER, PREFORK_TEST_LIMIT_SECONDS
 
 celery_app.tasks["docflow.parse_and_extract"].time_limit = PREFORK_TEST_LIMIT_SECONDS
 

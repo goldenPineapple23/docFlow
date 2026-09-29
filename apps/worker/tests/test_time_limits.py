@@ -11,6 +11,7 @@ real kill -- a prefork worker, a task that overruns, the worker carrying on
 from __future__ import annotations
 
 import contextlib
+import sys
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -59,6 +60,15 @@ def test_the_document_task_has_no_soft_limit_and_a_27_minute_hard_limit():
     assert task.soft_time_limit is None
     assert task.time_limit == 27 * 60
     assert task.Request == "app.timeouts:DocumentTaskRequest"
+
+
+def test_the_prefork_test_app_is_never_imported_into_the_test_process():
+    """
+    tests/prefork_app patches the real document task for the separate worker
+    it runs in. Collection has imported every test module by now, so if any of
+    them imported it, the limits asserted here would be the test's 3 s.
+    """
+    assert "tests.prefork_app" not in sys.modules
 
 
 def test_every_task_has_its_hard_limit_and_none_has_a_soft_limit():
