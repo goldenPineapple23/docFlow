@@ -7,7 +7,107 @@ phase."
 
 ---
 
-## Phase 5.5 Stage 1 — Data integrity — COMPLETE, awaiting "go" (2026-09-26)
+## Phase 5.5 Stage 2 — Security and lifecycle — COMPLETE (2026-09-29), go given
+
+Built as 2a (PR #14), 2b (PR #15), 2c (PR #18, migration `0029` applied and
+verified on `docflow-staging` 2026-09-28) and 2d (PR #20), with the MFA
+follow-ups #21 and #22, the audit-findings design (#23) and the D-170 clock
+PR (#24). The founder's go for Stage 3 came on 2026-09-29, before this entry
+was written. The suite run and this record were missing and are made up here.
+Checkpoint run on `main` at `5db7762`.
+
+### Test runs
+
+On staging, one at a time (RUNBOOK 1.4), as pytest printed them:
+
+- **API:** `517 passed, 3 deselected, 579 warnings in 2029.53s (0:33:49)`.
+  The 3 deselected are the `live_api` tests below.
+- **Worker:** `109 passed, 4 warnings in 601.49s (0:10:01)`.
+- **Live** (`pytest -m live_api`, real calls to `claude-sonnet-5`):
+  - **First run, 10:18: `3 failed, 517 deselected, 1 warning in 18.41s`**,
+    and a re-run straight after failed the same way (`3 failed ... in
+    17.52s`). Every call got `InternalServerError` (HTTP 500) from
+    Anthropic's API within 3-4 s, after the SDK's retries. No assertion on
+    extracted values ran.
+  - At 11:41 a diagnostic showed the API healthy: the golden call succeeded,
+    and so did a one-word request to each of the two models.
+  - **Run of record, 11:41: `3 passed, 517 deselected, 1 warning in 27.08s`:**
+    - `test_live_extraction_matches_section_8_3` (golden)
+    - `test_live_golden_fixture_still_extracts_exactly_with_examples`
+    - `test_live_contamination_no_example_value_appears`
+
+  The failure is recorded, not treated as flaky: a provider outage fails the
+  golden run, and the checkpoint waits for a pass.
+
+Also:
+
+- **Core** (no database): `552 passed in 22.70s`.
+- **CI on `5db7762`:** core, api, web, web-live and worker all green.
+- **Warnings:** the API suite's count rose from 443 (Stage 1) to 579 as tests
+  were added. D-163's triage found them all test-only (PyJWT's short-key
+  warning). Clearing them is the Stage 5 item "use a test JWT secret of at
+  least 32 bytes".
+
+No failures and no skips in the runs of record.
+
+### Verdicts
+
+| Finding | Verdict | Evidence |
+|---|---|---|
+| **H8** Inbound mail was admitted on the intake address alone | **Closed** | Postmark's HTTP Basic credentials checked before the payload is parsed or the token resolved; a blank credential refuses everything (D-171). API `test_email_intake_auth.py` (12 tests): `test_the_intake_address_alone_no_longer_admits_anything`, `test_a_forged_authentication_results_header_never_gets_that_far`, `test_a_wrong_password_is_refused`, `test_the_right_credentials_are_processed_as_before`. A refusal raises a high-severity `intake_webhook_refused` alert: `test_intake_refusal_alert.py` (7 tests), `test_a_refused_request_raises_one_high_severity_alert_with_no_tenant`, `test_the_refusal_session_reads_nothing`. |
+| **H10** A suspended tenant could still upload | **Closed** | One predicate, `intake_gate.blocks_new_intake`, for both intake channels; INT-010 before the file is validated or stored (D-172). API `test_lifecycle_intake_gate.py` (8 tests): `test_a_blocked_tenant_cannot_upload`, `test_the_refusal_is_not_a_404`, `test_an_active_or_cancelling_tenant_uploads_normally`, `test_a_blocked_tenant_can_still_read_and_export`. |
+| **H11** A Stripe event could be lost, reordered or suppressed | **Closed**, one named residual risk | `record_stripe_subscription_event()` records the event id in the same transaction as the status write, applies the ordering guard and cross-checks the customer (D-173, D-175, D-176). API `test_stripe_webhook_api.py` (22 tests): `test_the_event_id_is_recorded_in_the_same_transaction_as_the_status_write`, `test_an_event_older_than_the_saved_state_is_recorded_and_not_applied`, `test_a_same_second_event_fetches_stripes_state_with_no_transaction_holding_the_row`, `test_a_newer_event_saved_during_the_fetch_is_not_overwritten`, `test_a_crash_between_the_fetch_and_the_save_records_nothing_and_a_replay_applies`, `test_no_session_can_insert_into_stripe_webhook_events_directly`, `test_the_function_refuses_a_customer_that_is_not_the_session_tenants`. **Residual risk (D-173):** code running as `docflow_app` can call the function with a made-up event id. Closed by F-1 in Stage 3e. |
+| **H9** The Console had no MFA or step-up | **Closed**; enforcement on | aal2 for the whole Console (AUTH-006); a TOTP challenge under 5 minutes old for the seven destructive actions (AUTH-007); two lost-device drills passed on staging (D-177, D-178). API `test_console_mfa.py` (14 tests): `test_exactly_the_seven_destructive_routes_require_a_recent_code`, `test_a_platform_admin_without_an_authenticator_code_gets_auth_006`, `test_anyone_else_still_gets_a_404_not_an_mfa_answer`. `CONSOLE_MFA_ENFORCED` is on for the local API. |
+| **D-170 clock items** (#3 and #6 in 2c; #1, #2, #4, #5 and #7 in PR #24) | **Closed** | Stripe's clock has one named tolerance of 300 s, and the database writes what it later compares. API `test_a_signature_stamped_more_than_300_seconds_ago_is_refused`, `..._in_the_future_is_refused`, `test_the_cure_clock_starts_at_stripes_event_time_and_unpaid_does_not_reset_it`, `test_d170_clock.py` (3 tests); core `test_one_clock.py`, the CI check that a database-access module may not pass the app's clock into SQL. |
+
+### Measured AI cost per document (founder's question, 2026-09-29)
+
+From staging's cost record: `documents.est_cost_usd`, plus one
+`extraction_runs` row per paid call since D-142. These are estimates (token
+counts x the price table in `extraction.py`), not invoiced amounts. The price
+table was checked on 2026-09-29 against the claude-api skill's model table:
+`claude-sonnet-5` $2 / $10, `claude-haiku-4-5` $1 / $5 per million tokens.
+
+| Set | Documents | Mean | Median | Max |
+|---|---|---|---|---|
+| All | 18 | $0.0138 | $0.0135 | $0.0189 |
+| `.txt` | 16 | $0.0138 | $0.0137 | $0.0189 |
+| `.docx` | 2 | $0.0131 | $0.0131 | $0.0132 |
+| With examples (routing + 3 examples) | 2 | $0.0187 | $0.0187 | $0.0189 |
+| Without examples | 16 | $0.0131 | $0.0131 | $0.0144 |
+
+- **Models:** every extraction was `claude-sonnet-5`. The two routing calls
+  were `claude-haiku-4-5` at $0.0009 each; each is included in its
+  document's total.
+- **Retries and verification passes:** no document had more than one
+  extraction call on record. Secondary-model verification is deferred
+  (Section 3), and the second pass with examples was left out by founder
+  decision (D-141). Retries inside the SDK after a 500 or 429 are not billed
+  and not visible to us. Before D-163 (2026-09-26), a failed call's cost
+  could go unrecorded.
+- **Limits of this sample:** all 18 are short text orders, one page with 2-4
+  lines. **Staging holds no costed scanned PDF, image, spreadsheet or
+  multi-page TIFF**, so there is no split by page count and nothing on
+  visual reads. Long orders were measured in D-161: 300 lines $0.41, 600
+  lines $0.81.
+- Today's golden calls were not recorded (the live tests keep no cost). At
+  2,400-5,400 input tokens they are the same size as the rows above.
+
+### Open, carried forward
+
+- **Stage 3** (design agreed 2026-09-29, `docs/BUILD-STATUS.md`): H5, H6, H4
+  fairness, F-1. D-163's run row before the model call moved into 3c.
+- **Stage 4:** matching speed, and the audit of the ~23 broad `except`
+  blocks on the document path (founder, 2026-09-29).
+- **Stage 5:** the test-hygiene items, the audit-trail findings (D-178), the
+  stranded test data, and the typed note on high-severity acknowledgements
+  (agreed 2026-09-27, not yet given a stage).
+- **A representative cost sample** (scans, images, spreadsheets, long
+  orders): not measured; it needs paid runs.
+
+---
+
+## Phase 5.5 Stage 1 — Data integrity — COMPLETE (2026-09-26), go given
 
 Built as 1a (PR #4), 1b (PR #6), 1c (PR #7) and the named system actors
 (PR #8). Migrations `0026`, `0027` and `0028` applied and verified on
@@ -62,7 +162,7 @@ No failures and no skips in any run.
 
 ---
 
-## Phase 5 — Founder Console, tenant surface, operations — COMPLETE, awaiting "go" (2026-09-25)
+## Phase 5 — Founder Console, tenant surface, operations — COMPLETE (2026-09-25), go given
 
 Built as ten slices from 18 to 25 Sept 2026, each walked by the founder
 before the next began. Slice-by-slice detail is in `docs/BUILD-STATUS.md`;
@@ -156,7 +256,7 @@ Migrations `0011` – `0025` are applied to `docflow-staging`.
 
 ---
 
-## Phase 4 — Export — COMPLETE, awaiting "go" (2026-09-18)
+## Phase 4 — Export — COMPLETE (2026-09-18), go given
 
 ### Exit criteria, both met
 

@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-09-28** (Phase 5.5: Stage 0 done, Stage 1 checkpoint done and walked, Stage 2a, 2b and 2c merged (2c: PR #18, `0029` applied to staging 2026-09-28), 2d built and verified on staging, ready to merge; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
+commit as the slice. Statuses below are as of **2026-09-29** (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29, 3a next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -186,9 +186,280 @@ are D-149 – D-153.
 | 0 | Safety net: push, CI green, `main` protected (done before 5.5 began); **CI database and the unapproved-skip check** (H7 part 2); core type-checked and pinned in CI | DONE (PR #3, merged 2026-09-25) | D-148 |
 | 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents. **Plus the two defects the founder's walkthrough found on the real stack (2026-09-27): the review screen said nothing when an edit raised a check (D-166), and a session token one second ahead of this clock was refused as "signed out" (D-167).** | **CHECKPOINT DONE 2026-09-26, awaiting "go"** (`CHECKPOINTS.md`: C1, H1, H3, M1, M3, H2, M4, M5 all closed). 1a DONE (PR #4, D-156); 1b DONE (PR #6, migration `0027`, D-158 – D-160); 1c DONE (PR #7: golden rename, M1 streaming measured, H2/M4/M5, one read budget, every paid call costed, Audit tab on one clock; D-159, D-161 – D-164); named system actors DONE (PR #8, migration `0028` applied and verified on staging 2026-09-26: 3 system actors, no blank lifecycle actor, idle-transaction cap 5 min; D-165); Stage 1 checkpoint run on `b04f16d`; walkthrough fixes DONE (D-166 the review screen, D-167 clock skew, D-169 the line table marking the rows and numbers a check is about, and the live end-to-end suite that catches this class of defect) | D-149, D-154 – D-169 |
 | 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events (record the event in the same transaction as its effect; ignore an event older than the state already saved; **an event in the same second as the saved state can't be ordered by `created` (one-second resolution), so it re-fetches the subscription from Stripe and saves that, never guesses** -- a webhook-side fetch, not a page-load one, so within 7.15.3 (founder, 2026-09-26); the Phase 6 plan-change reconcile reuses this guard). **Plus two clock items folded in from the D-170 sweep:** `first_past_due_at` written from Stripe's event time rather than the app clock, and tests that a stale and a future-dated Stripe webhook signature are both refused (the 300 s tolerance is real but untested today). **Also carries 2a's deferred `intake_webhook_refused` alert** and the `founder_alerts` insert policy it needs (the `rollup_raise` pattern from 0017), since `0029` is the migration already planned (D-171). **2a (H8) DONE (PR #14):** the inbound webhook now authenticates the provider with Postmark's HTTP Basic credentials, checked before the payload is parsed and before the token is resolved; the per-tenant token identifies the tenant and no longer authenticates the request. A blank credential refuses all inbound mail on purpose (D-171), so RUNBOOK 2.1's cutover order is a requirement: credentials set and deployed, *then* Postmark pointed at the URL carrying them. A refusal logs which reason it was, and **raises a high-severity `intake_webhook_refused` alert in 2c, not 2a** -- a tenant-less alert needs its own RLS insert policy, which needs a migration, and 2c already has `0029`; `test_rls_flags.py` caught the attempt to raise it from the router and located the right home (D-171). **Blocking condition (founder, 2026-09-27): credential enforcement must not go live on an address real customers send to until 2c's alert lands.** A refused request is, from outside, either a misconfigured cutover or an attacker, and the first means no mail arrives at all -- so until the alert exists, the only signal is a log line nobody is watching. Staging and a test address are fine; the RUNBOOK 2.1 cutover on a production intake address waits for 2c. The IP allowlist is log-only with no enforcing branch (D-155); RUNBOOK 2.3 is the confirm-then-enforce procedure and 2.2 the rotation procedure. 12 tests; 10 of them fail with the credential check disabled **2b (H10) DONE (PR #15):** a suspended or pending-deletion tenant can no longer upload -- refused with a new `INT-010` before the file is validated or stored, so it costs nothing; read and export stay open, asserted against `/home`, the order history, one order in full and its export history, in both blocked states (7.14). `cancelling` deliberately does not block. One predicate, `intake_gate.blocks_new_intake`, is shared by both intake channels so the lifecycle answer cannot drift -- which is how the defect existed. Two departures from the review's proposed fix, reasoned in D-172: a new catalog entry rather than reusing INT-006 (whose reader is a buyer whose mail bounced, not the tenant's own user), and the gate reads lifecycle status rather than `intake_address_active` (which is also false before go-live). The refused attempt is recorded in `intake_rejections` (the file is not), so a customer who keeps trying is visible -- a retention signal, not only an audit one. Three drift tests beyond the shared predicate: both real endpoints asserted to agree across four states, a structural test forbidding the status pair inside any condition, and the invariant that the suspend transition sets `status` and clears `intake_address_active` together (they are different columns and only the transition keeps them in step). 14 tests; 3 fail with the gate disabled **2c (H11, clock items #3 and #6, 2a's deferred alert) BUILT, migration `0029` not yet applied to staging:** Stripe events go through `record_stripe_subscription_event()`, a SECURITY DEFINER function called inside the tenant's own session, which records the event id in the same transaction as the status write, applies the ordering guard (older events recorded, not applied; a NULL saved time applies), and cross-checks the customer against the session's tenant. A same-second event fetches Stripe's state with no transaction open and re-checks the guard before saving. `first_past_due_at` is Stripe's event time and `unpaid` no longer resets it. No session can write `stripe_webhook_events` any more; EXECUTE is revoked from PUBLIC **and from Supabase's `anon`/`authenticated`** (which get it by default -- found while building, D-175). A refused inbound webhook now raises a high-severity `intake_webhook_refused` alert, one per reason, never changing the 401 -- **which satisfies 2a's blocking condition once 0029 is applied** (RUNBOOK 2.1). Stripe's clock against ours has one named tolerance, `STRIPE_CLOCK_TOLERANCE_SECONDS` (300 s), enforced at the signature and, on the database's clock, at the event time: an event stamped beyond it is not applied and alerts the founder (D-176). 29 new API tests (22 webhook, 7 refusal alert) plus 5 static core tests | 2a, 2b DONE; **2c DONE** (PR #18; `0029` applied to staging 2026-09-28; on `b540433`: API 477 passed / 3 deselected, core 547 passed, worker 107 passed; CI green); **2d (H9) DONE** (PR #20; lost-device drill passed on staging 2026-09-28, D-177): the Console needs an aal2 session (AUTH-006); seven destructive actions -- hard delete, clear quarantine, cancel, address rotation, buyer merge, go live, tier change -- need a TOTP challenge under 5 min old (AUTH-007, 30 s GoTrue allowance); a wrong code is AUTH-008, mirrored in the web app and kept in step by a test; `CONSOLE_MFA_ENFORCED` ships off, with a startup warning, a Console banner and a founder alert while off; enrol and add a backup at /admin/security; RUNBOOK section 4. No migration. 24 API tests (11 fail with the checks disabled), 4 Vitest, 4 e2e. **Founder enrolled 2026-09-28: two authenticators, both verified** (checked through the Supabase admin API). The backup first failed: Supabase refuses a second factor with the same name (422), and both were named after the date -- fixed in PR #21 (each new authenticator gets a name not already taken; 2 Vitest). A failed enrolment now shows its own catalog entry, **`AUTH-009`** (PR #22), mirrored in the web app and drift-tested like AUTH-008, instead of the generic "We couldn't reach DocFlow" (founder, 2026-09-28, who also set its next-step wording; 2 e2e). **The e2e suite now fails any test whose browser reaches a host other than this machine** (`apps/web/e2e/networkGuard.ts`, every spec imports it and a check fails the suite if one doesn't) -- one AUTH-009 test draft had reached real staging; shown failing with a test pointed at staging. **Second lost-device drill with enforcement on PASSED 2026-09-28 (D-178)**: backup-only sign-in, stale step-up refused, fresh one accepted, dashboard removal leaving only enrolment, re-enrol; drill admin revoked and deleted. **`CONSOLE_MFA_ENFORCED` is on** for the local API (`.env` and the running process agree). A CI timing race in `test_console_mfa.py` was found and fixed (D-178) | D-151, D-170, D-171, D-172, D-173, D-175, D-176, D-177 |
-| 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation (**host settled, D-150: Fly.io, each parse process in its own network namespace; proof spike PASSED 2026-09-28. Carried in from the spike: hide `/.fly` and `/sys` in a mount namespace, and re-run the probe against the real Upstash and API**), H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) -- **including a login for the Stripe webhook that holds EXECUTE on 2c's event function, with EXECUTE then revoked from `docflow_app`**, which closes the residual risk D-173 names. **Also moves with it (founder, 2026-09-28): 0029's `platform_admin_read` policy on `stripe_webhook_events`** -- a flag policy on `app.is_platform_admin`, so it goes to real login separation with D-173's function grant; likewise 0029's `app.intake_refusal` policies (D-175 §8). **H6 note: signed URLs become cross-clock** -- minted and verified on the app clock today (`signed_urls.py`), one clock because one service does both; on Supabase Storage the expiry is Supabase's clock, so D-170 applies (a named tolerance and a test, or the expiry decided in one place) | PLANNED | D-003, D-150, D-159, D-170, D-173 |
-| 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items | PLANNED | D-152 |
+| 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation (**host settled, D-150: Fly.io, each parse process in its own network namespace; proof spike PASSED 2026-09-28. Carried in from the spike: hide `/.fly` and `/sys` in a mount namespace, and re-run the probe against the real Upstash and API**), H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) -- **including a login for the Stripe webhook that holds EXECUTE on 2c's event function, with EXECUTE then revoked from `docflow_app`**, which closes the residual risk D-173 names. **Also moves with it (founder, 2026-09-28): 0029's `platform_admin_read` policy on `stripe_webhook_events`** -- a flag policy on `app.is_platform_admin`, so it goes to real login separation with D-173's function grant; likewise 0029's `app.intake_refusal` policies (D-175 §8). **H6 note: signed URLs become cross-clock** -- minted and verified on the app clock today (`signed_urls.py`), one clock because one service does both; on Supabase Storage the expiry is Supabase's clock, so D-170 applies (a named tolerance and a test, or the expiry decided in one place) -- **settled 2026-09-29: the expiry is decided in one place, our own signed links with the API streaming from Storage.** **Also carried from the Stage 1 checkpoint (D-163):** a run row before the model call, so a worker killed mid-call still records the call's cost | **IN PROGRESS** -- design agreed 2026-09-29 ("Stage 3 -- agreed with the founder before building", below); order 3a -> 3e; 3a's specifics and the D-163 item's placement await the founder | D-003, D-150, D-159, D-163, D-170, D-173 |
+| 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items. **Also (founder, 2026-09-29): audit the ~23 broad `except` blocks on the document path.** Each one turns *any* exception into a data outcome -- DOC-005 (parsing, conversion), DOC-021 (saving, validation) or VAL-016 (buyer identification, matching, duplicate detection) -- so a real bug in our code can be shown as a problem with the customer's file. After the audit only the exceptions each block expects get a catalog code; anything else fails loudly as our error. Found while designing 3a's timeouts, not in 3a's scope | PLANNED | D-152 |
 | 5 | Remaining findings, doc/code contradictions, proposed CLAUDE.md additions; **audit every test that counts a whole table** (the `deal7` pattern) and move each one to data only that test can see, after which staging suites may run concurrently again (RUNBOOK 1.4); **robust test cleanup** (every test that creates data cleans it up in a fixture or `finally`, so a failing test still leaves nothing); **a staging sweep script** that lists tenants named "Acme Test ..." older than a day, with what each holds, and deletes one only on the founder's per-action OK (a stopped run always strands something); **triage the API suite's warnings** (425 on the 2026-09-26 run): list each kind, say which are harmless library deprecations and which point at a real problem in our code -- listed, not fixed (triage done 2026-09-26, D-163: all 439 are test-only; 438 are PyJWT's `InsecureKeyLengthWarning` from short test signing keys); **use a test JWT secret of at least 32 bytes** to clear that noise (founder); **a test that expects the database to refuse a write** must run in a transaction that is always rolled back, or on data it owns, so it can't leave a row behind when the refusal doesn't happen (D-165 incident); **two audit-trail findings from the second lost-device drill (D-178; founder: fixed before any pilot, with tests; design settled 2026-09-28)** -- (1) refused Console and step-up attempts are recorded server-side (AUTH-006/007); AUTH-008 is never browser-reported, and Supabase's database audit log was checked and records nothing on this project, so that gap is documented and Supabase's rate limit covers wrong-code guessing (its behaviour measured with the test account at build time); 5 refusals in 15 min for one account raise one high-severity founder alert per window, set only after measuring what a normal sign-in and step-up produce; (2) the outcome is a second, append-only `admin_actions` row referencing the intent row (succeeded, or failed with its code; no migration), and an intent with no outcome is shown in the Console as crashed midway, never as done; *low priority, not a blocker:* **count rows in spreadsheet and CSV orders for free before extraction** (no model call needed), so an oversized order is caught before a paid read (founder, D-163) | PLANNED | D-160, D-163, D-165, D-178 |
+
+### Stage 3 -- agreed with the founder before building (2026-09-29)
+
+Written here before any code, as for 2c and 2d. The founder's go for Stage 3
+came on 2026-09-29: **build all of it, in the order 3a -> 3b -> 3c -> 3d -> 3e**
+(ahead of schedule). Each slice is its own branch and PR. Items marked
+*proposed* are mine and wait for the founder's answer before they are built.
+
+**3a -- H5, the quick part: time limits on every task, and a memory cap.**
+Agreed 2026-09-29 (founder's answers to my proposal):
+
+- **The document task: a hard limit of 27 minutes, no soft limit** (founder
+  approved hard-only over the earlier 25 soft / 27 hard).
+  - 27 minutes is above the 20-minute read budget
+    (`EXTRACTION_DEADLINE_SECONDS`) and below the 30-minute stuck timeout. So
+    no document task outlives its claim, and the sweep can never hand a
+    document to a second worker while the first is still on it. Today
+    matching after the read has no bound. A test holds the constants in that
+    order.
+  - Why no soft limit: Celery raises it inside the task as an ordinary
+    exception, and about 23 broad `except` blocks on the document path would
+    relabel it (DOC-005 while parsing, DOC-021 while saving, VAL-016 in the
+    post-processing steps). With hard-only, "never DOC-005" is true because
+    the task can't catch anything.
+- **The timeout is recorded by Celery's main process**, through a custom
+  `Request` class whose `on_timeout` runs there for every timeout (Celery
+  5.6.3). A parser hung in C code never sees a soft signal, and the killed
+  child can't write anything.
+  - It appends the attempt number to a new column,
+    **`documents.timeout_attempts integer[]`** (migration `0030`, approved,
+    backup first, deletes nothing). The append is idempotent.
+  - If the write fails, it is logged and the document gets today's
+    dead-worker handling.
+- **The sweep decides, in one place**, for a document stuck in `processing`
+  past the timeout:
+
+  | State | Outcome |
+  |---|---|
+  | First timeout was on the latest attempt | Retry once |
+  | A try has already run since the first timeout | **DOC-022, cause timeout** |
+  | No timeout, `MAX_PROCESSING_ATTEMPTS` used | DOC-022, cause worker stopped (unchanged) |
+  | Otherwise | Retry (unchanged) |
+
+  **A timeout gets at most one retry** (founder): a file that hangs the parser
+  will hang it again.
+- **The alert says the cause.** It is the same `document_stuck` alert and the
+  same DOC-022 entry; DOC-022's wording is unchanged (founder). The payload
+  gains three fields:
+  - `cause`: `timeout` or `worker_stopped`;
+  - the tries that timed out;
+  - the number of tries.
+
+  They are ids and numbers only (7.10), and the founder email already lists
+  every payload field. **Deduplication becomes one DOC-022 alert per tenant
+  per cause per day** (founder, approved), so a timeout is never hidden inside
+  a dead-worker alert from the same day.
+- **Memory:** Celery's `worker_max_memory_per_child`, which replaces a worker
+  process after the task that pushed it over. This is not a cap during a task:
+  the machine's memory is the ceiling until 3c's per-file `setrlimit`. The
+  value follows the worker machine size.
+- **Production runs Celery's prefork pool.** Time limits do nothing under the
+  `solo` pool used on Windows.
+- **The six other tasks** (export, catalog import, rollup, scheduled jobs,
+  lifecycle sweep, stuck sweep): limits sized to their measured worst case.
+  **The measurements go to the founder before any limit is set.**
+- **Tests:**
+  - **Linux CI, a real prefork worker** (the CI worker job already has Redis),
+    with shortened limits. A task that hangs and ignores signals must be:
+    - killed, with its attempt recorded;
+    - followed by the worker taking the next task;
+    - retried once by the sweep;
+    - ended by the second hang in DOC-022, with the cause `timeout` in the
+      alert.
+
+    A separate test kills a worker with no timeout and asserts the
+    worker-stopped path is unchanged.
+  - **On any OS:** the sweep's decision table; the hook recording one
+    attempt once even when it fires twice; the order of the limit constants.
+  - **The document task's effective limits** (founder, 2026-09-29): read from
+    the finalized Celery app, its soft limit is `None` and its hard limit is 27
+    minutes. Celery treats a task's `None` as "not set", so a global
+    `task_soft_time_limit` added later would override it; this test fails when
+    that happens.
+- **The founder's condition on hard-only: nothing done before the commit is
+  repeated wrongly by a kill and a retry.** Checked 2026-09-29; the three
+  fixes below were approved by the founder the same day:
+  - **Paid model calls: never repeated.** Every model call ends by the
+    20-minute read budget counted from the claim (existing test
+    `test_M1_the_whole_read_ends_well_inside_the_stuck_timeout`), so a kill
+    at 27 minutes can't land during one. Once the answer is saved, a retry
+    resumes from it without a model call (H3). A parse hang is killed before
+    any paid call is made.
+  - **Emails and alerts: never duplicated.** They are outbox and alert rows
+    written in the same transaction as the state change, with dedupe keys.
+  - **Buyer creation and merge flags: safe to repeat** (`ON CONFLICT`).
+  - **Not safe: `learned_rules.times_applied`.** Matching (`matching.py`) and
+    buyer-alias identification (`buyers.py`) add to it in their own
+    transactions, before the move to review, so a kill between them and that
+    move counts a document's rule uses twice on the retry. This already
+    happens today on the dead-worker resume path; 3a makes it more reachable
+    until Stage 4 speeds up matching. It inflates the Console Rules page's
+    "times applied"; the mapping-reuse KPI counts lines, not this counter, so
+    it is unaffected (`matching.py`'s docstring saying otherwise is out of
+    date). **Fix, in 3a:** add to the counter once, inside the transaction
+    that moves the document to `needs_review`, from the rules recorded on the
+    document's lines and header. That transition happens exactly once.
+    - Checked first (founder's condition): **nothing on the document path
+      reads `times_applied` for a decision.** Its only reader is
+      `learned_rules.list_rules` for the Console Rules page, which sorts by
+      `created_at`. Matching and buyer identification load rules without it.
+    - What changes: the counter comes to mean "fired on documents that
+      reached review". A document that fails validation (DOC-021) or is taken
+      over by the sweep no longer adds to it.
+    - **Existing staging counts are not corrected** (founder).
+  - **Previews and extracted text: repeated writes, orphaned files.** Each
+    write gets a new random file name, so a retry leaves the earlier file
+    behind; the document always points to the latest. **Fix, in 3b:** a fixed
+    key per document that a repeat overwrites, built with the storage
+    rewrite. **3b's copy of staging's files into Storage copies only files a
+    document still references**; orphans are left behind and their number is
+    reported (founder).
+  - **The needs-review digest note is written after the commit.** A kill in
+    that gap of milliseconds leaves the order out of the digest email (it is
+    still in the review queue); it is never duplicated. **Fix, in 3a:** the
+    same transaction behind a savepoint, which keeps D-131's rule that a
+    notification can never cost the document its checks.
+
+**Carried from the Stage 1 checkpoint and missing from the row above: a run
+row before the model call (D-163).** A worker that dies during the model call
+(a crash, a lost machine; not 3a's hard limit, which can't land there)
+records nothing, so that call's cost is lost. `extraction_runs` is append-only
+with `succeeded NOT NULL`, so the fix needs a migration. **Agreed: its own item
+in 3c, designed and asked about before building.**
+
+**3b -- H6, Supabase Storage.** Agreed:
+- **fixed per-document keys for derived files** (preview, extracted text), so
+  a repeated write overwrites instead of leaving an orphan (from 3a's
+  side-effects review);
+- a private bucket behind the existing `save_file` / `read_file` interface,
+  keys prefixed `tenants/{id}/` and the prefix enforced on read as well as
+  write;
+- staging's files **copied** into the bucket, the local copies kept until the
+  copy is verified.
+
+**Downloads use our own signed links, and the API streams the file from
+Storage** (founder). This **settles the H6 / D-170 note**: the expiry is
+minted and verified by the API on one clock, so there is no foreign clock to
+tolerate, and no customer ever sees a Supabase URL or the storage host.
+Storage connects through Supavisor with a pool of its own (see 3e).
+
+**3c -- H5, the full part: the parse service.** Agreed:
+- **Bytes in, text and images out.** The worker sends the file, the service
+  returns the parts. The service holds **no storage key, no database login
+  and no model key**, and **refuses to start in production mode unless
+  isolation is active**.
+- **Every parse process** gets:
+  - its own network namespace, and a mount namespace hiding `/.fly` and `/sys`
+    (the D-150 spike's two findings);
+  - an unprivileged user;
+  - `setrlimit` memory and CPU caps;
+  - a SIGKILL wall-clock timeout;
+  - one subprocess per file, never reused.
+- Tier 2 conversion (LibreOffice, image libraries, `.msg`) moves into it.
+- **CI requirement (founder):** CI builds the parse service from **the same
+  Linux image production uses**, runs it, and exercises **the real
+  namespaces and limits**, including the hostile fixtures against the running
+  service, not only unit tests of the isolation code. Dev is Windows, where
+  none of this can run, so **CI is the only place isolation runs before
+  production**. In dev the service runs the same code path without
+  namespaces; in production mode that is a refusal to start.
+- **The re-probe against the real Upstash and the real API happens in Stage
+  3**, on a Fly staging deployment. It is priced first, and the founder
+  approves the monthly number before anything is stood up.
+
+**3d -- H4, per-tenant fairness.** Agreed design:
+- Documents wait as `pending` in the database.
+- A dispatcher takes turns between tenants, with a cap per tenant on
+  documents already on the queue.
+- `pg_trgm` matching stays in Stage 4.
+
+**Interplay with the stuck-document sweep** (founder: written down before
+building; each point that changes existing sweep behaviour is marked
+**CHANGES**):
+
+1. **CHANGES: the sweep stops enqueueing `pending` documents directly.**
+   - Today every `pending` document older than
+     `STUCK_PROCESSING_TIMEOUT_MIN` (30 min) is put on the queue again by the
+     sweep, on the theory that its job was lost (D-095).
+   - Under the dispatcher, `pending` is the normal state for a backfill still
+     waiting its turn. The sweep enqueueing it would bypass the per-tenant cap
+     and push a 500-document backfill onto the queue 30 minutes in, undoing
+     fairness.
+   - Proposed: `pending` splits into *waiting* (not yet dispatched) and
+     *dispatched* (sent to the queue, not yet claimed), recorded by a
+     `dispatched_at` column on `documents`, which is a migration. Only a
+     document dispatched and unclaimed past the timeout counts as a lost job.
+     The sweep hands it back to the dispatcher, which re-sends it within the
+     cap. Nothing puts it on the queue except the dispatcher.
+2. **CHANGES: the `document_stuck` "waiting" alert.**
+   - Today one warning per tenant per day fires for any `pending` document
+     past 30 minutes.
+   - A backfill legitimately waits longer than that, so the alert would fire
+     every day of every large backfill.
+   - Proposed: the alert fires for a *dispatched* document unclaimed past the
+     timeout (a lost job, as today). A document still *waiting* alerts only
+     when the dispatcher itself has not run for a set time, which means the
+     dispatcher has stopped. That would be a new constant, raised with the 3d
+     design.
+3. **Unchanged:** the handling of `processing` (retry, then DOC-022 and an
+   alert after `MAX_PROCESSING_ATTEMPTS`). Quarantined and staged documents
+   stay out of both the dispatcher and the sweep. A released document enters
+   the dispatcher's turn order like a new one.
+4. **To decide in 3d's design, before code:**
+   - the per-tenant cap (a constant);
+   - whether interactive single uploads skip ahead of a tenant's own
+     backfill (Section 5.1 says interactive is always drained first);
+   - what triggers the dispatcher: beat, each completion, each upload, or all
+     three.
+
+**3e -- F-1, separate database logins.** Approved as proposed:
+- **`docflow_api`**: tenant requests, plus the intake-token, sign-in-identity
+  and refusal-alert policies.
+- **`docflow_admin`**: the Console and the maintenance scripts, holding every
+  `platform_admin_access` policy, 0029's `platform_admin_read` included.
+- **`docflow_worker`**: the rollup, scheduler, pipeline-sweep and lifecycle
+  policies, plus tenant sessions for jobs.
+- **`docflow_stripe`**: the Stripe lookup policy and EXECUTE on
+  `record_stripe_subscription_event()`, with EXECUTE revoked from
+  `docflow_app`. This closes D-173's residual risk.
+
+Counted on `main` 2026-09-29: 52 policy uses of session flags across 19
+migrations, and each flag session is opened by one service only.
+
+**Founder's condition: the pooler limits are checked before the migration is
+written.** Checked 2026-09-29:
+- **Each login gets its own pool.** Supabase's Supavisor FAQ: the pool size
+  is the most direct connections the pooler keeps "per unique user, database,
+  and mode combination"; two combinations at pool size 120 may form 120 each.
+  Supabase Storage is one more combination with the same pool size.
+- **Staging's limit:** `max_connections` = 60 (read from the database), with 3
+  reserved for the superuser. That is Supabase's Nano or Micro size; the
+  memory settings point to Micro, and the plan shown in the dashboard is the
+  check. Supabase's own services held 13 connections at the time of reading.
+- **Headroom:**
+  - After 3b and 3e there are five combinations: four logins plus Storage
+    (`docflow_app` is retired by F-1).
+  - The worst case is 5 x the pool size, against about 44 usable connections.
+  - Supabase's guidance for several combinations is to keep the pooler under
+    40% of `max_connections` (24 here).
+  - So four logins fit with headroom **only at a pool size of about 4-5**. The
+    pool size is a dashboard setting (Database -> Settings -> Connection
+    pooling -> Default Pool Size), readable by the founder only.
+- **Options, for the founder:**
+  - keep the compute and set the pool size to 4-5 (recommended for staging);
+  - upgrade staging to Small (90 connections, about $15/mo against Micro's
+    $10);
+  - merge `docflow_stripe` into `docflow_api`, not recommended because it
+    reopens D-173's risk.
+
+- **Decided (founder, 2026-09-29): keep Micro and set the pool size to 5.**
+  Default Pool Size was **15** (founder, 2026-09-29). At 15, the five
+  combinations could ask for 75 connections, more than the database's 60,
+  which is why it comes down. The founder changes it to 5 on 2026-09-29, after
+  the Stage 2 checkpoint run, so the change can't drop a running suite's
+  connections. Compute is recorded as **Micro, inferred from
+  `max_connections` = 60** (founder). Five combinations at 5 is 25 connections
+  at most, against about 44 usable. The first staging suite run after the
+  change shows whether 5 is enough for the tests that hold one connection
+  while probing with another; the result is reported.
+- **Production's pool size and compute are decided in Phase 6, with real load,
+  not inherited from staging** (founder).
 
 ### Stage 2c and 2d -- agreed with the founder before building (2026-09-27)
 
@@ -299,7 +570,7 @@ wording and reasoning in D-150.
   after the report.
 
 **Then, before any real tenant:** the D-170 clock PR -- #2 first, then #1, #4,
-#5, #7. **BUILT (branch `phase55/d170-clock`, 2026-09-28), awaiting merge.**
+#5, #7. **DONE (PR #24, merged 2026-09-29).**
 One commit per item, in that order. Each makes the database's clock write what the database compares: the deletion date, the
 delete guard and the reminder's day count (#2); the sweep's re-check and the "immediate" effective date (#1, which the founder
 widened to include `lifecycle.py:156`); every job's `run_at` (#4); the rollup's staleness verdict (#5); and the once-a-day alert
@@ -407,11 +678,12 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   `apps/api/tests/fixtures/golden/`; answers re-recorded, live golden + contamination pass;
   a guard test keeps the old name out of the code (D-159). Staging rows holding the old name
   in their stored model answers wait for the end-of-build cleanup.
-- **F-1 (D-159): about 50 RLS policies are keyed on `app.*` settings any
-  connection can set** -- enforced by code and guard tests today, not by the
-  database. Stage 3: separate logins for API, worker and admin path, with
-  policies granted to those roles (about 2-3 days, $0).
-- **Blank audit actors (D-159, D-165):** fixed by migration 0028 (not yet applied): the 7 staging
+- **F-1 (D-159): 52 RLS policy uses are keyed on `app.*` settings any
+  connection can set** (counted 2026-09-29) -- enforced by code and guard tests
+  today, not by the database. Stage 3e: four logins (API, admin, worker,
+  Stripe), approved 2026-09-29; about 3-4 days, $0; pooler headroom checked
+  (see "Stage 3 -- agreed with the founder before building").
+- **Blank audit actors (D-159, D-165):** fixed by migration 0028 (applied and verified on staging 2026-09-26): the 7 staging
   rows get named system actors, a purged person's events name `deleted-account`, and the actor
   is required from then on.
 - **Four** stranded test tenants on staging, all 2026-09-26 (the fourth, "Acme Test M5 Lock"
