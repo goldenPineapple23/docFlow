@@ -2637,3 +2637,19 @@ The fresh backup challenge passed the step-up. The rotation then stopped at `QUA
 - **Also in 0030 (founder, 2026-09-29):** two partial indexes on `exports`, for pending exports and for EXP-009s, so the sweep and the health strip never scan the whole table.
 
 **Related:** D-095, D-131, D-158; BUILD-STATUS Stage 3; Sections 7.9, 7.11, 7.14, 7.16.5; review H3, H5.
+
+## D-180 — One test run at a time against a shared database, enforced by an advisory lock (founder, 2026-09-29)
+
+**Context:** On 2026-09-29 two Claude sessions each ran the full API suite against `docflow-staging`, 76 seconds apart. Test cleanup hard-deletes the test's own tenants (and their lifecycle events and admin actions first), so each run deleted a tenant while the other's `test_a_failed_tenant_creation_rolls_back_everything_including_the_file_move` was counting every tenant; both failed it, and the audit trail showed nothing, because cleanup deletes those rows too. RUNBOOK 1.4's "one suite at a time" was a rule to remember, and a second session didn't know the first was running.
+
+**Decision (founder):** a suite run takes a Postgres advisory lock at startup and refuses to start if another run holds it, with a clear message.
+
+**As built:**
+- `tests/suite_lock.py` in `apps/api` and an identical copy in `apps/worker` (each app's tests are their own package; a test fails if the copies differ). `pytest_sessionstart` takes the lock when a database is configured and the run isn't collect-only; a held lock stops the run with `pytest.exit(..., returncode=3)` and the holder's name. `pytest_sessionfinish` releases it. Both suites share one key, because both write to the same database.
+- **The lock has a connection of its own, through the pooler's session mode.** `DATABASE_URL` is Supabase's transaction-mode pooler (port 6543, D-016), which may give each transaction a different server connection, so a session-level lock taken through it would stay on whichever server connection it landed on. The lock connects to the same host on port 5432 (session mode), which keeps one server connection for as long as the client is connected. Any other URL, such as CI's local Postgres, is used as it is.
+- **The holder is named with `set_config('application_name', ...)` after connecting**, because Supavisor reports every connection's `application_name` as "Supavisor". The name carries the suite, pid, host and the run's start time; `backend_start` isn't used, because the pooler's server connection can be older than the run.
+- **Tested against staging:** a second real run was refused with exit code 3 and the first run's name; the lock was free after a clean finish, and after a hard kill (`os._exit`) three times out of three. A forked child (the worker's prefork tests, Linux) doesn't close the inherited connection (psycopg only closes a connection in the process that opened it), and `release()` tolerates a connection that is already gone.
+
+**Not covered:** the web suites and scripts that write to staging (`seed_live_e2e.py`, the demo seeds). They still follow RUNBOOK 1.4 by hand.
+
+**Related:** RUNBOOK 1.4; D-016, D-160.

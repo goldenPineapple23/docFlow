@@ -78,6 +78,23 @@ check a count across the whole table, so one suite's test data can fail
 another suite's test. This happened on 2026-09-26: the API suite's `deal7`
 case failed while the worker suite was running (DECISIONS.md D-160).
 
+**The API and worker suites enforce it (D-180).** Each run takes a Postgres
+advisory lock when it starts and holds it until it ends. A second run of
+either suite against the same database stops at once, with exit code 3 and a
+message naming the run that holds the lock:
+
+```
+Exit: Another test run is using this database: docflow-test-run api pid=23972 host=NKPC started=18:53:17Z.
+```
+
+Wait for that run to finish, or stop it, then start again. The lock goes with
+its run: it is released at the end, and also when the run is killed (tested
+three times against staging), so there is nothing to clear by hand. Collect-only
+runs (`--co`) don't take it. It doesn't cover the web suites or scripts such as
+`seed_live_e2e.py`: those still follow the rule by hand. This came from
+2026-09-29, when two sessions ran the full API suite 76 seconds apart and each
+deleted a tenant the other was counting.
+
 The rule stays until every test uses data only it can see: rows with a unique
 prefix that the test filters on, or a transaction the test rolls back. The
 audit of the "count everything" tests is a Phase 5.5 Stage 5 item

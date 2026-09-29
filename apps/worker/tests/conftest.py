@@ -6,6 +6,24 @@ def database_available() -> bool:
     return bool(get_settings().database_url)
 
 
+# ── One test run at a time against a shared database (tests/suite_lock.py) ──
+def pytest_sessionstart(session):
+    if session.config.option.collectonly or not database_available():
+        return
+    from tests import suite_lock
+
+    try:
+        suite_lock.acquire(get_settings().database_url, suite="worker")
+    except suite_lock.SuiteLockHeld as held:
+        pytest.exit(str(held), returncode=3)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    from tests import suite_lock
+
+    suite_lock.release()
+
+
 def documents_schema_available() -> bool:
     """
     True once supabase/migrations/0002_documents.sql has actually been
