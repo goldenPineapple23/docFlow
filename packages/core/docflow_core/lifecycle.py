@@ -565,14 +565,29 @@ class ReactivatePlan:
     tier_name: str
     monthly_price: Decimal
     document_allowance: int
+    # When the tenant's status last changed (it was suspended, or entered
+    # pending deletion). Unchanged until this reactivation commits, so it
+    # names this reactivation in the Stripe idempotency key: a retried click
+    # reuses the key, a later reactivation gets a new one (Stage 3a).
+    status_changed_at: datetime | None = None
+    # When the current suspension began (its `suspended` lifecycle event):
+    # the line between the founder's two invoice sections (Stage 3a).
+    suspended_at: datetime | None = None
+
+    @property
+    def idempotency_scope(self) -> str:
+        changed = self.status_changed_at
+        return f"reactivate-{int(changed.timestamp() * 1_000_000) if changed else 0}"
 
 
 def plan_reactivate(session: Session, tenant_id: UUID) -> ReactivatePlan:
     row = session.execute(
         text(
             """
-            SELECT t.name, t.status, t.stripe_customer_id,
-                   tr.id AS tier_id, tr.name AS tier_name, tr.monthly_price, tr.document_allowance
+            SELECT t.name, t.status, t.stripe_customer_id, t.status_changed_at,
+                   tr.id AS tier_id, tr.name AS tier_name, tr.monthly_price, tr.document_allowance,
+                   (SELECT max(e.created_at) FROM tenant_lifecycle_events e
+                     WHERE e.tenant_id = t.id AND e.event_type = 'suspended') AS suspended_at
             FROM tenants t
             LEFT JOIN tiers tr ON tr.id = t.tier_id
             WHERE t.id = :id
@@ -593,6 +608,71 @@ def plan_reactivate(session: Session, tenant_id: UUID) -> ReactivatePlan:
         tier_name=row["tier_name"],
         monthly_price=Decimal(row["monthly_price"]),
         document_allowance=row["document_allowance"],
+        status_changed_at=row["status_changed_at"],
+        suspended_at=row["suspended_at"],
+    )
+
+
+def _invoice_section(heading: str, invoices: list[Any]) -> tuple[str, str]:
+    """One section of the reactivation invoice alert, as text (the email and
+    the Console show payload values as plain strings), and its total."""
+    total = sum((i.amount for i in invoices), Decimal("0.00"))
+    lines = "; ".join(
+        f"{i.invoice_id}"
+        + (f" #{i.number}" if i.number else "")
+        + f" {i.status} ${i.amount}"
+        + f" (created {datetime.fromtimestamp(i.created, tz=UTC):%Y-%m-%d})"
+        for i in invoices
+    )
+    count = f"{len(invoices)} invoice{'' if len(invoices) == 1 else 's'}"
+    return f"{heading}: {count}, total ${total}" + (f" -- {lines}" if lines else ""), f"{total}"
+
+
+def raise_reactivation_invoice_alert(
+    session: Session,
+    tenant_id: UUID,
+    *,
+    subscription_id: str,
+    subscription_status: str,
+    suspended_at: datetime,
+    review: Any | None,
+) -> bool:
+    """
+    Reactivation kept the old subscription because Stripe still held it live
+    after the suspension (Stage 3a, option C; founder 2026-09-29). Lists what
+    the founder has to act on at Stripe, in two sections with a total each:
+    open invoices from before the suspension (service delivered: collect),
+    and draft, open or paid ones since (void, or refund). `review` is None
+    when Stripe couldn't be asked -- the alert then says so rather than
+    staying quiet. Nothing to act on: no alert. Returns whether one was raised.
+    """
+    from docflow_core.external_services import BEFORE_SUSPENSION_HEADING, DURING_SUSPENSION_HEADING
+
+    payload: dict[str, Any] = {
+        "stripe_subscription_id": subscription_id,
+        "subscription_status": subscription_status,
+        "suspended_at": suspended_at.astimezone(UTC).isoformat(timespec="seconds"),
+    }
+    if review is None:
+        payload["invoices"] = "Stripe's invoice list could not be read -- check this subscription in Stripe"
+    else:
+        if not review.before_suspension and not review.during_suspension:
+            return False
+        before, before_total = _invoice_section(BEFORE_SUSPENSION_HEADING, review.before_suspension)
+        during, during_total = _invoice_section(DURING_SUSPENSION_HEADING, review.during_suspension)
+        payload.update(
+            before_suspension=before,
+            before_suspension_total=before_total,
+            during_suspension=during,
+            during_suspension_total=during_total,
+        )
+    return founder_alerts.raise_alert(
+        session,
+        alert_type="reactivation_invoices_to_review",
+        severity="high",
+        tenant_id=tenant_id,
+        payload=payload,
+        dedupe_key=f"reactivation_invoices:{tenant_id}:{subscription_id}:{int(suspended_at.timestamp())}",
     )
 
 

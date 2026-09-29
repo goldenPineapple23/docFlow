@@ -864,6 +864,7 @@ def go_live(
             promo_months=plan.promo_months if founding else None,
             setup_fee=fee if plan.setup_fee_billing == "stripe" and fee > 0 else None,
             days_until_due=INVOICE_DAYS_UNTIL_DUE,
+            idempotency_scope="golive",
             trial_end=trial_end,
         )
     except ExternalServiceError as exc:
@@ -984,9 +985,10 @@ def reactivate_tenant(
     Section 7.15.4: "Resumes the Stripe subscription (or creates a new one
     on the tenant's tier version) and returns the tenant to active ... no
     re-onboarding, no data loss." Reuses start_subscription exactly as
-    go-live does: it returns the tenant's existing non-cancelled
-    subscription if one somehow still exists, or creates a fresh one --
-    the suspend sweep already cancelled the old one at Stripe.
+    go-live does: it returns the tenant's existing subscription if Stripe
+    still holds it live (a cancel that never went through), or creates a
+    fresh one. When the old one is reused after a suspension, the founder is
+    alerted with the invoices to collect, void or refund (Stage 3a, option C).
     """
     admin_id = _console_act(identity, tenant_id, "reactivate", target_type="tenant", target_id=tenant_id)
     with tenant_session(tenant_id) as session:
@@ -1007,10 +1009,24 @@ def reactivate_tenant(
             promo_months=None,
             setup_fee=None,
             days_until_due=INVOICE_DAYS_UNTIL_DUE,
+            idempotency_scope=plan.idempotency_scope,
             trial_end=None,  # D-125's trial is a go-live perk, not a reactivation one
         )
     except ExternalServiceError as exc:
         raise catalog_error("CON-006", status_code=502) from exc
+
+    # The old subscription was still live, so Stripe kept invoicing through
+    # the suspension. Read with no transaction open; a failure to read never
+    # blocks the reactivation -- the alert then says the list is missing.
+    review = None
+    reused_after = plan.suspended_at if subscription.reused else None
+    if reused_after is not None:
+        try:
+            review = external_services.invoices_to_review(
+                subscription.subscription_id, int(reused_after.timestamp())
+            )
+        except ExternalServiceError:
+            logger.error("reactivation_invoice_list_failed tenant_id=%s", tenant_id)
 
     with tenant_session(tenant_id) as session:
         try:
@@ -1026,6 +1042,15 @@ def reactivate_tenant(
                 ),
                 app_url=get_settings().app_base_url,
             )
+            if reused_after is not None:
+                lifecycle.raise_reactivation_invoice_alert(
+                    session,
+                    tenant_id,
+                    subscription_id=subscription.subscription_id,
+                    subscription_status=subscription.status,
+                    suspended_at=reused_after,
+                    review=review,
+                )
         except lifecycle.LifecycleError as exc:
             raise _lifecycle_error(exc) from exc
     return {"status": "active"}

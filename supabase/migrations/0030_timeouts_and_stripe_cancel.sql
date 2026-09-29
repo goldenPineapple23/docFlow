@@ -2,9 +2,11 @@
 -- decided with the founder before building (docs/BUILD-STATUS.md, "Stage 3
 -- -- agreed with the founder before building", 3a).
 --
--- Touches two tables: documents, tenants. Adds a column to each. Deletes
--- nothing and changes no existing value.
+-- Touches three tables: documents, tenants (a column each), exports (two
+-- indexes). Deletes nothing and changes no existing value; an index changes
+-- no row.
 -- BACKUP FIRST -- see RUNBOOK.md section 1.1 (backup_0030: documents, tenants).
+-- exports is not backed up: nothing in it is written or changed here.
 --
 -- 1. documents.timeout_attempts -- the processing attempts (the value of
 --    processing_attempts at the time) that ended because the document task
@@ -35,3 +37,14 @@ alter table documents
 
 alter table tenants
     add column stripe_cancel_pending_at timestamptz;
+
+-- 3. Two small partial indexes on exports (founder, 2026-09-29), for the
+--    stuck sweep's EXP-009 step (Stage 3a). Each holds only the rows it
+--    names, so both stay tiny however many exports a tenant makes:
+--    * pending exports, which the sweep checks for every tenant each tick;
+--    * EXP-009 exports, which the health strip counts for today and the
+--      sweep counts per tenant for the daily alert.
+create index idx_exports_pending on exports(tenant_id, requested_at)
+    where status = 'pending' and deleted_at is null;
+create index idx_exports_not_finished on exports(generated_at)
+    where error_code = 'EXP-009';

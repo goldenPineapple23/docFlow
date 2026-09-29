@@ -478,6 +478,14 @@ every task that doesn't set its own, which is all of them).
   again (EXP-009); the health strip shows the day's total.
 - **IMP-009 on an import in the Console:** start the import again from the
   same file. If it stops again, find the import's ID in the worker log.
+- **`reactivation_invoices_to_review`:** a reactivation kept the tenant's old
+  subscription, because Stripe still had it live after the suspension.
+  DocFlow changed nothing at Stripe. In the Stripe dashboard, for that
+  subscription: **collect** the invoices under "Before suspension" (service
+  was delivered); **void** the drafts and open invoices under "During
+  suspension", and **refund** the paid ones. If the alert says the invoice
+  list couldn't be read, look at the subscription's invoices in Stripe
+  directly.
 
 ### 5.4 A Stripe cancel still owed after a suspension
 
