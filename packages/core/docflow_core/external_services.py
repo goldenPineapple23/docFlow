@@ -39,6 +39,15 @@ class ExternalServiceError(Exception):
         self.reason = reason
 
 
+class CardDeclined(ExternalServiceError):
+    """Stripe refused to create a subscription because the first charge on the
+    customer's card was declined (`payment_behavior=error_if_incomplete`,
+    reactivation D5). Nothing was created at Stripe."""
+
+    def __init__(self) -> None:
+        super().__init__("stripe", "card declined on the first charge")
+
+
 # ── Stripe ──────────────────────────────────────────────────────────────────
 
 
@@ -210,13 +219,27 @@ def start_subscription(
     days_until_due: int,
     idempotency_scope: str,
     trial_end: int | None = None,
+    charge_card: bool = False,
+    refuse_if_declined: bool = False,
 ) -> SubscriptionResult:
     """
     Go-live billing (Section 7.15.2 Step 9; D-113): a monthly subscription at
-    the tier's price, invoiced to the customer (collection_method
-    send_invoice) because nobody has entered a card yet; the setup fee, when
-    billed through Stripe, as a pending invoice item that Stripe puts on that
-    first invoice; the founding price as a coupon for the promo months.
+    the tier's price; the setup fee, when billed through Stripe with month one,
+    as a pending invoice item that Stripe puts on that first invoice; the
+    founding price as a coupon for the promo months.
+
+    How it collects (card billing, founder 2026-09-29, D6):
+      * `charge_card=False`: invoiced to the customer (collection_method
+        send_invoice), payable within `days_until_due`.
+      * `charge_card=True`: Stripe charges the customer's default card
+        (collection_method charge_automatically), the card saved by DocFlow's
+        card page. `days_until_due` is not sent.
+      * `refuse_if_declined=True` (reactivation with a card, D5): Stripe
+        refuses to create the subscription if its first charge is declined
+        (`payment_behavior=error_if_incomplete`, checked in test mode
+        2026-09-29: a 402 and no subscription left behind), raised here as
+        CardDeclined. Without it a declined first charge would leave an
+        `incomplete` subscription on an active tenant.
 
     `trial_end` (unix seconds, D-125): delays that first invoice. Stripe
     generates no invoice at all for a trialing send_invoice subscription
@@ -296,10 +319,8 @@ def start_subscription(
             if created.status_code >= 300:
                 raise ExternalServiceError("stripe", f"invoice item create returned {created.status_code}")
 
-    data = {
+    data: dict[str, Any] = {
         "customer": customer_id,
-        "collection_method": "send_invoice",
-        "days_until_due": days_until_due,
         "items[0][price_data][currency]": "usd",
         "items[0][price_data][product]": product_id,
         "items[0][price_data][unit_amount]": _cents(monthly_price),
@@ -308,6 +329,13 @@ def start_subscription(
         # The founding discount's end date comes back in the answer (D-139).
         "expand[]": "discounts",
     }
+    if charge_card:
+        data["collection_method"] = "charge_automatically"
+        if refuse_if_declined:
+            data["payment_behavior"] = "error_if_incomplete"
+    else:
+        data["collection_method"] = "send_invoice"
+        data["days_until_due"] = days_until_due
     if coupon_id:
         data["discounts[0][coupon]"] = coupon_id
     if trial_end:
@@ -318,6 +346,8 @@ def start_subscription(
         data=data,
         idempotency_key=f"docflow-subscription-{tenant_id}-{idempotency_scope}",
     )
+    if response.status_code == 402 and refuse_if_declined:
+        raise CardDeclined()
     if response.status_code >= 300:
         raise ExternalServiceError("stripe", f"subscription create returned {response.status_code}")
     return _subscription_result(response.json())
@@ -590,6 +620,185 @@ def void_pending_setup_fee(*, customer_id: str, tenant_id: UUID) -> None:
         response = _stripe("DELETE", f"invoiceitems/{item['id']}")
         if response.status_code >= 300 and response.status_code != 404:
             raise ExternalServiceError("stripe", f"invoice item delete returned {response.status_code}")
+
+
+# ── Card billing (founder, 2026-09-29; decisions D1-D6 in BUILD-STATUS) ──────
+# Card details never touch DocFlow: Stripe's hosted pages collect them and save
+# the card on the tenant's existing Stripe customer (Section 3: no public
+# signup, so the customer already exists from tenant creation).
+
+
+@dataclass(frozen=True)
+class CardPage:
+    session_id: str
+    url: str
+    mode: str  # "setup": saves the card, charges nothing | "payment": also charges the setup fee
+
+
+def create_card_page(
+    *,
+    tenant_id: UUID,
+    customer_id: str,
+    setup_fee: Decimal | None,
+    success_url: str,
+    cancel_url: str,
+) -> CardPage:
+    """
+    The page DocFlow sends the customer to put a card on file (D1), as Stripe
+    Checkout:
+      * `setup_fee` None or 0 -- **setup mode**: the card is saved, nothing is
+        charged. Founding customers (their fee comes with month one), a waived
+        fee, and a fee invoiced by hand.
+      * `setup_fee` > 0 -- **payment mode**: the setup fee is charged now, "at
+        signing", and the same card is saved for the subscription
+        (`setup_future_usage=off_session`). Standard customers (D2).
+    Both parameter sets were accepted by Stripe in test mode, 2026-09-29.
+
+    A payment-mode page is the only one that charges, so before creating one,
+    every DocFlow card page still open for this customer is expired: a
+    customer holding an older link must not be able to pay the setup fee
+    twice. The amount comes from the caller, who read it from the tenant's
+    deal terms (Section 10: no price is typed into code).
+    """
+    charges_fee = setup_fee is not None and setup_fee > 0
+    if charges_fee:
+        _expire_open_card_pages(customer_id)
+    tenant = str(tenant_id)
+    data: dict[str, Any] = {
+        "customer": customer_id,
+        "success_url": success_url,
+        "cancel_url": cancel_url,
+        "payment_method_types[0]": "card",
+        "metadata[docflow_tenant_id]": tenant,
+    }
+    if charges_fee:
+        assert setup_fee is not None
+        data.update(
+            {
+                "mode": "payment",
+                "line_items[0][quantity]": "1",
+                "line_items[0][price_data][currency]": "usd",
+                "line_items[0][price_data][unit_amount]": _cents(setup_fee),
+                "line_items[0][price_data][product_data][name]": "DocFlow setup fee",
+                "payment_intent_data[setup_future_usage]": "off_session",
+                "payment_intent_data[metadata][docflow_setup_fee_for]": tenant,
+                "metadata[docflow_card_page]": "setup_fee",
+            }
+        )
+    else:
+        data.update(
+            {
+                "mode": "setup",
+                "currency": "usd",
+                "setup_intent_data[metadata][docflow_tenant_id]": tenant,
+                "metadata[docflow_card_page]": "card",
+            }
+        )
+    response = _stripe("POST", "checkout/sessions", data=data)
+    if response.status_code >= 300:
+        raise ExternalServiceError(
+            "stripe", f"checkout session create returned {response.status_code}: {_stripe_error(response)}"
+        )
+    body = response.json()
+    return CardPage(session_id=str(body["id"]), url=str(body["url"]), mode=str(body["mode"]))
+
+
+def _expire_open_card_pages(customer_id: str) -> None:
+    listed = _stripe(
+        "GET", "checkout/sessions", params={"customer": customer_id, "status": "open", "limit": 100}
+    )
+    if listed.status_code >= 300:
+        raise ExternalServiceError("stripe", f"checkout session list returned {listed.status_code}")
+    for page in listed.json().get("data", []):
+        if not page.get("metadata", {}).get("docflow_card_page"):
+            continue
+        expired = _stripe("POST", f"checkout/sessions/{page['id']}/expire")
+        # 400: it completed or expired between the list and now -- nothing to do.
+        if expired.status_code >= 300 and expired.status_code != 400:
+            raise ExternalServiceError("stripe", f"checkout session expire returned {expired.status_code}")
+
+
+@dataclass(frozen=True)
+class CompletedCardPage:
+    customer_id: str
+    tenant_id: str | None
+    payment_method_id: str
+    kind: str  # "card" | "setup_fee"
+    # Only for "setup_fee": what Stripe actually collected, in cents.
+    amount_paid_cents: int | None
+
+
+def complete_card_page(session_id: str) -> CompletedCardPage | None:
+    """
+    After `checkout.session.completed`: which card was saved, and -- for a
+    setup-fee page -- what was collected. Makes that card the customer's
+    default for invoices, which is the card a `charge_automatically`
+    subscription and every retry charges (Stripe uses the customer's default
+    when the subscription has none of its own; DocFlow never sets one on the
+    subscription, so a card update lands where the retries look).
+
+    Reads the session back from Stripe rather than trusting the event body.
+    None for a session that isn't a completed DocFlow card page. Safe to call
+    again: setting the same default twice changes nothing.
+    """
+    response = _stripe(
+        "GET",
+        f"checkout/sessions/{session_id}",
+        params={"expand[0]": "setup_intent", "expand[1]": "payment_intent"},
+    )
+    if response.status_code >= 300:
+        raise ExternalServiceError("stripe", f"checkout session retrieve returned {response.status_code}")
+    page = response.json()
+    kind = page.get("metadata", {}).get("docflow_card_page")
+    if kind not in ("card", "setup_fee") or page.get("status") != "complete":
+        return None
+    intent = page.get("setup_intent") if page.get("mode") == "setup" else page.get("payment_intent")
+    payment_method = (intent or {}).get("payment_method")
+    if isinstance(payment_method, dict):
+        payment_method = payment_method.get("id")
+    customer_id = page.get("customer")
+    if not payment_method or not customer_id:
+        return None
+    amount = None
+    if kind == "setup_fee":
+        if page.get("payment_status") != "paid":
+            return None
+        amount = int(page.get("amount_total") or 0)
+    set_default = _stripe(
+        "POST",
+        f"customers/{customer_id}",
+        data={"invoice_settings[default_payment_method]": payment_method},
+    )
+    if set_default.status_code >= 300:
+        raise ExternalServiceError("stripe", f"customer update returned {set_default.status_code}")
+    return CompletedCardPage(
+        customer_id=str(customer_id),
+        tenant_id=page.get("metadata", {}).get("docflow_tenant_id"),
+        payment_method_id=str(payment_method),
+        kind=str(kind),
+        amount_paid_cents=amount,
+    )
+
+
+def create_card_update_page(*, customer_id: str, return_url: str) -> str:
+    """Stripe's customer portal, opened straight on its "update payment
+    method" page, for an owner or admin changing the card on file. The portal
+    sets the new card as the customer's default. Accepted by Stripe in test
+    mode, 2026-09-29, with the sandbox's default portal configuration."""
+    response = _stripe(
+        "POST",
+        "billing_portal/sessions",
+        data={
+            "customer": customer_id,
+            "return_url": return_url,
+            "flow_data[type]": "payment_method_update",
+        },
+    )
+    if response.status_code >= 300:
+        raise ExternalServiceError(
+            "stripe", f"portal session create returned {response.status_code}: {_stripe_error(response)}"
+        )
+    return str(response.json()["url"])
 
 
 def verify_webhook_signature(
