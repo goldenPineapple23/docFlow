@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 
+from docflow_core.constants import ROLLUP_TASK_TIME_LIMIT_SECONDS
 from docflow_core.metrics import run_rollup
 
 from app.celery_app import celery_app
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 NIGHTLY_DAYS = 2
 
 
-@celery_app.task(name="docflow.run_daily_rollup")
+@celery_app.task(name="docflow.run_daily_rollup", time_limit=ROLLUP_TASK_TIME_LIMIT_SECONDS)
 def run_daily_rollup(days: int = NIGHTLY_DAYS, trigger: str = "nightly") -> int:
     result = run_rollup(days=days, trigger=trigger)
     # Counts only -- never a tenant's numbers (Section 7.10).

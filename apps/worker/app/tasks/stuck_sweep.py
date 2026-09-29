@@ -10,6 +10,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from docflow_core import stuck_documents
+from docflow_core.constants import STUCK_SWEEP_TASK_TIME_LIMIT_SECONDS
 
 from app.celery_app import celery_app
 
@@ -20,6 +21,6 @@ def _enqueue(tenant_id: UUID, document_id: UUID) -> None:
     )
 
 
-@celery_app.task(name="docflow.sweep_stuck_documents")
+@celery_app.task(name="docflow.sweep_stuck_documents", time_limit=STUCK_SWEEP_TASK_TIME_LIMIT_SECONDS)
 def sweep_stuck_documents() -> None:
     stuck_documents.sweep_all(_enqueue)

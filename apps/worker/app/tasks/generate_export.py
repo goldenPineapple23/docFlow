@@ -16,11 +16,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from docflow_core.constants import EXPORT_TASK_TIME_LIMIT_SECONDS
 from docflow_core.export_jobs import run_export
 
 from app.celery_app import celery_app
 
 
-@celery_app.task(name="docflow.generate_export")
+@celery_app.task(name="docflow.generate_export", time_limit=EXPORT_TASK_TIME_LIMIT_SECONDS)
 def generate_export(tenant_id: str, export_id: str) -> str:
     return run_export(UUID(tenant_id), UUID(export_id)).status

@@ -119,6 +119,16 @@ def get_engine() -> Engine:
     return _engine
 
 
+def forget_inherited_connections() -> None:
+    """For a process forked from one that has already used the database
+    (Celery's prefork children, Stage 3a): drop the pooled connections it
+    inherited without closing them, since they belong to the parent. Two
+    processes sharing one Postgres connection corrupt each other's traffic.
+    The next query opens a fresh connection of this process's own."""
+    if _engine is not None:
+        _engine.dispose(close=False)
+
+
 def get_session_factory() -> sessionmaker[Session]:
     global _SessionLocal
     if _SessionLocal is None:

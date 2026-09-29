@@ -8,11 +8,12 @@ restart loses nothing.
 
 from __future__ import annotations
 
+from docflow_core.constants import SCHEDULED_JOBS_TASK_TIME_LIMIT_SECONDS
 from docflow_core.scheduled_jobs import run_due_jobs
 
 from app.celery_app import celery_app
 
 
-@celery_app.task(name="docflow.run_scheduled_jobs")
+@celery_app.task(name="docflow.run_scheduled_jobs", time_limit=SCHEDULED_JOBS_TASK_TIME_LIMIT_SECONDS)
 def run_scheduled_jobs() -> int:
     return run_due_jobs()

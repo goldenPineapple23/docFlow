@@ -25,6 +25,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from docflow_core.constants import STUCK_PROCESSING_TIMEOUT_MIN
+from docflow_core.db import rowcount
 
 STATUSES = (
     "pending",
@@ -183,6 +184,35 @@ def transition_many(
         },
     ).all()
     return [UUID(str(row[0])) for row in rows]
+
+
+def record_timeout(session: Session, document_id: UUID) -> bool:
+    """
+    Record that the document's current attempt ended at the document task's
+    hard time limit (Stage 3a). Called from the Celery worker's MAIN process
+    (app.timeouts), which is told about every timeout even when the task's
+    own process was killed in C code and could write nothing. The stuck sweep
+    reads it (its `decide`: a timeout gets one retry).
+
+    Idempotent per attempt -- the attempt number (`processing_attempts`, set
+    by `claim_for_processing`) is appended only if it isn't there yet, since
+    Celery can report a soft and a hard timeout for one attempt -- and only
+    while the document is still `processing`. Returns whether it wrote.
+    `session` must be the document's tenant session.
+    """
+    result = session.execute(
+        text(
+            """
+            UPDATE documents
+               SET timeout_attempts = array_append(timeout_attempts, processing_attempts)
+             WHERE id = :id
+               AND status = 'processing'
+               AND NOT (processing_attempts = ANY(timeout_attempts))
+            """
+        ),
+        {"id": str(document_id)},
+    )
+    return bool(rowcount(result))
 
 
 def claim_for_processing(

@@ -46,6 +46,38 @@ ABANDONED_REVIEW_CEILING_MIN = 30
 STUCK_PROCESSING_TIMEOUT_MIN = 30
 # Tries before a document stuck in processing is failed with DOC-022 (D-158).
 MAX_PROCESSING_ATTEMPTS = 3
+
+# ── Worker time limits (Phase 5.5 Stage 3a, review H5) ──────────────────────
+# Hard limits only: Celery kills the task's process. A soft limit is raised
+# inside the task as an ordinary exception, and the broad `except` blocks on
+# the document path and in the sweeps would catch it and relabel it (a
+# damaged file, a failed step), so none is set anywhere. Sized from the
+# worst cases measured on 2026-09-29 (docs/BUILD-STATUS.md, Stage 3a).
+#
+# The document task: above the 20-minute read budget (EXTRACTION_DEADLINE_
+# SECONDS) and below STUCK_PROCESSING_TIMEOUT_MIN, so a task never outlives
+# its claim and the sweep never hands a document to a second worker while
+# the first is still on it. A test holds that order.
+DOCUMENT_TASK_TIME_LIMIT_SECONDS = 27 * 60
+EXPORT_TASK_TIME_LIMIT_SECONDS = 5 * 60
+IMPORT_TASK_TIME_LIMIT_SECONDS = 5 * 60
+ROLLUP_TASK_TIME_LIMIT_SECONDS = 15 * 60
+# Below scheduled_jobs.RUNNING_TIMEOUT_MINUTES (30), for the same reason as
+# the document task: a live sweep's jobs are never released to another.
+SCHEDULED_JOBS_TASK_TIME_LIMIT_SECONDS = 10 * 60
+LIFECYCLE_SWEEP_TASK_TIME_LIMIT_SECONDS = 10 * 60
+STUCK_SWEEP_TASK_TIME_LIMIT_SECONDS = 4 * 60
+# The lifecycle sweep takes no new tenant after this long and leaves the rest
+# to the next tick, so its hard limit can't land in the middle of a tenant's
+# suspension in normal running: after the box closes, the most still in
+# flight is one tenant's Stripe calls (3 x the 15-second timeout).
+LIFECYCLE_SWEEP_TIME_BOX_SECONDS = 4 * 60
+# A worker process is replaced after the task that took it past this much
+# memory (Celery's worker_max_memory_per_child, in KiB). Not a cap during a
+# task: the machine's memory is the ceiling until the parse service's
+# per-file limits (Stage 3c). About 70% of the 1 GB worker machine priced
+# for staging.
+WORKER_MAX_MEMORY_PER_CHILD_KIB = 700 * 1024
 STAGING_TTL_DAYS = 90
 FIRST_WEEK_CHECKIN_DAYS = 7
 ROLLUP_STALE_HOURS = 36

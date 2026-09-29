@@ -21,7 +21,9 @@ from __future__ import annotations
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_process_init
 from docflow_core.config import get_settings
+from docflow_core.constants import WORKER_MAX_MEMORY_PER_CHILD_KIB
 
 settings = get_settings()
 
@@ -73,6 +75,12 @@ celery_app.conf.update(
     },
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    # Stage 3a (review H5): a worker process is replaced after the task that
+    # took it past this much memory. Time limits are per task, on each task's
+    # decorator (hard only; see docflow_core.constants), and both need
+    # Celery's prefork pool, which production runs: the `solo` pool used on
+    # Windows ignores them.
+    worker_max_memory_per_child=WORKER_MAX_MEMORY_PER_CHILD_KIB,
     broker_transport_options={"visibility_timeout": BROKER_VISIBILITY_TIMEOUT_SECONDS},
     beat_schedule={
         "run-scheduled-jobs": {
@@ -97,3 +105,14 @@ celery_app.conf.update(
         },
     },
 )
+
+
+@worker_process_init.connect
+def _forget_inherited_db_connections(**_kwargs: object) -> None:
+    """Stage 3a: the main process now writes to the database (it records the
+    document task's timeouts, app.timeouts), and prefork forks each
+    replacement child from it after a kill. A child must never reuse the
+    parent's pooled connections."""
+    from docflow_core.db import forget_inherited_connections
+
+    forget_inherited_connections()
