@@ -130,6 +130,8 @@ def get_tenant_overview(*, platform_admin_user_id: UUID, tenant_id: UUID) -> dic
                        t.founding_price_ends_at,
                        t.onboarding_intake_id, t.test_batch_completed_at,
                        t.setup_fee_amount, t.setup_fee_billing, t.setup_fee_note, t.founding_price,
+                       -- Card billing (0031, D-181)
+                       t.billing_method, t.card_on_file_at, t.setup_fee_paid_at,
                        tr.code AS tier_code, tr.name AS tier_name, tr.version AS tier_version,
                        tr.monthly_price AS tier_monthly_price,
                        tr.promo_monthly_price AS tier_promo_monthly_price,
