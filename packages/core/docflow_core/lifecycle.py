@@ -28,6 +28,7 @@ inside a session this module is handed.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -55,6 +56,8 @@ REASONS = ("customer_requested", "non_payment", "for_cause")
 # today and are free to diverge. Neither is defined in terms of the other, so a
 # change to one cannot silently change the other.
 REACTIVATABLE = ("suspended", "pending_deletion")
+
+logger = logging.getLogger(__name__)
 
 
 class LifecycleError(Exception):
@@ -325,6 +328,13 @@ def claim_for_suspend(session: Session, tenant_id: UUID) -> SuspendClaim | None:
                 status_changed_at = now(),
                 intake_address_active = false,
                 deletion_scheduled_at = now() + make_interval(days => :window),
+                -- Stage 3a: Stripe is called after this commits, so the
+                -- cancel is marked as owed in the same transaction. A worker
+                -- killed before Stripe confirms leaves the mark, and the next
+                -- sweep retries (`process_pending_cancel`).
+                stripe_cancel_pending_at = CASE
+                    WHEN stripe_subscription_id IS NOT NULL OR stripe_customer_id IS NOT NULL
+                    THEN now() END,
                 updated_at = now()
             WHERE id = :id
             RETURNING now() AS suspended_at, deletion_scheduled_at
@@ -398,6 +408,92 @@ def _schedule_reminder(session: Session, tenant_id: UUID, *, day: int) -> None:
             """
         ),
         {"id": str(uuid4()), "tenant_id": str(tenant_id), "day": day},
+    )
+
+
+def pending_cancels(session: Session, *, limit: int = 100) -> list[UUID]:
+    """Tenants whose Stripe cancel is still owed (`lifecycle_session()` only
+    -- read-only, cross-tenant), oldest first. Each is then handled in its own
+    tenant_session by `process_pending_cancel`."""
+    rows = session.execute(
+        text(
+            """
+            SELECT id FROM tenants
+            WHERE stripe_cancel_pending_at IS NOT NULL
+            ORDER BY stripe_cancel_pending_at
+            LIMIT :limit
+            """
+        ),
+        {"limit": limit},
+    ).all()
+    return [UUID(str(r[0])) for r in rows]
+
+
+def process_pending_cancel(tenant_id: UUID) -> str:
+    """
+    Cancel a suspended tenant's Stripe billing, if it is still owed. One of:
+    "none" (nothing owed), "skipped" (the tenant is no longer suspended --
+    reactivated, say -- so the mark is cleared and Stripe is not called),
+    "cancelled", or "failed" (the mark stays, the founder is alerted, and
+    the next sweep tries again).
+
+    The tenant row is locked and its state re-checked immediately before the
+    Stripe calls, and the lock is HELD across them (founder, Stage 3a). That
+    is deliberate, and the opposite of the webhook's fetch-outside-a-
+    transaction rule (D-173): releasing it would let a reactivation commit
+    between the check and the call, and the cancel would then hit the
+    tenant's live subscription. A reactivation that arrives meanwhile waits
+    for the lock. The wait is bounded by the Stripe timeouts (at most three
+    calls of TIMEOUT_SECONDS each), well inside the 5-minute idle-transaction
+    cap on docflow_app (0028).
+    """
+    from docflow_core.db import tenant_session
+    from docflow_core.external_services import (
+        ExternalServiceError,
+        cancel_subscription,
+        void_pending_setup_fee,
+    )
+
+    with tenant_session(tenant_id) as session:
+        row = session.execute(
+            text(
+                "SELECT status, stripe_subscription_id, stripe_customer_id, stripe_cancel_pending_at "
+                "FROM tenants WHERE id = :id FOR UPDATE"
+            ),
+            {"id": str(tenant_id)},
+        ).mappings().first()
+        if row is None or row["stripe_cancel_pending_at"] is None:
+            return "none"
+        if row["status"] not in REACTIVATABLE:
+            _clear_pending_cancel(session, tenant_id)
+            return "skipped"
+        try:
+            if row["stripe_subscription_id"]:
+                cancel_subscription(row["stripe_subscription_id"])
+            if row["stripe_customer_id"]:
+                # A tenant cancelled mid-trial (D-125) may still have a
+                # pending, never-invoiced setup-fee item -- clear it so it
+                # can't land on some unrelated future invoice.
+                void_pending_setup_fee(customer_id=row["stripe_customer_id"], tenant_id=tenant_id)
+        except ExternalServiceError as exc:
+            logger.error("stripe_cancel_failed tenant_id=%s error=%s", tenant_id, type(exc).__name__)
+            founder_alerts.raise_alert(
+                session,
+                alert_type="stripe_cancel_failed",
+                severity="high",
+                tenant_id=tenant_id,
+                payload={"subscription_id": row["stripe_subscription_id"]},
+                dedupe_key=f"stripe_cancel_failed:{tenant_id}",
+            )
+            return "failed"
+        _clear_pending_cancel(session, tenant_id)
+        return "cancelled"
+
+
+def _clear_pending_cancel(session: Session, tenant_id: UUID) -> None:
+    session.execute(
+        text("UPDATE tenants SET stripe_cancel_pending_at = NULL, updated_at = now() WHERE id = :id"),
+        {"id": str(tenant_id)},
     )
 
 
@@ -550,6 +646,10 @@ def complete_reactivate(
                 -- D-139: the founding price is a go-live perk; a reactivated
                 -- subscription is at list price.
                 founding_price_ends_at = NULL,
+                -- Stage 3a: in the same transaction as the status change, so
+                -- a sweep retrying an owed cancel can never cancel the
+                -- reactivated tenant's billing.
+                stripe_cancel_pending_at = NULL,
                 updated_at = now()
             WHERE id = :id
             """
