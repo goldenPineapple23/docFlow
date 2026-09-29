@@ -486,3 +486,150 @@ def test_an_owed_cancel_that_goes_through_clears_the_mark(monkeypatch):
         assert _cancel_state(tenant)["stripe_cancel_pending_at"] is None
         assert lifecycle.process_pending_cancel(tenant.tenant_id) == "none"
         assert cancelled == [subscription]
+
+
+# ── Database: exports and imports that never finish (EXP-009 / IMP-009) ─────
+
+
+def _approved_document(monkeypatch, tenant: WorkerTestTenant) -> UUID:
+    from docflow_core.review import Acknowledgement, approve_document
+    from docflow_core.validation import open_warnings, validate_document
+
+    document_id = tenant.create_pending_document()
+    run_extraction(
+        monkeypatch,
+        tenant,
+        document_id,
+        model_payload(
+            header={"order_total": "570.00"},
+            lines=[{"quantity": "12", "unit_price": "47.50", "line_total": "570.00"}],
+        ),
+    )
+    with tenant_session(tenant.tenant_id) as session:
+        validate_document(session, tenant.tenant_id, document_id)
+        approve_document(
+            session,
+            tenant.tenant_id,
+            document_id,
+            user_id=tenant.user_id,
+            acknowledgements=[
+                Acknowledgement(warning_id=w["id"])
+                for w in open_warnings(session, document_id)
+                if w["status"] == "open"
+            ],
+        )
+    return document_id
+
+
+def _export(tenant: WorkerTestTenant, document_id: UUID, *, minutes_ago: int) -> UUID:
+    from docflow_core.export_jobs import request_export
+
+    with tenant_session(tenant.tenant_id) as session:
+        export_id = request_export(session, tenant.tenant_id, document_id, "csv", user_id=tenant.user_id)
+    with platform_session() as session:
+        session.execute(
+            text("UPDATE exports SET requested_at = now() - make_interval(mins => :m) WHERE id = :id"),
+            {"id": str(export_id), "m": minutes_ago},
+        )
+    return export_id
+
+
+def _import(tenant: WorkerTestTenant, *, minutes_ago: int) -> UUID:
+    from docflow_core.catalog_import import create_import
+
+    with tenant_session(tenant.tenant_id) as session:
+        import_id = create_import(
+            session,
+            tenant.tenant_id,
+            kind="catalog",
+            source="upload",
+            original_filename="acme-test-catalog.csv",
+            storage_path=f"tenants/{tenant.tenant_id}/onboarding/acme-test-catalog.csv",
+            file_sha256=uuid4().hex,
+            file_type="csv",
+            created_by=tenant.user_id,
+        )
+    with platform_session() as session:
+        session.execute(
+            text("UPDATE catalog_imports SET created_at = now() - make_interval(mins => :m) WHERE id = :id"),
+            {"id": str(import_id), "m": minutes_ago},
+        )
+    return import_id
+
+
+def _row(table: str, row_id: UUID) -> dict:
+    with platform_session() as session:
+        return dict(
+            session.execute(
+                text(f"SELECT status, error_code FROM {table} WHERE id = :id"),  # noqa: S608 -- fixed names
+                {"id": str(row_id)},
+            )
+            .mappings()
+            .one()
+        )
+
+
+def _alert_rows(tenant: WorkerTestTenant, alert_type: str) -> list[dict]:
+    with platform_session() as session:
+        return [
+            dict(r)
+            for r in session.execute(
+                text("SELECT payload FROM founder_alerts WHERE tenant_id = :t AND type = :k"),
+                {"t": str(tenant.tenant_id), "k": alert_type},
+            ).mappings()
+        ]
+
+
+@requires_timeout_schema
+def test_an_export_and_an_import_left_unfinished_are_failed_and_a_late_finish_changes_nothing(monkeypatch):
+    from docflow_core.export_jobs import run_export
+
+    with WorkerTestTenant("Acme Test Stuck Export") as tenant:
+        document_id = _approved_document(monkeypatch, tenant)
+        timeout = constants.STUCK_PROCESSING_TIMEOUT_MIN
+        stuck_export = _export(tenant, document_id, minutes_ago=timeout + 1)
+        # Still inside the window, e.g. waiting behind a busy queue: left alone.
+        waiting_export = _export(tenant, document_id, minutes_ago=timeout - 5)
+        stuck_import = _import(tenant, minutes_ago=timeout + 1)
+        fresh_import = _import(tenant, minutes_ago=1)
+
+        result = stuck_documents.sweep_tenant(tenant.tenant_id, lambda _t, _d: None)
+
+        assert result.exports_failed == [stuck_export]
+        assert result.imports_failed == [stuck_import]
+        assert _row("exports", stuck_export) == {"status": "failed", "error_code": "EXP-009"}
+        assert _row("exports", waiting_export) == {"status": "pending", "error_code": None}
+        assert _row("catalog_imports", stuck_import) == {"status": "failed", "error_code": "IMP-009"}
+        assert _row("catalog_imports", fresh_import) == {"status": "parsing", "error_code": None}
+        # One EXP-009 is below the daily threshold: no alert (EXP-009 promises none).
+        assert _alert_rows(tenant, "exports_not_finishing") == []
+
+        # The lost job turns up after all: the sweep's record stands, and the
+        # document is not marked exported on the strength of a failed export.
+        assert run_export(tenant.tenant_id, stuck_export).status == "skipped"
+        assert _row("exports", stuck_export) == {"status": "failed", "error_code": "EXP-009"}
+        assert _document(document_id)["status"] == "approved"
+
+
+@requires_timeout_schema
+def test_more_than_the_daily_threshold_of_unfinished_exports_raises_one_alert_that_day(monkeypatch):
+    threshold = constants.EXPORTS_NOT_FINISHED_ALERT_PER_DAY
+    old = constants.STUCK_PROCESSING_TIMEOUT_MIN + 1
+    with WorkerTestTenant("Acme Test Stuck Export Alert") as tenant:
+        document_id = _approved_document(monkeypatch, tenant)
+        for _ in range(threshold):
+            _export(tenant, document_id, minutes_ago=old)
+        stuck_documents.sweep_tenant(tenant.tenant_id, lambda _t, _d: None)
+        assert _alert_rows(tenant, "exports_not_finishing") == [], f"{threshold} is not more than {threshold}"
+
+        _export(tenant, document_id, minutes_ago=old)
+        stuck_documents.sweep_tenant(tenant.tenant_id, lambda _t, _d: None)
+        alerts = _alert_rows(tenant, "exports_not_finishing")
+        assert len(alerts) == 1
+        assert alerts[0]["payload"]["exports_not_finished_today"] == threshold + 1
+        assert alerts[0]["payload"]["error_code"] == "EXP-009"
+
+        # Another one the same day: still one alert.
+        _export(tenant, document_id, minutes_ago=old)
+        stuck_documents.sweep_tenant(tenant.tenant_id, lambda _t, _d: None)
+        assert len(_alert_rows(tenant, "exports_not_finishing")) == 1

@@ -342,6 +342,11 @@ def dashboard(*, platform_admin_user_id: UUID, days: int = 30) -> dict[str, Any]
                         (SELECT count(*) FROM extraction_runs
                           WHERE created_at >= now() - interval '1 hour'
                             AND NOT succeeded) AS model_failures_hour,
+                        -- Exports the stuck sweep gave up on today (EXP-009,
+                        -- Stage 3a): they carry no alert of their own.
+                        (SELECT count(*) FROM exports
+                          WHERE error_code = 'EXP-009'
+                            AND generated_at >= date_trunc('day', now())) AS exports_not_finished_today,
                         (SELECT coalesce(sum(est_cost_usd), 0) FROM documents
                           WHERE created_at >= date_trunc('day', now())
                             AND NOT is_test_batch) AS spend_today,

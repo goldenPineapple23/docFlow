@@ -46,6 +46,12 @@ ABANDONED_REVIEW_CEILING_MIN = 30
 STUCK_PROCESSING_TIMEOUT_MIN = 30
 # Tries before a document stuck in processing is failed with DOC-022 (D-158).
 MAX_PROCESSING_ATTEMPTS = 3
+# Exports and imports still unfinished STUCK_PROCESSING_TIMEOUT_MIN after they
+# were started are failed by the stuck sweep (EXP-009 / IMP-009, Stage 3a).
+# Counted from creation, not from the job's start: `pending` includes time
+# waiting in the queue. The founder hears once a day about a tenant with more
+# than this many EXP-009s that day (UTC).
+EXPORTS_NOT_FINISHED_ALERT_PER_DAY = 3
 
 # ── Worker time limits (Phase 5.5 Stage 3a, review H5) ──────────────────────
 # Hard limits only: Celery kills the task's process. A soft limit is raised

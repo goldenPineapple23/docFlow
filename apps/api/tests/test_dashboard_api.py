@@ -396,6 +396,8 @@ def test_the_dashboard_reads_the_rollup_and_reports_its_freshness(client, queue)
             body = client.get("/admin/dashboard", headers=console.headers()).json()
             assert body["kpis"]["documents_received"] >= 1
             assert body["health"]["needs_review"] >= 0
+            # EXP-009s today (Stage 3a); the sweep's own tests prove the count.
+            assert body["health"]["exports_not_finished_today"] >= 0
             assert body["rollup_stale_hours"] == 36
             # `rollup_runs` is global and other tests/manual runs may have
             # left a real row in it, so this checks the wiring -- the

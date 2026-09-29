@@ -428,3 +428,68 @@ verified authenticator; the founder used **Remove MFA factors** in the
 dashboard exactly as written above; the account then had no authenticator,
 signed in with its password alone, enrolled a replacement and passed a real
 challenge with it. The account was then revoked and deleted.
+
+---
+
+## 5. The worker: time limits, the prefork pool, and jobs that never finish (Stage 3a, D-179)
+
+### 5.1 Production runs Celery's prefork pool
+
+Every task has a **hard** time limit, and nothing else stops a parser hung
+inside C code. Those limits only work under Celery's **prefork** pool on
+Linux. The `solo` pool used on Windows for development **ignores them**.
+Start production and staging workers with `--pool=prefork`. Never deploy one
+with `--pool=solo` or `--pool=threads`.
+
+The evidence that the limits work is `apps/worker/tests/test_time_limits_prefork.py`,
+which starts a real prefork worker in CI (Linux). On Windows it skips.
+
+### 5.2 The limits and related constants (`packages/core/docflow_core/constants.py`)
+
+| Constant | Value | What it does |
+|---|---|---|
+| `DOCUMENT_TASK_TIME_LIMIT_SECONDS` | 27 min | Hard limit on reading one document. Under `STUCK_PROCESSING_TIMEOUT_MIN`, so a killed attempt is retried by the sweep, never raced by it. |
+| `EXPORT_TASK_TIME_LIMIT_SECONDS` / `IMPORT_TASK_TIME_LIMIT_SECONDS` | 5 min each | Hard limits on building an export / reading a catalog or customer list. |
+| `ROLLUP_TASK_TIME_LIMIT_SECONDS` | 15 min | Nightly KPI rollup. |
+| `SCHEDULED_JOBS_TASK_TIME_LIMIT_SECONDS` | 10 min | Check-ins, reminders, digests. |
+| `LIFECYCLE_SWEEP_TASK_TIME_LIMIT_SECONDS` / `LIFECYCLE_SWEEP_TIME_BOX_SECONDS` | 10 min / 4 min | Past the time box the sweep takes no new tenant; the next tick takes the rest. |
+| `STUCK_SWEEP_TASK_TIME_LIMIT_SECONDS` | 4 min | The stuck sweep. |
+| `WORKER_MAX_MEMORY_PER_CHILD_KIB` | 700 MiB | A worker process is replaced after a task that took it past this. It isn't a cap during a task (the parse service's limits are, from 3c). |
+| `STUCK_PROCESSING_TIMEOUT_MIN` | 30 | A document in `processing` this long is retried or failed (DOC-022). An export still `pending`, or an import still `parsing`, this long after it was created is failed (EXP-009 / IMP-009). |
+| `MAX_PROCESSING_ATTEMPTS` | 3 | Tries before a document whose worker stopped is failed (DOC-022, cause `worker_stopped`). A timeout gets one retry only (cause `timeout`). |
+| `EXPORTS_NOT_FINISHED_ALERT_PER_DAY` | 3 | A tenant with more EXP-009s than this in one UTC day raises one `exports_not_finishing` alert. |
+
+A test reads the finalized Celery app and fails if any task gains a soft
+limit, or if the document task's hard limit is no longer 27 minutes. So a
+global `task_soft_time_limit` added later is caught (Celery would apply it to
+every task that doesn't set its own, which is all of them).
+
+### 5.3 When the founder gets one of these alerts
+
+- **`document_stuck`, cause `timeout`:** the document hit its hard limit
+  twice. It is the file, not the worker. Look for `document_timeout
+  document_id=...` in the worker log. The customer sees DOC-022.
+- **`document_stuck`, cause `worker_stopped`:** the worker died or was
+  restarted under the document three times. Check the worker's restarts and
+  memory.
+- **`exports_not_finishing`:** a tenant's exports keep being lost or killed.
+  Check the worker is running and consuming the `interactive` queue, and look
+  for `export_` lines in the log. The tenant was told to start the export
+  again (EXP-009); the health strip shows the day's total.
+- **IMP-009 on an import in the Console:** start the import again from the
+  same file. If it stops again, find the import's ID in the worker log.
+
+### 5.4 A Stripe cancel still owed after a suspension
+
+`tenants.stripe_cancel_pending_at` is set when a suspension claims a tenant
+with Stripe billing, and cleared when the cancel goes through. Every
+lifecycle sweep retries owed cancels first; a failure raises
+`stripe_cancel_failed`. To see what is owed:
+
+```sql
+select id, name, status, stripe_subscription_id, stripe_cancel_pending_at
+from tenants where stripe_cancel_pending_at is not null;
+```
+
+Reactivating the tenant clears the mark. Don't clear it by hand while the
+tenant is still suspended: the subscription would keep billing.

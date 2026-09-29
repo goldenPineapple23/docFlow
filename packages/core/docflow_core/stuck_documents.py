@@ -20,6 +20,14 @@ sure there IS a later job, and that trying stops somewhere:
   claim makes it a no-op -- and the founder gets one `document_stuck` alert
   per tenant per day saying how many are waiting. A pending document is not
   failed for waiting: a 500-document backfill legitimately waits.
+* Exports still `pending`, and imports still `parsing`, STUCK_PROCESSING_
+  TIMEOUT_MIN after they were created are failed: EXP-009 / IMP-009 (Stage
+  3a). Their jobs are short (5-minute hard limits), so by then the job was
+  lost or killed; the reader starts it again. The export and import jobs only
+  ever finish a row still in that state, so one arriving late changes nothing.
+  No alert per export (EXP-009 promises none): the health strip shows the
+  day's count, and a tenant with more than EXPORTS_NOT_FINISHED_ALERT_PER_DAY
+  in a UTC day raises one `exports_not_finishing` alert that day.
 
 Read and changed in each tenant's own tenant_session(); tenants are listed
 through `pipeline_sweep_session` (migration 0027), which can read nothing else.
@@ -33,14 +41,21 @@ from dataclasses import dataclass, field
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from docflow_core import document_status, founder_alerts
-from docflow_core.constants import MAX_PROCESSING_ATTEMPTS, STUCK_PROCESSING_TIMEOUT_MIN
+from docflow_core.constants import (
+    EXPORTS_NOT_FINISHED_ALERT_PER_DAY,
+    MAX_PROCESSING_ATTEMPTS,
+    STUCK_PROCESSING_TIMEOUT_MIN,
+)
 from docflow_core.db import pipeline_sweep_session, tenant_session
 
 logger = logging.getLogger(__name__)
 
 STUCK_CODE = "DOC-022"
+EXPORT_NOT_FINISHED_CODE = "EXP-009"
+IMPORT_NOT_FINISHED_CODE = "IMP-009"
 CAUSE_TIMEOUT = "timeout"
 CAUSE_WORKER_STOPPED = "worker_stopped"
 
@@ -77,6 +92,8 @@ class SweepResult:
     requeued: list[UUID] = field(default_factory=list)
     failed: list[UUID] = field(default_factory=list)
     waiting: list[UUID] = field(default_factory=list)
+    exports_failed: list[UUID] = field(default_factory=list)
+    imports_failed: list[UUID] = field(default_factory=list)
 
 
 def sweep_tenant(
@@ -147,19 +164,84 @@ def sweep_tenant(
                 dedupe_per_utc_day=True,
             )
 
+        _fail_unfinished_exports_and_imports(session, tenant_id, result, timeout_min)
+
     # After the commit: a job must never run against a state it can't see.
     for document_id in [*result.requeued, *result.waiting]:
         enqueue(tenant_id, document_id)
     # Ids and counts only (Section 7.10).
-    if result.requeued or result.failed or result.waiting:
+    if result.requeued or result.failed or result.waiting or result.exports_failed or result.imports_failed:
         logger.info(
-            "stuck_sweep tenant_id=%s requeued=%d failed=%d waiting=%d",
+            "stuck_sweep tenant_id=%s requeued=%d failed=%d waiting=%d exports_failed=%d imports_failed=%d",
             tenant_id,
             len(result.requeued),
             len(result.failed),
             len(result.waiting),
+            len(result.exports_failed),
+            len(result.imports_failed),
         )
     return result
+
+
+def _fail_unfinished_exports_and_imports(
+    session: Session, tenant_id: UUID, result: SweepResult, timeout_min: int
+) -> None:
+    """EXP-009 / IMP-009 for jobs that never finished (the module docstring)."""
+    result.exports_failed = [
+        UUID(str(row[0]))
+        for row in session.execute(
+            text(
+                """
+                UPDATE exports SET status = 'failed', error_code = :code, generated_at = now()
+                WHERE tenant_id = :tid AND status = 'pending' AND deleted_at IS NULL
+                  AND requested_at < now() - make_interval(mins => :t)
+                RETURNING id
+                """
+            ),
+            {"tid": str(tenant_id), "code": EXPORT_NOT_FINISHED_CODE, "t": timeout_min},
+        )
+    ]
+    result.imports_failed = [
+        UUID(str(row[0]))
+        for row in session.execute(
+            text(
+                """
+                UPDATE catalog_imports SET status = 'failed', error_code = :code
+                WHERE tenant_id = :tid AND status = 'parsing' AND deleted_at IS NULL
+                  AND created_at < now() - make_interval(mins => :t)
+                RETURNING id
+                """
+            ),
+            {"tid": str(tenant_id), "code": IMPORT_NOT_FINISHED_CODE, "t": timeout_min},
+        )
+    ]
+    if not result.exports_failed:
+        return
+    today = session.execute(
+        text(
+            """
+            SELECT count(*) FROM exports
+            WHERE tenant_id = :tid AND error_code = :code
+              AND generated_at >= (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+            """
+        ),
+        {"tid": str(tenant_id), "code": EXPORT_NOT_FINISHED_CODE},
+    ).scalar_one()
+    if today > EXPORTS_NOT_FINISHED_ALERT_PER_DAY:
+        founder_alerts.raise_alert(
+            session,
+            alert_type="exports_not_finishing",
+            severity="warning",
+            tenant_id=tenant_id,
+            # Counts only (Section 7.10: the payload is emailed).
+            payload={
+                "error_code": EXPORT_NOT_FINISHED_CODE,
+                "exports_not_finished_today": int(today),
+                "alert_above": EXPORTS_NOT_FINISHED_ALERT_PER_DAY,
+            },
+            dedupe_key=f"exports_not_finishing:{tenant_id}",
+            dedupe_per_utc_day=True,
+        )
 
 
 def sweep_all(enqueue: Callable[[UUID, UUID], None]) -> dict[UUID, SweepResult]:

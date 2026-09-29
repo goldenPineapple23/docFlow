@@ -34,7 +34,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from docflow_core import document_status
-from docflow_core.db import tenant_session
+from docflow_core.db import rowcount, tenant_session
 from docflow_core.founder_alerts import raise_alert
 from docflow_core.review import snapshot_sha256
 
@@ -263,7 +263,7 @@ def run_export(tenant_id: UUID, export_id: UUID) -> ExportOutcome:
         return _finish_failed(tenant_id, export_id, "EXP-007")
 
     with tenant_session(tenant_id) as session:
-        session.execute(
+        finished = session.execute(
             text(
                 """
                 UPDATE exports
@@ -280,6 +280,12 @@ def run_export(tenant_id: UUID, export_id: UUID) -> ExportOutcome:
                 "byte_size": len(built.content),
             },
         )
+        if not rowcount(finished):
+            # The stuck sweep failed this export (EXP-009) while it was still
+            # running: that record stands, and the reader was told to start
+            # again. The stored file is simply never referenced. Stage 3a.
+            logger.warning("export_finished_after_sweep export_id=%s", export_id)
+            return ExportOutcome(status="skipped")
         # `exported` means "a file of THIS approval has been produced". Only
         # when the document is still approved on the same snapshot: a
         # document reopened since the click stays in needs_review.
