@@ -940,6 +940,7 @@ Fixing the login bug in D-088 let the app be opened for the first time. Everythi
 - **Bounces and complaints.** Postmark's bounce and spam-complaint webhook (authenticated like the inbound one, D-171) marks the row and raises a founder alert naming the tenant and template: a bounced owner address means a trial-ending or past-due email never arrived, and the founder has to reach the customer another way. Postmark suppresses hard-bounced and complaining addresses itself.
 - **A stale-email alert either way.** An email `queued` longer than a set time (the sender is down), or `held` longer than a set time (no provider), raises a founder alert. This alert is also the whole of option (b).
 - **Schema.** A migration: `sending` in the status check, `attempts` and `next_attempt_at` for retries, the bounce fields. New constants for the retry delays and the stale thresholds.
+- **Decided (founder, 2026-09-30):** automatic sending, built as its own stage after Stage 3e and before the first pilot; at-least-once delivery (a rare duplicate over a rare loss).
 - **What stays manual.** Setting up the Postmark account and the DNS records; following up a bounce (the customer's right address, by phone if need be); re-sending a failed email once the cause is fixed; removing an address from Postmark's suppression list. Held mode stays as the fallback when no key is set, so development machines never send.
 
 ## D-104 — Founder alerts: one writer, one savepoint, deduplicated

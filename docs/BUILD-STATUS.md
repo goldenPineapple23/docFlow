@@ -1185,8 +1185,11 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
     - (b) **the founder sends from the Outbox every day**, and an alert
       fires when an email has waited too long, so a missed day is noticed
       rather than a customer's reminder silently going out late.
-    Neither is built or scheduled yet: no Stage 3 slice and no Phase 6 item
-    covers it.
+    **Decided (founder, 2026-09-30): (a), automatic sending, as its own
+    stage after 3e and before the first pilot; a duplicate email is
+    preferred over a lost one (at-least-once).** The founder is setting up
+    the Postmark sending domain now (steps given in chat, 2026-09-30), so
+    DNS verification isn't on the stage's critical path.
 - **CI names the step that failed when there is no test report**
   (founder-approved, 2026-09-29): a worker run whose local Supabase stack
   failed to start had read as a pytest failure. The skip check now reads the
