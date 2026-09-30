@@ -354,17 +354,54 @@ list is the checks that sit around them. Phase 6 completes it.
 
 - [ ] **Stripe must never cancel a subscription by itself.** Suspension is
   your decision (D-125), taken through DocFlow's lifecycle; a cancel on
-  Stripe's side skips it and leaves an active tenant with no billing. In the
-  Stripe dashboard: **Settings** (gear icon, top right) → **Billing** →
-  **Subscriptions and emails** (direct link:
-  `https://dashboard.stripe.com/settings/billing/automatic`; in test mode,
-  `https://dashboard.stripe.com/test/settings/billing/automatic`). Change the
-  subscription outcome to **leave the subscription past due** in both
-  sections:
-  - **invoices sent to customers** (DocFlow's invoice billing): today it
-    cancels 90 days after the due date;
-  - **failed payments** (card billing, after the last retry).
-  Do it in test mode and in live mode; they are separate settings.
+  Stripe's side skips it and leaves an active tenant with no billing. Two
+  settings, on two different pages, both set to **leave the subscription past
+  due**:
+  - **Failed card payments, after the last retry** (card billing): **Billing**
+    → **Revenue recovery** → **Retries**
+    (`https://dashboard.stripe.com/revenue_recovery/retries`), the outcome
+    "if all retries for a payment fail". This is the one found still on
+    "cancel" in the sandbox on 2026-09-29, after it had been changed on the
+    other page: a test subscription was cancelled after its last retry.
+  - **Invoices sent to customers** (invoice billing): **Settings** (gear
+    icon) → **Billing** → **Subscriptions and emails**
+    (`https://dashboard.stripe.com/settings/billing/automatic`). Today it
+    cancels 90 days after the due date.
+- [ ] **Retry schedule: Smart Retries, 8 tries within 1 week** (founder,
+  2026-09-29), on the same Retries page. The last retry then lands by day 7,
+  well before day 14, the earliest date a past-due tenant may be suspended
+  (`CURE_PERIOD_DAYS`); from then until the owner updates the card, DocFlow
+  charges the new card itself when it is added (D-181).
+- [ ] **Check the account before saving.** A sandbox is an account of its
+  own: the account switcher (top left) must show the account DocFlow's key
+  belongs to, and a link scoped to it carries its id
+  (`https://dashboard.stripe.com/<account id>/test/...`). Each setting exists
+  separately in test mode, in each sandbox, and in live mode; do live mode
+  before the first real customer. To confirm in test mode, ask for the
+  "retries exhausted" check (a Stripe test clock): the subscription must end
+  `past_due`, never `canceled`.
+- [ ] **The webhook endpoint sends card billing's events** (D-181), besides
+  the `customer.subscription.*` events it already sends:
+  `checkout.session.completed` (a card saved, a setup fee paid at signing)
+  and `customer.updated` (a card changed; DocFlow charges a past-due
+  account's open invoice to it). In Stripe: **Developers** → **Webhooks** →
+  the DocFlow endpoint → **Select events**.
+- [ ] **A support mailbox that someone reads**, and its address in
+  `SUPPORT_EMAIL` (founder, 2026-09-29). The card-billing emails tell
+  customers to email it to cancel, and "Ask for a card" refuses while it is
+  blank (ONB-018). Cancel requests that arrive there follow section 6.
+- [ ] **The customer portal is on**, for the owner's "Update card" (D-181):
+  **Settings** → **Billing** → **Customer portal**. DocFlow uses its own
+  portal configuration (tagged `card-update-v1`: update the card and see
+  invoices, no cancelling), created automatically the first time an owner
+  opens "Update card", and put back if it is changed in the dashboard. Don't
+  delete it; the account's default configuration isn't used.
+- [ ] **Stripe's own trial-ending email is off** (founder, 2026-09-29; done
+  in the sandbox that day): **Settings** → **Billing** → **Subscriptions and
+  emails**, the reminder Stripe sends before a free trial ends. DocFlow
+  sends its own trial-ending email to card-billed customers (its wording is
+  with the founder for approval), so with Stripe's on, customers would get
+  two.
 
 **For each new tenant:**
 
@@ -536,3 +573,49 @@ from tenants where stripe_cancel_pending_at is not null;
 
 Reactivating the tenant clears the mark. Don't clear it by hand while the
 tenant is still suspended: the subscription would keep billing.
+
+## 6. Card billing: cancelling during the trial, and refunds (D-181)
+
+### 6.1 A cancel request during the trial
+
+Customers cancel by emailing `SUPPORT_EMAIL` (the card-billing emails say so;
+they can't cancel in Stripe, because DocFlow's portal configuration has
+cancelling turned off). When a request arrives:
+
+1. **Note the time the request arrived** (the email's timestamp). That time
+   decides the refund rule below, not the time you act on it.
+2. Console → the tenant → Lifecycle → **Cancel**, reason **Customer
+   requested**. For a tenant still in its trial, confirming it also tells
+   Stripe to end the subscription at the trial's end and removes a pending
+   setup fee, so nothing more can be charged. If Stripe doesn't answer, you
+   see CON-006 and nothing has changed: try again.
+3. Reply to the customer confirming the cancel and the date service ends
+   (the trial's last day, unless you set a later date).
+
+### 6.2 The refund rule (founder, 2026-09-29)
+
+**A cancel request received before the trial ends gets a full refund of
+anything charged after that request.** Examples: the request came in on day
+6, but the cancel was entered after Stripe had already charged the first
+month on day 7 -- refund that charge in full. The standard customer's setup
+fee, paid when they added their card (before any request), is
+non-refundable and is not part of this rule.
+
+Refund steps, in the Stripe dashboard (check the account switcher first,
+section 3):
+
+1. **Customers** → search for the tenant (the Console's billing card has
+   **Open in Stripe ↗**, which goes straight there).
+2. Under **Payments**, find each payment dated **after** the request's
+   arrival time.
+3. Open the payment → **Refund** → **Full refund** → reason **Requested by
+   customer** → **Refund**.
+4. If the subscription is still running (the cancel was entered after the
+   trial ended), check that the Console shows the tenant as cancelling, so
+   no further month is charged.
+5. Add a note in the Console's cancel (or the tenant's lifecycle log) with
+   the request time and the refunded amount, so the record says why money
+   went back.
+
+Stripe returns the money to the card; it can take 5-10 business days to
+reach the customer. DocFlow does not refund anything automatically.

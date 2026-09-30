@@ -16,6 +16,7 @@ from app.routers import (
     activity,
     admin,
     auth,
+    billing,
     documents,
     email_intake,
     exports,
@@ -143,6 +144,7 @@ app.include_router(auth.router)
 app.include_router(activity.router)
 app.include_router(admin.router)
 app.include_router(documents.router)
+app.include_router(billing.router)
 app.include_router(held.router)
 app.include_router(home.router)
 app.include_router(email_intake.router)

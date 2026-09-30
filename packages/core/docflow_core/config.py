@@ -93,6 +93,11 @@ class Settings(BaseSettings):
     postmark_inbound_ip_allowlist: str = ""
 
     founder_alert_email: str = ""
+    # The address customers write to -- to cancel, among other things (card
+    # billing, founder 2026-09-29). Never hard-coded: every email that tells a
+    # customer how to cancel reads it, and "Ask for a card" refuses while it is
+    # blank (ONB-018) rather than send an email with no way to cancel.
+    support_email: str = ""
     # D-151 / D-177: the Console requires an aal2 (TOTP-verified) session, and
     # destructive actions a challenge under MFA_STEP_UP_MAX_AGE_SECONDS old --
     # but only once this is true. Off by default so the founder can enrol

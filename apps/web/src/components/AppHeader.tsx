@@ -137,6 +137,8 @@ export function AppHeader({
           {isAdmin ? <NavLink href="/dashboard">Dashboard</NavLink> : null}
           {/* Only the account's admin adds or removes people (D-132). */}
           {isAdmin ? <NavLink href="/team">Team</NavLink> : null}
+          {/* The card on file, for the account's admin (card billing, D-181). */}
+          {isAdmin ? <NavLink href="/billing">Billing</NavLink> : null}
         </nav>
 
         <div className="flex items-center gap-3 text-sm">

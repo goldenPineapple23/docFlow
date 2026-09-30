@@ -17,6 +17,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[3]
 MIGRATION = REPO / "supabase" / "migrations" / "0029_stripe_event_function.sql"
 APPLICATION_CODE = [
@@ -36,17 +38,32 @@ def _collapse(source: str) -> str:
     return re.sub(r"\s+", " ", joined)
 
 
-def test_the_function_is_security_definer_with_a_pinned_search_path():
-    sql = _collapse(MIGRATION.read_text(encoding="utf-8")).lower()
-    body = sql[sql.index("create function record_stripe_subscription_event") :]
+# Both Stripe event functions: 0029's subscription events, 0031's card events
+# (card billing, D-181). Same hygiene for each.
+FUNCTIONS = [
+    pytest.param(MIGRATION, "record_stripe_subscription_event", SIGNATURE, id="0029-subscription-events"),
+    pytest.param(
+        MIGRATION.with_name("0031_card_billing.sql"),
+        "record_stripe_card_event",
+        "(text, text, text, text, bigint)",
+        id="0031-card-events",
+    ),
+]
+
+
+@pytest.mark.parametrize(("migration", "function", "signature"), FUNCTIONS)
+def test_the_function_is_security_definer_with_a_pinned_search_path(migration, function, signature):
+    sql = _collapse(migration.read_text(encoding="utf-8")).lower()
+    body = sql[sql.index(f"create function {function}") :]
     header = body[: body.index("as $$")]
     assert "security definer" in header
     assert "set search_path = pg_catalog, public" in header
 
 
-def test_execute_is_revoked_from_public_anon_and_authenticated():
-    sql = _collapse(MIGRATION.read_text(encoding="utf-8")).lower()
-    assert f"revoke all on function record_stripe_subscription_event{SIGNATURE} from public" in sql
+@pytest.mark.parametrize(("migration", "function", "signature"), FUNCTIONS)
+def test_execute_is_revoked_from_public_anon_and_authenticated(migration, function, signature):
+    sql = _collapse(migration.read_text(encoding="utf-8")).lower()
+    assert f"revoke all on function {function}{signature} from public" in sql
     roles = re.search(r"foreach r in array array\[([^\]]*)\]", sql)
     assert roles is not None
     assert {"'anon'", "'authenticated'"} <= {r.strip() for r in roles.group(1).split(",")}

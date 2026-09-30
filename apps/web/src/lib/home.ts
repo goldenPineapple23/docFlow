@@ -46,6 +46,8 @@ export type Home = {
     tier: string | null;
     banner: (CatalogError & { threshold_pct: number }) | null;
   };
+  /** BIL-006 / BIL-009: a card-billed account whose last payment didn't go through (D-181). */
+  billing_banner: CatalogError | null;
   held: {
     total: number;
     groups: { reason: string; count: number; title: string; message: string }[];

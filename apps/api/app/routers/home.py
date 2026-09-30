@@ -15,7 +15,7 @@ banner uses (7.16.1), so a number cannot mean one thing here and another there.
 from __future__ import annotations
 
 from docflow_core import allowance as allowance_module
-from docflow_core import quarantine, tenant_home, usage
+from docflow_core import card_billing, quarantine, tenant_home, usage
 from docflow_core.db import tenant_session
 from fastapi import APIRouter, Depends
 
@@ -35,6 +35,9 @@ def get_home(identity: AuthenticatedIdentity = Depends(get_current_identity)) ->
         a = usage.allowance_for(session, tenant_id)
         banner = allowance_module.current_banner(session, tenant_id)
         held = quarantine.held_summary(session, tenant_id, role=identity.role)
+        # Card billing (BIL-006 / BIL-009): owners and admins of a card-billed,
+        # past-due tenant see it here and on the Billing page.
+        billing_banner = card_billing.past_due_banner(session, tenant_id)
 
     return {
         "documents_by_status": statuses,
@@ -61,6 +64,16 @@ def get_home(identity: AuthenticatedIdentity = Depends(get_current_identity)) ->
                 else None
             ),
         },
+        "billing_banner": (
+            {
+                "code": billing_banner.code,
+                "title": billing_banner.title,
+                "message": billing_banner.message,
+                "action": billing_banner.action,
+            }
+            if billing_banner
+            else None
+        ),
         "held": {
             "total": sum(g.count for g in held),
             "groups": [

@@ -63,11 +63,24 @@ def test_every_approved_skip_has_a_reason():
         assert entry.split()[0] in PYTHON_JOBS, f"unknown suite in {raw!r}"
 
 
-def test_the_stripe_event_function_is_granted_the_same_way_in_the_migration_and_in_ci():
-    """CI creates `docflow_app` after the migrations run, so migration 0029's
+@pytest.mark.parametrize(
+    ("function", "migration_file", "signature"),
+    [
+        (
+            "record_stripe_subscription_event",
+            "0029_stripe_event_function.sql",
+            "(text, text, timestamptz, text, text, timestamptz, text)",
+        ),
+        ("record_stripe_card_event", "0031_card_billing.sql", "(text, text, text, text, bigint)"),
+    ],
+)
+def test_each_stripe_event_function_is_granted_the_same_way_in_the_migration_and_in_ci(
+    function, migration_file, signature
+):
+    """CI creates `docflow_app` after the migrations run, so a migration's
     guarded grant is skipped there and scripts/ci/create_app_role.py grants it
-    again (D-173). The two must name the same signature, or CI would test a
-    function the app can't call on staging -- or the reverse."""
+    again (D-173, D-181). The two must name the same signature, or CI would
+    test a function the app can't call on staging -- or the reverse."""
 
     def collapse(source: str) -> str:
         # Join adjacent string literals and squeeze whitespace, so a statement
@@ -75,11 +88,51 @@ def test_the_stripe_event_function_is_granted_the_same_way_in_the_migration_and_
         return re.sub(r"\s+", " ", re.sub(r"['\"]\s*\n?\s*['\"]", "", source))
 
     grant = re.compile(
-        r"grant execute on function record_stripe_subscription_event\s*(\([^)]*\))\s*to docflow_app",
+        rf"grant execute on function {function}\s*(\([^)]*\))\s*to docflow_app",
         re.IGNORECASE,
     )
-    migration = REPO / "supabase" / "migrations" / "0029_stripe_event_function.sql"
+    migration = REPO / "supabase" / "migrations" / migration_file
     ci_role = REPO / "scripts" / "ci" / "create_app_role.py"
-    signature = "(text, text, timestamptz, text, text, timestamptz, text)"
     assert grant.findall(collapse(migration.read_text(encoding="utf-8"))) == [signature]
     assert grant.findall(collapse(ci_role.read_text(encoding="utf-8"))) == [signature]
+
+
+def _check_skips():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("check_skips", REPO / "scripts" / "ci" / "check_skips.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("job", PYTHON_JOBS)
+def test_the_skip_check_is_told_which_step_failed(job):
+    """A missing test report names the setup step that failed (2026-09-29),
+    which needs the step ids and CI_STEPS in every Python job."""
+    block = _job_block(WORKFLOW.read_text(encoding="utf-8"), job)
+    assert "CI_STEPS: ${{ toJSON(steps) }}" in block
+    for step_id in ("supabase", "deps", "core", "app_role", "ruff", "mypy", "test"):
+        assert f"id: {step_id}\n" in block, f"CI job {job!r} lost the step id {step_id!r}"
+
+
+def test_a_missing_report_names_the_setup_step_that_failed():
+    reason = _check_skips().no_report_reason(
+        "junit.xml",
+        '{"supabase": {"outcome": "failure", "conclusion": "failure"}, "test": {"outcome": "skipped"}}',
+    )
+    assert reason.startswith('pytest never ran: the step "Start the local Supabase stack" failed first')
+
+
+def test_a_missing_report_after_pytest_started_points_at_the_test_step():
+    reason = _check_skips().no_report_reason(
+        "junit.xml", '{"supabase": {"outcome": "success"}, "test": {"outcome": "failure"}}'
+    )
+    assert "stopped before or while collecting tests" in reason
+
+
+@pytest.mark.parametrize("steps_json", ["", "not json", '{"pip": {"outcome": "failure"}}'])
+def test_a_missing_report_with_no_named_failure_says_where_to_look(steps_json):
+    reason = _check_skips().no_report_reason("junit.xml", steps_json)
+    assert "first failed step in the job's step list" in reason

@@ -98,6 +98,10 @@ export type TenantOverview = {
   setup_fee_preset: SetupFeePreset["code"] | null;
   setup_fee_preset_name: string | null;
   founding_price: boolean;
+  // Card billing (0031, D-181). billing_method is set at go-live.
+  billing_method?: "card" | "invoice";
+  card_on_file_at?: string | null;
+  setup_fee_paid_at?: string | null;
   // The plan billed at go-live (D-138): Deal terms shows this once live, so a
   // later plan change does not rewrite what was agreed. Null before go-live.
   golive_tier_name?: string | null;
@@ -448,14 +452,31 @@ export type GoLivePlan = {
   setup_fee_note: string | null;
   setup_fee_preset_name: string | null;
   founding_price: boolean;
+  // Card billing (D1, D2; D-181): what choosing "card" at go-live needs.
+  founding_customer: boolean;
+  card_on_file: boolean;
+  setup_fee_paid: boolean;
+  card_needs_fee_paid_at_signing: boolean;
 };
+
+export type BillingMethod = "card" | "invoice";
 
 export const getGoLivePlan = (tenantId: string) =>
   request<GoLivePlan>(`/admin/tenants/${tenantId}/go-live`);
 
-/** Nothing about price is sent: go-live bills the deal recorded on the tenant (D-117). */
-export const goLive = (tenantId: string) =>
-  request<{ onboarding_status: string }>(`/admin/tenants/${tenantId}/go-live`, { method: "POST" });
+/** Nothing about price is sent: go-live bills the deal recorded on the tenant
+ * (D-117). Only how it collects is chosen here: by card or by invoice (D6). */
+export const goLive = (tenantId: string, billingMethod: BillingMethod) =>
+  request<{ onboarding_status: string }>(`/admin/tenants/${tenantId}/go-live`, {
+    method: "POST",
+    body: JSON.stringify({ billing_method: billingMethod }),
+  });
+
+/** "Ask for a card" (D1): emails the owner a link to their Billing page. */
+export const requestCard = (tenantId: string) =>
+  request<{ email_outbox_id: string; template: string }>(`/admin/tenants/${tenantId}/card-request`, {
+    method: "POST",
+  });
 
 // ── Operator screens: buyer merge and learned rules (slice 5.4; D-119) ──────
 

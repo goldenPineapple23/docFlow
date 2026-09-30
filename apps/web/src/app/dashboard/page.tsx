@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AppHeader } from "@/components/AppHeader";
 import { CatalogErrorBox } from "@/components/admin/CatalogErrorBox";
 import { ActivityList, ago } from "@/components/ActivityList";
+import { PastDueBanner } from "@/components/PastDueBanner";
 import { getHome, type Home } from "@/lib/home";
 import { ReviewApiError, UNEXPECTED, type CatalogError } from "@/lib/review";
 
@@ -75,6 +76,8 @@ export default function DashboardPage() {
 
         {home ? (
           <>
+            {home.billing_banner ? <PastDueBanner banner={home.billing_banner} linkToBilling /> : null}
+
             {home.allowance.banner ? (
               <div
                 data-testid="allowance-banner"

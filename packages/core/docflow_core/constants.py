@@ -16,14 +16,15 @@ from typing import Any
 
 # ── Lifecycle (Section 7.14 / 7.15.4) ───────────────────────────────────────
 # Added on top of the first `past_due` notice before a non-payment
-# cancellation's computed effective date. 0 (D-125, 22 Sept 2026): Net terms
-# (INVOICE_DAYS_UNTIL_DUE) are themselves the grace period -- Stripe doesn't
-# mark a subscription past_due until an invoice is already that many days
-# overdue, so a customer already gets the full Net-15 window before this
-# clock even starts. Stacking a second cure period on top was the original
-# ToS-placeholder default; kept here, at 0, as the one constant to change if
-# a future ToS wants a second window.
-CURE_PERIOD_DAYS = 0
+# cancellation's computed effective date. 14 (founder, 2026-09-29, with card
+# billing): a card subscription goes past_due on the FIRST failed charge,
+# while Stripe is still retrying, so the cure period has to cover the retry
+# window -- Stripe's retry schedule is set so the final retry lands before
+# day 14 (RUNBOOK section 3). The ToS placeholder ("uncured after [14] days'
+# notice") was changed to match. It applies to invoice billing too, where
+# past_due already means the invoice is INVOICE_DAYS_UNTIL_DUE days late.
+# Was 0 (D-125) while invoice billing was the only method.
+CURE_PERIOD_DAYS = 14
 EXPORT_WINDOW_DAYS = 30  # ToS placeholder
 REMINDER_DAYS = (1, 15, 25)
 
@@ -152,6 +153,12 @@ INVOICE_DAYS_UNTIL_DUE = 15
 # trial ends, at which point Stripe combines the first month's charge and
 # the setup fee onto one invoice, due INVOICE_DAYS_UNTIL_DUE days later.
 TRIAL_PERIOD_DAYS = 7
+
+# Card billing (founder, 2026-09-29): a card-billed owner whose subscription
+# goes past due is emailed at once, and again this many days before the date
+# from which the tenant may be suspended (first past-due notice +
+# CURE_PERIOD_DAYS). The job skips itself if the payment has gone through.
+PAST_DUE_REMINDER_DAYS_BEFORE = 3
 
 
 def constants_in_effect(*names: str) -> dict[str, Any]:

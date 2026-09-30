@@ -17,7 +17,7 @@ Getting started:
   4. Download the approved order as CSV, Excel, JSON or QuickBooks (IIF).
 
 Your plan: $tier_name, including $document_allowance documents a month.
-Your first invoice comes from Stripe by email.
+$billing_line
 
 We will check in with you after your first week.
 

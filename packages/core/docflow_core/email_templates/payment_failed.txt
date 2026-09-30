@@ -1,0 +1,13 @@
+Subject: Your DocFlow payment didn't go through
+
+Hello,
+
+We couldn't charge the card on file for your DocFlow subscription
+($amount on $failed_date). Your documents keep processing as normal.
+
+Update your card here: $billing_url
+We'll charge the new card right away.
+
+If the card isn't updated, processing may be paused from $suspension_date.
+
+-- DocFlow

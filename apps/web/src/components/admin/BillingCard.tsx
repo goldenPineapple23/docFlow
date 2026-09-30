@@ -44,12 +44,18 @@ export function BillingCard({ tenant, children }: { tenant: TenantOverview; chil
   const foundingUntil =
     b.founding_price_ends_at && new Date(b.founding_price_ends_at) > new Date() ? b.founding_price_ends_at : null;
   const status = b.status ? (STATUS[b.status] ?? { label: b.status, tone: "bg-gray-100 text-gray-700 border-gray-200" }) : null;
+  const byCard = tenant.billing_method === "card";
   const setupFee =
     tenant.setup_fee_amount == null
       ? "Not agreed yet"
-      : tenant.setup_fee_billing === "invoiced_manually"
-        ? `$${tenant.setup_fee_amount} · invoiced by hand${tenant.setup_fee_note ? ` (${tenant.setup_fee_note})` : ""}`
-        : `$${tenant.setup_fee_amount} · on the first Stripe invoice`;
+      : tenant.setup_fee_paid_at
+        ? `$${tenant.setup_fee_amount} · paid when the card was added (${day(tenant.setup_fee_paid_at)})`
+        : tenant.setup_fee_billing === "invoiced_manually"
+          ? `$${tenant.setup_fee_amount} · invoiced by hand${tenant.setup_fee_note ? ` (${tenant.setup_fee_note})` : ""}`
+          : `$${tenant.setup_fee_amount} · on the first Stripe ${byCard ? "charge" : "invoice"}`;
+  // Card billing (D-181): shown before and after go-live, since the card is
+  // usually added before it.
+  const card = tenant.card_on_file_at ? `On file since ${day(tenant.card_on_file_at)}` : "None yet";
 
   return (
     <section data-testid="billing-card" className="mt-5 rounded-xl border border-gray-200 bg-white p-5 text-sm">
@@ -69,9 +75,16 @@ export function BillingCard({ tenant, children }: { tenant: TenantOverview; chil
       </div>
 
       {!b.subscription_id ? (
-        <p className="mt-2 text-gray-600">
-          No subscription yet. Billing starts at go-live, with a free week before the first invoice.
-        </p>
+        <>
+          <p className="mt-2 text-gray-600">
+            No subscription yet. Billing starts at go-live, with a free week before the first charge or invoice.
+          </p>
+          <p data-testid="card-on-file-status" className="mt-2">
+            <span className="text-xs text-gray-500">Card: </span>
+            {card}
+            {tenant.setup_fee_paid_at ? ` · setup fee paid ${day(tenant.setup_fee_paid_at)}` : ""}
+          </p>
+        </>
       ) : (
         <dl className="mt-3 grid gap-x-6 gap-y-3 sm:grid-cols-2">
           <Row label="Plan">
@@ -98,10 +111,13 @@ export function BillingCard({ tenant, children }: { tenant: TenantOverview; chil
             )}
           </Row>
           {b.trial_ends_at ? (
-            <Row label="Free week ends">{day(b.trial_ends_at)} — the first invoice goes out then</Row>
+            <Row label="Free week ends">
+              {day(b.trial_ends_at)} — {byCard ? "the card is charged then" : "the first invoice goes out then"}
+            </Row>
           ) : (
             <Row label="Current period ends">{day(b.current_period_end)}</Row>
           )}
+          <Row label="Paid by">{byCard ? `Card · ${card}` : "Invoice"}</Row>
           <Row label="Setup fee">{setupFee}</Row>
           {b.first_past_due_at ? (
             <Row label="Overdue since">

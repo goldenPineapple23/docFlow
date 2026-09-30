@@ -183,6 +183,82 @@ def compute_effective_at(session: Session, tenant_id: UUID, reason: str) -> Effe
     raise LifecycleError("LIFE-001")
 
 
+
+def _check_cancel(
+    session: Session,
+    tenant_id: UUID,
+    *,
+    reason: str,
+    note: str | None,
+    override_effective_at: datetime | None,
+    lock: bool,
+) -> tuple[Any, datetime, EffectiveDatePlan]:
+    """Every rule a cancel must pass, its effective date, and the rule that
+    produced it. Shared by
+    `cancel` (under a row lock) and `trial_cancel_target` (read only, before
+    Stripe is touched), so the two can never disagree."""
+    if reason not in REASONS:
+        raise LifecycleError("LIFE-001")
+    row = session.execute(
+        text("SELECT name, status FROM tenants WHERE id = :id" + (" FOR UPDATE" if lock else "")),
+        {"id": str(tenant_id)},
+    ).mappings().first()
+    if row is None:
+        raise LifecycleError("CON-001")
+    if row["status"] != "active":
+        raise LifecycleError("LIFE-001", {"status": row["status"]})
+    if reason == "for_cause" and (not note or len(note.strip()) < 20):
+        raise LifecycleError("LIFE-002")
+
+    plan = compute_effective_at(session, tenant_id, reason)
+    effective_at = plan.effective_at
+    if override_effective_at is not None:
+        if override_effective_at < plan.effective_at:
+            raise LifecycleError("LIFE-003")
+        effective_at = override_effective_at
+    return row, effective_at, plan
+
+
+@dataclass(frozen=True)
+class TrialCancelTarget:
+    subscription_id: str
+    customer_id: str
+
+
+def trial_cancel_target(
+    session: Session,
+    tenant_id: UUID,
+    *,
+    reason: str,
+    note: str | None,
+    override_effective_at: datetime | None,
+) -> TrialCancelTarget | None:
+    """
+    For a cancel confirmed while the tenant is still in its trial (founder,
+    2026-09-29): the Stripe subscription whose trial must end with nothing
+    charged, or None. Runs every rule `cancel` runs, without writing, so
+    Stripe is only touched for a cancel that will be recorded; the caller then
+    calls Stripe with no transaction open (D-173) and records the cancel.
+    """
+    _check_cancel(
+        session, tenant_id, reason=reason, note=note, override_effective_at=override_effective_at, lock=False
+    )
+    row = session.execute(
+        text(
+            "SELECT stripe_subscription_status, stripe_subscription_id, stripe_customer_id "
+            "FROM tenants WHERE id = :id"
+        ),
+        {"id": str(tenant_id)},
+    ).mappings().one()
+    if row["stripe_subscription_status"] != "trialing" or not row["stripe_subscription_id"]:
+        return None
+    if not row["stripe_customer_id"]:
+        return None
+    return TrialCancelTarget(
+        subscription_id=str(row["stripe_subscription_id"]), customer_id=str(row["stripe_customer_id"])
+    )
+
+
 def cancel(
     session: Session,
     tenant_id: UUID,
@@ -199,25 +275,9 @@ def cancel(
     effective date (Section 7.14: "Everything keeps working until the
     effective date").
     """
-    if reason not in REASONS:
-        raise LifecycleError("LIFE-001")
-    row = session.execute(
-        text("SELECT name, status FROM tenants WHERE id = :id FOR UPDATE"),
-        {"id": str(tenant_id)},
-    ).mappings().first()
-    if row is None:
-        raise LifecycleError("CON-001")
-    if row["status"] != "active":
-        raise LifecycleError("LIFE-001", {"status": row["status"]})
-    if reason == "for_cause" and (not note or len(note.strip()) < 20):
-        raise LifecycleError("LIFE-002")
-
-    plan = compute_effective_at(session, tenant_id, reason)
-    effective_at = plan.effective_at
-    if override_effective_at is not None:
-        if override_effective_at < plan.effective_at:
-            raise LifecycleError("LIFE-003")
-        effective_at = override_effective_at
+    row, effective_at, plan = _check_cancel(
+        session, tenant_id, reason=reason, note=note, override_effective_at=override_effective_at, lock=True
+    )
 
     session.execute(
         text(
@@ -573,6 +633,9 @@ class ReactivatePlan:
     # When the current suspension began (its `suspended` lifecycle event):
     # the line between the founder's two invoice sections (Stage 3a).
     suspended_at: datetime | None = None
+    # 'card' | 'invoice' (migration 0031). A card-billed tenant is charged at
+    # once on reactivation, and a declined card refuses it (D5).
+    billing_method: str = "invoice"
 
     @property
     def idempotency_scope(self) -> str:
@@ -584,7 +647,7 @@ def plan_reactivate(session: Session, tenant_id: UUID) -> ReactivatePlan:
     row = session.execute(
         text(
             """
-            SELECT t.name, t.status, t.stripe_customer_id, t.status_changed_at,
+            SELECT t.name, t.status, t.stripe_customer_id, t.status_changed_at, t.billing_method,
                    tr.id AS tier_id, tr.name AS tier_name, tr.monthly_price, tr.document_allowance,
                    (SELECT max(e.created_at) FROM tenant_lifecycle_events e
                      WHERE e.tenant_id = t.id AND e.event_type = 'suspended') AS suspended_at
@@ -610,6 +673,7 @@ def plan_reactivate(session: Session, tenant_id: UUID) -> ReactivatePlan:
         document_allowance=row["document_allowance"],
         status_changed_at=row["status_changed_at"],
         suspended_at=row["suspended_at"],
+        billing_method=row["billing_method"],
     )
 
 

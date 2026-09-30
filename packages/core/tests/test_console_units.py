@@ -8,6 +8,7 @@ All data is fictional (CLAUDE.md Section 0 rule 4).
 
 from __future__ import annotations
 
+import re
 from uuid import uuid4
 
 import pytest
@@ -34,6 +35,40 @@ TEMPLATE_PARAMS = {
         "app_url": "https://app.example.test",
         "tier_name": "Starter",
         "document_allowance": "300",
+        "billing_line": "Your first invoice comes from Stripe by email.",
+    },
+    # Card billing (founder, 2026-09-29)
+    "payment_failed": {
+        "amount": "$299.00",
+        "failed_date": "October 6, 2026",
+        "billing_url": "https://app.example.test/billing",
+        "suspension_date": "October 20, 2026",
+    },
+    "payment_failed_reminder": {
+        "amount": "$299.00",
+        "billing_url": "https://app.example.test/billing",
+        "suspension_date": "October 20, 2026",
+    },
+    "card_request_founding": {
+        "tenant_name": "Acme Test Distributor",
+        "support_email": "support@example.test",
+        "monthly_amount": "$199.00",
+        "promo_days": "90",
+        "setup_fee": "$750.00",
+        "billing_url": "https://app.example.test/billing",
+    },
+    "card_request_no_fee": {
+        "tenant_name": "Acme Test Distributor",
+        "support_email": "support@example.test",
+        "monthly_amount": "$299.00",
+        "billing_url": "https://app.example.test/billing",
+    },
+    "card_request_at_signing": {
+        "tenant_name": "Acme Test Distributor",
+        "support_email": "support@example.test",
+        "monthly_amount": "$299.00",
+        "setup_fee": "$1,500.00",
+        "billing_url": "https://app.example.test/billing",
     },
     "intake_not_active": {"tenant_name": "Acme Test Distributor"},
     "intake_suspended": {"tenant_name": "Acme Test Distributor"},
@@ -88,7 +123,9 @@ def test_every_template_is_covered_here():
 def test_every_template_renders_with_no_placeholder_left(template):
     subject, body = email_outbox.render(template, TEMPLATE_PARAMS[template])
     assert subject and body
-    assert "$" not in subject and "$" not in body
+    # A placeholder left unfilled ("$amount"), not a dollar amount ("$299.00").
+    leftover = re.compile(r"\$[A-Za-z_]")
+    assert not leftover.search(subject) and not leftover.search(body)
 
 
 def test_a_missing_template_field_fails_loudly_instead_of_sending_a_placeholder():
@@ -254,3 +291,17 @@ def test_staging_files_live_outside_every_tenant_prefix(tmp_path, monkeypatch):
         assert not (tmp_path / staged).exists()
     finally:
         get_settings.cache_clear()
+
+
+def test_the_trial_length_in_card_billings_wording_is_the_constant():
+    """The approved card-billing texts say "7-day" in words (founder,
+    2026-09-29). If TRIAL_PERIOD_DAYS ever changes, this fails until the
+    wording is changed with it."""
+    from docflow_core.constants import TRIAL_PERIOD_DAYS
+    from docflow_core.onboarding import GO_LIVE_BILLING_LINES
+
+    phrase = f"{TRIAL_PERIOD_DAYS}-day"
+    assert phrase in GO_LIVE_BILLING_LINES["card"]
+    for template in ("card_request_founding", "card_request_at_signing", "card_request_no_fee"):
+        _, body = email_outbox.render(template, TEMPLATE_PARAMS[template])
+        assert phrase in body.replace("\n", " "), template

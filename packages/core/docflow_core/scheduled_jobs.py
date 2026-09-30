@@ -24,7 +24,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from docflow_core import email_outbox, founder_alerts, review_digest
+from docflow_core import card_billing, email_outbox, founder_alerts, review_digest
 from docflow_core.db import scheduler_session, tenant_session
 
 logger = logging.getLogger(__name__)
@@ -272,4 +272,7 @@ HANDLERS: dict[str, Callable[[Session, Job], None]] = {
     "first_week_checkin": _first_week_checkin,
     "pending_deletion_reminder": _pending_deletion_reminder,
     "review_digest": review_digest.send_digest,
+    # Card billing (migration 0031): the owner's reminder before the date a
+    # past-due tenant may be paused from.
+    "past_due_reminder": card_billing.send_past_due_reminder,
 }

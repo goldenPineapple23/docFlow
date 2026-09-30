@@ -22,6 +22,8 @@ It also lists failed tests as GitHub annotations (`::error::`), so a failure
 can be read from the run's summary page without opening the log.
 """
 
+import json
+import os
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -83,18 +85,57 @@ def annotate_failures(suite: str, failures: list[tuple[str, str]]) -> None:
         print(f"::error title={title}::{body}")
 
 
+# The ids given to the steps before the skip check in ci.yml, in job order,
+# and the names they show in the run's step list.
+STEP_NAMES = {
+    "supabase": "Start the local Supabase stack",
+    "deps": "pip install -r requirements.lock.txt",
+    "core": "pip install packages/core",
+    "app_role": "Create docflow_app",
+    "libreoffice": "Install LibreOffice",
+    "ruff": "ruff check",
+    "mypy": "mypy",
+}
+
+
+def no_report_reason(report_name: str, steps_json: str | None = None) -> str:
+    """
+    Why there is no junit report, from the outcomes of the steps before it
+    (the workflow passes `toJSON(steps)` as CI_STEPS). A setup step that
+    failed means pytest never ran, and the message names that step, rather
+    than pointing at a Test step that was skipped (2026-09-29: a worker run
+    whose local Supabase stack failed to start read as a pytest failure).
+    """
+    raw = os.environ.get("CI_STEPS", "") if steps_json is None else steps_json
+    try:
+        steps = json.loads(raw) if raw else {}
+    except ValueError:
+        steps = {}
+    outcomes = {k: (v or {}).get("outcome") for k, v in steps.items()} if isinstance(steps, dict) else {}
+    for step_id, name in STEP_NAMES.items():
+        if outcomes.get(step_id) == "failure":
+            return (
+                f"pytest never ran: the step \"{name}\" failed first, so nothing was tested. "
+                "That step's own log has the cause."
+            )
+    if outcomes.get("test") == "failure":
+        return (
+            f"pytest wrote no {report_name}, so it stopped before or while collecting tests. "
+            "Look for an earlier annotation from the Test step."
+        )
+    return (
+        f"pytest wrote no {report_name}, and no named step before it failed. "
+        "The first failed step in the job's step list says why."
+    )
+
 def main(argv: list[str]) -> int:
     if len(argv) not in (3, 4):
         print(__doc__, file=sys.stderr)
         return 2
     suite, junit_path = argv[1], Path(argv[2])
     if not junit_path.exists():
-        # pytest stopped before writing its report (a failure at startup or in
-        # collection). Say so on the run page instead of a bare traceback.
-        print(
-            f"::error title={suite}: no test report::pytest wrote no {junit_path.name}, so it stopped "
-            "before or while collecting tests. Look for an earlier annotation from the Test step."
-        )
+        # No report: say why on the run page instead of a bare traceback.
+        print(f"::error title={suite}: no test report::{no_report_reason(junit_path.name)}")
         return 1
     approvals_path = Path(argv[3]) if len(argv) == 4 else DEFAULT_APPROVALS
 

@@ -37,6 +37,10 @@ ROUTE_ACCESS: dict[tuple[str, str], Access] = {
     ("GET", "/auth/me"): "member",
     # The customer's own dashboard (5.8a)
     ("GET", "/home"): "admin",
+    # The card on file (card billing, D-181): owners and admins only
+    ("GET", "/billing"): "admin",
+    ("POST", "/billing/card-page"): "admin",
+    ("POST", "/billing/card-update-page"): "admin",
     # The account's activity trail (5.8b). A read, but not a `member` one: the
     # people who do the work see what a colleague did; a viewer would not.
     ("GET", "/activity"): "reviewer",
