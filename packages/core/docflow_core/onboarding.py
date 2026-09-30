@@ -611,10 +611,10 @@ def schedule_trial_ending_reminder(
                                 now() + make_interval(days => :trial_days)) AS trial_end_at
             )
             INSERT INTO scheduled_jobs (id, tenant_id, job_type, run_at, payload, dedupe_key)
-            SELECT :id, :tenant_id, 'trial_ending_reminder',
+            SELECT CAST(:id AS uuid), CAST(:tenant_id AS uuid), 'trial_ending_reminder',
                    t.trial_end_at - make_interval(days => :before),
                    CAST(:payload AS jsonb) || jsonb_build_object('trial_end_at', t.trial_end_at),
-                   'trial_ending_reminder:' || :tenant_id
+                   'trial_ending_reminder:' || CAST(:tenant_id AS text)
               FROM t
             ON CONFLICT (dedupe_key) DO NOTHING
             """
