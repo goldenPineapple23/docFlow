@@ -2749,6 +2749,15 @@ The fresh backup challenge passed the step-up. The rotation then stopped at `QUA
     raises `storage_unavailable`, and a missing object is logged
     (`viewer_stored_file_missing`).
   - DOC-027 promises no alert, because a missing object raises none.
+  - **A Storage outage is its own entry, DOC-028** "The original can't be
+    shown right now" (founder, 2026-09-30, same reasoning as DOC-025 against
+    DOC-026). The stored copy is expected to open again once Storage is
+    back, so the tenant must not be sent to ask their buyer for the order.
+    The entry doesn't claim the file is fine: during an outage DocFlow
+    can't know that. It is also the one case where
+    DocFlow has already been alerted (`storage_unavailable`), and it says
+    so. DOC-027 stays for a missing object or a refused path. The shared
+    read returns why it failed, and the original's cause picks the entry.
 - **The alert can't live in the check** (founder agreed): the check also
   runs on writes, from the copy script and in tests, and doesn't know which
   record it's looking at. So each reader calls one helper,

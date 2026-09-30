@@ -262,6 +262,10 @@ DOC-027 [warning/tenant] The original can't be shown
   what+why: DocFlow couldn't open its stored copy of this order's original file, so it can't be shown here. Everything DocFlow read from it is still shown beside this.
   next:     If you need to check a value against the original, ask the sender for their copy of the order.
 
+DOC-028 [warning/tenant] The original can't be shown right now
+  what+why: DocFlow couldn't reach its file storage to open this order's original file. Everything DocFlow read from it is still shown beside this.
+  next:     DocFlow has already been alerted. Reload this page in a few minutes to see the original.
+
 EXM-001 [warning/founder] Confirm the live golden check first
   what+why: Example prompting changes what the extraction model is sent, so it may only be switched on after a live golden-fixture run with examples has passed (Section 7.13). The confirmation wasn't ticked, so nothing was changed.
   next:     Run `pytest -m live_api tests/test_example_prompting_golden.py` in apps/api; when it passes, tick the confirmation and switch it on again.

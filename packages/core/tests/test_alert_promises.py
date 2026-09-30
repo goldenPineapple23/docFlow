@@ -33,6 +33,8 @@ ALERTED_ELSEWHERE = {
     # an hour (founder_alerts.raise_storage_unavailable).
     "DOC-025": "storage_unavailable",
     "EXP-010": "storage_unavailable",
+    # The review viewer during an outage (apps/api/app/routers/review.py).
+    "DOC-028": "storage_unavailable",
 }
 
 PROMISE = re.compile(r"(has|have) (already )?been alerted", re.IGNORECASE)

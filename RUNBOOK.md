@@ -137,11 +137,12 @@ How a run is reported:
 - Save each suite's full output to a file. Never cut it with `tail` or
   `head`: the exit code of the pipe replaces pytest's, so a failed run looks
   like it passed, and the failure details are lost.
-- Quote pytest's last line as printed. The API suite should read `568 passed,
+- Quote pytest's last line as printed. The API suite should read `571 passed,
   3 deselected` with nothing failed or skipped (staging, 2026-09-30, Stage 3b
-  on `e3e8641`; it was 424 at Stage 1 and 562 after card billing). If the
-  count is *lower* than the number written here, find out what stopped
-  running before calling the run green.
+  on `aefd428`; the DOC-028 follow-up commit changed test wording, not the
+  count; it was 424 at Stage 1, 562 after card billing and 568 on `e3e8641`).
+  If the count is *lower* than the number written here, find out what
+  stopped running before calling the run green.
   The 3 deselected are the `live_api` tests, which only run at checkpoints
   (`apps/api/pyproject.toml`): `pytest -m live_api` — the golden fixture, the
   golden fixture with examples, and the example-contamination check.

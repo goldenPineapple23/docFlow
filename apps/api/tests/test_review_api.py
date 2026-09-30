@@ -662,11 +662,14 @@ def test_a_missing_stored_original_says_doc_027_not_an_unviewable_format(client)
 
 
 @requires_review_schema
-def test_storage_down_says_doc_027_and_raises_the_storage_alert(client, monkeypatch):
-    """An outage lands on the same message, and -- like every other reader --
-    raises `storage_unavailable`."""
-    import app.routers.review as review_router
+def test_storage_down_says_doc_028_and_raises_the_storage_alert(client, monkeypatch):
+    """An outage is DOC-028, not DOC-027: the file is fine and will open
+    again, so the tenant is told to reload rather than ask their buyer for
+    the order (founder, 2026-09-30). Like every other reader, it raises
+    `storage_unavailable` -- the alert DOC-028 promises."""
     from docflow_core.storage import StorageUnavailableError
+
+    import app.routers.review as review_router
 
     def down(tenant_id, path):
         raise StorageUnavailableError("fake outage")
@@ -683,7 +686,8 @@ def test_storage_down_says_doc_027_and_raises_the_storage_alert(client, monkeypa
 
         minted = client.get(f"/review/documents/{document}/original", headers=tenant.headers())
         assert minted.status_code == 200
-        assert minted.json()["unavailable"]["code"] == "DOC-027"
+        assert minted.json()["unavailable"]["code"] == "DOC-028"
+        assert "ask the sender" not in minted.json()["unavailable"]["action"]
         assert alerted and alerted[0]["where"] == "review_viewer"
         assert alerted[0]["tenant_id"] == tenant.tenant_id
 

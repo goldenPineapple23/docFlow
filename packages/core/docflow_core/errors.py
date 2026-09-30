@@ -341,8 +341,9 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         audience="both",
     ),
     # Stage 3b (founder, 2026-09-30): the review viewer when the stored copy
-    # can't be read -- missing, refused, or Storage unreachable. Said in place of
-    # "a format a browser can't display", with no Open button to a bare 404.
+    # is gone -- missing, or its recorded path refused. Said in place of "a
+    # format a browser can't display", with no Open button to a bare 404. An
+    # outage is DOC-028: the file is fine, and the sender needn't be asked.
     "DOC-027": ErrorCatalogEntry(
         code="DOC-027",
         title="The original can't be shown",
@@ -353,6 +354,22 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         action=(
             "If you need to check a value against the original, ask the sender for their copy "
             "of the order."
+        ),
+        severity="warning",
+        audience="tenant",
+    ),
+    # The same screen during a Storage outage: the file is fine, it will open
+    # again, and storage_unavailable has always been raised by then.
+    "DOC-028": ErrorCatalogEntry(
+        code="DOC-028",
+        title="The original can't be shown right now",
+        message=(
+            "DocFlow couldn't reach its file storage to open this order's original file. "
+            "Everything DocFlow read from it is still shown beside this."
+        ),
+        action=(
+            "DocFlow has already been alerted. Reload this page in a few minutes to see the "
+            "original."
         ),
         severity="warning",
         audience="tenant",

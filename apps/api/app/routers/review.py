@@ -761,13 +761,12 @@ def original_document_url(
     # back to the original, exactly as the serving route below does.
     has_preview = (
         _has_preview(row)
-        and _read_for_viewer(tenant_id, row["preview_storage_path"], document_id) is not None
+        and _read_for_viewer(tenant_id, row["preview_storage_path"], document_id)[0] is not None
     )
     detected = None
-    original_readable = True
+    unreadable_because: str | None = None
     if not has_preview:
-        content = _read_for_viewer(tenant_id, row["storage_path"], document_id)
-        original_readable = content is not None
+        content, unreadable_because = _read_for_viewer(tenant_id, row["storage_path"], document_id)
         if content is not None:
             detected = file_types.detect_file_type(content, _extension(row["original_filename"]))
 
@@ -791,10 +790,16 @@ def original_document_url(
         # extracted text is DocFlow's rendering, not the original layout.
         "preview_kind": row["preview_kind"] if has_preview else None,
         # Nothing to show at all: the viewer says so in the catalog's words
-        # and offers no link, which could only lead to a 404 (DOC-027,
-        # founder, 2026-09-30). Distinct from "not previewable", which means
-        # the file is fine but no browser renders its format.
-        "unavailable": None if (has_preview or original_readable) else catalog_detail("DOC-027"),
+        # and offers no link, which could only lead to a 404 (founder,
+        # 2026-09-30). Distinct from "not previewable", which means the file
+        # is fine but no browser renders its format. Two entries, because the
+        # tenant's next step differs: the stored copy is gone (DOC-027, ask
+        # the sender), or storage is down and it will open again (DOC-028).
+        "unavailable": (
+            None
+            if unreadable_because is None
+            else catalog_detail("DOC-028" if unreadable_because == "unavailable" else "DOC-027")
+        ),
     }
 
 
@@ -802,25 +807,30 @@ def _has_preview(row: Any) -> bool:
     return bool(row["preview_storage_path"] and row["preview_media_type"])
 
 
-def _read_for_viewer(tenant_id: UUID, storage_path: str, document_id: UUID) -> bytes | None:
+def _read_for_viewer(
+    tenant_id: UUID, storage_path: str, document_id: UUID
+) -> tuple[bytes | None, str | None]:
     """
-    The viewer's read of a stored file (Stage 3b). None when it can't be read,
-    which is never a reason to fail the review screen -- the extracted values
-    are what the reviewer mainly needs. Each cause is still told apart: a
-    refused path is reported (and alerted if it names another tenant), an
-    outage raises `storage_unavailable`, a missing object is logged.
+    The viewer's read of a stored file (Stage 3b): the bytes, or None and why
+    -- "refused", "unavailable" or "missing". Never a reason to fail the
+    review screen: the extracted values are what the reviewer mainly needs.
+    Each cause is still recorded apart: a refused path is reported (and
+    alerted if it names another tenant), an outage raises
+    `storage_unavailable`, a missing object is logged.
     """
     try:
-        return read_file(tenant_id, storage_path)
+        return read_file(tenant_id, storage_path), None
     except UnsafeStoragePathError as exc:
         founder_alerts.report_refused_storage_path(
             exc, tenant_id=tenant_id, where="review_viewer", ref_id=document_id
         )
+        return None, "refused"
     except StorageUnavailableError:
         founder_alerts.alert_storage_unavailable(tenant_id, where="review_viewer")
+        return None, "unavailable"
     except StorageObjectMissingError:
         logger.error("viewer_stored_file_missing document_id=%s", document_id)
-    return None
+        return None, "missing"
 
 
 # Naming a format from its extension, for the one message that needs a word
@@ -893,9 +903,9 @@ def original_document_content(
     # here (Section 7.11).
     # Same reasoning as the mint route: a preview that can't be read falls
     # back to the original; nothing readable is a 404 for this one file --
-    # the viewer has already said so (DOC-027) -- never a 500 for the screen.
+    # the viewer has already said so (DOC-027 / DOC-028) -- never a 500.
     if _has_preview(row):
-        preview = _read_for_viewer(tenant_id, row["preview_storage_path"], document_id)
+        preview, _ = _read_for_viewer(tenant_id, row["preview_storage_path"], document_id)
         if preview is not None:
             return Response(
                 content=preview,
@@ -903,7 +913,7 @@ def original_document_content(
                 headers=_viewer_headers(),
             )
 
-    content = _read_for_viewer(tenant_id, row["storage_path"], document_id)
+    content, _ = _read_for_viewer(tenant_id, row["storage_path"], document_id)
     if content is None:
         raise HTTPException(status_code=404)
 

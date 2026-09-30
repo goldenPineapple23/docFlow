@@ -697,7 +697,11 @@ from the design above, or adds to it:
     (missing, refused, or Storage down). The viewer shows DOC-027 with no
     link.
   - A preview that can't be read falls back to the original.
-  - An outage here raises `storage_unavailable` like every other reader.
+  - An outage here raises `storage_unavailable` like every other reader, and
+    shows **DOC-028** "The original can't be shown right now" ("reload in a
+    few minutes"), not DOC-027 ("ask the sender"). Founder's review of
+    `aefd428`: the tenant's next step differs. DOC-028 does not claim the
+    file is fine: during an outage DocFlow can't know that.
 - **Tenant creation cleanup is best effort:** removing the copies after a
   failed creation, or the staging originals after a committed one, never
   replaces the error (or the success) the founder sees. Anything left is an
@@ -776,8 +780,15 @@ tests), then the rollout in item 11.
     `SUPABASE_JWT_SECRET`, blank since D-174; the anon-key test covers it);
   - worker: 139 passed, 2 skipped (the prefork tests, Linux only; CI runs
     them);
-  - API: **568 passed, 3 deselected**, nothing failed or skipped. RUNBOOK 1.4
-    now says 568.
+  - API: **568 passed, 3 deselected**, nothing failed or skipped. Then, after
+    the DOC-027 viewer fix `aefd428` (new API code and 3 new API tests),
+    **571 passed, 3 deselected** on `aefd428`. RUNBOOK 1.4 says 571. The
+    DOC-028 follow-up commit changed one API test's expectation and the
+    viewer's cause-to-code branch. It was checked with the whole review API
+    file on staging (35 passed), core (678 passed, 1 skipped) and every
+    linter; CI's full run covers the rest.
+  - web, on `aefd428`: Vitest 59 passed; the full browser suite 73 passed
+    (72 plus the DOC-027 test). The DOC-028 commit doesn't touch the web app.
   - live (`pytest -m live_api`, paid): **3 passed**. That's the golden
     fixture, the golden fixture with examples, and the example-contamination
     check, required because this stage changed the example read path
@@ -834,8 +845,23 @@ tests), then the rollout in item 11.
   Staging folders: none at the rollout copy (no intake file row pointed at
   `staging/`). Those created since, by the walkthrough intake and the
   Console tests, were removed by tenant creation and by the tests' clean-up.
-  No row points at `staging/` now. Deleting the 218 waits on the founder's
-  backup check (condition 2).
+  No row points at `staging/` now.
+
+  **Deleted, in this order:**
+  1. The founder ran the backup check for all 218 ids against
+     `backup_3b.documents`. The result was empty ("No rows returned").
+  2. The founder approved.
+  3. The 218 folders were deleted by their saved ids, with a `tenants`-row
+     re-check before each one: **218 folders, 310 files removed**, none
+     skipped.
+
+  Before: 229 folders, 450 files (the 228 plus one in-flight test folder).
+  After: **10 folders, all existing tenants.**
+
+  *Out of order:* the delete ran **during** the final API run. The founder
+  had since asked for it to run after (the D-160 kind of overlap). Nothing
+  outside the list was touched, since the 310 files removed are exactly the
+  list's, and the run passed.
 - **Stage 5 (founder, 2026-09-30): the API suite's test clean-up never
   deletes its tenants' files.** Each full staging API run leaves about 46
   tenant folders and 73 files in the bucket. The worker suite's clean-up
@@ -855,6 +881,11 @@ tests), then the rollout in item 11.
   - CLAUDE.md 7.14 says deletion removes the tenant's business data.
     Whether a linked intake counts is the founder's decision. It doesn't
     block 3b.
+- **Stage 5 question (founder, 2026-09-30): the review viewer finding an
+  order's original missing tells no one.** The worker alerts on DOC-026
+  (`document_failed`), but the viewer only logs
+  `viewer_stored_file_missing`. A missing original is a data-integrity
+  fault, so the founder probably wants an alert, deduplicated per order.
 - **Stage 5 question (founder, 2026-09-30): a catalog import failed by the
   stuck sweep raises no alert.** The sweep marks an import left in `parsing`
   failed with IMP-009 and tells no one. CLAUDE.md 7.9 requires an alert for a
