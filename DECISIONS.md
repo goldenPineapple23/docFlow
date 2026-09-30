@@ -2730,7 +2730,20 @@ The fresh backup challenge passed the step-up. The rotation then stopped at `QUA
   - the review viewer (link and file): the original isn't shown, 404;
   - export download: 404;
   - the worker: a clean DOC-026 `path_refused`, with no retry and no wait;
-  - catalog import: IMP-009 at once, not after the stuck sweep;
+  - catalog import: at once, not after the stuck sweep, with the new
+    founder-audience **IMP-010** "This file's stored copy can't be read".
+    IMP-009 tells the founder to start again, which would fail the same way.
+    A missing stored copy moves to IMP-010 too; an outage stays IMP-009;
   - Console import from an intake file: SYS-001, like any failed Console read;
   - example prompting: the example is left out.
+- **The alert can't live in the check** (founder agreed): the check also
+  runs on writes, from the copy script and in tests, and doesn't know which
+  record it's looking at. So each reader calls one helper,
+  `founder_alerts.report_refused_storage_path`.
+- **A build guard** (`test_every_reader_of_a_stored_path_reports_a_refused_one`)
+  fails when any use of a path-taking storage function outside `storage.py`
+  isn't inside a `try` whose `except UnsafeStoragePathError` calls the
+  helper. It keeps an explicit exemption list, each with a reason (tenant
+  creation's staging copy and its best-effort clean-ups; example
+  prompting's `read` closure), and it is tested both ways.
 

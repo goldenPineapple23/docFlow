@@ -288,6 +288,122 @@ def test_product_code_never_imports_the_storage_fake():
     assert offenders == []
 
 
+# ── Every reader reports a refused path (founder, 2026-09-30) ────────────────
+
+# The storage functions that take a stored path from a database row.
+_PATH_TAKING = {
+    "read_file",
+    "read_staging_file",
+    "copy_into_tenant",
+    "delete_tenant_file",
+    "delete_staging_file",
+}
+
+# (file, enclosing function, storage function) -> why it needs no report.
+_REPORT_EXEMPT = {
+    ("packages/core/docflow_core/admin_data_access.py", "add_intake_file", "delete_staging_file"): (
+        "clean-up of the staging file this request just wrote; best effort and logged"
+    ),
+    ("packages/core/docflow_core/admin_data_access.py", "create_tenant", "copy_into_tenant"): (
+        "staging paths belong to no tenant; a refused file rolls the whole creation back"
+    ),
+    ("packages/core/docflow_core/admin_data_access.py", "create_tenant", "delete_tenant_file"): (
+        "clean-up of copies this request just made; best effort and logged"
+    ),
+    ("packages/core/docflow_core/admin_data_access.py", "create_tenant", "delete_staging_file"): (
+        "clean-up of staging originals after a committed creation; best effort and logged"
+    ),
+    ("packages/core/docflow_core/example_prompting.py", "read", "read_file"): (
+        "the default `read` closure; its call site in the same function reports the refusal"
+    ),
+}
+
+
+def _refused_path_sites_without_a_report(sources: dict[str, str]) -> list[str]:
+    """Every use of a path-taking storage function outside storage.py must sit
+    in a `try` whose `except UnsafeStoragePathError` calls
+    `report_refused_storage_path`, unless it is exempt above with a reason."""
+    offenders = []
+    for rel, source in sources.items():
+        tree = ast.parse(source)
+        parent = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Name) and node.id in _PATH_TAKING):
+                continue
+            function, reported, child, up = "<module>", False, node, parent.get(node)
+            while up is not None:
+                if isinstance(up, ast.Try) and any(child is s for s in up.body) and not reported:
+                    reported = any(_catches_unsafe(h) and _calls_report(h) for h in up.handlers)
+                if isinstance(up, (ast.FunctionDef, ast.AsyncFunctionDef)) and function == "<module>":
+                    function = up.name
+                child, up = up, parent.get(up)
+            if not reported and (rel, function, node.id) not in _REPORT_EXEMPT:
+                offenders.append(f"{rel}:{node.lineno} {node.id} in {function}")
+    return offenders
+
+
+def _catches_unsafe(handler: ast.ExceptHandler) -> bool:
+    types = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
+    return any(
+        (isinstance(t, ast.Name) and t.id == "UnsafeStoragePathError")
+        or (isinstance(t, ast.Attribute) and t.attr == "UnsafeStoragePathError")
+        for t in types
+    )
+
+
+def _calls_report(handler: ast.ExceptHandler) -> bool:
+    return any(
+        isinstance(n, ast.Call)
+        and (
+            (isinstance(n.func, ast.Attribute) and n.func.attr == "report_refused_storage_path")
+            or (isinstance(n.func, ast.Name) and n.func.id == "report_refused_storage_path")
+        )
+        for stmt in handler.body
+        for n in ast.walk(stmt)
+    )
+
+
+def _product_sources() -> dict[str, str]:
+    sources = {}
+    for root in ("packages/core/docflow_core", "apps/api/app", "apps/worker/app", "scripts"):
+        for path in (REPO_ROOT / root).rglob("*.py"):
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            if rel != "packages/core/docflow_core/storage.py":
+                sources[rel] = path.read_text(encoding="utf-8")
+    return sources
+
+
+def test_every_reader_of_a_stored_path_reports_a_refused_one():
+    assert _refused_path_sites_without_a_report(_product_sources()) == []
+
+
+def test_the_reporting_guard_fails_when_a_reader_drops_the_report():
+    """The guard tested both ways: remove the report from the worker's read
+    and the guard names that line."""
+    sources = _product_sources()
+    worker = "apps/worker/app/tasks/parse_and_extract.py"
+    assert "founder_alerts.report_refused_storage_path(" in sources[worker]
+    sources[worker] = sources[worker].replace(
+        "founder_alerts.report_refused_storage_path(", "founder_alerts.alert_storage_unavailable(", 1
+    )
+    offenders = _refused_path_sites_without_a_report(sources)
+    assert len(offenders) == 1 and offenders[0].startswith(f"{worker}:")
+
+
+def test_every_exemption_still_matches_a_real_site():
+    """An exemption whose site has gone would silently cover a new one."""
+    sources = _product_sources()
+    found = set()
+    for rel, source in sources.items():
+        tree = ast.parse(source)
+        for fn in ast.walk(tree):
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for n in ast.walk(fn):
+                    if isinstance(n, ast.Name) and n.id in _PATH_TAKING:
+                        found.add((rel, fn.name, n.id))
+    assert set(_REPORT_EXEMPT) <= found
+
+
 def test_no_product_code_writes_to_the_local_storage_folder():
     """From the switch on, nothing reads or writes the local folder except
     the copy script (item 11)."""

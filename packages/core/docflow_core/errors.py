@@ -1159,6 +1159,23 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="founder",
     ),
+    # Stage 3b (founder, 2026-09-30): IMP-009's "start again" would fail the
+    # same way every time when the stored copy itself can't be read.
+    "IMP-010": ErrorCatalogEntry(
+        code="IMP-010",
+        title="This file's stored copy can't be read",
+        message=(
+            "DocFlow couldn't read its stored copy of this file: it is missing, or the location"
+            " recorded for it isn't valid. Nothing was imported, and starting this import again"
+            " would fail the same way."
+        ),
+        action=(
+            "Upload the file again as a new import. The log names this import's ID; if the"
+            " recorded location pointed into another tenant, you have also been alerted."
+        ),
+        severity="warning",
+        audience="founder",
+    ),
     "CAT-001": ErrorCatalogEntry(
         code="CAT-001",
         title="Rows with no SKU",

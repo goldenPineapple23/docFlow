@@ -931,6 +931,7 @@ def run_parse(tenant_id: UUID, import_id: UUID) -> str:
     from docflow_core.db import tenant_session
     from docflow_core.storage import (
         StorageError,
+        StorageObjectMissingError,
         StorageUnavailableError,
         UnsafeStoragePathError,
         read_file,
@@ -945,15 +946,23 @@ def run_parse(tenant_id: UUID, import_id: UUID) -> str:
     try:
         content = read_file(tenant_id, row["storage_path"])
     except UnsafeStoragePathError as exc:
-        # The row's path breaks the prefix rules: nothing is read. Failed now
-        # with IMP-009, not left for the stuck sweep (founder, 2026-09-30).
+        # The row's path breaks the prefix rules: nothing is read. Failed now,
+        # not left for the stuck sweep; IMP-010, because starting again would
+        # fail the same way (founder, 2026-09-30).
         from docflow_core import founder_alerts
 
         founder_alerts.report_refused_storage_path(
             exc, tenant_id=tenant_id, where="catalog_import", ref_id=import_id
         )
         with tenant_session(tenant_id) as session:
-            record_parse_failure(session, import_id, "IMP-009")
+            record_parse_failure(session, import_id, "IMP-010")
+        return "failed"
+    except StorageObjectMissingError:
+        # The stored copy is gone: a data fault, and starting again can't
+        # help either -- IMP-010, not IMP-009's "start again".
+        logger.error("import_stored_file_missing import_id=%s", import_id)
+        with tenant_session(tenant_id) as session:
+            record_parse_failure(session, import_id, "IMP-010")
         return "failed"
     except StorageError as exc:
         # Nothing was imported and the file may be fine: IMP-009 says exactly

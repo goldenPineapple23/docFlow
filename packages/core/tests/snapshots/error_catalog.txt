@@ -346,6 +346,10 @@ IMP-009 [warning/founder] Reading this file didn't finish
   what+why: The worker reading this file stopped before it finished (a time limit, a restart, or running out of memory), so nothing was imported. The file itself may be fine.
   next:     Start the import again from the same file. If it stops again, check the worker log for this import's ID.
 
+IMP-010 [warning/founder] This file's stored copy can't be read
+  what+why: DocFlow couldn't read its stored copy of this file: it is missing, or the location recorded for it isn't valid. Nothing was imported, and starting this import again would fail the same way.
+  next:     Upload the file again as a new import. The log names this import's ID; if the recorded location pointed into another tenant, you have also been alerted.
+
 INT-001 [warning/tenant] No attachment to process
   what+why: This email didn't include an attachment DocFlow recognizes as a document, so nothing was processed.
   next:     Resend with the purchase order attached as a PDF, Word, or Excel file.

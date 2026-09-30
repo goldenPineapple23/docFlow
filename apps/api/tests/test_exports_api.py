@@ -362,6 +362,48 @@ def test_a_download_link_works_only_for_its_own_export_and_tenant(client):
 
 
 @requires_exports_schema
+def test_a_download_whose_path_names_another_tenant_is_404_and_alerts_the_founder(client, monkeypatch):
+    """Stage 3b (founder, 2026-09-30). A finished export row can't be edited
+    (0010), so the refusal is injected at the read; the check that produces it
+    is proven in packages/core/tests/test_storage.py. The route must answer
+    404, never the file, and raise the critical cross-tenant alert."""
+    from docflow_core.config import get_settings
+    from docflow_core.storage import CrossTenantStoragePathError
+
+    monkeypatch.setenv("FOUNDER_ALERT_EMAIL", "")  # the alert row only; no outbox email
+    get_settings.cache_clear()
+    with _ReviewTenant("Acme Test Distributor -- crossed export") as tenant:
+        status = _export(client, tenant, _approved_document(tenant), "csv")
+        other_tenant = str(uuid4())
+
+        def crossed(tenant_id, path):
+            raise CrossTenantStoragePathError("another tenant's folder", named_tenant_id=other_tenant)
+
+        monkeypatch.setattr("app.routers.exports.read_file", crossed)
+        try:
+            response = _download(client, status)
+            assert response.status_code == 404
+            with platform_session() as session:
+                alerts = session.execute(
+                    text(
+                        "SELECT severity, payload FROM founder_alerts "
+                        "WHERE tenant_id = :t AND type = 'storage_path_cross_tenant'"
+                    ),
+                    {"t": str(tenant.tenant_id)},
+                ).mappings().all()
+            assert len(alerts) == 1
+            assert alerts[0]["severity"] == "critical"
+            assert alerts[0]["payload"]["where"] == "export_download"
+            assert alerts[0]["payload"]["ref_id"] == status["export"]["id"]
+            assert alerts[0]["payload"]["named_tenant_id"] == other_tenant
+        finally:
+            with platform_session() as session:
+                session.execute(
+                    text("DELETE FROM founder_alerts WHERE tenant_id = :t"), {"t": str(tenant.tenant_id)}
+                )
+
+
+@requires_exports_schema
 def test_the_storage_path_never_reaches_the_client(client):
     with _ReviewTenant("Acme Test Distributor -- no paths") as tenant:
         status = _export(client, tenant, _approved_document(tenant), "csv")
