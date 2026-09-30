@@ -532,14 +532,17 @@ a local folder can't work in production.
      - a founder alert, `storage_unavailable`, **at most once per hour for
        the whole platform** (Decided, Q3), not once per tenant: an outage
        hits every tenant at once, and per-tenant alerts would send N alerts
-       an hour for one incident. The alert has no tenant and its payload
-       counts the tenants affected in that hour.
-     - Open point for the build: today a tenant session may only raise
-       alerts for its own tenant (0011's `tenant_raise` policy), so a
-       tenant-less alert from the upload path may need a new insert policy.
-       If it does, that policy goes in its **own** migration with the normal
-       backup, never folded into `0033` (which must stay bucket-only for the
-       Q2 rule to apply). I'll say which before building.
+       an hour for one incident.
+     - How, with no new migration (settled 2026-09-30): the open-alert
+       dedupe index (`idx_founder_alerts_open_dedupe`, 0011) is unique
+       across all tenants and applies regardless of RLS. Each tenant session
+       raises the alert for its own tenant (the existing `tenant_raise`
+       policy) with the key `storage_unavailable:<UTC hour>`, the hour taken
+       from the database's clock (as `dedupe_per_utc_day` does, D-170 #7).
+       The first tenant in the hour writes the row; the rest get the dedupe
+       conflict and write nothing. Trade-off: the alert names the first
+       tenant that hit it, not a count, because a tenant session can't update
+       another tenant's row. Every failure is still logged with its tenant.
    - **Email intake:** answer the webhook with a **5xx, never a 403**
      (Postmark retries non-2xx inbound webhooks but stops on a 403), so
      Postmark sends the email again later, and raise the same alert.
@@ -556,9 +559,15 @@ a local folder can't work in production.
      tells the founder how many are waiting. This is a narrow, Storage-only
      version of 3d's `processing -> pending` wait; 3d extends the same
      transition to provider outages. That read is outside every broad
-     `except`, so it can't be relabelled DOC-005. Test: a read failure
-     leaves the document `pending` with its attempt count unchanged, three
-     times in a row.
+     `except`, so it can't be relabelled DOC-005.
+     - **Only an outage waits.** Connection errors, timeouts and 5xx from
+       Storage return the document to `pending`. A **404 (object missing)
+       is not an outage**: it is a data fault, and waiting would retry it
+       forever. It fails the document loudly, with the same catalog code and
+       founder alert as a hash mismatch (item 9).
+     - Tests: an unreachable Storage leaves the document `pending` with its
+       attempt count unchanged, three times in a row; a 404 fails it once,
+       with the alert.
    - **Previews and extracted text:** best effort, unchanged. A failure
      never touches the document's status.
    - **Export and catalog import:** they fail with their existing codes and
@@ -599,7 +608,8 @@ a local folder can't work in production.
    `documents.content_sha256` already exists. The worker compares it with
    the bytes it reads before parsing. A mismatch fails the document loudly
    with a new catalog code (audience both, with a founder alert), rather
-   than extracting the wrong file or only logging it. It costs one hash
+   than extracting the wrong file or only logging it. The same code covers
+   an original that is missing from Storage (item 6). It costs one hash
    per read. It guards against a wrong or corrupted object, which is rare.
 10. **Tests.**
     - Product code has one backend, Supabase Storage. The suites run
