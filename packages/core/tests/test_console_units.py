@@ -405,8 +405,27 @@ def test_the_founding_trial_ending_email_states_the_rate_after_the_founding_peri
     assert "To cancel, email support@example.test by October 5, 2026, and nothing is charged." in flat
 
 
-@pytest.mark.parametrize("template", ["trial_ending_at_signing", "trial_ending_no_fee"])
-def test_the_standard_and_no_fee_trial_ending_emails_promise_no_monthly_charge(template):
+@pytest.mark.parametrize(
+    ("template", "outcome"),
+    [("trial_ending_at_signing", "no monthly charge is made"), ("trial_ending_no_fee", "nothing is charged")],
+)
+def test_the_standard_and_no_fee_trial_ending_emails_end_the_cancel_line_as_approved(template, outcome):
+    """Standard: the fee was paid at signing. No fee: "nothing is charged", the
+    same as the no-fee "Ask for a card" and go-live emails (founder, 2026-09-29)."""
     _, body = email_outbox.render(template, TEMPLATE_PARAMS[template])
     flat = " ".join(body.split())
-    assert "To cancel, email support@example.test by October 5, 2026, and no monthly charge is made." in flat
+    assert f"To cancel, email support@example.test by October 5, 2026, and {outcome}." in flat
+
+
+def test_the_three_no_fee_emails_end_the_cancel_line_the_same_way():
+    from docflow_core.onboarding import CANCEL_OUTCOMES
+
+    assert CANCEL_OUTCOMES["no_fee"] == "nothing is charged"
+    for template in ("card_request_no_fee", "trial_ending_no_fee"):
+        _, body = email_outbox.render(template, TEMPLATE_PARAMS[template])
+        assert "and nothing is charged." in " ".join(body.split()), template
+
+
+def test_the_held_reply_tells_the_buyer_to_contact_their_supplier():
+    _, body = email_outbox.render("intake_held", TEMPLATE_PARAMS["intake_held"])
+    assert "If your order is urgent, contact Acme Test Distributor directly." in body

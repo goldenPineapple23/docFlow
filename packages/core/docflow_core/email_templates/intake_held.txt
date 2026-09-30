@@ -6,4 +6,6 @@ Your email to $tenant_name's order address was received.
 
 $message
 
+If your order is urgent, contact $tenant_name directly.
+
 -- DocFlow (automatic reply; this mailbox is not monitored)

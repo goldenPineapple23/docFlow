@@ -1503,8 +1503,8 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         code="ONB-018",
         title="Set the support address first",
         message=(
-            "The card request tells the customer how to cancel, and SUPPORT_EMAIL isn't set, "
-            "so there is no address to give them. Nothing was sent."
+            "The emails for card billing tell the customer how to cancel, and SUPPORT_EMAIL "
+            "isn't set, so there is no address to give them. Nothing was sent."
         ),
         action="Set SUPPORT_EMAIL (RUNBOOK section 3), restart the API, then ask again.",
         severity="warning",

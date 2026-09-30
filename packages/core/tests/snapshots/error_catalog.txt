@@ -483,7 +483,7 @@ ONB-017 [warning/founder] The setup fee is already paid
   next:     If the deal changed, settle the difference in Stripe.
 
 ONB-018 [warning/founder] Set the support address first
-  what+why: The card request tells the customer how to cancel, and SUPPORT_EMAIL isn't set, so there is no address to give them. Nothing was sent.
+  what+why: The emails for card billing tell the customer how to cancel, and SUPPORT_EMAIL isn't set, so there is no address to give them. Nothing was sent.
   next:     Set SUPPORT_EMAIL (RUNBOOK section 3), restart the API, then ask again.
 
 QUA-001 [info/tenant] Only DocFlow can release these documents

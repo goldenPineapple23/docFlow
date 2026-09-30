@@ -403,14 +403,14 @@ GO_LIVE_BILLING_LINES = {
     ),
 }
 
-# How the cancel sentence ends (founder, 2026-09-29): a founding customer's
-# fee is still to come with month one, so cancelling means nothing at all is
-# charged; a standard customer's fee was paid at signing, and with no fee
-# there is only the month.
+# How the cancel sentence ends (founder, 2026-09-29): a standard customer's
+# fee was paid at signing, so only the monthly charge is avoided; for a
+# founding customer (fee still to come with month one) and one with no fee,
+# nothing at all is charged -- the same words in all three no-fee emails.
 CANCEL_OUTCOMES = {
     "founding": "nothing is charged",
     "at_signing": "no monthly charge is made",
-    "no_fee": "no monthly charge is made",
+    "no_fee": "nothing is charged",
 }
 
 

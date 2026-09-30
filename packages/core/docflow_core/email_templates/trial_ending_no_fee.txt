@@ -7,7 +7,6 @@ on file is charged $first_charge_amount: your first month.
 
 You don't need to do anything to keep using DocFlow.
 
-To cancel, email $support_email by $cancel_by_date, and no monthly charge is
-made.
+To cancel, email $support_email by $cancel_by_date, and nothing is charged.
 
 -- DocFlow
