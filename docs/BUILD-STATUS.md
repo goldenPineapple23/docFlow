@@ -902,6 +902,21 @@ tests), then the rollout in item 11.
   Approval re-validates (H2) and would refuse, so nothing wrong can be
   approved. Still, seeded orders must go through the pipeline, or at least
   through validation, so they don't look clean when they aren't.
+- **CI, 2026-09-30: every test passed on `58c8008`; only the dependency
+  audit failed**, on two advisories published that day (PyJWT, Next.js).
+  They were fixed in their own PR (#30, "Security upgrades" below), merged to
+  `main` first, then `main` was merged into this branch:
+  - **no conflict**; both lock files now pin `boto3==1.43.105` and
+    `PyJWT==2.15.0`;
+  - the lock files are plain `pip freeze` output (there is no lock tool), so
+    each was checked by installing it into a fresh Python 3.13 environment
+    the way CI does, then core with `--no-deps`: `pip check` clean, a fresh
+    `pip freeze` identical to the lock file, `pip-audit` clean (api and
+    worker);
+  - web: `npm ci`, next and eslint-config-next at 16.3.8, `npm audit`
+    0 vulnerabilities;
+  - DOC-028 re-checked at `58c8008` (founder): it doesn't contain "The file
+    itself is fine".
 
 **3c -- H5, the full part: the parse service.** Agreed:
 - **Bytes in, text and images out.** The worker sends the file, the service
