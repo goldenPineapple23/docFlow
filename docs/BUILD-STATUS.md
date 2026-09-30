@@ -793,6 +793,68 @@ tests), then the rollout in item 11.
     the review viewer. The fix is D-182's addendum: every reader handles a
     refused path; a path under another tenant's folder raises a critical
     `storage_path_cross_tenant` alert; IMP-010; and a build guard.
+- **Founder's walkthrough (`docs/walkthroughs/3b-storage.md`), 2026-09-30:
+  steps 1-6 pass.** Each step was checked against the bucket and the
+  database:
+  - upload: the original sits under `uploads/` with a matching hash, and its
+    extracted text is at the fixed `derived/` key;
+  - export: under `exports/`, with its hash matching the one recorded;
+  - catalog import: under `uploads/`, with a matching hash;
+  - tenant from intake: the file was copied inside Storage to `onboarding/`,
+    and the staging original is gone;
+  - **hard delete: the folder went from 5 objects to 0, and the deletion
+    record says `objects_removed: 5`** (the bulk-delete fix, proven live);
+  - a bad path: the viewer shows DOC-027 (built after step 6 first showed
+    the wrong message).
+
+  Two faults outside 3b turned up, the Next.js dev cache and seed-script
+  data, both recorded here.
+- **Delta copy, 2026-09-30 (after the switch at 15:21 UTC):** nothing to
+  copy. The pass criterion "0 referenced but missing locally" assumed
+  nothing would be written after the switch, but the tests and the
+  walkthrough wrote. **Restated: nothing left to copy, and every newly
+  flagged row is either already in the bucket or explained.** It holds:
+  - 49 new rows are in the bucket (written after the switch);
+  - 1 is a made-up test path, `tenants/seed/seed.txt`, on "Acme Test
+    Examples" (goes into the seed-data item below);
+  - 1 is the intake file row of the hard-deleted walkthrough tenant (see
+    the retention question below).
+
+  The original 14 flagged rows are unchanged.
+- **Bucket clean-up, 2026-09-30:** 228 tenant folders; 10 belong to
+  existing tenants and 218 have no `tenants` row at all (310 objects).
+  Every one of the 218 was written inside one of today's recorded test
+  runs:
+  - worker run 1 (the failed clean-up run): 58;
+  - the three full API runs: 46, 46 and 47;
+  - the API "affected files" run: 17;
+  - worker runs 2 and 3: 2 and 1;
+  - the viewer tests: 1.
+
+  Staging folders: none at the rollout copy (no intake file row pointed at
+  `staging/`). Those created since, by the walkthrough intake and the
+  Console tests, were removed by tenant creation and by the tests' clean-up.
+  No row points at `staging/` now. Deleting the 218 waits on the founder's
+  backup check (condition 2).
+- **Stage 5 (founder, 2026-09-30): the API suite's test clean-up never
+  deletes its tenants' files.** Each full staging API run leaves about 46
+  tenant folders and 73 files in the bucket. The worker suite's clean-up
+  deletes them. Fix the shared API test fixtures in Stage 5; until then,
+  the clean-up procedure above clears them.
+- **Question for the founder (data retention, 2026-09-30, from before 3b):
+  a hard delete leaves the linked onboarding intake behind.** Intakes carry
+  no `tenant_id`, only `linked_tenant_id`, so the delete doesn't reach
+  them.
+  - The files themselves are removed, because they were moved under
+    `tenants/{id}/onboarding/` at tenant creation.
+  - The `onboarding_intakes` row stays, with the prospect's name and contact
+    email, and so do its file rows, pointing at objects that no longer
+    exist.
+  - The Console's intake page reads only those rows, so it lists the files
+    as if present (no error page, but a stale listing).
+  - CLAUDE.md 7.14 says deletion removes the tenant's business data.
+    Whether a linked intake counts is the founder's decision. It doesn't
+    block 3b.
 - **Stage 5 question (founder, 2026-09-30): a catalog import failed by the
   stuck sweep raises no alert.** The sweep marks an import left in `parsing`
   failed with IMP-009 and tells no one. CLAUDE.md 7.9 requires an alert for a
