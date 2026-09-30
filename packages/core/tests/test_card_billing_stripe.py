@@ -180,10 +180,9 @@ def _subscribe(**kw):
         monthly_price=Decimal("299.00"),
         promo_monthly_price=None,
         promo_months=None,
-        setup_fee=None,
         days_until_due=15,
         idempotency_scope="golive",
-        **kw,
+        **{"setup_fee": None, **kw},
     )
 
 
@@ -284,3 +283,63 @@ def test_a_card_needing_the_customer_is_an_outcome_not_an_error(monkeypatch):
 def test_stripe_failing_otherwise_raises_so_the_event_is_redelivered(monkeypatch):
     with pytest.raises(es.ExternalServiceError):
         _pay(monkeypatch, {"in_1": (500, {})}, {"in_1": "open"})
+
+
+# ── When the setup fee is added (test mode, 2026-09-29) ──────────────────────
+# A charge_automatically subscription on a trial gets a $0 first invoice at
+# once, and Stripe sweeps pending items onto it and charges them then: added
+# before, a founding customer's fee was charged at go-live. Added after and
+# tied to the subscription, it comes with month one at the trial's end.
+
+
+def _calls(stripe) -> list[tuple[str, dict]]:
+    return [(p, d) for m, p, d in stripe.requests if m == "POST" and p in ("subscriptions", "invoiceitems")]
+
+
+def test_by_card_the_fee_is_added_after_the_subscription_and_tied_to_it(stripe):
+    _subscribe(charge_card=True, setup_fee=Decimal("750.00"), trial_end=1_900_000_000)
+    (first, _), (second, item) = _calls(stripe)
+    assert (first, second) == ("subscriptions", "invoiceitems")
+    assert item["subscription"] == "sub_1" and item["amount"] == 75000
+
+
+def test_by_invoice_the_fee_is_still_added_before_the_subscription(stripe):
+    _subscribe(setup_fee=Decimal("750.00"), trial_end=1_900_000_000)
+    (first, item), (second, _) = _calls(stripe)
+    assert (first, second) == ("invoiceitems", "subscriptions")
+    assert "subscription" not in item
+
+
+def test_a_retried_card_go_live_adds_a_missing_fee_to_the_existing_subscription(stripe, monkeypatch):
+    live = {
+        "id": "sub_live",
+        "status": "trialing",
+        "metadata": {"docflow_tenant_id": str(TENANT)},
+        "items": {"data": []},
+    }
+    original = stripe.__call__
+
+    def with_live_subscription(method, url, **kw):
+        if method == "GET" and url.endswith("/subscriptions"):
+            return httpx.Response(200, json={"data": [live]})
+        return original(method, url, **kw)
+
+    monkeypatch.setattr(es.httpx, "request", with_live_subscription)
+    result = _subscribe(charge_card=True, setup_fee=Decimal("750.00"))
+    assert result.reused
+    ((path, item),) = _calls(stripe)
+    assert path == "invoiceitems" and item["subscription"] == "sub_live"
+
+
+def test_a_fee_already_invoiced_is_never_added_again(stripe, monkeypatch):
+    original = stripe.__call__
+
+    def with_invoiced_fee(method, url, **kw):
+        if method == "GET" and url.endswith("/invoiceitems"):
+            invoiced = {"id": "ii_1", "invoice": "in_1", "metadata": {"docflow_setup_fee_for": str(TENANT)}}
+            return httpx.Response(200, json={"data": [invoiced]})
+        return original(method, url, **kw)
+
+    monkeypatch.setattr(es.httpx, "request", with_invoiced_fee)
+    _subscribe(charge_card=True, setup_fee=Decimal("750.00"))
+    assert [p for p, _ in _calls(stripe)] == ["subscriptions"]

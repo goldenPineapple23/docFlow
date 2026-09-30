@@ -6,9 +6,10 @@ To finish setting up $tenant_name on DocFlow, please add the card DocFlow
 should charge. Your card details go straight to Stripe, our payment
 provider; DocFlow never sees them.
 
-The setup fee ($setup_fee) is charged when you add the card. Your 7-day
-free trial starts when DocFlow goes live, and your first month is charged
-when it ends.
+The setup fee ($setup_fee) is charged when you add the card. It covers the
+setup work and is non-refundable. Your 7-day free trial starts when DocFlow
+goes live. When it ends, your first month ($monthly_amount) is charged.
+Cancel before the trial ends and no monthly charge is made.
 
 Add your card: $billing_url
 

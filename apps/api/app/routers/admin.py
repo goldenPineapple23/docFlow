@@ -362,7 +362,10 @@ def request_card(tenant_id: UUID, identity: AuthenticatedIdentity = Depends(requ
     at signing (standard), with month one (founding), or none to charge."""
     _console_act(identity, tenant_id, "card_request", target_type="tenant", target_id=tenant_id)
     with tenant_session(tenant_id) as session:
-        outbox_id, template = card_billing.request_card(session, tenant_id)
+        try:
+            outbox_id, template = card_billing.request_card(session, tenant_id)
+        except onboarding.OnboardingError as exc:
+            raise _onboarding_error(exc) from exc
     if outbox_id is None:
         raise catalog_error("CON-004", status_code=409)
     return {"email_outbox_id": str(outbox_id), "template": template}
@@ -925,6 +928,7 @@ def go_live(
                     subscription_status=subscription.status,
                     current_period_end=subscription.current_period_end,
                     founding_ends_at=subscription.founding_ends_at,
+                    trial_end=trial_end,
                 ),
                 app_url=get_settings().app_base_url,
             )

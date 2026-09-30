@@ -7,7 +7,8 @@ should charge. Your card details go straight to Stripe, our payment
 provider; DocFlow never sees them.
 
 Nothing is charged now. Your 7-day free trial starts when DocFlow goes
-live, and your first month is charged when it ends.
+live. When it ends, your first month ($monthly_amount) is charged. Cancel
+before the trial ends and nothing is charged.
 
 Add your card: $billing_url
 

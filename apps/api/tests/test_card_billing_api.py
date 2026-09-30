@@ -402,7 +402,8 @@ def test_owners_see_bil_006_with_the_date_and_bil_009_after_it(client):
         _past_due_since(tenant, 15)  # past the 14-day cure period
         banner = client.get("/billing", headers=tenant.headers()).json()["banner"]
         assert banner["code"] == "BIL-009"
-        assert banner["message"] == "Your payment is overdue, and processing may be paused."
+        assert banner["title"] == "Your payment is overdue"
+        assert banner["message"] == "Processing may be paused."
 
 
 def test_no_banner_for_an_invoice_tenant_and_no_billing_page_for_a_reviewer(client):
@@ -547,7 +548,8 @@ def test_a_founding_customer_billed_by_card_pays_the_fee_with_month_one(
         assert call["charge_card"] is True and call["setup_fee"] == Decimal("750.00")
         assert _column(tenant_id, "billing_method") == "card"
         (email,) = _emails(tenant_id, "go_live")
-        assert "The card on file is charged when it ends." in email["body_text"]
+        # The $199.00 founding month plus the $750.00 setup fee, on the trial's last day.
+        assert "the card on file is charged $949.00." in email["body_text"]
 
 
 @requires_console_schema

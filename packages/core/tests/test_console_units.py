@@ -51,15 +51,19 @@ TEMPLATE_PARAMS = {
     },
     "card_request_founding": {
         "tenant_name": "Acme Test Distributor",
+        "monthly_amount": "$199.00",
+        "promo_days": "90",
         "setup_fee": "$750.00",
         "billing_url": "https://app.example.test/billing",
     },
     "card_request_no_fee": {
         "tenant_name": "Acme Test Distributor",
+        "monthly_amount": "$299.00",
         "billing_url": "https://app.example.test/billing",
     },
     "card_request_at_signing": {
         "tenant_name": "Acme Test Distributor",
+        "monthly_amount": "$299.00",
         "setup_fee": "$1,500.00",
         "billing_url": "https://app.example.test/billing",
     },
@@ -284,3 +288,17 @@ def test_staging_files_live_outside_every_tenant_prefix(tmp_path, monkeypatch):
         assert not (tmp_path / staged).exists()
     finally:
         get_settings.cache_clear()
+
+
+def test_the_trial_length_in_card_billings_wording_is_the_constant():
+    """The approved card-billing texts say "7-day" in words (founder,
+    2026-09-29). If TRIAL_PERIOD_DAYS ever changes, this fails until the
+    wording is changed with it."""
+    from docflow_core.constants import TRIAL_PERIOD_DAYS
+    from docflow_core.onboarding import GO_LIVE_BILLING_LINES
+
+    phrase = f"{TRIAL_PERIOD_DAYS}-day"
+    assert phrase in GO_LIVE_BILLING_LINES["card"]
+    for template in ("card_request_founding", "card_request_at_signing", "card_request_no_fee"):
+        _, body = email_outbox.render(template, TEMPLATE_PARAMS[template])
+        assert phrase in body.replace("\n", " "), template

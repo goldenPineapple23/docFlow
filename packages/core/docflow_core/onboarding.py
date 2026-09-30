@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -27,7 +27,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from docflow_core import document_status, email_outbox
-from docflow_core.constants import FIRST_WEEK_CHECKIN_DAYS, constants_in_effect
+from docflow_core.constants import FIRST_WEEK_CHECKIN_DAYS, TRIAL_PERIOD_DAYS, constants_in_effect
 from docflow_core.db import rowcount
 
 ORDER = (
@@ -99,17 +99,23 @@ def advance(
     """Move onboarding_status forward to `to`, from any earlier state. Never
     backward. Returns whether it moved (and so whether an event was written)."""
     earlier = list(ORDER[: ORDER.index(to)])
-    moved = rowcount(session.execute(
-        text(
-            "UPDATE tenants SET onboarding_status = :to, updated_at = now() "
-            "WHERE id = :id AND onboarding_status = ANY(string_to_array(:earlier, ','))"
-        ),
-        {"to": to, "id": str(tenant_id), "earlier": ",".join(earlier)},
-    ))
+    moved = rowcount(
+        session.execute(
+            text(
+                "UPDATE tenants SET onboarding_status = :to, updated_at = now() "
+                "WHERE id = :id AND onboarding_status = ANY(string_to_array(:earlier, ','))"
+            ),
+            {"to": to, "id": str(tenant_id), "earlier": ",".join(earlier)},
+        )
+    )
     if moved:
         _lifecycle_event(
-            session, tenant_id, f"onboarding_{to}", actor_user_id=actor_user_id,
-            payload=payload, constants=constants,
+            session,
+            tenant_id,
+            f"onboarding_{to}",
+            actor_user_id=actor_user_id,
+            payload=payload,
+            constants=constants,
         )
     return bool(moved)
 
@@ -140,7 +146,10 @@ def record_test_batch_upload(
     session: Session, tenant_id: UUID, document_ids: list[str], *, actor_user_id: UUID
 ) -> None:
     advance(
-        session, tenant_id, "test_batch_uploaded", actor_user_id=actor_user_id,
+        session,
+        tenant_id,
+        "test_batch_uploaded",
+        actor_user_id=actor_user_id,
         payload={"document_ids": document_ids, "acting_as_tenant_id": str(tenant_id)},
     )
 
@@ -176,7 +185,10 @@ def start_test_batch_run(session: Session, tenant_id: UUID, *, actor_user_id: UU
         raise OnboardingError("ONB-003")
     ids = [UUID(str(row[0])) for row in sorted(released, key=lambda r: (r[1], str(r[0])))]
     advance(
-        session, tenant_id, "test_batch_running", actor_user_id=actor_user_id,
+        session,
+        tenant_id,
+        "test_batch_running",
+        actor_user_id=actor_user_id,
         payload={"document_ids": [str(i) for i in ids], "acting_as_tenant_id": str(tenant_id)},
     )
     return ids
@@ -184,9 +196,10 @@ def start_test_batch_run(session: Session, tenant_id: UUID, *, actor_user_id: UU
 
 def list_test_batch_documents(session: Session) -> list[dict[str, Any]]:
     """The tenant page's per-document status and cost list (Steps 7-8)."""
-    rows = session.execute(
-        text(
-            """
+    rows = (
+        session.execute(
+            text(
+                """
             SELECT d.id, d.original_filename, d.status, d.created_at, d.approved_at,
                    d.est_cost_usd, d.overall_confidence, d.input_tokens, d.output_tokens,
                    h.po_number, h.buyer_name
@@ -195,8 +208,11 @@ def list_test_batch_documents(session: Session) -> list[dict[str, Any]]:
             WHERE d.is_test_batch AND d.deleted_at IS NULL
             ORDER BY d.created_at, d.id
             """
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return [dict(r) for r in rows]
 
 
@@ -209,14 +225,18 @@ def mark_test_batch_complete(session: Session, tenant_id: UUID, *, actor_user_id
         raise OnboardingError("ONB-002")
     if status != "test_batch_running":
         raise OnboardingError("ONB-004")
-    counts = session.execute(
-        text(
-            "SELECT count(*) AS total, "
-            "count(*) FILTER (WHERE status = ANY(string_to_array(:done, ','))) AS done "
-            "FROM documents WHERE is_test_batch AND deleted_at IS NULL"
-        ),
-        {"done": ",".join(TEST_DOCUMENT_DONE)},
-    ).mappings().one()
+    counts = (
+        session.execute(
+            text(
+                "SELECT count(*) AS total, "
+                "count(*) FILTER (WHERE status = ANY(string_to_array(:done, ','))) AS done "
+                "FROM documents WHERE is_test_batch AND deleted_at IS NULL"
+            ),
+            {"done": ",".join(TEST_DOCUMENT_DONE)},
+        )
+        .mappings()
+        .one()
+    )
     if counts["total"] == 0 or counts["done"] < counts["total"]:
         raise OnboardingError("ONB-004", {"approved": counts["done"], "total": counts["total"]})
     session.execute(
@@ -224,7 +244,10 @@ def mark_test_batch_complete(session: Session, tenant_id: UUID, *, actor_user_id
         {"id": str(tenant_id)},
     )
     advance(
-        session, tenant_id, "test_batch_complete", actor_user_id=actor_user_id,
+        session,
+        tenant_id,
+        "test_batch_complete",
+        actor_user_id=actor_user_id,
         payload={"documents": counts["total"], "acting_as_tenant_id": str(tenant_id)},
     )
 
@@ -290,9 +313,10 @@ def plan_go_live(session: Session, tenant_id: UUID, *, billing_method: str | Non
     card-billing gates apply: a card on file (D1, ONB-015) and, for a fee paid
     at signing, that payment (D2, ONB-016). Without it (the summary screen)
     nothing is refused for billing, and the plan says what each method needs."""
-    row = session.execute(
-        text(
-            """
+    row = (
+        session.execute(
+            text(
+                """
             SELECT t.name, t.onboarding_status, t.stripe_customer_id, t.invite_sent_at,
                    t.card_on_file_at, t.setup_fee_paid_at,
                    t.setup_fee_amount, t.setup_fee_billing, t.setup_fee_note, t.founding_price,
@@ -304,9 +328,12 @@ def plan_go_live(session: Session, tenant_id: UUID, *, billing_method: str | Non
             LEFT JOIN setup_fee_presets sp ON sp.id = t.setup_fee_preset_id
             WHERE t.id = :id
             """
-        ),
-        {"id": str(tenant_id)},
-    ).mappings().first()
+            ),
+            {"id": str(tenant_id)},
+        )
+        .mappings()
+        .first()
+    )
     if row is None:
         raise LookupError(tenant_id)
     if row["onboarding_status"] == "live":
@@ -354,8 +381,24 @@ def plan_go_live(session: Session, tenant_id: UUID, *, billing_method: str | Non
 # the template can't branch.
 GO_LIVE_BILLING_LINES = {
     "invoice": "Your first invoice comes from Stripe by email.",
-    "card": "Your 7-day free trial starts today. The card on file is charged when it ends.",
+    # {trial_end_date} and {first_charge_amount} are filled at go-live
+    # (founder, 2026-09-29): the first month at the rate they pay, plus the
+    # setup fee when it comes with month one (founding customers).
+    "card": (
+        "Your 7-day free trial starts today. On {trial_end_date}, the card on file is charged "
+        "{first_charge_amount}."
+    ),
 }
+
+
+def first_charge_amount(plan: GoLivePlan) -> Decimal:
+    """What a card-billed customer's card is charged when the trial ends: the
+    first month (the founding rate if they have one) plus the setup fee if it
+    goes on that first invoice. From the plan, never typed in (Section 10)."""
+    month = (
+        plan.promo_monthly_price if plan.founding_price and plan.promo_monthly_price else plan.monthly_price
+    )
+    return month + (plan.setup_fee_on_first_invoice or Decimal("0"))
 
 
 @dataclass(frozen=True)
@@ -368,6 +411,8 @@ class GoLiveBilling:
     # From Stripe's answer when it includes it (D-139); otherwise computed
     # below from the coupon's length, which is what Stripe itself applies.
     founding_ends_at: int | None = None
+    # When the trial ends (unix seconds), for the card-billed go-live email.
+    trial_end: int | None = None
 
 
 def complete_go_live(
@@ -447,7 +492,7 @@ def complete_go_live(
                 "app_url": app_url,
                 "tier_name": plan.tier_name,
                 "document_allowance": f"{plan.document_allowance:,}",
-                "billing_line": GO_LIVE_BILLING_LINES[plan.billing_method],
+                "billing_line": _billing_line(session, tenant_id, plan, billing),
             },
             related_type="tenant",
             related_id=tenant_id,
@@ -474,6 +519,26 @@ def complete_go_live(
         constants=constants_in_effect(
             "FIRST_WEEK_CHECKIN_DAYS", "INVOICE_DAYS_UNTIL_DUE", "TRIAL_PERIOD_DAYS"
         ),
+    )
+
+
+def _billing_line(session: Session, tenant_id: UUID, plan: GoLivePlan, billing: GoLiveBilling) -> str:
+    line = GO_LIVE_BILLING_LINES[plan.billing_method]
+    if plan.billing_method != "card":
+        return line
+    from docflow_core import card_billing
+
+    timezone = session.execute(
+        text("SELECT timezone FROM tenants WHERE id = :id"), {"id": str(tenant_id)}
+    ).scalar()
+    trial_end = (
+        datetime.fromtimestamp(billing.trial_end, tz=UTC)
+        if billing.trial_end
+        else datetime.now(UTC) + timedelta(days=TRIAL_PERIOD_DAYS)
+    )
+    return line.format(
+        trial_end_date=card_billing.local_date(trial_end, timezone),
+        first_charge_amount=card_billing.money(int(first_charge_amount(plan) * 100)),
     )
 
 

@@ -766,7 +766,7 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
     "BIL-009": ErrorCatalogEntry(
         code="BIL-009",
         title="Your payment is overdue",
-        message="Your payment is overdue, and processing may be paused.",
+        message="Processing may be paused.",
         action="Update your card to avoid any interruption.",
         severity="warning",
         audience="tenant",

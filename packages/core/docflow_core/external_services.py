@@ -251,7 +251,8 @@ def start_subscription(
     Safe to retry at any time -- a go-live whose database transaction failed
     after Stripe succeeded must never bill twice:
       * the product and coupon have fixed ids per tier version;
-      * the setup fee is added only if no pending one for this tenant exists;
+      * the setup fee is added only if no item for this tenant exists, pending
+        or invoiced (`_ensure_setup_fee`);
       * an existing live subscription for this tenant is returned, not duplicated
         (live = any status Stripe hasn't ended: not `canceled` or
         `incomplete_expired`; founder, 2026-09-29);
@@ -291,33 +292,17 @@ def start_subscription(
         if sub.get("metadata", {}).get("docflow_tenant_id") == str(tenant_id) and sub.get("status") not in (
             ENDED_SUBSCRIPTION_STATUSES
         ):
-            return replace(_subscription_result(sub), reused=True)
+            reused = replace(_subscription_result(sub), reused=True)
+            if charge_card and setup_fee is not None and setup_fee > 0:
+                # A retried card go-live: the subscription exists, the fee may not.
+                _ensure_setup_fee(customer_id, tenant_id, setup_fee, subscription_id=reused.subscription_id)
+            return reused
 
-    if setup_fee is not None and setup_fee > 0:
-        pending = _stripe(
-            "GET", "invoiceitems", params={"customer": customer_id, "pending": "true", "limit": 50}
-        )
-        if pending.status_code >= 300:
-            raise ExternalServiceError("stripe", f"invoice item list returned {pending.status_code}")
-        already = any(
-            item.get("metadata", {}).get("docflow_setup_fee_for") == str(tenant_id)
-            for item in pending.json().get("data", [])
-        )
-        if not already:
-            created = _stripe(
-                "POST",
-                "invoiceitems",
-                data={
-                    "customer": customer_id,
-                    "amount": _cents(setup_fee),
-                    "currency": "usd",
-                    "description": "DocFlow setup fee",
-                    "metadata[docflow_setup_fee_for]": str(tenant_id),
-                },
-                idempotency_key=f"docflow-setupfee-{tenant_id}",
-            )
-            if created.status_code >= 300:
-                raise ExternalServiceError("stripe", f"invoice item create returned {created.status_code}")
+    # Invoice billing: the fee is added before the subscription, and waits
+    # pending until the trial ends (a send_invoice subscription in trial makes
+    # no invoice at all, D-125). Card billing can't do that -- see below.
+    if not charge_card and setup_fee is not None and setup_fee > 0:
+        _ensure_setup_fee(customer_id, tenant_id, setup_fee, subscription_id=None)
 
     data: dict[str, Any] = {
         "customer": customer_id,
@@ -350,7 +335,45 @@ def start_subscription(
         raise CardDeclined()
     if response.status_code >= 300:
         raise ExternalServiceError("stripe", f"subscription create returned {response.status_code}")
-    return _subscription_result(response.json())
+    result = _subscription_result(response.json())
+    if charge_card and setup_fee is not None and setup_fee > 0:
+        # Card billing: added AFTER the subscription, tied to it. A
+        # charge_automatically subscription starting on a trial gets a $0
+        # first invoice at once, and Stripe sweeps any pending item onto it and
+        # charges it there and then -- test mode, 2026-09-29: a founding
+        # customer's $750 fee was charged at go-live instead of with month one.
+        # Added after, it waits for the invoice at the trial's end: one charge
+        # of fee plus first month (test mode: $949.00 = $750 + $199).
+        _ensure_setup_fee(customer_id, tenant_id, setup_fee, subscription_id=result.subscription_id)
+    return result
+
+
+def _ensure_setup_fee(
+    customer_id: str, tenant_id: UUID, setup_fee: Decimal, *, subscription_id: str | None
+) -> None:
+    """Add the tenant's setup fee as an invoice item, once. Skipped if an item
+    for this tenant exists at all -- pending or already invoiced -- so a
+    retried go-live never bills the fee twice."""
+    listed = _stripe("GET", "invoiceitems", params={"customer": customer_id, "limit": 100})
+    if listed.status_code >= 300:
+        raise ExternalServiceError("stripe", f"invoice item list returned {listed.status_code}")
+    if any(
+        item.get("metadata", {}).get("docflow_setup_fee_for") == str(tenant_id)
+        for item in listed.json().get("data", [])
+    ):
+        return
+    data: dict[str, Any] = {
+        "customer": customer_id,
+        "amount": _cents(setup_fee),
+        "currency": "usd",
+        "description": "DocFlow setup fee",
+        "metadata[docflow_setup_fee_for]": str(tenant_id),
+    }
+    if subscription_id:
+        data["subscription"] = subscription_id
+    created = _stripe("POST", "invoiceitems", data=data, idempotency_key=f"docflow-setupfee-{tenant_id}")
+    if created.status_code >= 300:
+        raise ExternalServiceError("stripe", f"invoice item create returned {created.status_code}")
 
 
 # Stripe's own "about a month": its repeating coupons count billing months, and

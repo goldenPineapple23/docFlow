@@ -1152,6 +1152,10 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
     `phase55/card-billing`, migration `0031`)**; waits on the founder's backup
     and staging apply of `0031`, the staging suites, then the Stripe
     test-mode walkthrough (`docs/walkthroughs/card-billing.md`).
+  - **The setup fee is non-refundable for standard customers** (founder,
+    2026-09-29): it covers the setup work and is charged when they add their
+    card, and the "Ask for a card" email says so. **Required before the first
+    pilot: the customer agreement must say the same.**
 - **Before the first real customer:** an email provider (the founder is setting one up with the domain). Until then every invite, notice and digest waits in the Console Outbox and must be sent by hand, and the inbound intake address cannot receive real mail.
 - Digest opt-out per person: decided yes, but later (needs a settings page).
 - `RUNBOOK.md` exists since Phase 5.5 with the migration backup procedure (section 1). Still to add in Phase 6: the constants (CLAUDE.md 7.15.4; `constants.py` is their single home until then), tier price changes (`scripts/new_tier_version.py`, D-137), the restore drill and the parser-upgrade process.

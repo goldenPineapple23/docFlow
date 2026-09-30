@@ -67,7 +67,7 @@ BIL-008 [warning/tenant] We couldn't open the card page
   next:     Try again in a minute. DocFlow has already logged the problem.
 
 BIL-009 [warning/tenant] Your payment is overdue
-  what+why: Your payment is overdue, and processing may be paused.
+  what+why: Processing may be paused.
   next:     Update your card to avoid any interruption.
 
 BUY-001 [warning/founder] Rows with no customer name

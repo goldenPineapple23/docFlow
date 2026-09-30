@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 PAST_DUE_STATUSES = ("past_due", "unpaid")
 
 
-def _local_date(moment: datetime, timezone: str | None) -> str:
+def local_date(moment: datetime, timezone: str | None) -> str:
     """'October 20, 2026', in the tenant's own timezone."""
     try:
         zone = ZoneInfo(timezone or "UTC")
@@ -50,7 +50,7 @@ def _local_date(moment: datetime, timezone: str | None) -> str:
     return f"{local:%B} {local.day}, {local.year}"
 
 
-def _money(cents: int | None) -> str:
+def money(cents: int | None) -> str:
     if cents is None:
         return "your subscription payment"
     return f"${Decimal(cents) / 100:,.2f}"
@@ -112,10 +112,10 @@ def on_newly_past_due(session: Session, tenant_id: UUID, *, amount_cents: int | 
             to_address=owner,
             template="payment_failed",
             params={
-                "amount": _money(amount_cents),
-                "failed_date": _local_date(state["first_past_due_at"], state["timezone"]),
+                "amount": money(amount_cents),
+                "failed_date": local_date(state["first_past_due_at"], state["timezone"]),
                 "billing_url": _billing_url(),
-                "suspension_date": _local_date(state["may_pause_at"], state["timezone"]),
+                "suspension_date": local_date(state["may_pause_at"], state["timezone"]),
             },
             related_type="tenant",
             related_id=tenant_id,
@@ -173,9 +173,9 @@ def send_past_due_reminder(session: Session, job: Any) -> None:
         to_address=owner,
         template="payment_failed_reminder",
         params={
-            "amount": _money(int(amount) if amount is not None else None),
+            "amount": money(int(amount) if amount is not None else None),
             "billing_url": _billing_url(),
-            "suspension_date": _local_date(state["may_pause_at"], state["timezone"]),
+            "suspension_date": local_date(state["may_pause_at"], state["timezone"]),
         },
         related_type="scheduled_job",
         related_id=job.id,
@@ -195,7 +195,7 @@ def past_due_banner(session: Session, tenant_id: UUID) -> ErrorCatalogEntry | No
         return None
     if state["first_past_due_at"] is None or state["date_passed"]:
         return render_error("BIL-009")
-    return render_error("BIL-006", suspension_date=_local_date(state["may_pause_at"], state["timezone"]))
+    return render_error("BIL-006", suspension_date=local_date(state["may_pause_at"], state["timezone"]))
 
 
 def record_card_event(
@@ -229,7 +229,7 @@ def record_card_event(
                 alert_type=alert_type,
                 severity="high",
                 tenant_id=tenant_id,
-                payload={"event_id": event_id, "amount_paid": _money(amount_cents)},
+                payload={"event_id": event_id, "amount_paid": money(amount_cents)},
                 dedupe_key=f"{alert_type}:{event_id}",
             )
     logger.info("stripe_card_event tenant=%s kind=%s outcome=%s", tenant_id, kind, outcome)
@@ -263,9 +263,11 @@ def request_card(session: Session, tenant_id: UUID) -> tuple[UUID | None, str]:
         session.execute(
             text(
                 """
-            SELECT name, onboarding_status, setup_fee_amount, setup_fee_billing,
-                   setup_fee_paid_at, founding_price
-              FROM tenants WHERE id = :id
+            SELECT t.name, t.onboarding_status, t.setup_fee_amount, t.setup_fee_billing,
+                   t.setup_fee_paid_at, t.founding_price,
+                   tr.monthly_price, tr.promo_monthly_price, tr.promo_days
+              FROM tenants t LEFT JOIN tiers tr ON tr.id = t.tier_id
+             WHERE t.id = :id
             """
             ),
             {"id": str(tenant_id)},
@@ -273,6 +275,15 @@ def request_card(session: Session, tenant_id: UUID) -> tuple[UUID | None, str]:
         .mappings()
         .one()
     )
+    if tenant["monthly_price"] is None:
+        # No plan agreed yet, so no monthly amount to state (ONB-009, as go-live).
+        from docflow_core.onboarding import OnboardingError
+
+        raise OnboardingError("ONB-009")
+    # The first month: the founding rate for a founding customer (their box is
+    # only ever ticked on a tier with a promo, D-117), otherwise the list price.
+    founding_rate = tenant["founding_price"] and tenant["promo_monthly_price"] is not None
+    monthly = Decimal(tenant["promo_monthly_price"] if founding_rate else tenant["monthly_price"])
     at_signing = fee_due_at_signing(dict(tenant))
     fee = tenant["setup_fee_amount"]
     if at_signing is not None:
@@ -290,9 +301,15 @@ def request_card(session: Session, tenant_id: UUID) -> tuple[UUID | None, str]:
     owner = _owner_email(session, tenant_id)
     if owner is None:
         return None, template
-    params: dict[str, Any] = {"tenant_name": tenant["name"], "billing_url": _billing_url()}
+    params: dict[str, Any] = {
+        "tenant_name": tenant["name"],
+        "billing_url": _billing_url(),
+        "monthly_amount": money(int(monthly * 100)),
+    }
     if setup_fee is not None:
-        params["setup_fee"] = _money(int(setup_fee * 100))
+        params["setup_fee"] = money(int(setup_fee * 100))
+    if template == "card_request_founding":
+        params["promo_days"] = tenant["promo_days"]
     outbox_id = email_outbox.enqueue(
         session,
         tenant_id=tenant_id,
