@@ -772,9 +772,13 @@ tests), then the rollout in item 11.
   - live (`pytest -m live_api`, paid): **3 passed**. That's the golden
     fixture, the golden fixture with examples, and the example-contamination
     check, required because this stage changed the example read path
-    (7.13). Those tests take their examples from a fixture file. Reading
-    examples from the bucket is proven separately against staging
-    (`test_example_prompting_db.py`, 10 passed).
+    (7.13). **The live example tests use a stand-in read:** their examples
+    come from a fixture file. Reading examples from the real bucket is
+    proven separately against staging (`test_example_prompting_db.py`, 10
+    passed: `save_file` into the bucket, then `select_examples` with no
+    stand-in). So the bucket read and the model call with examples are each
+    tested, but **not end to end in one run**. *Stage 5 item (founder,
+    2026-09-30):* add a real-bucket read to a live example test.
   - The first API run (11 failed) found stale `storage._resolve` imports in
     the example-prompting tests, and a refused stored path answering 500 in
     the review viewer. The fix is D-182's addendum: every reader handles a
