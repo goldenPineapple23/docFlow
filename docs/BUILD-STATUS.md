@@ -762,6 +762,24 @@ tests), then the rollout in item 11.
     bucket. The copy script's orphan count is local files only, so they
     don't affect the delta-copy check. They are listed before anything is
     removed.
+- **Staging suites on the final code (`e3e8641`, 2026-09-30):**
+  - core: 678 passed, 1 skipped (the customer-token live test, which needs
+    `SUPABASE_JWT_SECRET`, blank since D-174; the anon-key test covers it);
+  - worker: 139 passed, 2 skipped (the prefork tests, Linux only; CI runs
+    them);
+  - API: **568 passed, 3 deselected**, nothing failed or skipped. RUNBOOK 1.4
+    now says 568.
+  - live (`pytest -m live_api`, paid): **3 passed**. That's the golden
+    fixture, the golden fixture with examples, and the example-contamination
+    check, required because this stage changed the example read path
+    (7.13). Those tests take their examples from a fixture file. Reading
+    examples from the bucket is proven separately against staging
+    (`test_example_prompting_db.py`, 10 passed).
+  - The first API run (11 failed) found stale `storage._resolve` imports in
+    the example-prompting tests, and a refused stored path answering 500 in
+    the review viewer. The fix is D-182's addendum: every reader handles a
+    refused path; a path under another tenant's folder raises a critical
+    `storage_path_cross_tenant` alert; IMP-010; and a build guard.
 - **Stage 5 question (founder, 2026-09-30): a catalog import failed by the
   stuck sweep raises no alert.** The sweep marks an import left in `parsing`
   failed with IMP-009 and tells no one. CLAUDE.md 7.9 requires an alert for a
