@@ -418,8 +418,9 @@ minted and verified by the API on one clock, so there is no foreign clock to
 tolerate, and no customer ever sees a Supabase URL or the storage host.
 Storage connects through Supavisor with a pool of its own (see 3e).
 
-**3b detailed design -- PROPOSED 2026-09-30, for the founder's review. Nothing
-is built until it is approved.** Numbered items marked **Q** need an answer.
+**3b detailed design -- Q1-Q5 ANSWERED 2026-09-30; awaiting the founder's
+final sign-off. Nothing is built until then.** The founder's answers are
+recorded in each item as **Decided**.
 
 *Where things stand today.* `docflow_core/storage.py` writes to a folder on
 the machine running the code (`storage/`, 2,973 files and 3.3 MB on this
@@ -448,6 +449,10 @@ a local folder can't work in production.
      `STORAGE_S3_SECRET_ACCESS_KEY` (documented in `.env.example`; the
      founder creates the key). The 3c parse service still holds no storage
      key.
+   - **Decided (Q1): the S3 access key.** Recorded caveat: Supabase S3 keys
+     are project-wide, not per-bucket or per-tenant. A leaked key reaches
+     every tenant's files, so tenant isolation for files rests entirely on
+     item 3's checks in our own code, not on the key.
    - Every call: 5 s connect and 30 s read timeouts, and up to 3 tries with
      backoff. Only on requests that are safe to repeat: every write goes to a
      key nobody else writes, so a repeated PUT is the same PUT. The worst
@@ -464,6 +469,12 @@ a local folder can't work in production.
      bucket from the same file. `0033` inserts one row into
      `storage.buckets` and touches no existing table, so **I propose no
      backup for it** (the rule is backup-first; this is the question).
+   - **Decided (Q2): no backup for `0033`,** as a standing rule rather than
+     a one-off: a migration that only creates Storage buckets and touches
+     no existing table skips the backup. RUNBOOK 1 records the rule.
+     Separately, staging has had no backups since 2026-09-30 (RUNBOOK 1.3),
+     so a fresh full backup is taken before the 3b rollout starts (item
+     11, step 1) as a restore point for the cutover.
    - CI: `supabase/config.toml` turns `[storage]` on (it is off today).
 3. **The tenant prefix is checked on read as well as write (agreed; this is
    how).**
@@ -518,50 +529,78 @@ a local folder can't work in production.
        received and nothing was processed.";
      - action: "Upload it again in a few minutes. DocFlow has already been
        alerted.";
-     - a founder alert, `storage_unavailable`, once per tenant per hour. It
-       uses the tenant's own alert path, so it needs no new insert policy.
-   - **Email intake:** answer the webhook with a 5xx so Postmark sends the
-     email again later (Postmark retries inbound webhooks), and raise the
-     same alert. Nothing is lost.
-   - **Worker reading the original:** raise, and leave the document in
-     `processing`. The stuck sweep retries it, as it does today for a
-     crashed worker. That read is outside every broad `except`, so it can't
-     be relabelled DOC-005. A long outage would end in DOC-022 "worker
-     stopped". That is honest but vague, and 3d's `processing -> pending`
-     wait (built for provider outages) is the proper home. **Proposed:** in
-     3b, log `storage_read_failed`; in 3d, Storage read failures join the
-     errors that make a document wait.
+     - a founder alert, `storage_unavailable`, **at most once per hour for
+       the whole platform** (Decided, Q3), not once per tenant: an outage
+       hits every tenant at once, and per-tenant alerts would send N alerts
+       an hour for one incident. The alert has no tenant and its payload
+       counts the tenants affected in that hour.
+     - Open point for the build: today a tenant session may only raise
+       alerts for its own tenant (0011's `tenant_raise` policy), so a
+       tenant-less alert from the upload path may need a new insert policy.
+       If it does, that policy goes in its **own** migration with the normal
+       backup, never folded into `0033` (which must stay bucket-only for the
+       Q2 rule to apply). I'll say which before building.
+   - **Email intake:** answer the webhook with a **5xx, never a 403**
+     (Postmark retries non-2xx inbound webhooks but stops on a 403), so
+     Postmark sends the email again later, and raise the same alert.
+     Nothing is lost. A test asserts the status is 5xx.
+   - **Worker reading the original (Decided, Q3: an outage must not fail
+     documents).** Today's sweep would: `MAX_PROCESSING_ATTEMPTS` is 3 and
+     `STUCK_PROCESSING_TIMEOUT_MIN` is 30, so an outage longer than about
+     90 minutes ends in DOC-022 "worker stopped". So in 3b a Storage read
+     failure logs `storage_read_failed` and returns the document to
+     `pending` **without using an attempt** (the attempt counter is put
+     back in the same update). The pending sweep re-enqueues it after the
+     timeout, a pending document is never failed for waiting, and the
+     sweep's existing `document_stuck` alert (once per tenant per day)
+     tells the founder how many are waiting. This is a narrow, Storage-only
+     version of 3d's `processing -> pending` wait; 3d extends the same
+     transition to provider outages. That read is outside every broad
+     `except`, so it can't be relabelled DOC-005. Test: a read failure
+     leaves the document `pending` with its attempt count unchanged, three
+     times in a row.
    - **Previews and extracted text:** best effort, unchanged. A failure
      never touches the document's status.
    - **Export and catalog import:** they fail with their existing codes and
      are retried by the user. (Q3 covers these too, if you want DOC-025's
      wording there.)
-7. **Tenant hard delete: remove the files first, then the rows (Q4).**
+7. **Tenant hard delete: remove the files first, then the rows (Decided,
+   Q4).**
    - Today the rows are deleted and committed, then the folder is removed
      with errors ignored. A failure leaves the customer's files behind with
      nothing recording it.
    - On Storage, removing a prefix means listing it and deleting in batches
      of 1,000, so a partial failure is more likely.
-   - Proposed order: delete every object under `tenants/{id}/` and check
-     the listing is empty. **Only then** run the existing database
-     transaction.
-   - If the file removal fails, nothing in the database has changed, and
-     the founder sees the error and runs the delete again.
+   - Order: delete every object under `tenants/{id}/` and check the listing
+     is empty. **Only then** run the existing database transaction.
+   - If the file removal fails, nothing in the database has changed: the
+     tenant is still `pending_deletion` (the only state `delete_tenant`
+     accepts, LIFE-006), the founder sees the error, and runs the delete
+     again.
    - If the database step fails after the files are gone, running the delete
      again finishes it. The founder has already typed the name to confirm an
      irreversible delete, so files going first is the direction already
      chosen.
-   - The deletion event records how many objects were removed.
+   - **No new `deleting` status** (considered and dropped 2026-09-30). By
+     the time a delete can run, the intake gate already blocks email and
+     uploads for a `pending_deletion` tenant. The one write still possible
+     is an export, which 7.14 keeps available until deletion. So, after the
+     database transaction commits, a **final sweep** lists the prefix again
+     and removes anything written during the delete.
+   - The deletion event records how many objects were removed, including
+     the final sweep's count separately. A test writes an export object
+     between the file step and the database step and asserts the final
+     sweep removes it.
    - No new alert and no new migration.
 8. **Tenant creation's staging copy uses Storage's server-side copy.** The
    rollback is unchanged: a failed creation deletes the copies, and a
    committed one deletes the staging originals.
-9. **Optional: check the original's hash on every read (Q5).**
-   `documents.content_sha256` already exists. The worker would compare it
-   with the bytes it reads before parsing, and a mismatch would fail the
-   document with a new code rather than extract the wrong file. It costs
-   one hash per read. It guards against a wrong or corrupted object, which
-   is rare. Not built unless you say yes.
+9. **Check the original's hash on every read (Decided, Q5: yes).**
+   `documents.content_sha256` already exists. The worker compares it with
+   the bytes it reads before parsing. A mismatch fails the document loudly
+   with a new catalog code (audience both, with a founder alert), rather
+   than extracting the wrong file or only logging it. It costs one hash
+   per read. It guards against a wrong or corrupted object, which is rare.
 10. **Tests.**
     - Product code has one backend, Supabase Storage. The suites run
       against the real bucket: staging's when run from this machine, the
@@ -571,25 +610,35 @@ a local folder can't work in production.
     - New tests: the read-side prefix check (3); a tenant token refused by
       Storage (2); fixed keys overwritten by a retry, with one object left
       (4); the copy script's dry run, apply, verify and orphan report
-      against a fake (5); DOC-025 and its alert (6, if approved); files
-      removed before rows in a hard delete, and a failed removal leaving the
-      database untouched (7).
+      against a fake (5); DOC-025, its platform-wide alert and the 5xx to
+      Postmark (6); a Storage read failure returning the document to
+      `pending` without using an attempt (6); the hash mismatch failing
+      loudly (9); files removed before rows in a hard delete, a failed
+      removal leaving the database untouched, and the final sweep (7).
     - **The rollback-test fix carried into 3b (approved earlier):**
       `test_a_failed_tenant_creation_rolls_back_everything_including_the_file_move`
       asserts that no tenant named "Acme Test Rollback" exists and that its
       own intake is unlinked, instead of counting every tenant on staging.
       The file check moves from the local folder to the bucket.
 11. **Rollout, in order.**
-    1. The founder creates the S3 access key and puts the three settings in
+    1. The founder takes a fresh full backup of staging (RUNBOOK 1.1),
+       since staging has none left (item 2).
+    2. The founder creates the S3 access key and puts the three settings in
        the root `.env`.
-    2. The founder applies `0033` on staging (it creates the bucket).
-    3. I run the copy script as a dry run, then with `--apply`, and report
+    3. The founder applies `0033` on staging (it creates the bucket).
+    4. I run the copy script as a dry run, then with `--apply`, and report
        the counts.
-    4. The staging suites run.
-    5. The walkthrough: upload, review, preview, export and download, a
+    5. The switch: the code that writes to Storage is deployed.
+    6. **Delta copy:** I run the copy script with `--apply` again straight
+       after the switch. Anything uploaded between step 4 and step 5 was
+       written to the local folder by the old code; this second run copies
+       it (running twice is safe, and it verifies by SHA-256). Its report
+       must show zero "referenced but missing".
+    7. The staging suites run.
+    8. The walkthrough: upload, review, preview, export and download, a
        Console catalog import from an intake file, tenant creation from an
        intake, and a hard delete of a test tenant.
-    6. Merge.
+    9. Merge.
 
     From the switch onward, nothing reads the local folder.
 12. **Cost.** Storage holds 3.3 MB today. At the Section 5.1 envelope

@@ -26,6 +26,12 @@ role deliberately cannot change the schema (DECISIONS.md D-013, D-017).
 6. From Phase 6 on: only after all of this on staging, apply the same file to
    `docflow-prod`, again with its own backup first.
 
+**The one exception to backup-first (decided 2026-09-30, Stage 3b):** a
+migration that **only creates Storage buckets** (inserts into
+`storage.buckets`) and touches no existing table, policy or row skips steps
+1-2. There is nothing in it to restore. A migration that does anything else
+as well, even adding one policy, takes the backup as normal.
+
 ### 1.1 The standard backup (run before the migration)
 
 Replace `NNNN` with the migration's number and list every table the migration
