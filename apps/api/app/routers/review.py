@@ -28,6 +28,7 @@ ever visible to the client (Section 7.4 / 7.12).
 
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -57,15 +58,21 @@ from docflow_core.signed_urls import (
     mint_document_token,
     verify_document_token,
 )
-from docflow_core.storage import StorageError, UnsafeStoragePathError, read_file
+from docflow_core.storage import (
+    StorageObjectMissingError,
+    StorageUnavailableError,
+    UnsafeStoragePathError,
+    read_file,
+)
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.actor import Actor, current_actor
-from app.errors import catalog_error
+from app.errors import catalog_detail, catalog_error
 
 router = APIRouter(prefix="/review", tags=["review"])
+logger = logging.getLogger(__name__)
 
 # The statuses a reviewer's queue can show. `quarantined` is deliberately
 # absent -- held documents have their own screen (7.16.4) and must not appear
@@ -739,8 +746,8 @@ def original_document_url(
     with tenant_session(tenant_id) as session:
         row = session.execute(
             text(
-                "SELECT storage_path, original_filename, preview_storage_path, preview_kind "
-                "FROM documents WHERE id = :id AND deleted_at IS NULL"
+                "SELECT storage_path, original_filename, preview_storage_path, preview_media_type, "
+                "preview_kind FROM documents WHERE id = :id AND deleted_at IS NULL"
             ),
             {"id": str(document_id)},
         ).mappings().first()
@@ -750,27 +757,19 @@ def original_document_url(
     # A stored preview means the worker (or a seeding script) already turned
     # this into something a browser shows. The API never decodes a document
     # itself -- Section 7.11 keeps parsing out of the web process -- so all
-    # it does here is notice that a viewable rendering exists.
-    has_preview = bool(row["preview_storage_path"])
+    # it does here is confirm that rendering can be read, and otherwise fall
+    # back to the original, exactly as the serving route below does.
+    has_preview = (
+        _has_preview(row)
+        and _read_for_viewer(tenant_id, row["preview_storage_path"], document_id) is not None
+    )
     detected = None
+    original_readable = True
     if not has_preview:
-        try:
-            detected = file_types.detect_file_type(
-                read_file(tenant_id, row["storage_path"]), _extension(row["original_filename"])
-            )
-        except StorageError:
-            # The stored object is gone, or Storage is unreachable. That is a storage
-            # problem, not a reason to fail the whole review screen -- the
-            # extracted values are what the reviewer mainly needs, and the
-            # viewer says plainly that the original cannot be shown.
-            detected = None
-        except UnsafeStoragePathError as exc:
-            # The row's path breaks the prefix rules: nothing is read, and the
-            # screen degrades the same way (founder, 2026-09-30).
-            founder_alerts.report_refused_storage_path(
-                exc, tenant_id=tenant_id, where="review_viewer", ref_id=document_id
-            )
-            detected = None
+        content = _read_for_viewer(tenant_id, row["storage_path"], document_id)
+        original_readable = content is not None
+        if content is not None:
+            detected = file_types.detect_file_type(content, _extension(row["original_filename"]))
 
     previewable = has_preview or (detected is not None and detected.name not in _NOT_PREVIEWABLE)
 
@@ -790,8 +789,38 @@ def original_document_url(
         "filename": row["original_filename"],
         # Told honestly: a converted image is the page as it was sent;
         # extracted text is DocFlow's rendering, not the original layout.
-        "preview_kind": row["preview_kind"],
+        "preview_kind": row["preview_kind"] if has_preview else None,
+        # Nothing to show at all: the viewer says so in the catalog's words
+        # and offers no link, which could only lead to a 404 (DOC-027,
+        # founder, 2026-09-30). Distinct from "not previewable", which means
+        # the file is fine but no browser renders its format.
+        "unavailable": None if (has_preview or original_readable) else catalog_detail("DOC-027"),
     }
+
+
+def _has_preview(row: Any) -> bool:
+    return bool(row["preview_storage_path"] and row["preview_media_type"])
+
+
+def _read_for_viewer(tenant_id: UUID, storage_path: str, document_id: UUID) -> bytes | None:
+    """
+    The viewer's read of a stored file (Stage 3b). None when it can't be read,
+    which is never a reason to fail the review screen -- the extracted values
+    are what the reviewer mainly needs. Each cause is still told apart: a
+    refused path is reported (and alerted if it names another tenant), an
+    outage raises `storage_unavailable`, a missing object is logged.
+    """
+    try:
+        return read_file(tenant_id, storage_path)
+    except UnsafeStoragePathError as exc:
+        founder_alerts.report_refused_storage_path(
+            exc, tenant_id=tenant_id, where="review_viewer", ref_id=document_id
+        )
+    except StorageUnavailableError:
+        founder_alerts.alert_storage_unavailable(tenant_id, where="review_viewer")
+    except StorageObjectMissingError:
+        logger.error("viewer_stored_file_missing document_id=%s", document_id)
+    return None
 
 
 # Naming a format from its extension, for the one message that needs a word
@@ -862,34 +891,21 @@ def original_document_content(
     # this cannot become a way to serve document-derived markup. Producing it
     # required decoding the document, which happened in the worker -- never
     # here (Section 7.11).
-    # Same reasoning as the mint route: a missing object, or Storage being
-    # unreachable, is a 404 for this one file -- the viewer says the original
-    # can't be shown -- never a 500 for the review screen.
-    if row["preview_storage_path"] and row["preview_media_type"]:
-        try:
-            preview = read_file(tenant_id, row["preview_storage_path"])
-        except StorageError as exc:
-            raise HTTPException(status_code=404) from exc
-        except UnsafeStoragePathError as exc:
-            founder_alerts.report_refused_storage_path(
-                exc, tenant_id=tenant_id, where="review_viewer", ref_id=document_id
+    # Same reasoning as the mint route: a preview that can't be read falls
+    # back to the original; nothing readable is a 404 for this one file --
+    # the viewer has already said so (DOC-027) -- never a 500 for the screen.
+    if _has_preview(row):
+        preview = _read_for_viewer(tenant_id, row["preview_storage_path"], document_id)
+        if preview is not None:
+            return Response(
+                content=preview,
+                media_type=row["preview_media_type"],
+                headers=_viewer_headers(),
             )
-            raise HTTPException(status_code=404) from exc
-        return Response(
-            content=preview,
-            media_type=row["preview_media_type"],
-            headers=_viewer_headers(),
-        )
 
-    try:
-        content = read_file(tenant_id, row["storage_path"])
-    except StorageError as exc:
-        raise HTTPException(status_code=404) from exc
-    except UnsafeStoragePathError as exc:
-        founder_alerts.report_refused_storage_path(
-            exc, tenant_id=tenant_id, where="review_viewer", ref_id=document_id
-        )
-        raise HTTPException(status_code=404) from exc
+    content = _read_for_viewer(tenant_id, row["storage_path"], document_id)
+    if content is None:
+        raise HTTPException(status_code=404)
 
     return Response(
         content=content,

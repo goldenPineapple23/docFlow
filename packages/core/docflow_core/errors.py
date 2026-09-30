@@ -340,6 +340,23 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="high",
         audience="both",
     ),
+    # Stage 3b (founder, 2026-09-30): the review viewer when the stored copy
+    # can't be read -- missing, refused, or Storage unreachable. Said in place of
+    # "a format a browser can't display", with no Open button to a bare 404.
+    "DOC-027": ErrorCatalogEntry(
+        code="DOC-027",
+        title="The original can't be shown",
+        message=(
+            "DocFlow couldn't open its stored copy of this order's original file, so it can't be "
+            "shown here. Everything DocFlow read from it is still shown beside this."
+        ),
+        action=(
+            "If you need to check a value against the original, ask the sender for their copy "
+            "of the order."
+        ),
+        severity="warning",
+        audience="tenant",
+    ),
     "INT-001": ErrorCatalogEntry(
         code="INT-001",
         title="No attachment to process",

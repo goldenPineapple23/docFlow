@@ -2736,6 +2736,19 @@ The fresh backup challenge passed the step-up. The rotation then stopped at `QUA
     A missing stored copy moves to IMP-010 too; an outage stays IMP-009;
   - Console import from an intake file: SYS-001, like any failed Console read;
   - example prompting: the example is left out.
+- **The review viewer when nothing can be read** (founder, 2026-09-30,
+  from the walkthrough):
+  - `previewable: false` used to cover both "no browser renders this
+    format" and "the stored copy can't be read". The screen therefore said
+    the first, beside an Open button that led to a bare 404, which breaks
+    7.16.5.
+  - The viewer link now returns `unavailable`, the tenant-audience
+    **DOC-027** "The original can't be shown", and the viewer shows it with
+    no link. A preview that can't be read falls back to the original.
+  - Each cause is still told apart: a refused path is reported, an outage
+    raises `storage_unavailable`, and a missing object is logged
+    (`viewer_stored_file_missing`).
+  - DOC-027 promises no alert, because a missing object raises none.
 - **The alert can't live in the check** (founder agreed): the check also
   runs on writes, from the copy script and in tests, and doesn't know which
   record it's looking at. So each reader calls one helper,

@@ -569,6 +569,9 @@ def test_the_viewer_url_is_minted_then_served_with_a_strict_csp(client):
         assert "tenants/" not in minted["url"]
         assert storage_path not in minted["url"]
 
+        # A readable original is never reported unavailable (DOC-027).
+        assert minted["unavailable"] is None
+
         served = client.get(minted["url"], headers=tenant.headers())
         assert served.status_code == 200
         assert served.content == content
@@ -632,10 +635,91 @@ def test_an_order_whose_stored_path_is_refused_shows_no_original_instead_of_a_50
         minted = client.get(f"/review/documents/{document}/original", headers=tenant.headers())
         assert minted.status_code == 200
         assert minted.json()["previewable"] is False
+        assert minted.json()["unavailable"]["code"] == "DOC-027"
 
         served = client.get(minted.json()["url"])
         assert served.status_code == 404
         assert _path_alerts(tenant.tenant_id) == []
+
+
+@requires_review_schema
+def test_a_missing_stored_original_says_doc_027_not_an_unviewable_format(client):
+    """The viewer used to answer a missing object with `previewable: false`,
+    which the screen shows as "a format a browser can't display" beside an
+    Open button that leads to a 404. It now says DOC-027 (founder, 2026-09-30)."""
+    with _ReviewTenant("Acme Test Distributor -- missing original") as tenant:
+        document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        # Well-formed, this tenant's own, and never written.
+        _set_storage_path(document, f"tenants/{tenant.tenant_id}/uploads/{uuid4().hex}.txt")
+
+        minted = client.get(f"/review/documents/{document}/original", headers=tenant.headers())
+        assert minted.status_code == 200
+        body = minted.json()
+        assert body["unavailable"]["code"] == "DOC-027"
+        assert body["unavailable"]["title"] == "The original can't be shown"
+        assert body["preview_kind"] is None
+        assert client.get(body["url"]).status_code == 404
+
+
+@requires_review_schema
+def test_storage_down_says_doc_027_and_raises_the_storage_alert(client, monkeypatch):
+    """An outage lands on the same message, and -- like every other reader --
+    raises `storage_unavailable`."""
+    import app.routers.review as review_router
+    from docflow_core.storage import StorageUnavailableError
+
+    def down(tenant_id, path):
+        raise StorageUnavailableError("fake outage")
+
+    alerted: list[dict] = []
+    monkeypatch.setattr(review_router, "read_file", down)
+    monkeypatch.setattr(
+        review_router.founder_alerts,
+        "alert_storage_unavailable",
+        lambda tenant_id, **kw: alerted.append({"tenant_id": tenant_id, **kw}),
+    )
+    with _ReviewTenant("Acme Test Distributor -- storage down") as tenant:
+        document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+
+        minted = client.get(f"/review/documents/{document}/original", headers=tenant.headers())
+        assert minted.status_code == 200
+        assert minted.json()["unavailable"]["code"] == "DOC-027"
+        assert alerted and alerted[0]["where"] == "review_viewer"
+        assert alerted[0]["tenant_id"] == tenant.tenant_id
+
+
+@requires_review_schema
+def test_a_preview_that_cant_be_read_falls_back_to_the_original(client):
+    """A stored preview is only a convenience: if it's gone, the viewer shows
+    the original instead of an empty frame (founder, 2026-09-30)."""
+    from docflow_core.storage import delete_tenant_storage
+
+    with _ReviewTenant("Acme Test Distributor -- preview gone") as tenant:
+        content = b"PO Number: BCH-2291\n"
+        storage_path = save_file(tenant.tenant_id, "po.txt", content)
+        try:
+            document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+            _set_storage_path(document, storage_path)
+            with platform_session() as session:
+                session.execute(
+                    text(
+                        "UPDATE documents SET preview_storage_path = :p, "
+                        "preview_media_type = 'text/plain; charset=utf-8', preview_kind = 'extracted_text' "
+                        "WHERE id = :id"
+                    ),
+                    {"p": f"tenants/{tenant.tenant_id}/derived/{document}/preview", "id": str(document)},
+                )
+
+            minted = client.get(f"/review/documents/{document}/original", headers=tenant.headers()).json()
+            assert minted["unavailable"] is None
+            assert minted["previewable"] is True
+            assert minted["preview_kind"] is None  # it's the original now, not DocFlow's rendering
+
+            served = client.get(minted["url"])
+            assert served.status_code == 200
+            assert served.content == content
+        finally:
+            delete_tenant_storage(tenant.tenant_id)
 
 
 @requires_review_schema

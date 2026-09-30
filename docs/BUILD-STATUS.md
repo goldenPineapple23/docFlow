@@ -688,7 +688,16 @@ from the design above, or adds to it:
   imported ... start it again"). Reads elsewhere in the Console fall to the
   general SYS-001.
 - **The review screen's viewer** treats any Storage failure like a missing
-  file: a 404 for the file, never a 500 for the screen.
+  file: a 404 for the file, never a 500 for the screen. **Corrected after the
+  founder's walkthrough (2026-09-30):**
+  - The screen used to say "a format a browser can't display", beside an
+    Open button that led to a bare 404.
+  - The viewer link now also returns `unavailable`, the catalog entry
+    **DOC-027** "The original can't be shown", whenever nothing can be read
+    (missing, refused, or Storage down). The viewer shows DOC-027 with no
+    link.
+  - A preview that can't be read falls back to the original.
+  - An outage here raises `storage_unavailable` like every other reader.
 - **Tenant creation cleanup is best effort:** removing the copies after a
   failed creation, or the staging originals after a committed one, never
   replaces the error (or the success) the founder sees. Anything left is an
@@ -793,7 +802,13 @@ tests), then the rollout in item 11.
 - **Known issue for Stage 5** (the sweep and robust test cleanup): seeded
   rows with a faked `content_sha256` fail DOC-026 if they are ever read
   again for extraction (the hash check, Q5). Fix the seed scripts to store
-  the real hash, and repair or remove these 14 rows.
+  the real hash, and repair or remove these 14 rows. **Also (founder's
+  walkthrough, 2026-09-30):** `seed_merge_demo.py` inserts orders with no
+  order total and no lines, and never runs validation. The review screen
+  therefore shows "Everything checked" with a required field empty.
+  Approval re-validates (H2) and would refuse, so nothing wrong can be
+  approved. Still, seeded orders must go through the pipeline, or at least
+  through validation, so they don't look clean when they aren't.
 
 **3c -- H5, the full part: the parse service.** Agreed:
 - **Bytes in, text and images out.** The worker sends the file, the service
