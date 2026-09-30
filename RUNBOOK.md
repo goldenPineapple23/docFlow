@@ -377,6 +377,92 @@ credentials, it does not replace them.
    address that is not Postmark's and still passed the credential check is worth
    understanding, not filtering.
 
+### 2.4 Outbound: the sending domain and the support mailbox (founder, 2026-09-30)
+
+Needed before automatic sending (its own stage after 3e, D-103). Verification
+can take up to 48 hours, so it is done ahead of the stage. `yourdomain.com`
+below is the company's main domain (the one on the website and in the
+customer agreement).
+
+**Addresses on the domain:**
+- `notifications@yourdomain.com`: the From address of every DocFlow email
+  (`EMAIL_FROM_ADDRESS`). Needs no mailbox; customer emails carry Reply-To.
+- `support@yourdomain.com`: the support mailbox (`SUPPORT_EMAIL`), routed to
+  the founder's inbox.
+- The intake addresses stay on their own subdomain (`INTAKE_EMAIL_DOMAIN`,
+  e.g. `mail.yourdomain.com`, section 2), so their MX record never conflicts
+  with the root domain's.
+
+**1. Find the DNS host.** The records go wherever the domain's nameservers
+point, which may not be where it was bought:
+`nslookup -type=ns yourdomain.com` (Cloudflare shows `*.ns.cloudflare.com`;
+GoDaddy `*.domaincontrol.com`; Namecheap `*.registrar-servers.com`; Google
+`ns-cloud-*.googledomains.com`).
+
+**2. Postmark: add the domain.** account.postmarkapp.com → **Sender
+Signatures** → add a **domain** (not a single-address signature) → `yourdomain.com`.
+Postmark then shows two records under **DNS Settings**.
+
+**3. Add the records at the DNS host** (type, name, value exactly as Postmark
+shows them; most hosts add `.yourdomain.com` to the name themselves, so type
+only the part before it):
+
+| Type | Name | Value |
+|---|---|---|
+| TXT | the DKIM name Postmark shows, e.g. `20260930123456pm._domainkey` | the `k=rsa; p=...` value Postmark shows (copy it whole) |
+| CNAME | `pm-bounces` | `pm.mtasv.net` |
+| TXT | `_dmarc` | see step 4 |
+
+No SPF change is needed for Postmark: with the Return-Path CNAME, Postmark's
+mail passes SPF on `pm-bounces.yourdomain.com` (Postmark: "Why we no longer
+ask for SPF records"). On Cloudflare, set the CNAME to **DNS only** (grey
+cloud), not proxied.
+
+**4. DMARC.** One `_dmarc` TXT record per domain: if one exists, edit it, don't
+add a second. Start with monitoring only:
+
+```
+v=DMARC1; p=none; rua=mailto:<the address Postmark's DMARC tool gives>
+```
+
+Get the `rua` address from dmarc.postmarkapp.com (free weekly digests: enter
+the domain and the founder's email). After a few weeks, once the digests show
+every legitimate sender passing (Postmark, the support mailbox's provider),
+move to `p=quarantine`, later `p=reject`.
+
+**5. Check.** In Postmark, the domain's **DNS Settings** → **Verify** next to
+each record, until both show verified (up to 48 hours). From Windows:
+
+```
+nslookup -type=cname pm-bounces.yourdomain.com
+nslookup -type=txt <dkim name>._domainkey.yourdomain.com
+nslookup -type=txt _dmarc.yourdomain.com
+```
+
+**6. Account approval.** A new Postmark account can only send to addresses on
+its own verified domains until Postmark approves it for sending to anyone:
+request approval in the account, describing the mail as transactional
+(invites, billing notices, reminders to business customers).
+
+**7. The support mailbox.** Route `support@yourdomain.com` to the founder's
+inbox:
+- If the domain already has email (Google Workspace, Microsoft 365): add
+  `support@` as an alias or group there. Nothing else to change.
+- If it has none and DNS is on Cloudflare: **Email** → **Email Routing** →
+  enable, then **Routing rules** → **Create address**: `support` → **Send to
+  an email** → the founder's inbox (confirm the verification email).
+  Cloudflare adds its MX and SPF records to the root domain itself. Replies
+  then go out from the founder's own address, not `support@`.
+- To reply *as* `support@` (recommended once customers write in), the address
+  needs a real mailbox: Google Workspace (or similar) on the domain. Don't use
+  Postmark for personal replies: it is for application email.
+
+Then set `SUPPORT_EMAIL=support@yourdomain.com` and
+`EMAIL_FROM_ADDRESS=notifications@yourdomain.com` in `.env` and restart the
+API. The Postmark server API token (`EMAIL_PROVIDER_API_KEY`) waits for the
+automatic-sending stage: while it is blank, every email stays held in the
+Outbox.
+
 ---
 
 ## 3. Onboarding a new tenant — checklist
