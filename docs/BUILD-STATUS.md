@@ -1158,9 +1158,12 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
     the go-live email gives the date; the founding rate followed by the
     tier's list price; Reply-To = `SUPPORT_EMAIL` on every email to the
     customer's own people (`email_outbox.reply_to`, shown in the Console
-    Outbox). Waits on the founder's backup and staging apply of `0032`. The
-    Stripe test-mode walkthrough (`docs/walkthroughs/card-billing.md`) comes
-    after it merges.
+    Outbox). `0032` applied on staging by the founder 2026-09-30 (backup
+    `backup_0032`, counts matched). Staging on `6712214`: worker 134 passed /
+    2 skipped, API 562 passed / 3 deselected; CI green on `88a84b4`. Ready to
+    merge; then the founder drops `backup_0026`-`backup_0031` (RUNBOOK 1.3).
+    The Stripe test-mode walkthrough (`docs/walkthroughs/card-billing.md`)
+    comes after it merges.
   - **The setup fee is non-refundable for standard customers** (founder,
     2026-09-29): it covers the setup work and is charged when they add their
     card, and the "Ask for a card" email says so. **Required before the first
