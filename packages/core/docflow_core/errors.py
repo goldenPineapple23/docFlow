@@ -1149,12 +1149,14 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         code="IMP-009",
         title="Reading this file didn't finish",
         message=(
-            "The worker reading this file stopped before it finished (a time limit, a restart, or"
-            " running out of memory), so nothing was imported. The file itself may be fine."
+            "Reading this file stopped before it finished, so nothing was imported: either the"
+            " worker stopped (a time limit, a restart, or running out of memory), or file storage"
+            " couldn't be reached. The file itself may be fine."
         ),
         action=(
-            "Start the import again from the same file. If it stops again, check the worker log for"
-            " this import's ID."
+            "Start the import again from the same file in a few minutes. If storage couldn't be"
+            " reached, a 'File storage couldn't be reached' alert is already in your attention"
+            " panel. If it stops again, check the worker log for this import's ID."
         ),
         severity="warning",
         audience="founder",

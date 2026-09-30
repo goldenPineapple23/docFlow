@@ -343,8 +343,8 @@ IMP-008 [warning/founder] That mapping or fix doesn't fit this file
   next:     Reload the import and choose again.
 
 IMP-009 [warning/founder] Reading this file didn't finish
-  what+why: The worker reading this file stopped before it finished (a time limit, a restart, or running out of memory), so nothing was imported. The file itself may be fine.
-  next:     Start the import again from the same file. If it stops again, check the worker log for this import's ID.
+  what+why: Reading this file stopped before it finished, so nothing was imported: either the worker stopped (a time limit, a restart, or running out of memory), or file storage couldn't be reached. The file itself may be fine.
+  next:     Start the import again from the same file in a few minutes. If storage couldn't be reached, a 'File storage couldn't be reached' alert is already in your attention panel. If it stops again, check the worker log for this import's ID.
 
 IMP-010 [warning/founder] This file's stored copy can't be read
   what+why: DocFlow couldn't read its stored copy of this file: it is missing, or the location recorded for it isn't valid. Nothing was imported, and starting this import again would fail the same way.
