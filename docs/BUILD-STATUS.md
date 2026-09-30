@@ -635,8 +635,8 @@ a local folder can't work in production.
 11. **Rollout, in order.**
     1. The founder takes a fresh full backup of staging (RUNBOOK 1.1),
        since staging has none left (item 2).
-    2. The founder creates the S3 access key and puts the three settings in
-       the root `.env`.
+    2. The founder creates the S3 access key and puts the four settings in
+       the root `.env` (four as built; see "3b build" below).
     3. The founder applies `0033` on staging (it creates the bucket).
     4. I run the copy script as a dry run, then with `--apply`, and report
        the counts.
@@ -710,6 +710,62 @@ environment-only failures as the base branch plus the new webhook test.
 Still to do, on the founder's machine: the staging suites (including
 `test_storage_outage_api.py`, the rewritten Console tests and the live-bucket
 tests), then the rollout in item 11.
+
+**Rollout on staging, 2026-09-30 (founder's machine):**
+- Step 1: backup schema `backup_3b` (documents 54, exports 11,
+  onboarding_intake_files 2, catalog_imports 22; live = backup on all four),
+  the tables whose rows point at files. The files' own backup is the
+  untouched `storage/` folder, plus a zip of it outside the repo (2,973
+  files).
+- Steps 2-3: the key's four settings are in `.env`, and `0033` is applied.
+  The bucket exists, and it refuses both a public URL and the anon key for
+  an object that exists (HTTP 400 for each).
+- Step 4: dry run, then `--apply`. **89 copied and verified by SHA-256**,
+  0 missing locally, 0 failed, 2,877 orphans left in place. **14 rows
+  flagged and left out (founder: option (b)):**
+  - **7 hash mismatches.** Seed and test scripts store an altered hash on
+    purpose, to dodge duplicate detection: `seed_review_walkthrough.py`
+    hashes file + document id (5 rows); `seed_demo_data.py`'s "resend"
+    hashes the text rather than the `.xlsx` (1 row); the
+    golden-with-examples row's hash has an extra `x` (1 row). Six of the
+    seven are in Acme Test Distributor.
+  - **7 made-up paths with no file behind them** (`tenants/seed/po.txt`,
+    `tenants/{id}/seed/...`), written by the merge-demo seed and the
+    acting-edit, reapprove and M5-lock tests.
+  - Consequence: these orders show no original in the viewer. The script
+    therefore exits 1 in this environment, not the 0 RUNBOOK 7.2 describes
+    for a clean run.
+  - **Pass criterion for the delta copy:** the flagged list is exactly
+    these 14 and nothing new, and "referenced but missing locally" is 0.
+    The baseline dry run is saved for the comparison.
+- Step 7 (staging suites), first worker run: **28 failed / 110 passed / 2
+  skipped.** The 35 database-backed worker tests had never run against the
+  build; the offline "103 passed" didn't include them. Two causes, both
+  fixed:
+  - **Product bug: the bulk delete never worked on Supabase.**
+    `DeleteObjects` answered 400 "must have required property 'Body'":
+    Supabase reads that body only when it is labelled `application/xml`, and
+    boto3 doesn't label it. Every tenant hard delete would have stopped at
+    LIFE-007. The in-memory fake couldn't show it; single-object delete and
+    server-side copy were checked on staging and work. Fixed in
+    `S3Backend` with a request hook. New live test,
+    `test_a_hard_delete_empties_the_tenants_folder_in_the_real_bucket`:
+    it fails with the hook removed and passes with it. **Watch the first CI
+    run:** CI runs this test against the local stack's Storage, not the
+    hosted one.
+  - **Test fixture:** `WorkerTestTenant.create_pending_document` stored a
+    random `content_sha256`, so the hash check (Q5) failed every order it
+    made with DOC-026. It now stores the real hash. In the API suite, a
+    DOC-026 failure means the same fixture problem, not a storage one.
+  - The failed run's clean-up removed its test tenants' rows but not their
+    files, so about 28 dead test tenants' objects remain in the staging
+    bucket. The copy script's orphan count is local files only, so they
+    don't affect the delta-copy check. They are listed before anything is
+    removed.
+- **Known issue for Stage 5** (the sweep and robust test cleanup): seeded
+  rows with a faked `content_sha256` fail DOC-026 if they are ever read
+  again for extraction (the hash check, Q5). Fix the seed scripts to store
+  the real hash, and repair or remove these 14 rows.
 
 **3c -- H5, the full part: the parse service.** Agreed:
 - **Bytes in, text and images out.** The worker sends the file, the service

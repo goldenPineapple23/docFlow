@@ -177,6 +177,10 @@ class StorageBackend(Protocol):
 _MISSING_CODES = frozenset({"NoSuchKey", "NotFound", "404"})
 
 
+def _label_body_as_xml(request, **_kwargs) -> None:  # type: ignore[no-untyped-def]
+    request.headers["Content-Type"] = "application/xml"
+
+
 class S3Backend:
     """
     boto3 against Supabase Storage's S3 endpoint.
@@ -227,6 +231,10 @@ class S3Backend:
                 response_checksum_validation="when_required",
             ),
         )
+        # Supabase reads a DeleteObjects body only when it is labelled XML;
+        # boto3 sends none, and Supabase answers 400 "must have required
+        # property 'Body'" (found on staging, 2026-09-30).
+        self._client.meta.events.register("before-sign.s3.DeleteObjects", _label_body_as_xml)
 
     @staticmethod
     def _translate(exc: Exception, op: str, key: str) -> StorageError:

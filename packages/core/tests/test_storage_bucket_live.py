@@ -75,6 +75,20 @@ def test_the_anon_key_reaches_no_file(probe):
 
 
 @requires_bucket
+def test_a_hard_delete_empties_the_tenants_folder_in_the_real_bucket():
+    """Item 7's file step against the real Storage, not the fake: the bulk
+    delete once answered 400 on Supabase (its body wasn't labelled XML),
+    which the in-memory fake could never show."""
+    tenant = uuid4()
+    for name in ("one.txt", "two.txt", "three.txt"):
+        storage.save_file(tenant, name, f"hard delete probe {uuid4()}".encode())
+    storage.save_derived(tenant, uuid4(), "extracted_text", b"derived probe")
+
+    assert storage.delete_tenant_storage(tenant) == 4
+    assert storage._get_backend().list_keys(f"tenants/{tenant}/") == []
+
+
+@requires_bucket
 def test_a_customers_own_signed_in_token_reaches_no_file(probe):
     """A tenant user's token is `role: authenticated`. Minted here with the
     project's JWT secret; skipped where that secret isn't held (staging keeps
