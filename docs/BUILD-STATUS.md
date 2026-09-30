@@ -1160,6 +1160,15 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
     the card-billing emails tell customers to email it to cancel; "Ask for a
     card" refuses while it is blank. RUNBOOK section 3; cancel requests and
     the refund rule, RUNBOOK section 6.
+  - **Stripe's own trial-ending email off, in live mode too** (founder,
+    2026-09-29; off in the sandbox): DocFlow's own trial-ending email for
+    card-billed customers replaces it. That email, its migration `0032` and
+    error ONB-018's wording are drafted and with the founder for approval;
+    not built. RUNBOOK section 3.
+- **CI names the step that failed when there is no test report**
+  (founder-approved, 2026-09-29): a worker run whose local Supabase stack
+  failed to start had read as a pytest failure. The skip check now reads the
+  earlier steps' outcomes (`CI_STEPS`) and says which one failed.
 - **Before the first real customer:** an email provider (the founder is setting one up with the domain). Until then every invite, notice and digest waits in the Console Outbox and must be sent by hand, and the inbound intake address cannot receive real mail.
 - Digest opt-out per person: decided yes, but later (needs a settings page).
 - `RUNBOOK.md` exists since Phase 5.5 with the migration backup procedure (section 1). Still to add in Phase 6: the constants (CLAUDE.md 7.15.4; `constants.py` is their single home until then), tier price changes (`scripts/new_tier_version.py`, D-137), the restore drill and the parser-upgrade process.

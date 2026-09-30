@@ -73,6 +73,7 @@ jobs:
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
       - name: Start the local Supabase stack (applies supabase/migrations/)
+        id: supabase
         run: supabase start
       # The API must verify tokens with the same secret the local GoTrue
       # signs them with, and the browser bundle needs that stack's URL and
@@ -153,6 +154,7 @@ jobs:
       - run: pip install -r apps/api/requirements.lock.txt
       - run: pip install --no-deps -e packages/core
       - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
+        id: app_role
         run: python scripts/ci/create_app_role.py
       - name: Start the API
         run: |
@@ -205,6 +207,7 @@ jobs:
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
       - name: Start the local Supabase stack (applies supabase/migrations/)
+        id: supabase
         working-directory: ${{ github.workspace }}
         run: supabase start
       - uses: actions/setup-python@v5
@@ -215,17 +218,26 @@ jobs:
       - run: python -m pip install --upgrade pip
       # Pinned, not ranges (H7): the worker's lockfile holds every core
       # dependency, the `files` extras and the lint/type/test tools.
-      - run: pip install -r ../../apps/worker/requirements.lock.txt
-      - run: pip install --no-deps -e .
+      - id: deps
+        run: pip install -r ../../apps/worker/requirements.lock.txt
+      - id: core
+        run: pip install --no-deps -e .
       - run: pip install pip-audit
       - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
+        id: app_role
         run: python "${{ github.workspace }}/scripts/ci/create_app_role.py"
-      - run: ruff check .
-      - run: mypy docflow_core
+      - id: ruff
+        run: ruff check .
+      - id: mypy
+        run: mypy docflow_core
       - name: Test (against the local Supabase stack, as docflow_app)
+        id: test
         run: pytest -v --junitxml=junit.xml
       - name: No unapproved skipped tests
         if: success() || failure()
+        env:
+          # Which earlier step failed, so a missing test report names it.
+          CI_STEPS: ${{ toJSON(steps) }}
         run: python "${{ github.workspace }}/scripts/ci/check_skips.py" core junit.xml
       - name: Dependency audit (fail on known vulnerabilities)
         run: pip-audit
@@ -247,6 +259,7 @@ jobs:
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
       - name: Start the local Supabase stack (applies supabase/migrations/)
+        id: supabase
         working-directory: ${{ github.workspace }}
         run: supabase start
       - uses: actions/setup-python@v5
@@ -255,17 +268,26 @@ jobs:
           cache: pip
           cache-dependency-path: apps/api/requirements.lock.txt
       - run: python -m pip install --upgrade pip
-      - run: pip install -r requirements.lock.txt
-      - run: pip install --no-deps -e ../../packages/core
+      - id: deps
+        run: pip install -r requirements.lock.txt
+      - id: core
+        run: pip install --no-deps -e ../../packages/core
       - run: pip install pip-audit
       - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
+        id: app_role
         run: python "${{ github.workspace }}/scripts/ci/create_app_role.py"
-      - run: ruff check .
-      - run: mypy app
+      - id: ruff
+        run: ruff check .
+      - id: mypy
+        run: mypy app
       - name: Test (against the local Supabase stack, as docflow_app; live_api deselected)
+        id: test
         run: pytest -v --junitxml=junit.xml
       - name: No unapproved skipped tests
         if: success() || failure()
+        env:
+          # Which earlier step failed, so a missing test report names it.
+          CI_STEPS: ${{ toJSON(steps) }}
         run: python "${{ github.workspace }}/scripts/ci/check_skips.py" api junit.xml
       - name: Dependency audit (fail on known vulnerabilities)
         run: pip-audit
@@ -287,6 +309,7 @@ jobs:
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
       - name: Start the local Supabase stack (applies supabase/migrations/)
+        id: supabase
         working-directory: ${{ github.workspace }}
         run: supabase start
       - uses: actions/setup-python@v5
@@ -295,19 +318,29 @@ jobs:
           cache: pip
           cache-dependency-path: apps/worker/requirements.lock.txt
       - run: python -m pip install --upgrade pip
-      - run: pip install -r requirements.lock.txt
-      - run: pip install --no-deps -e ../../packages/core
+      - id: deps
+        run: pip install -r requirements.lock.txt
+      - id: core
+        run: pip install --no-deps -e ../../packages/core
       - run: pip install pip-audit
       - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
+        id: app_role
         run: python "${{ github.workspace }}/scripts/ci/create_app_role.py"
       - name: Install LibreOffice (the .doc converter, D-041), so its tests run
+        id: libreoffice
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer
-      - run: ruff check .
-      - run: mypy app
+      - id: ruff
+        run: ruff check .
+      - id: mypy
+        run: mypy app
       - name: Test (against the local Supabase stack, as docflow_app)
+        id: test
         run: pytest -v --junitxml=junit.xml
       - name: No unapproved skipped tests
         if: success() || failure()
+        env:
+          # Which earlier step failed, so a missing test report names it.
+          CI_STEPS: ${{ toJSON(steps) }}
         run: python "${{ github.workspace }}/scripts/ci/check_skips.py" worker junit.xml
       - name: Dependency audit (fail on known vulnerabilities)
         run: pip-audit

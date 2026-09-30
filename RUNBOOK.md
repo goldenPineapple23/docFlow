@@ -396,6 +396,12 @@ list is the checks that sit around them. Phase 6 completes it.
   invoices, no cancelling), created automatically the first time an owner
   opens "Update card", and put back if it is changed in the dashboard. Don't
   delete it; the account's default configuration isn't used.
+- [ ] **Stripe's own trial-ending email is off** (founder, 2026-09-29; done
+  in the sandbox that day): **Settings** → **Billing** → **Subscriptions and
+  emails**, the reminder Stripe sends before a free trial ends. DocFlow
+  sends its own trial-ending email to card-billed customers (its wording is
+  with the founder for approval), so with Stripe's on, customers would get
+  two.
 
 **For each new tenant:**
 
