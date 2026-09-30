@@ -741,3 +741,56 @@ section 3):
 
 Stripe returns the money to the card; it can take 5-10 business days to
 reach the customer. DocFlow does not refund anything automatically.
+
+## 7. File storage: Supabase Storage (Stage 3b, D-182)
+
+DocFlow's files live in one private bucket, `docflow-files`, reached through
+Storage's S3-compatible endpoint with a Storage-only access key. Nothing
+reads the old local `storage/` folder any more except the copy script below.
+
+### 7.1 Creating the key (once per project)
+
+1. Supabase dashboard -> the project -> Storage -> **S3 Configuration**.
+2. Copy the **Endpoint** into `STORAGE_S3_ENDPOINT` and the **Region** into
+   `STORAGE_S3_REGION` in the root `.env`.
+3. **New access key**, described "DocFlow API and worker". Copy the key id
+   into `STORAGE_S3_ACCESS_KEY_ID` and the secret into
+   `STORAGE_S3_SECRET_ACCESS_KEY`. The secret is shown once.
+4. The same four values go into the API's and the worker's secrets on Fly.
+
+The key reaches every file of every tenant. Treat it like the database
+password: never in the frontend, never in a log, never in a ticket. If it
+leaks, revoke it on the same page and create a new one.
+
+### 7.2 Copying staging's files into the bucket (the 3b rollout)
+
+Run from the repo root with `apps/api/.venv`'s Python, on the machine that
+holds the `storage/` folder:
+
+    python scripts/copy_storage_to_bucket.py            # dry run first
+    python scripts/copy_storage_to_bucket.py --apply    # then the copy
+
+It copies every file a row still references under the same key, reads each
+one back and checks its SHA-256, never overwrites something different that
+is already in the bucket, and leaves the local folder untouched. A clean run
+exits 0 and lists nothing. **Run it again with `--apply` straight after the
+switch** (the delta copy): it picks up anything the old code wrote in the
+meantime; "referenced but missing locally" must then be 0.
+
+The orphan count is files no row references (from failed uploads, and old
+test runs). They are left where they are.
+
+### 7.3 When the founder gets a `storage_unavailable` alert
+
+At most one an hour for the whole platform; it names the first tenant that
+hit it. While Storage is down: uploads answer DOC-025 and nothing is
+received; Postmark gets a 503 and sends the mail again later; documents
+already received wait in Processing without using up their tries. Check the
+Supabase status page and the project's Storage logs. Nothing needs doing
+once Storage is back: the waiting documents are picked up by the stuck sweep
+within `STUCK_PROCESSING_TIMEOUT_MIN`.
+
+A `document_failed` alert with **DOC-026** is different: the stored original
+is missing or isn't the file that was received. That is never an outage. Ask
+the customer to upload the file again, and look for how the object went
+missing.

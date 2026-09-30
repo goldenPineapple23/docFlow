@@ -553,7 +553,9 @@ a local folder can't work in production.
      90 minutes ends in DOC-022 "worker stopped". So in 3b a Storage read
      failure logs `storage_read_failed` and returns the document to
      `pending` **without using an attempt** (the attempt counter is put
-     back in the same update). The pending sweep re-enqueues it after the
+     back in the same update). *As built: it stays `processing` with its
+     attempt given back -- 0027 has no `processing -> pending`; see "3b
+     build" below.* The pending sweep re-enqueues it after the
      timeout, a pending document is never failed for waiting, and the
      sweep's existing `document_stuck` alert (once per tenant per day)
      tells the founder how many are waiting. This is a narrow, Storage-only
@@ -656,6 +658,58 @@ a local folder can't work in production.
     that is a few GB. It is covered by the plan's included storage and egress, so
     there is no new line item. I'll confirm against the Supabase pricing
     page when building.
+
+**3b build -- IN PROGRESS 2026-09-30 (branch `phase55/stage3b-design`).**
+The offline part is built and tested; what is left needs the founder's
+machine (staging and the local `storage/` folder). Where the build differs
+from the design above, or adds to it:
+
+- **Four settings, not three:** Supabase's S3 endpoint needs the project's
+  region, so `STORAGE_S3_REGION` joins the other three (`.env.example`).
+- **Upload checksums off:** Supabase supports no S3 upload checksums and
+  current boto3 sends one on every PUT, so the client sends them only when
+  an operation requires one. **3 tries in all** (`total_max_attempts`; boto3's
+  `max_attempts` counts retries, which would have been 4).
+- **An outage keeps the document `processing`, not `pending`** (item 6).
+  0027's state-machine trigger has no `processing -> pending`, and 3b adds no
+  migration for it. Same guarantee: the attempt is given back and the claim
+  re-stamped, so the stuck sweep retries every `STUCK_PROCESSING_TIMEOUT_MIN`
+  and `decide()` never reaches the cap. The document shows as Processing
+  while it waits. 3d's wait brings the real `pending` with its own migration.
+- **New catalog entries beyond DOC-025** (for the founder's review):
+  - **DOC-026** "The stored file doesn't match this order" -- a missing
+    original (404) or a hash mismatch (items 6 and 9); alert `document_failed`.
+  - **EXP-010** "This file can't be downloaded right now" -- a ready export
+    Storage can't hand over; alert `storage_unavailable`.
+  - **LIFE-007** "The tenant's files couldn't all be removed" -- the
+    founder's error when the hard delete's file step fails (item 7).
+- **Console catalog import** during an outage: the upload answers DOC-025;
+  a file that can't be read back fails the import as IMP-009 ("nothing was
+  imported ... start it again"). Reads elsewhere in the Console fall to the
+  general SYS-001.
+- **The review screen's viewer** treats any Storage failure like a missing
+  file: a 404 for the file, never a 500 for the screen.
+- **Tenant creation cleanup is best effort:** removing the copies after a
+  failed creation, or the staging originals after a committed one, never
+  replaces the error (or the success) the founder sees. Anything left is an
+  orphan the copy script reports.
+- **Hard delete's final sweep** is recorded as its own admin action,
+  `tenant_delete_final_sweep`, with its count (or its failure); the deletion
+  event and `tenant_delete` carry `objects_removed` from the first step.
+- **CI:** `supabase/config.toml` turns Storage on; every job with a local
+  stack runs `scripts/ci/local_storage_env.py`, which points the four
+  settings at the runner's own S3 endpoint and refuses anything else.
+- **Test files left in the staging bucket:** the staging suites now write to
+  the real bucket. The Console tests clean up their own objects; other
+  suites' test tenants may leave objects behind, which the copy script's
+  orphan count and a later clean-up handle. Not a data risk (test data only).
+
+Built and tested offline: core 671 passed (+3 live-bucket tests that run
+where Storage is configured), worker 103 passed, API the same 24
+environment-only failures as the base branch plus the new webhook test.
+Still to do, on the founder's machine: the staging suites (including
+`test_storage_outage_api.py`, the rewritten Console tests and the live-bucket
+tests), then the rollout in item 11.
 
 **3c -- H5, the full part: the parse service.** Agreed:
 - **Bytes in, text and images out.** The worker sends the file, the service

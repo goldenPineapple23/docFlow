@@ -75,6 +75,9 @@ jobs:
       - name: Start the local Supabase stack (applies supabase/migrations/)
         id: supabase
         run: supabase start
+      - name: Point Storage at this runner's own bucket (Stage 3b)
+        working-directory: ${{ github.workspace }}
+        run: python3 scripts/ci/local_storage_env.py
       # The API must verify tokens with the same secret the local GoTrue
       # signs them with, and the browser bundle needs that stack's URL and
       # anon key compiled into it. Both come from the running stack rather
@@ -210,6 +213,9 @@ jobs:
         id: supabase
         working-directory: ${{ github.workspace }}
         run: supabase start
+      - name: Point Storage at this runner's own bucket (Stage 3b)
+        working-directory: ${{ github.workspace }}
+        run: python3 scripts/ci/local_storage_env.py
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -262,6 +268,9 @@ jobs:
         id: supabase
         working-directory: ${{ github.workspace }}
         run: supabase start
+      - name: Point Storage at this runner's own bucket (Stage 3b)
+        working-directory: ${{ github.workspace }}
+        run: python3 scripts/ci/local_storage_env.py
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -312,6 +321,9 @@ jobs:
         id: supabase
         working-directory: ${{ github.workspace }}
         run: supabase start
+      - name: Point Storage at this runner's own bucket (Stage 3b)
+        working-directory: ${{ github.workspace }}
+        run: python3 scripts/ci/local_storage_env.py
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"

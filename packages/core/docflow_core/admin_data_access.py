@@ -30,6 +30,7 @@ import logging
 from collections.abc import Callable
 from datetime import timedelta
 from decimal import Decimal
+from functools import partial
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -598,7 +599,7 @@ def add_intake_file(
                 payload={"file_id": str(file_id), "detected_type": detected_type},
             )
     except Exception:
-        _cleanup_quietly(lambda: delete_staging_file(intake_id, storage_path), "staging_file_cleanup_failed")
+        _cleanup_quietly(partial(delete_staging_file, intake_id, storage_path), "staging_file_cleanup_failed")
         raise
     return file_id
 
@@ -886,9 +887,7 @@ def create_tenant(
         # that was never committed, and the copy script's orphan report finds
         # it -- the original error, not this one, is what the founder sees.
         for path in copied:
-            _cleanup_quietly(
-                lambda path=path: delete_tenant_file(tenant_id, path), "tenant_copy_cleanup_failed"
-            )
+            _cleanup_quietly(partial(delete_tenant_file, tenant_id, path), "tenant_copy_cleanup_failed")
         if stripe_customer_id:
             try:
                 from docflow_core.external_services import delete_stripe_customer
@@ -901,10 +900,11 @@ def create_tenant(
     # Committed: the staging originals can go. Best effort: the tenant exists
     # now, so a failure here must not look like a failed creation. An
     # original left behind is an orphan the copy script reports.
-    for path in originals:
-        _cleanup_quietly(
-            lambda path=path: delete_staging_file(intake_id, path), "staging_original_cleanup_failed"
-        )
+    if intake_id is not None:
+        for path in originals:
+            _cleanup_quietly(
+                partial(delete_staging_file, intake_id, path), "staging_original_cleanup_failed"
+            )
 
     return {"tenant_id": tenant_id, "owner_user_id": owner_user_id}
 

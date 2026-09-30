@@ -229,7 +229,12 @@ def test_a_partial_batch_delete_raises(s3):
 
 
 def test_missing_configuration_fails_safe_as_unavailable(monkeypatch):
-    for name in ("STORAGE_S3_ENDPOINT", "STORAGE_S3_REGION", "STORAGE_S3_ACCESS_KEY_ID", "STORAGE_S3_SECRET_ACCESS_KEY"):
+    for name in (
+        "STORAGE_S3_ENDPOINT",
+        "STORAGE_S3_REGION",
+        "STORAGE_S3_ACCESS_KEY_ID",
+        "STORAGE_S3_SECRET_ACCESS_KEY",
+    ):
         monkeypatch.setenv(name, "")
     from docflow_core.config import get_settings
 

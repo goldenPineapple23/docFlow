@@ -2708,3 +2708,18 @@ The fresh backup challenge passed the step-up. The rotation then stopped at `QUA
 - **Go-live by card needs `SUPPORT_EMAIL`** (ONB-018, as "Ask for a card"): the go-live email and the trial-ending email both say how to cancel. ONB-018's message now covers every card-billing email: "The emails for card billing tell the customer how to cancel, and SUPPORT_EMAIL isn't set, so there is no address to give them. Nothing was sent." (founder, 2026-09-29). If it is blank when the trial-ending job runs, the job fails, is retried, and reaches the founder as `scheduled_job_failed`.
 - **Reply-To.** `email_outbox.reply_to` is filled when the email is queued: `SUPPORT_EMAIL` on every email to the customer's own people (`email_outbox.TO_CUSTOMER`), none on founder alerts and on the intake address's automatic replies to buyers (`NOT_TO_CUSTOMER`), whose replies belong with the supplier. Every template is in exactly one set (a test). The Console Outbox shows it, so an email sent by hand carries it too.
 - **The held reply to buyers** (INT-007, `intake_held`) now ends "If your order is urgent, contact {customer} directly.", like the other three intake replies, which already sent the buyer to the supplier (founder, 2026-09-29). Buyer's email only; the customer's own banner is unchanged.
+
+## D-182 — Stage 3b: files move to Supabase Storage (founder, 2026-09-30)
+
+**Context:** files were written to a folder on whichever machine ran the code, and `read_file(path)` took no tenant. On Fly the API and the worker run on different machines, so a local folder can't work in production. The design and the founder's five answers are in `docs/BUILD-STATUS.md` ("3b detailed design").
+
+**Decided (founder, 2026-09-30):**
+- Q1: a Storage-only S3 access key through `boto3`, never the service role key. The key is project-wide and bypasses RLS, so file isolation is `docflow_core.storage`'s own prefix check, on read and delete as well as write.
+- Q2: migration `0033` creates the private bucket `docflow-files`, with no backup: a migration that only creates Storage buckets skips backup-first (RUNBOOK section 1). A fresh staging backup is taken before the rollout.
+- Q3: a Storage outage never loses or fails anything. Upload -> DOC-025 (503); email -> 503 to Postmark (never 403); worker -> the document waits without using an attempt; one `storage_unavailable` alert an hour for the whole platform, through the global open-alert dedupe index (no migration). A missing object (404) is a data fault, not an outage: DOC-026.
+- Q4: tenant hard delete removes files first, rows second, then sweeps the prefix again. No new `deleting` status: by then the intake gate already blocks new documents, and the final sweep catches an export written during the delete.
+- Q5: the original's SHA-256 is checked before parsing; a mismatch fails as DOC-026 with an alert.
+- The recoverable grace period before a hard delete is deferred.
+
+**As built:** see BUILD-STATUS "3b build". Differences from the design: four settings (the region), the outage wait stays `processing` (0027 has no `processing -> pending`), and new catalog entries DOC-026, EXP-010 and LIFE-007.
+

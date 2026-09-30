@@ -21,6 +21,7 @@ doesn't apply here; this module is not `/admin/*` and must never import it).
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import re
 import time

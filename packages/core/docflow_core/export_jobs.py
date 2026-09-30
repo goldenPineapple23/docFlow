@@ -206,8 +206,7 @@ def run_export(tenant_id: UUID, export_id: UUID) -> ExportOutcome:
     same id (the queue acknowledges late, so a crash can redeliver): a row
     that is no longer `pending` is left exactly as it is.
     """
-    from docflow_core import exports
-    from docflow_core import founder_alerts
+    from docflow_core import exports, founder_alerts
     from docflow_core.storage import StorageError, StorageUnavailableError, save_file
 
     with tenant_session(tenant_id) as session:
