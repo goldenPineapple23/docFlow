@@ -324,6 +324,10 @@ export function originalDocumentUrl(id: string): Promise<{
   // file, spreadsheet or email, which is NOT the original layout. null when
   // the original is shown as-is.
   preview_kind: "converted_image" | "extracted_text" | null;
+  // The stored copy can't be read at all (missing, refused, or storage
+  // unreachable): the catalog entry to show instead, DOC-027. Not the same as
+  // `previewable: false`, where the file is fine but no browser renders it.
+  unavailable?: CatalogError | null;
 }> {
   return request(`${reviewApiBase()}/documents/${id}/original`);
 }

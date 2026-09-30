@@ -121,14 +121,20 @@ class Settings(BaseSettings):
     # conversion service is never an option (Section 7.10). See SETUP.md.
     libreoffice_path: str = ""
 
-    # Phase 1 stand-in for Supabase Storage (see DECISIONS.md): no Storage
-    # bucket/client wiring exists yet anywhere in this codebase, and adding
-    # real object storage is out of scope for this slice. Local filesystem
-    # under the same `tenants/{tenant_id}/...` path convention Section 7.5
-    # requires, so the storage-path/prefix enforcement logic doesn't change
-    # when this is swapped for real Supabase Storage later. Both the API and
-    # worker processes must be able to see this path (true in local dev;
-    # a real deploy needs shared/object storage -- tracked as a TODO).
+    # Supabase Storage through its S3-compatible endpoint (Stage 3b, Q1): an
+    # access key that reaches Storage and nothing else, never the service
+    # role key. The key is project-wide (every bucket, bypasses RLS), so
+    # tenant isolation for files is docflow_core.storage's own prefix checks.
+    # Endpoint: https://<project_ref>.storage.supabase.co/storage/v1/s3;
+    # region: the project's region. See .env.example.
+    storage_s3_endpoint: str = ""
+    storage_s3_region: str = ""
+    storage_s3_access_key_id: str = ""
+    storage_s3_secret_access_key: str = ""
+
+    # The pre-3b local folder. Product code no longer reads or writes it; only
+    # scripts/copy_storage_to_bucket.py reads it, to copy staging's files
+    # into the bucket (Stage 3b item 5). Kept until the founder drops it.
     storage_root: str = "storage"
 
     @property

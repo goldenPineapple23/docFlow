@@ -14,6 +14,7 @@ All data is fictional (CLAUDE.md Section 0 rule 4).
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -177,7 +178,8 @@ class WorkerTestTenant:
                     "tid": str(self.tenant_id),
                     "name": filename,
                     "path": path,
-                    "sha": uuid4().hex,
+                    # The real hash: the worker checks it on every read (3b, Q5).
+                    "sha": hashlib.sha256(content).hexdigest(),
                 },
             )
         return document_id

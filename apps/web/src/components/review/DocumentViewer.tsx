@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { originalDocumentUrl } from "@/lib/review";
+import { originalDocumentUrl, type CatalogError } from "@/lib/review";
 
 /**
  * The original document, beside the extracted data (CLAUDE.md Section 7.12).
@@ -35,6 +35,7 @@ type Minted = {
   format: string | null;
   filename: string;
   previewKind: "converted_image" | "extracted_text" | null;
+  unavailable: CatalogError | null;
 };
 
 export function DocumentViewer({
@@ -62,6 +63,7 @@ export function DocumentViewer({
             format: result.format ?? null,
             filename: result.filename ?? filename,
             previewKind: result.preview_kind ?? null,
+            unavailable: result.unavailable ?? null,
           });
         }
       })
@@ -91,6 +93,19 @@ export function DocumentViewer({
     return (
       <Panel>
         <p className="text-sm text-gray-500">Loading the original document…</p>
+      </Panel>
+    );
+  }
+
+  // The stored copy can't be read at all (Stage 3b, DOC-027). Said in the
+  // catalog's words, and no link: it could only lead to a 404.
+  if (minted.unavailable) {
+    return (
+      <Panel testId="viewer-original-unavailable">
+        <p className="text-sm font-medium text-gray-900">{minted.unavailable.title}</p>
+        <p className="mt-1 text-sm text-gray-600">{minted.unavailable.message}</p>
+        <p className="mt-1 text-sm text-gray-600">{minted.unavailable.action}</p>
+        <p className="mt-2 text-xs text-gray-400">{minted.unavailable.code}</p>
       </Panel>
     );
   }

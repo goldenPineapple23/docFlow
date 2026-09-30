@@ -26,6 +26,12 @@ role deliberately cannot change the schema (DECISIONS.md D-013, D-017).
 6. From Phase 6 on: only after all of this on staging, apply the same file to
    `docflow-prod`, again with its own backup first.
 
+**The one exception to backup-first (decided 2026-09-30, Stage 3b):** a
+migration that **only creates Storage buckets** (inserts into
+`storage.buckets`) and touches no existing table, policy or row skips steps
+1-2. There is nothing in it to restore. A migration that does anything else
+as well, even adding one policy, takes the backup as normal.
+
 ### 1.1 The standard backup (run before the migration)
 
 Replace `NNNN` with the migration's number and list every table the migration
@@ -89,17 +95,9 @@ select n.nspname as backup, string_agg(c.relname, ', ' order by c.relname) as ta
  where n.nspname like 'backup%' group by n.nspname order by n.nspname;
 ```
 
-**On `docflow-staging`, 2026-09-29** (by that query). Every one of these
-migrations' PRs has merged, so each may be dropped now:
-
-| Schema | Tables | Migration |
-|---|---|---|
-| `backup_0026` | document_headers, document_lines | 0026 (kept until now by D-156; this rule replaces that hold) |
-| `backup_0027` | documents, tenants | 0027 |
-| `backup_0028` | tenant_lifecycle_events, users | 0028 |
-| `backup_0029` | email_outbox, founder_alerts, stripe_webhook_events, tenants | 0029 |
-| `backup_0030` | documents, tenants | 0030 |
-| `backup_0031` | tenants | 0031, card billing (merged 2026-09-29) |
+**On `docflow-staging`: none since 2026-09-30.** The founder dropped
+`backup_0026` to `backup_0032` that day, after the PR for `0032` (the card
+billing follow-up, PR #29) merged.
 
 `docflow-prod` doesn't exist yet (Phase 6), so it has no backups.
 
@@ -139,10 +137,12 @@ How a run is reported:
 - Save each suite's full output to a file. Never cut it with `tail` or
   `head`: the exit code of the pipe replaces pytest's, so a failed run looks
   like it passed, and the failure details are lost.
-- Quote pytest's last line as printed. The API suite should read `424 passed,
-  3 deselected` with nothing failed or skipped (391 before the Stage 1
-  walkthrough fixes added tests; if the count is *lower* than the number
-  written here, find out what stopped running before calling the run green).
+- Quote pytest's last line as printed. The API suite should read `571 passed,
+  3 deselected` with nothing failed or skipped (staging, 2026-09-30, Stage 3b
+  on `aefd428`; the DOC-028 follow-up commit changed test wording, not the
+  count; it was 424 at Stage 1, 562 after card billing and 568 on `e3e8641`).
+  If the count is *lower* than the number written here, find out what
+  stopped running before calling the run green.
   The 3 deselected are the `live_api` tests, which only run at checkpoints
   (`apps/api/pyproject.toml`): `pytest -m live_api` — the golden fixture, the
   golden fixture with examples, and the example-contamination check.
@@ -743,3 +743,56 @@ section 3):
 
 Stripe returns the money to the card; it can take 5-10 business days to
 reach the customer. DocFlow does not refund anything automatically.
+
+## 7. File storage: Supabase Storage (Stage 3b, D-182)
+
+DocFlow's files live in one private bucket, `docflow-files`, reached through
+Storage's S3-compatible endpoint with a Storage-only access key. Nothing
+reads the old local `storage/` folder any more except the copy script below.
+
+### 7.1 Creating the key (once per project)
+
+1. Supabase dashboard -> the project -> Storage -> **S3 Configuration**.
+2. Copy the **Endpoint** into `STORAGE_S3_ENDPOINT` and the **Region** into
+   `STORAGE_S3_REGION` in the root `.env`.
+3. **New access key**, described "DocFlow API and worker". Copy the key id
+   into `STORAGE_S3_ACCESS_KEY_ID` and the secret into
+   `STORAGE_S3_SECRET_ACCESS_KEY`. The secret is shown once.
+4. The same four values go into the API's and the worker's secrets on Fly.
+
+The key reaches every file of every tenant. Treat it like the database
+password: never in the frontend, never in a log, never in a ticket. If it
+leaks, revoke it on the same page and create a new one.
+
+### 7.2 Copying staging's files into the bucket (the 3b rollout)
+
+Run from the repo root with `apps/api/.venv`'s Python, on the machine that
+holds the `storage/` folder:
+
+    python scripts/copy_storage_to_bucket.py            # dry run first
+    python scripts/copy_storage_to_bucket.py --apply    # then the copy
+
+It copies every file a row still references under the same key, reads each
+one back and checks its SHA-256, never overwrites something different that
+is already in the bucket, and leaves the local folder untouched. A clean run
+exits 0 and lists nothing. **Run it again with `--apply` straight after the
+switch** (the delta copy): it picks up anything the old code wrote in the
+meantime; "referenced but missing locally" must then be 0.
+
+The orphan count is files no row references (from failed uploads, and old
+test runs). They are left where they are.
+
+### 7.3 When the founder gets a `storage_unavailable` alert
+
+At most one an hour for the whole platform; it names the first tenant that
+hit it. While Storage is down: uploads answer DOC-025 and nothing is
+received; Postmark gets a 503 and sends the mail again later; documents
+already received wait in Processing without using up their tries. Check the
+Supabase status page and the project's Storage logs. Nothing needs doing
+once Storage is back: the waiting documents are picked up by the stuck sweep
+within `STUCK_PROCESSING_TIMEOUT_MIN`.
+
+A `document_failed` alert with **DOC-026** is different: the stored original
+is missing or isn't the file that was received. That is never an outage. Ask
+the customer to upload the file again, and look for how the object went
+missing.

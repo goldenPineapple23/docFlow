@@ -71,6 +71,12 @@ ALERT_TYPES: dict[str, str] = {
     "stripe_event_future_dated": "A Stripe event was stamped in the future and was not applied",
     # D-177: the Console accepts password-only sessions until this is fixed.
     "console_mfa_enforcement_off": "Console MFA enforcement is off (CONSOLE_MFA_ENFORCED=false)",
+    # Stage 3b (Q3): Storage couldn't be reached. Once an hour for the whole
+    # platform, not per tenant: one outage hits every tenant at once.
+    "storage_unavailable": "File storage couldn't be reached",
+    # Stage 3b (founder, 2026-09-30): a stored path named another tenant's
+    # folder and was refused before any read (Section 7.5).
+    "storage_path_cross_tenant": "A stored file path named another tenant's folder and was refused",
 }
 
 # Failure codes whose catalog text promises the reader that DocFlow has been
@@ -85,6 +91,8 @@ FAILURE_ALERTS: dict[str, str] = {
     "DOC-020": "document_failed",
     "DOC-021": "document_failed",
     "DOC-022": "document_stuck",
+    # Stage 3b: the stored original is missing or its hash doesn't match.
+    "DOC-026": "document_failed",
     "DOC-015": "unsafe_file_refused",
     "INT-004": "unverified_sender_held",
 }
@@ -101,6 +109,7 @@ def raise_alert(
     payload: dict[str, Any] | None = None,
     dedupe_key: str | None = None,
     dedupe_per_utc_day: bool = False,
+    dedupe_per_utc_hour: bool = False,
 ) -> bool:
     """
     Raise an alert. Returns False when an open alert with the same dedupe key
@@ -110,8 +119,11 @@ def raise_alert(
     `dedupe_per_utc_day` makes it one alert per condition per day: the INSERT
     appends ":YYYY-MM-DD" to the key, the UTC date by the database's clock --
     the clock that stamps the rows the key dedupes, so the day can't disagree
-    with them near midnight (D-170 #7).
+    with them near midnight (D-170 #7). `dedupe_per_utc_hour` does the same
+    per UTC hour (":YYYY-MM-DDTHH").
     """
+    if dedupe_per_utc_day and dedupe_per_utc_hour:
+        raise ValueError("choose one dedupe window")
     if alert_type not in ALERT_TYPES:
         raise ValueError(f"unknown alert type {alert_type!r}")
     if severity not in SEVERITIES:
@@ -156,6 +168,9 @@ def raise_alert(
                     (:id, :type, :severity, :tenant_id, CAST(:payload AS jsonb),
                      CASE WHEN :per_day
                           THEN CAST(:dedupe_key AS text) || ':' || (now() AT TIME ZONE 'UTC')::date::text
+                          WHEN :per_hour
+                          THEN CAST(:dedupe_key AS text) || ':'
+                               || to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24')
                           ELSE CAST(:dedupe_key AS text) END,
                      :email_outbox_id)
                 """
@@ -168,6 +183,7 @@ def raise_alert(
                 "payload": json.dumps(payload, sort_keys=True),
                 "dedupe_key": dedupe_key,
                 "per_day": dedupe_per_utc_day,
+                "per_hour": dedupe_per_utc_hour,
                 "email_outbox_id": str(outbox_id) if outbox_id else None,
             },
         )
@@ -244,3 +260,101 @@ def raise_for_failure(
         return False
     savepoint.commit()
     return raised
+
+
+def raise_storage_unavailable(session: Session, *, tenant_id: UUID, where: str) -> bool:
+    """
+    Stage 3b (Q3): Storage couldn't be reached. At most one alert per UTC
+    hour for the whole platform, with no new migration: the open-alert dedupe
+    index (0011) is unique across every tenant and applies whatever RLS lets
+    a session see, so each tenant session raises the alert for its own tenant
+    under the same hourly key, the first in the hour writes the row, and the
+    rest write nothing. The alert therefore names the first tenant to hit it,
+    not a count; every failure is still logged with its tenant.
+
+    `where` is a fixed label for the call site (upload, email_intake, worker,
+    export_download), never anything from a document. Like raise_for_failure
+    it has its own savepoint and never raises: an alert that can't be written
+    must never undo what the caller is recording.
+    """
+    logger.error("storage_unavailable tenant_id=%s where=%s", tenant_id, where)
+    savepoint = session.begin_nested()
+    try:
+        raised = raise_alert(
+            session,
+            alert_type="storage_unavailable",
+            severity="high",
+            tenant_id=tenant_id,
+            payload={"first_seen_at": where},
+            dedupe_key="storage_unavailable",
+            dedupe_per_utc_hour=True,
+        )
+    except Exception:
+        savepoint.rollback()
+        logger.exception("founder_alert_not_raised tenant_id=%s alert=storage_unavailable", tenant_id)
+        return False
+    savepoint.commit()
+    return raised
+
+
+def report_refused_storage_path(
+    exc: Exception, *, tenant_id: UUID, where: str, ref_id: UUID | str | None
+) -> None:
+    """
+    Stage 3b (founder, 2026-09-30): a stored path the prefix rules refused.
+    Nothing was read; this only records it.
+
+    * A malformed path (seed data, a bug): logged as `storage_path_refused`.
+    * A well-formed path under another tenant's folder
+      (`CrossTenantStoragePathError`): logged as `storage_path_cross_tenant`
+      and raised as a critical alert, one open alert per record, because
+      Section 7.5's isolation rule caught something.
+
+    `where` is a fixed call-site label and `ref_id` the order, export or
+    import id -- never the path or anything from a document (Section 7.10).
+    Opens its own tenant session and never raises: the caller is about to
+    answer with its own error.
+    """
+    from docflow_core.storage import CrossTenantStoragePathError
+
+    if not isinstance(exc, CrossTenantStoragePathError):
+        logger.error("storage_path_refused tenant_id=%s where=%s ref_id=%s", tenant_id, where, ref_id)
+        return
+    logger.error(
+        "storage_path_cross_tenant tenant_id=%s named_tenant_id=%s where=%s ref_id=%s",
+        tenant_id,
+        exc.named_tenant_id,
+        where,
+        ref_id,
+    )
+    from docflow_core.db import tenant_session
+
+    try:
+        with tenant_session(tenant_id) as session:
+            raise_alert(
+                session,
+                alert_type="storage_path_cross_tenant",
+                severity="critical",
+                tenant_id=tenant_id,
+                payload={
+                    "where": where,
+                    "ref_id": str(ref_id) if ref_id else None,
+                    "named_tenant_id": exc.named_tenant_id,
+                },
+                dedupe_key=f"storage_path_cross_tenant:{tenant_id}:{ref_id}",
+            )
+    except Exception:  # noqa: BLE001 -- logged above and here; the caller's error still goes out
+        logger.exception("founder_alert_not_raised tenant_id=%s alert=storage_path_cross_tenant", tenant_id)
+
+
+def alert_storage_unavailable(tenant_id: UUID, *, where: str) -> None:
+    """raise_storage_unavailable in its own tenant session, for a caller whose
+    own transaction has just rolled back because Storage failed. Never
+    raises: the caller is about to return its own catalog error."""
+    from docflow_core.db import tenant_session
+
+    try:
+        with tenant_session(tenant_id) as session:
+            raise_storage_unavailable(session, tenant_id=tenant_id, where=where)
+    except Exception:  # noqa: BLE001 -- logged; the caller's error still goes out
+        logger.exception("founder_alert_not_raised tenant_id=%s alert=storage_unavailable", tenant_id)

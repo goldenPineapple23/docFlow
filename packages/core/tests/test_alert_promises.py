@@ -28,6 +28,13 @@ ALERTED_ELSEWHERE = {
     # The worker raises it when buyer identification, matching or duplicate
     # detection didn't finish on a document (Phase 5.5, D-158).
     "VAL-016": "pipeline_step_failed",
+    # Stage 3b: Storage couldn't be reached, on upload / email intake
+    # (DOC-025) or on an export download (EXP-010). One platform-wide alert
+    # an hour (founder_alerts.raise_storage_unavailable).
+    "DOC-025": "storage_unavailable",
+    "EXP-010": "storage_unavailable",
+    # The review viewer during an outage (apps/api/app/routers/review.py).
+    "DOC-028": "storage_unavailable",
 }
 
 PROMISE = re.compile(r"(has|have) (already )?been alerted", re.IGNORECASE)

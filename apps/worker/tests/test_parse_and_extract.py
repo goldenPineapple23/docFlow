@@ -95,7 +95,14 @@ def test_unhandled_file_type_raises():
         build_content_blocks(_ft(FileTypeName.DOC), b"whatever")
 
 
+def _fixed_derived_key(tenant_id, document_id, kind, data, content_type=None):
+    """Stands in for storage.save_derived: returns the fixed key it would write."""
+    return f"tenants/{tenant_id}/derived/{document_id}/{kind}"
+
+
 class _FakeResult:
+    rowcount = 1  # every UPDATE finds its row (the storage-outage release, Stage 3b)
+
     def __init__(self, row):
         self._row = row
 
@@ -172,7 +179,7 @@ def test_conversion_failure_marks_the_document_failed_and_keeps_the_worker_alive
         yield session
 
     monkeypatch.setattr(mod, "tenant_session", fake_tenant_session)
-    monkeypatch.setattr(mod, "read_file", lambda path: b"II\x2a\x00" + b"\xff" * 512)
+    monkeypatch.setattr(mod, "read_file", lambda tenant_id, path: b"II\x2a\x00" + b"\xff" * 512)
 
     mod.parse_and_extract(str(uuid4()), str(uuid4()))
 
@@ -206,7 +213,7 @@ def test_a_failure_that_promises_an_alert_raises_it_without_risking_the_failed_s
         raise RuntimeError("the alert table is unreachable")
 
     monkeypatch.setattr(mod, "tenant_session", fake_tenant_session)
-    monkeypatch.setattr(mod, "read_file", lambda path: b"II\x2a\x00" + b"\xff" * 512)
+    monkeypatch.setattr(mod, "read_file", lambda tenant_id, path: b"II\x2a\x00" + b"\xff" * 512)
     monkeypatch.setattr(mod.founder_alerts, "raise_for_failure", broken_alert)
 
     tenant_id, document_id = uuid4(), uuid4()
@@ -318,11 +325,15 @@ def _drive_successful_task(monkeypatch, *, buyer_id, matcher):
     )
 
     monkeypatch.setattr(mod, "tenant_session", fake_tenant_session)
-    monkeypatch.setattr(mod, "read_file", lambda path: b"PURCHASE ORDER\nPO Number: BCH-2291\n")
+    monkeypatch.setattr(mod, "read_file", lambda tenant_id, path: b"PURCHASE ORDER\nPO Number: BCH-2291\n")
     monkeypatch.setattr(mod.anthropic, "Anthropic", lambda api_key=None, **kwargs: object())
     monkeypatch.setattr(mod, "extract_document", lambda client, content, **kwargs: result)
     _no_examples(monkeypatch, mod)
-    monkeypatch.setattr(mod, "save_file", lambda tenant_id, name, data: f"tenants/{tenant_id}/uploads/x.txt")
+    monkeypatch.setattr(
+        mod,
+        "save_derived",
+        _fixed_derived_key,
+    )
     monkeypatch.setattr(
         mod,
         "identify_and_link_buyer",
@@ -484,7 +495,7 @@ def test_a_page_read_visually_is_named_in_the_preview_not_dropped():
     assert _VISUAL_PART_PLACEHOLDER.encode() in preview.content
 
 
-def _drive_task_over(monkeypatch, filename: str, content: bytes, *, save_file):
+def _drive_task_over(monkeypatch, filename: str, content: bytes, *, save_derived):
     import contextlib
     from uuid import uuid4
 
@@ -504,8 +515,8 @@ def _drive_task_over(monkeypatch, filename: str, content: bytes, *, save_file):
         ok=False, model_id="m", prompt_hash="h", schema_version="s", raw_response={}
     )
     monkeypatch.setattr(mod, "tenant_session", fake_tenant_session)
-    monkeypatch.setattr(mod, "read_file", lambda path: content)
-    monkeypatch.setattr(mod, "save_file", save_file)
+    monkeypatch.setattr(mod, "read_file", lambda tenant_id, path: content)
+    monkeypatch.setattr(mod, "save_derived", save_derived)
     monkeypatch.setattr(mod.anthropic, "Anthropic", lambda api_key=None, **kwargs: object())
     monkeypatch.setattr(mod, "extract_document", lambda client, blocks, **kwargs: failed)
     _no_examples(monkeypatch, mod)
@@ -525,11 +536,11 @@ def test_the_task_stores_a_preview_under_the_tenant_even_when_extraction_fails(m
 
     saved: list[tuple] = []
 
-    def fake_save(tenant_id, name, data):
-        saved.append((tenant_id, name, data))
-        return f"tenants/{tenant_id}/uploads/preview.txt"
+    def fake_save(tenant_id, document_id, kind, data, content_type=None):
+        saved.append((tenant_id, kind, data, content_type))
+        return f"tenants/{tenant_id}/derived/{document_id}/{kind}"
 
-    session, tenant_id = _drive_task_over(monkeypatch, "po.docx", fb.build_docx(), save_file=fake_save)
+    session, tenant_id = _drive_task_over(monkeypatch, "po.docx", fb.build_docx(), save_derived=fake_save)
 
     previews_saved = [entry for entry in saved if entry[1].startswith("preview")]
     assert len(previews_saved) == 1 and previews_saved[0][0] == tenant_id
@@ -537,7 +548,7 @@ def test_the_task_stores_a_preview_under_the_tenant_even_when_extraction_fails(m
     assert updates == [
         {
             "id": updates[0]["id"],
-            "path": f"tenants/{tenant_id}/uploads/preview.txt",
+            "path": f"tenants/{tenant_id}/derived/{updates[0]['id']}/preview",
             "media_type": "text/plain; charset=utf-8",
             "kind": "extracted_text",
         }
@@ -547,10 +558,12 @@ def test_the_task_stores_a_preview_under_the_tenant_even_when_extraction_fails(m
 def test_a_preview_failure_never_touches_the_document(monkeypatch):
     from tests import fixture_builders as fb
 
-    def broken_save(tenant_id, name, data):
-        raise OSError("disk full")
+    def broken_save(tenant_id, document_id, kind, data, content_type=None):
+        from docflow_core.storage import StorageUnavailableError
 
-    session, _ = _drive_task_over(monkeypatch, "po.docx", fb.build_docx(), save_file=broken_save)
+        raise StorageUnavailableError("fake outage")
+
+    session, _ = _drive_task_over(monkeypatch, "po.docx", fb.build_docx(), save_derived=broken_save)
 
     assert not [sql for sql, _ in session.statements if "preview_storage_path" in sql]
     # The run still reached the model call and recorded its outcome.
@@ -565,17 +578,17 @@ def test_the_text_sent_to_the_model_is_kept_for_a_text_document(monkeypatch):
 
     saved: list[tuple] = []
 
-    def fake_save(tenant_id, name, data):
-        saved.append((tenant_id, name, data))
-        return f"tenants/{tenant_id}/uploads/{name}"
+    def fake_save(tenant_id, document_id, kind, data, content_type=None):
+        saved.append((tenant_id, kind, data, document_id))
+        return f"tenants/{tenant_id}/derived/{document_id}/{kind}"
 
-    session, tenant_id = _drive_task_over(monkeypatch, "po.docx", fb.build_docx(), save_file=fake_save)
+    session, tenant_id = _drive_task_over(monkeypatch, "po.docx", fb.build_docx(), save_derived=fake_save)
 
-    kept = [entry for entry in saved if entry[1] == "extracted.txt"]
+    kept = [entry for entry in saved if entry[1] == "extracted_text"]
     assert len(kept) == 1 and kept[0][0] == tenant_id
     assert b"CF-1001" in kept[0][2]
     updates = [params for sql, params in session.statements if "extracted_text_path" in sql]
-    assert updates and updates[0]["path"] == f"tenants/{tenant_id}/uploads/extracted.txt"
+    assert updates and updates[0]["path"] == f"tenants/{tenant_id}/derived/{kept[0][3]}/extracted_text"
 
 
 def test_a_document_read_visually_keeps_no_text_and_can_never_be_an_example(monkeypatch):
@@ -584,13 +597,13 @@ def test_a_document_read_visually_keeps_no_text_and_can_never_be_an_example(monk
 
     saved: list[tuple] = []
 
-    def fake_save(tenant_id, name, data):
-        saved.append((tenant_id, name, data))
-        return f"tenants/{tenant_id}/uploads/{name}"
+    def fake_save(tenant_id, document_id, kind, data, content_type=None):
+        saved.append((tenant_id, kind, data, document_id))
+        return f"tenants/{tenant_id}/derived/{document_id}/{kind}"
 
-    session, _ = _drive_task_over(monkeypatch, "fax.tif", fb.build_tiff(), save_file=fake_save)
+    session, _ = _drive_task_over(monkeypatch, "fax.tif", fb.build_tiff(), save_derived=fake_save)
 
-    assert not [entry for entry in saved if entry[1] == "extracted.txt"]
+    assert not [entry for entry in saved if entry[1] == "extracted_text"]
     assert not [sql for sql, _ in session.statements if "extracted_text_path" in sql]
 
 
@@ -600,7 +613,7 @@ def test_a_failed_extraction_is_still_recorded_as_a_model_run(monkeypatch):
     from tests import fixture_builders as fb
 
     session, _ = _drive_task_over(
-        monkeypatch, "po.docx", fb.build_docx(), save_file=lambda t, n, d: f"tenants/{t}/uploads/{n}"
+        monkeypatch, "po.docx", fb.build_docx(), save_derived=_fixed_derived_key
     )
 
     runs = [params for sql, params in session.statements if "INSERT INTO extraction_runs" in sql]
@@ -645,7 +658,7 @@ def test_the_routing_read_is_its_own_run_and_its_cost_is_part_of_the_document(mo
     from tests import fixture_builders as fb
 
     session, _ = _drive_task_over(
-        monkeypatch, "po.docx", fb.build_docx(), save_file=lambda t, n, d: f"tenants/{t}/uploads/{n}"
+        monkeypatch, "po.docx", fb.build_docx(), save_derived=_fixed_derived_key
     )
     # Re-drive with a routing plan in place.
     monkeypatch.setattr(mod.example_prompting, "plan", lambda *a, **k: ExamplePlan(routing=routing))
@@ -682,3 +695,137 @@ class _NoMatches:
     lines_considered = 0
     lines_matched = 0
     rules_applied: dict = {}
+
+
+# ── Stage 3b: reading the original from Storage (Q3, Q5) ──────────────────
+
+
+def _drive_read(monkeypatch, *, read, sha256=None):
+    import contextlib
+    from uuid import uuid4
+
+    import app.tasks.parse_and_extract as mod
+
+    session = _FakeSession(
+        {
+            "storage_path": "tenants/x/uploads/po.txt",
+            "original_filename": "po.txt",
+            "content_sha256": sha256,
+        }
+    )
+
+    @contextlib.contextmanager
+    def fake_tenant_session(tenant_id):
+        yield session
+
+    alerts: list[dict] = []
+    failure_alerts: list[dict] = []
+    monkeypatch.setattr(mod, "tenant_session", fake_tenant_session)
+    monkeypatch.setattr(mod, "read_file", read)
+    monkeypatch.setattr(
+        mod.founder_alerts, "raise_storage_unavailable", lambda session, **kw: alerts.append(kw)
+    )
+    monkeypatch.setattr(
+        mod.founder_alerts, "raise_for_failure", lambda session, **kw: failure_alerts.append(kw)
+    )
+
+    def no_model(*args, **kwargs):
+        raise AssertionError("the model must not be called")
+
+    monkeypatch.setattr(mod, "extract_document", no_model)
+    tenant_id = uuid4()
+    mod.parse_and_extract(str(tenant_id), str(uuid4()))
+    return session, alerts, failure_alerts
+
+
+def test_a_storage_outage_gives_the_attempt_back_and_never_fails_the_document(monkeypatch):
+    """An outage longer than MAX_PROCESSING_ATTEMPTS x the stuck timeout used
+    to end in DOC-022. Now each failed read puts its attempt back, so however
+    many times the sweep retries during an outage, the document never fails."""
+    from docflow_core.storage import StorageUnavailableError
+
+    def down(tenant_id, path):
+        raise StorageUnavailableError("fake outage")
+
+    for _ in range(3):
+        session, alerts, failure_alerts = _drive_read(monkeypatch, read=down)
+        assert not _to(session, "failed")
+        released = [sql for sql, _ in session.statements if "processing_attempts - 1" in sql]
+        assert len(released) == 1
+        assert alerts and alerts[0]["where"] == "worker"
+        assert not failure_alerts
+
+
+def test_a_missing_original_fails_loudly_once_instead_of_waiting(monkeypatch):
+    from docflow_core.storage import StorageObjectMissingError
+
+    def gone(tenant_id, path):
+        raise StorageObjectMissingError("not found")
+
+    session, alerts, failure_alerts = _drive_read(monkeypatch, read=gone)
+    failures = _to(session, "failed")
+    assert failures and failures[-1]["v_failure_code"] == "DOC-026"
+    assert not [sql for sql, _ in session.statements if "processing_attempts - 1" in sql]
+    assert failure_alerts and failure_alerts[0]["error_code"] == "DOC-026"
+    assert not alerts
+
+
+def test_a_refused_path_fails_cleanly_with_doc_026_and_no_retry(monkeypatch):
+    """A path the prefix rules refuse would be refused again on every retry,
+    so it ends now in DOC-026 -- not a crash, not a wait (founder, 2026-09-30)."""
+    from docflow_core.storage import UnsafeStoragePathError
+
+    import app.tasks.parse_and_extract as mod
+
+    reported: list[dict] = []
+    monkeypatch.setattr(
+        mod.founder_alerts, "report_refused_storage_path", lambda exc, **kw: reported.append(kw)
+    )
+
+    def refused(tenant_id, path):
+        raise UnsafeStoragePathError("not under this tenant's prefix")
+
+    session, alerts, failure_alerts = _drive_read(monkeypatch, read=refused)
+    failures = _to(session, "failed")
+    assert failures and failures[-1]["v_raw_json"] == {"error_code": "DOC-026", "detail": "path_refused"}
+    assert not [sql for sql, _ in session.statements if "processing_attempts - 1" in sql]
+    assert failure_alerts and failure_alerts[0]["error_code"] == "DOC-026"
+    assert reported and reported[0]["where"] == "worker"
+    assert not alerts
+
+
+def test_bytes_that_dont_match_the_received_file_are_never_parsed(monkeypatch):
+    import hashlib
+
+    received = b"PURCHASE ORDER\nPO Number: BCH-2291\n"
+    session, _, failure_alerts = _drive_read(
+        monkeypatch,
+        read=lambda tenant_id, path: b"PURCHASE ORDER\nPO Number: SOMETHING-ELSE\n",
+        sha256=hashlib.sha256(received).hexdigest(),
+    )
+    failures = _to(session, "failed")
+    assert failures and failures[-1]["v_failure_code"] == "DOC-026"
+    assert failures[-1]["v_raw_json"] == {"error_code": "DOC-026", "detail": "hash_mismatch"}
+    assert failure_alerts and failure_alerts[0]["error_code"] == "DOC-026"
+
+
+def test_the_worker_reads_with_its_documents_tenant(monkeypatch):
+    """Item 3: the read passes the tenant, so the storage layer can refuse a
+    path under any other tenant before contacting Storage."""
+    import hashlib
+
+    seen: list = []
+    content = b"PURCHASE ORDER\nPO Number: BCH-2291\n"
+
+    def read(tenant_id, path):
+        seen.append((tenant_id, path))
+        return content
+
+    try:
+        _drive_read(monkeypatch, read=read, sha256=hashlib.sha256(content).hexdigest())
+    except AssertionError:
+        pass  # it got as far as the model, which this test doesn't need
+    assert seen and seen[0][1] == "tenants/x/uploads/po.txt"
+    from uuid import UUID
+
+    assert isinstance(seen[0][0], UUID)

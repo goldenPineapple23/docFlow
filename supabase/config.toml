@@ -50,7 +50,11 @@ enabled = false
 enabled = true
 
 [storage]
-enabled = false
+# On since Stage 3b: DocFlow's files live in Supabase Storage (bucket
+# `docflow-files`, created by migration 0033), and CI's suites run against
+# this stack's bucket through its S3 endpoint (scripts/ci/local_storage_env.py).
+enabled = true
+file_size_limit = "25MiB"
 
 [edge_runtime]
 enabled = false

@@ -211,6 +211,44 @@ test("the original document renders in a sandboxed frame", async ({ page }) => {
   await expect(viewer).toHaveAttribute("sandbox", "");
 });
 
+test("an original that can't be read says so in the catalog's words, with no link to a 404", async ({ page }) => {
+  // Stage 3b (DOC-027): a missing, refused or unreachable stored copy is not
+  // "a format a browser can't display", and its Open button led to a bare 404.
+  const state = { detail: detail() };
+  await stubApi(page, state);
+  await page.route("**/review/documents/*/original", (route) =>
+    route.fulfill({
+      json: {
+        url: "/review/documents/x/original/content?token=t",
+        expires_at: 0,
+        previewable: false,
+        format: "plain text",
+        filename: "po.txt",
+        preview_kind: null,
+        unavailable: {
+          code: "DOC-027",
+          title: "The original can't be shown",
+          message:
+            "DocFlow couldn't open its stored copy of this order's original file, so it can't be shown here. Everything DocFlow read from it is still shown beside this.",
+          action:
+            "If you need to check a value against the original, ask the sender for their copy of the order.",
+        },
+      },
+    }),
+  );
+  await page.goto(`/review/${DOCUMENT_ID}`);
+
+  const panel = page.getByTestId("viewer-original-unavailable");
+  await expect(panel).toContainText("The original can't be shown");
+  await expect(panel).toContainText("ask the sender for their copy");
+  await expect(panel).toContainText("DOC-027");
+  await expect(panel).not.toContainText("a browser can't display");
+  await expect(page.getByTestId("download-original")).toHaveCount(0);
+  await expect(page.getByTestId("document-viewer")).toHaveCount(0);
+  // The rest of the review screen is untouched.
+  await expect(page.getByTestId("header-input-po_number")).toHaveValue("BCH-2291");
+});
+
 test("a read-only reviewer cannot edit or approve", async ({ page }) => {
   const state = { detail: detail({ can_edit: false }) };
   await stubApi(page, state);

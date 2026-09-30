@@ -28,7 +28,7 @@ from uuid import UUID, uuid4
 
 import jwt
 import pytest
-from docflow_core import external_services, founder_alerts
+from docflow_core import external_services, founder_alerts, storage
 from docflow_core.config import get_settings
 from docflow_core.db import platform_session, tenant_session
 from sqlalchemy import text
@@ -40,14 +40,15 @@ CATALOG_CSV = b"sku,description,unit_of_measure\nTEST-1001,Test Beans 5lb,CS\nTE
 
 
 @pytest.fixture(autouse=True)
-def _environment(monkeypatch, tmp_path):
+def _environment(monkeypatch):
+    # Files go to the real bucket (Stage 3b item 10): staging's when run from
+    # the founder's machine, the local stack's in CI. _Console cleans up.
     monkeypatch.setenv("SUPABASE_JWT_SECRET", JWT_SECRET)
-    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path))
     monkeypatch.setenv("INTAKE_EMAIL_DOMAIN", "intake.example.test")
     monkeypatch.setenv("FOUNDER_ALERT_EMAIL", "founder@example.com")
     monkeypatch.setenv("EMAIL_PROVIDER_API_KEY", "")
     get_settings.cache_clear()
-    yield tmp_path
+    yield
     get_settings.cache_clear()
 
 
@@ -125,6 +126,14 @@ class _Console:
         return {"Authorization": f"Bearer {token}"}
 
     def __exit__(self, *exc):
+        # The bucket first, while the ids are still known.
+        for tid in self.tenants:
+            storage.delete_tenant_storage(UUID(tid))
+        for iid in self.intakes:
+            backend = storage._get_backend()
+            keys = backend.list_keys(f"staging/{iid}/")
+            if keys:
+                backend.delete_keys(keys)
         with platform_session() as session:
             # 0012's import tables, when present: imports point at intake
             # files, and items/buyers point at imports, so they go first.
@@ -220,7 +229,7 @@ def test_an_intake_stores_files_that_pass_the_intake_checks(client):
 
 
 @requires_console_schema
-def test_a_file_the_intake_checks_refuse_is_stored_nowhere(client, _environment):
+def test_a_file_the_intake_checks_refuse_is_stored_nowhere(client):
     """"All 7.11 file-hardening rules apply to staging uploads" -- a .zip is Tier 3."""
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w") as z:
@@ -233,18 +242,14 @@ def test_a_file_the_intake_checks_refuse_is_stored_nowhere(client, _environment)
         assert detail["code"] == "CON-007"
         assert detail["detail"]["file_error_code"].startswith("DOC-")
         assert _scalar("SELECT count(*) FROM onboarding_intake_files WHERE intake_id = :i", i=intake_id) == 0
-        assert not (_environment / "staging" / intake_id).exists() or not any(
-            (_environment / "staging" / intake_id).iterdir()
-        )
+        assert storage._get_backend().list_keys(f"staging/{intake_id}/") == []
 
 
 # ── Step 2: tenant creation ─────────────────────────────────────────────────
 
 
 @requires_console_schema
-def test_creating_a_tenant_from_an_intake_moves_its_files_and_sets_everything_up(
-    client, stripe, _environment
-):
+def test_creating_a_tenant_from_an_intake_moves_its_files_and_sets_everything_up(client, stripe):
     with _Console() as console:
         intake_id = console.intake(client)
         console.upload(client, intake_id, "catalog.csv", CATALOG_CSV)
@@ -266,8 +271,9 @@ def test_creating_a_tenant_from_an_intake_moves_its_files_and_sets_everything_up
 
         moved = _scalar("SELECT storage_path FROM onboarding_intake_files WHERE intake_id = :i", i=intake_id)
         assert moved.startswith(f"tenants/{tenant_id}/onboarding/")
-        assert (_environment / moved).read_bytes() == CATALOG_CSV
-        assert not (_environment / staged).exists()
+        assert storage.read_file(UUID(tenant_id), moved) == CATALOG_CSV
+        with pytest.raises(storage.StorageObjectMissingError):
+            storage.read_staging_file(UUID(intake_id), staged)
         linked = _scalar("SELECT linked_tenant_id FROM onboarding_intakes WHERE id = :i", i=intake_id)
         assert str(linked) == tenant_id
         assert _scalar(
@@ -278,28 +284,43 @@ def test_creating_a_tenant_from_an_intake_moves_its_files_and_sets_everything_up
 
 @requires_console_schema
 def test_a_failed_tenant_creation_rolls_back_everything_including_the_file_move(
-    client, stripe, _environment
+    client, stripe, monkeypatch
 ):
-    """Step 2: "Any failure rolls back everything, including the storage move." """
+    """Step 2: "Any failure rolls back everything, including the storage move."
+
+    Checks its own tenant by name and its own copies, never a count of every
+    tenant on staging (approved fix carried into 3b): a count was thrown off
+    by anything else running against the same database."""
+    copies: list[str] = []
+    real_copy = storage.copy_into_tenant
+
+    def recording_copy(*args, **kwargs):
+        path = real_copy(*args, **kwargs)
+        copies.append(path)
+        return path
+
+    # admin_data_access imports it at call time, so the patch is seen.
+    monkeypatch.setattr(storage, "copy_into_tenant", recording_copy)
+
     with _Console() as console:
         intake_id = console.intake(client)
         console.upload(client, intake_id, "catalog.csv", CATALOG_CSV)
         staged = _scalar("SELECT storage_path FROM onboarding_intake_files WHERE intake_id = :i", i=intake_id)
-        tenants_before = _scalar("SELECT count(*) FROM tenants")
 
         stripe.fail = True
         response = console.create_tenant(client, intake_id=intake_id, name="Acme Test Rollback")
 
         assert response.status_code == 502
         assert response.json()["detail"]["code"] == "CON-006"
-        assert _scalar("SELECT count(*) FROM tenants") == tenants_before
+        assert _scalar("SELECT count(*) FROM tenants WHERE name = 'Acme Test Rollback'") == 0
         assert _scalar("SELECT linked_tenant_id FROM onboarding_intakes WHERE id = :i", i=intake_id) is None
         path = _scalar("SELECT storage_path FROM onboarding_intake_files WHERE intake_id = :i", i=intake_id)
         assert path == staged
-        assert (_environment / staged).read_bytes() == CATALOG_CSV
-        assert not (_environment / "tenants").exists() or not any(
-            p.is_file() for p in (_environment / "tenants").rglob("*")
-        )
+        assert storage.read_staging_file(UUID(intake_id), staged) == CATALOG_CSV
+        # The file was copied, and the copy is gone again.
+        assert len(copies) == 1
+        tenant_of_copy = UUID(copies[0].split("/")[1])
+        assert storage._get_backend().list_keys(f"tenants/{tenant_of_copy}/") == []
 
 
 @requires_console_schema

@@ -36,7 +36,8 @@ from __future__ import annotations
 
 import logging
 
-from docflow_core import email_intake
+from docflow_core import email_intake, founder_alerts
+from docflow_core.storage import StorageUnavailableError
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from app.deps import (
@@ -123,5 +124,13 @@ async def receive_inbound_email(
         result = email_intake.reply_address_changed(tenant_id, parsed)
         return {"outcome": result.outcome}
 
-    result = email_intake.process_inbound_email(tenant_id, parsed)
+    try:
+        result = email_intake.process_inbound_email(tenant_id, parsed)
+    except StorageUnavailableError as exc:
+        # Stage 3b (Q3): the whole email's transaction rolled back, so nothing
+        # was received. A 5xx -- never a 403, which Postmark treats as final --
+        # makes Postmark send the same email again later; the Message-ID and
+        # attachment-hash dedupe (7.8) keeps a retry from doubling anything.
+        founder_alerts.alert_storage_unavailable(tenant_id, where="email_intake")
+        raise HTTPException(status_code=503, detail="Temporarily unavailable.") from exc
     return {"outcome": result.outcome}

@@ -2708,3 +2708,64 @@ The fresh backup challenge passed the step-up. The rotation then stopped at `QUA
 - **Go-live by card needs `SUPPORT_EMAIL`** (ONB-018, as "Ask for a card"): the go-live email and the trial-ending email both say how to cancel. ONB-018's message now covers every card-billing email: "The emails for card billing tell the customer how to cancel, and SUPPORT_EMAIL isn't set, so there is no address to give them. Nothing was sent." (founder, 2026-09-29). If it is blank when the trial-ending job runs, the job fails, is retried, and reaches the founder as `scheduled_job_failed`.
 - **Reply-To.** `email_outbox.reply_to` is filled when the email is queued: `SUPPORT_EMAIL` on every email to the customer's own people (`email_outbox.TO_CUSTOMER`), none on founder alerts and on the intake address's automatic replies to buyers (`NOT_TO_CUSTOMER`), whose replies belong with the supplier. Every template is in exactly one set (a test). The Console Outbox shows it, so an email sent by hand carries it too.
 - **The held reply to buyers** (INT-007, `intake_held`) now ends "If your order is urgent, contact {customer} directly.", like the other three intake replies, which already sent the buyer to the supplier (founder, 2026-09-29). Buyer's email only; the customer's own banner is unchanged.
+
+## D-182 — Stage 3b: files move to Supabase Storage (founder, 2026-09-30)
+
+**Context:** files were written to a folder on whichever machine ran the code, and `read_file(path)` took no tenant. On Fly the API and the worker run on different machines, so a local folder can't work in production. The design and the founder's five answers are in `docs/BUILD-STATUS.md` ("3b detailed design").
+
+**Decided (founder, 2026-09-30):**
+- Q1: a Storage-only S3 access key through `boto3`, never the service role key. The key is project-wide and bypasses RLS, so file isolation is `docflow_core.storage`'s own prefix check, on read and delete as well as write.
+- Q2: migration `0033` creates the private bucket `docflow-files`, with no backup: a migration that only creates Storage buckets skips backup-first (RUNBOOK section 1). A fresh staging backup is taken before the rollout.
+- Q3: a Storage outage never loses or fails anything. Upload -> DOC-025 (503); email -> 503 to Postmark (never 403); worker -> the document waits without using an attempt; one `storage_unavailable` alert an hour for the whole platform, through the global open-alert dedupe index (no migration). A missing object (404) is a data fault, not an outage: DOC-026.
+- Q4: tenant hard delete removes files first, rows second, then sweeps the prefix again. No new `deleting` status: by then the intake gate already blocks new documents, and the final sweep catches an export written during the delete.
+- Q5: the original's SHA-256 is checked before parsing; a mismatch fails as DOC-026 with an alert.
+- The recoverable grace period before a hard delete is deferred.
+
+**As built:** see BUILD-STATUS "3b build". Differences from the design: four settings (the region), the outage wait stays `processing` (0027 has no `processing -> pending`), and new catalog entries DOC-026, EXP-010 and LIFE-007.
+
+**Addendum -- a refused stored path (founder, 2026-09-30, from the staging API run).** A row whose `storage_path` breaks the prefix rules (seed data's `tenants/seed/po.txt`) made the review viewer answer 500, and an audit found only example prompting handled it. Decided:
+- The file is never read; the prefix check is unchanged. `UnsafeStoragePathError` stays separate from `StorageError`, so a log can tell a bug from missing data.
+- **Two kinds, told apart by the check.** A malformed path logs `storage_path_refused`. A well-formed path under *another* tenant's folder raises `CrossTenantStoragePathError` (a subclass of `UnsafeStoragePathError`), logs `storage_path_cross_tenant`, and raises a **critical** `storage_path_cross_tenant` founder alert, one open alert per record (Section 7.5; 7.9's one row, two channels). `founder_alerts.type` is free text, so no migration.
+- Each reader handles it:
+  - the review viewer (link and file): the original isn't shown, 404;
+  - export download: 404;
+  - the worker: a clean DOC-026 `path_refused`, with no retry and no wait;
+  - catalog import: at once, not after the stuck sweep, with the new
+    founder-audience **IMP-010** "This file's stored copy can't be read".
+    IMP-009 tells the founder to start again, which would fail the same way.
+    A missing stored copy moves to IMP-010 too; an outage stays IMP-009;
+  - Console import from an intake file: SYS-001, like any failed Console read;
+  - example prompting: the example is left out.
+- **The review viewer when nothing can be read** (founder, 2026-09-30,
+  from the walkthrough):
+  - `previewable: false` used to cover both "no browser renders this
+    format" and "the stored copy can't be read". The screen therefore said
+    the first, beside an Open button that led to a bare 404, which breaks
+    7.16.5.
+  - The viewer link now returns `unavailable`, the tenant-audience
+    **DOC-027** "The original can't be shown", and the viewer shows it with
+    no link. A preview that can't be read falls back to the original.
+  - Each cause is still told apart: a refused path is reported, an outage
+    raises `storage_unavailable`, and a missing object is logged
+    (`viewer_stored_file_missing`).
+  - DOC-027 promises no alert, because a missing object raises none.
+  - **A Storage outage is its own entry, DOC-028** "The original can't be
+    shown right now" (founder, 2026-09-30, same reasoning as DOC-025 against
+    DOC-026). The stored copy is expected to open again once Storage is
+    back, so the tenant must not be sent to ask their buyer for the order.
+    The entry doesn't claim the file is fine: during an outage DocFlow
+    can't know that. It is also the one case where
+    DocFlow has already been alerted (`storage_unavailable`), and it says
+    so. DOC-027 stays for a missing object or a refused path. The shared
+    read returns why it failed, and the original's cause picks the entry.
+- **The alert can't live in the check** (founder agreed): the check also
+  runs on writes, from the copy script and in tests, and doesn't know which
+  record it's looking at. So each reader calls one helper,
+  `founder_alerts.report_refused_storage_path`.
+- **A build guard** (`test_every_reader_of_a_stored_path_reports_a_refused_one`)
+  fails when any use of a path-taking storage function outside `storage.py`
+  isn't inside a `try` whose `except UnsafeStoragePathError` calls the
+  helper. It keeps an explicit exemption list, each with a reason (tenant
+  creation's staging copy and its best-effort clean-ups; example
+  prompting's `read` closure), and it is tested both ways.
+

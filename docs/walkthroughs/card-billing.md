@@ -16,7 +16,7 @@ No real money moves. Decisions and design: DECISIONS.md D-181.
      running. It prints a signing secret starting `whsec_`. Put it in the root
      `.env` as `STRIPE_WEBHOOK_SECRET=whsec_...` (it's a test-mode secret for
      this machine only), then tell me: I restart the API.
-3. I start the API and the web app from the card-billing branch, and prepare
+3. I start the API and the web app from `main`, and prepare
    two tenants whose test batch is complete (so Go live is available): one
    **founding** and one **standard**.
 

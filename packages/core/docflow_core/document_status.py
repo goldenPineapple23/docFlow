@@ -242,3 +242,31 @@ def claim_for_processing(
         {"id": str(document_id), "stale": stale_after_min},
     ).first()
     return row is not None
+
+
+def release_after_storage_outage(session: Session, document_id: UUID) -> bool:
+    """
+    Stage 3b (Q3): the worker couldn't read the original because Storage was
+    unreachable. That is not the document's fault and must never use up one
+    of its MAX_PROCESSING_ATTEMPTS, or an outage longer than about 90 minutes
+    would end in DOC-022.
+
+    The document stays `processing` (0027's trigger has no `processing ->
+    pending`; 3d adds that wait with its own migration), its attempt is given
+    back, and its claim is re-stamped. The stuck sweep takes it over again
+    after STUCK_PROCESSING_TIMEOUT_MIN and `decide()` always says retry, so it
+    waits out the outage however long it lasts, and the hourly
+    storage_unavailable alert tells the founder.
+    """
+    result = session.execute(
+        text(
+            """
+            UPDATE documents
+               SET processing_attempts = GREATEST(processing_attempts - 1, 0),
+                   processing_started_at = now()
+             WHERE id = :id AND status = 'processing' AND deleted_at IS NULL
+            """
+        ),
+        {"id": str(document_id)},
+    )
+    return bool(rowcount(result))

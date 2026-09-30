@@ -313,6 +313,67 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="high",
         audience="both",
     ),
+    # ── Stage 3b: Supabase Storage (BUILD-STATUS "3b detailed design") ───────
+    # The two codes below DOC-025 are reserved for Stages 3c and 3d (BUILD-STATUS).
+    "DOC-025": ErrorCatalogEntry(
+        code="DOC-025",
+        title="We couldn't save this file",
+        message=(
+            "DocFlow couldn't store your file just now, so it wasn't received and nothing was "
+            "processed."
+        ),
+        action="Upload it again in a few minutes. DocFlow has already been alerted.",
+        severity="high",
+        audience="both",
+    ),
+    "DOC-026": ErrorCatalogEntry(
+        code="DOC-026",
+        title="The stored file doesn't match this order",
+        message=(
+            "The file DocFlow stored for this order is missing or isn't the file that was "
+            "received, so DocFlow stopped rather than read the wrong file."
+        ),
+        action=(
+            "DocFlow has already been alerted. Upload the original file again to have it read "
+            "from scratch."
+        ),
+        severity="high",
+        audience="both",
+    ),
+    # Stage 3b (founder, 2026-09-30): the review viewer when the stored copy
+    # is gone -- missing, or its recorded path refused. Said in place of "a
+    # format a browser can't display", with no Open button to a bare 404. An
+    # outage is DOC-028: the file is fine, and the sender needn't be asked.
+    "DOC-027": ErrorCatalogEntry(
+        code="DOC-027",
+        title="The original can't be shown",
+        message=(
+            "DocFlow couldn't open its stored copy of this order's original file, so it can't be "
+            "shown here. Everything DocFlow read from it is still shown beside this."
+        ),
+        action=(
+            "If you need to check a value against the original, ask the sender for their copy "
+            "of the order."
+        ),
+        severity="warning",
+        audience="tenant",
+    ),
+    # The same screen during a Storage outage: the file is fine, it will open
+    # again, and storage_unavailable has always been raised by then.
+    "DOC-028": ErrorCatalogEntry(
+        code="DOC-028",
+        title="The original can't be shown right now",
+        message=(
+            "DocFlow couldn't reach its file storage to open this order's original file. "
+            "Everything DocFlow read from it is still shown beside this."
+        ),
+        action=(
+            "DocFlow has already been alerted. Reload this page in a few minutes to see the "
+            "original."
+        ),
+        severity="warning",
+        audience="tenant",
+    ),
     "INT-001": ErrorCatalogEntry(
         code="INT-001",
         title="No attachment to process",
@@ -1122,12 +1183,31 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         code="IMP-009",
         title="Reading this file didn't finish",
         message=(
-            "The worker reading this file stopped before it finished (a time limit, a restart, or"
-            " running out of memory), so nothing was imported. The file itself may be fine."
+            "Reading this file stopped before it finished, so nothing was imported: either the"
+            " worker stopped (a time limit, a restart, or running out of memory), or file storage"
+            " couldn't be reached. The file itself may be fine."
         ),
         action=(
-            "Start the import again from the same file. If it stops again, check the worker log for"
-            " this import's ID."
+            "Start the import again from the same file in a few minutes. If storage couldn't be"
+            " reached, a 'File storage couldn't be reached' alert is already in your attention"
+            " panel. If it stops again, check the worker log for this import's ID."
+        ),
+        severity="warning",
+        audience="founder",
+    ),
+    # Stage 3b (founder, 2026-09-30): IMP-009's "start again" would fail the
+    # same way every time when the stored copy itself can't be read.
+    "IMP-010": ErrorCatalogEntry(
+        code="IMP-010",
+        title="This file's stored copy can't be read",
+        message=(
+            "DocFlow couldn't read its stored copy of this file: it is missing, or the location"
+            " recorded for it isn't valid. Nothing was imported, and starting this import again"
+            " would fail the same way."
+        ),
+        action=(
+            "Upload the file again as a new import. The log names this import's ID; if the"
+            " recorded location pointed into another tenant, you have also been alerted."
         ),
         severity="warning",
         audience="founder",
@@ -1646,6 +1726,18 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="tenant",
     ),
+    # Stage 3b: a ready export whose file Storage can't hand over right now.
+    "EXP-010": ErrorCatalogEntry(
+        code="EXP-010",
+        title="This file can't be downloaded right now",
+        message=(
+            "The export is ready, but DocFlow couldn't fetch the file from storage just now. "
+            "The export itself is safe."
+        ),
+        action="Try the download again in a few minutes. DocFlow has already been alerted.",
+        severity="warning",
+        audience="tenant",
+    ),
     # ── INT-006 · email intake (Section 7.14, slice 5.6) ────────────────────
     "INT-006": ErrorCatalogEntry(
         code="INT-006",
@@ -1737,6 +1829,19 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         ),
         action="Check the Ready to delete queue -- it only lists tenants past their window.",
         severity="warning",
+        audience="founder",
+    ),
+    # Stage 3b item 7: files go first, so a failure here leaves the database
+    # untouched and the delete can simply be run again.
+    "LIFE-007": ErrorCatalogEntry(
+        code="LIFE-007",
+        title="The tenant's files couldn't all be removed",
+        message=(
+            "Removing this tenant's stored files failed part-way, so its database records were "
+            "left untouched and it is still in the Ready to delete queue."
+        ),
+        action="Run the delete again in a few minutes. It picks up where it stopped.",
+        severity="high",
         audience="founder",
     ),
     # ── LIM / INT / QUA · allowances and quarantine (Section 7.16, slice 5.7) ─

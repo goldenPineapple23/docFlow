@@ -49,7 +49,7 @@ import po_formats
 from docflow_core import file_types, previews
 from docflow_core.db import platform_session, tenant_session
 from docflow_core.matching import match_document_lines
-from docflow_core.storage import save_file
+from docflow_core.storage import save_derived, save_file
 from docflow_core.validation import validate_document
 from sqlalchemy import text
 
@@ -389,10 +389,10 @@ def _insert(tenant_id: UUID, order: dict, *, content_sha: str | None = None) -> 
     if detected is not None and previews.needs_preview(detected.name):
         preview = previews.build_preview(content, detected.name)
         if preview is not None:
-            suffix = ".png" if preview.media_type == "image/png" else (
-                ".jpg" if preview.media_type == "image/jpeg" else ".txt"
+            # The same fixed key the worker writes (Stage 3b item 4).
+            preview_path = save_derived(
+                tenant_id, document_id, "preview", preview.content, content_type=preview.media_type
             )
-            preview_path = save_file(tenant_id, f"{order['po_number']}-preview{suffix}", preview.content)
             preview_media_type = preview.media_type
             preview_kind = preview.kind
     sha = content_sha or hashlib.sha256(content).hexdigest()

@@ -569,6 +569,9 @@ def test_the_viewer_url_is_minted_then_served_with_a_strict_csp(client):
         assert "tenants/" not in minted["url"]
         assert storage_path not in minted["url"]
 
+        # A readable original is never reported unavailable (DOC-027).
+        assert minted["unavailable"] is None
+
         served = client.get(minted["url"], headers=tenant.headers())
         assert served.status_code == 200
         assert served.content == content
@@ -595,6 +598,167 @@ def test_a_tenant_cannot_mint_a_viewer_url_for_another_tenants_document(client):
         refused = client.get(f"/review/documents/{document}/original", headers=b.headers())
 
         assert refused.status_code == 404
+
+
+def _set_storage_path(document_id: UUID, path: str) -> None:
+    with platform_session() as session:
+        session.execute(
+            text("UPDATE documents SET storage_path = :p WHERE id = :id"),
+            {"p": path, "id": str(document_id)},
+        )
+
+
+def _path_alerts(tenant_id: UUID) -> list[dict]:
+    with platform_session() as session:
+        return [
+            dict(r)
+            for r in session.execute(
+                text(
+                    "SELECT severity, payload FROM founder_alerts "
+                    "WHERE tenant_id = :t AND type = 'storage_path_cross_tenant'"
+                ),
+                {"t": str(tenant_id)},
+            ).mappings()
+        ]
+
+
+@requires_review_schema
+def test_an_order_whose_stored_path_is_refused_shows_no_original_instead_of_a_500(client):
+    """Stage 3b (founder, 2026-09-30): a path the prefix rules refuse (here
+    the seed scripts' made-up `tenants/seed/po.txt`) is never read, and the
+    review screen degrades as for a missing file -- the original can't be
+    shown -- instead of answering 500. A malformed path raises no alert."""
+    with _ReviewTenant("Acme Test Distributor -- refused path") as tenant:
+        document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        _set_storage_path(document, "tenants/seed/po.txt")
+
+        minted = client.get(f"/review/documents/{document}/original", headers=tenant.headers())
+        assert minted.status_code == 200
+        assert minted.json()["previewable"] is False
+        assert minted.json()["unavailable"]["code"] == "DOC-027"
+
+        served = client.get(minted.json()["url"])
+        assert served.status_code == 404
+        assert _path_alerts(tenant.tenant_id) == []
+
+
+@requires_review_schema
+def test_a_missing_stored_original_says_doc_027_not_an_unviewable_format(client):
+    """The viewer used to answer a missing object with `previewable: false`,
+    which the screen shows as "a format a browser can't display" beside an
+    Open button that leads to a 404. It now says DOC-027 (founder, 2026-09-30)."""
+    with _ReviewTenant("Acme Test Distributor -- missing original") as tenant:
+        document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        # Well-formed, this tenant's own, and never written.
+        _set_storage_path(document, f"tenants/{tenant.tenant_id}/uploads/{uuid4().hex}.txt")
+
+        minted = client.get(f"/review/documents/{document}/original", headers=tenant.headers())
+        assert minted.status_code == 200
+        body = minted.json()
+        assert body["unavailable"]["code"] == "DOC-027"
+        assert body["unavailable"]["title"] == "The original can't be shown"
+        assert body["preview_kind"] is None
+        assert client.get(body["url"]).status_code == 404
+
+
+@requires_review_schema
+def test_storage_down_says_doc_028_and_raises_the_storage_alert(client, monkeypatch):
+    """An outage is DOC-028, not DOC-027: the file is fine and will open
+    again, so the tenant is told to reload rather than ask their buyer for
+    the order (founder, 2026-09-30). Like every other reader, it raises
+    `storage_unavailable` -- the alert DOC-028 promises."""
+    from docflow_core.storage import StorageUnavailableError
+
+    import app.routers.review as review_router
+
+    def down(tenant_id, path):
+        raise StorageUnavailableError("fake outage")
+
+    alerted: list[dict] = []
+    monkeypatch.setattr(review_router, "read_file", down)
+    monkeypatch.setattr(
+        review_router.founder_alerts,
+        "alert_storage_unavailable",
+        lambda tenant_id, **kw: alerted.append({"tenant_id": tenant_id, **kw}),
+    )
+    with _ReviewTenant("Acme Test Distributor -- storage down") as tenant:
+        document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+
+        minted = client.get(f"/review/documents/{document}/original", headers=tenant.headers())
+        assert minted.status_code == 200
+        assert minted.json()["unavailable"]["code"] == "DOC-028"
+        assert "ask the sender" not in minted.json()["unavailable"]["action"]
+        assert alerted and alerted[0]["where"] == "review_viewer"
+        assert alerted[0]["tenant_id"] == tenant.tenant_id
+
+
+@requires_review_schema
+def test_a_preview_that_cant_be_read_falls_back_to_the_original(client):
+    """A stored preview is only a convenience: if it's gone, the viewer shows
+    the original instead of an empty frame (founder, 2026-09-30)."""
+    from docflow_core.storage import delete_tenant_storage
+
+    with _ReviewTenant("Acme Test Distributor -- preview gone") as tenant:
+        content = b"PO Number: BCH-2291\n"
+        storage_path = save_file(tenant.tenant_id, "po.txt", content)
+        try:
+            document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+            _set_storage_path(document, storage_path)
+            with platform_session() as session:
+                session.execute(
+                    text(
+                        "UPDATE documents SET preview_storage_path = :p, "
+                        "preview_media_type = 'text/plain; charset=utf-8', preview_kind = 'extracted_text' "
+                        "WHERE id = :id"
+                    ),
+                    {"p": f"tenants/{tenant.tenant_id}/derived/{document}/preview", "id": str(document)},
+                )
+
+            minted = client.get(f"/review/documents/{document}/original", headers=tenant.headers()).json()
+            assert minted["unavailable"] is None
+            assert minted["previewable"] is True
+            assert minted["preview_kind"] is None  # it's the original now, not DocFlow's rendering
+
+            served = client.get(minted["url"])
+            assert served.status_code == 200
+            assert served.content == content
+        finally:
+            delete_tenant_storage(tenant.tenant_id)
+
+
+@requires_review_schema
+def test_a_path_under_another_tenants_folder_is_refused_and_alerts_the_founder(client, monkeypatch):
+    """Section 7.5 caught something: the file is never served, and a critical
+    `storage_path_cross_tenant` alert is raised -- not only a log line."""
+    monkeypatch.setenv("FOUNDER_ALERT_EMAIL", "")  # the alert row only; no outbox email
+    get_settings.cache_clear()
+    with _ReviewTenant("Acme Test Distributor A") as a, _ReviewTenant("Beacon Test Supply B") as b:
+        b_content = b"PO Number: BEACON-7781\n"
+        b_path = save_file(b.tenant_id, "po.txt", b_content)
+        try:
+            document = a.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+            _set_storage_path(document, b_path)
+
+            minted = client.get(f"/review/documents/{document}/original", headers=a.headers())
+            assert minted.status_code == 200
+            served = client.get(minted.json()["url"])
+            assert served.status_code == 404
+            assert b_content not in served.content
+
+            alerts = _path_alerts(a.tenant_id)
+            assert len(alerts) == 1  # one open alert per record, however often it's opened
+            assert alerts[0]["severity"] == "critical"
+            assert alerts[0]["payload"]["named_tenant_id"] == str(b.tenant_id)
+            assert alerts[0]["payload"]["ref_id"] == str(document)
+            assert b_path not in str(alerts[0]["payload"])  # ids only, never the path
+        finally:
+            with platform_session() as session:
+                session.execute(
+                    text("DELETE FROM founder_alerts WHERE tenant_id = :t"), {"t": str(a.tenant_id)}
+                )
+            from docflow_core.storage import delete_tenant_storage
+
+            delete_tenant_storage(b.tenant_id)
 
 
 @requires_review_schema
