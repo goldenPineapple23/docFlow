@@ -27,7 +27,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from docflow_core import document_status, email_outbox
-from docflow_core.constants import FIRST_WEEK_CHECKIN_DAYS, TRIAL_PERIOD_DAYS, constants_in_effect
+from docflow_core.config import get_settings
+from docflow_core.constants import (
+    FIRST_WEEK_CHECKIN_DAYS,
+    TRIAL_ENDING_REMINDER_DAYS_BEFORE,
+    TRIAL_PERIOD_DAYS,
+    constants_in_effect,
+)
 from docflow_core.db import rowcount
 
 ORDER = (
@@ -373,6 +379,10 @@ def plan_go_live(session: Session, tenant_id: UUID, *, billing_method: str | Non
             raise OnboardingError("ONB-015")
         if plan.fee_at_signing and not plan.setup_fee_paid:
             raise OnboardingError("ONB-016")
+        if not get_settings().support_email.strip():
+            # The go-live email and the trial-ending email say how to cancel,
+            # and with no support address they can't (as "Ask for a card").
+            raise OnboardingError("ONB-018")
     return plan
 
 
@@ -383,12 +393,37 @@ GO_LIVE_BILLING_LINES = {
     "invoice": "Your first invoice comes from Stripe by email.",
     # {trial_end_date} and {first_charge_amount} are filled at go-live
     # (founder, 2026-09-29): the first month at the rate they pay, plus the
-    # setup fee when it comes with month one (founding customers).
+    # setup fee when it comes with month one (founding customers). The cancel
+    # sentence names the last day to ask, the day before the trial ends; its
+    # ending is CANCEL_OUTCOMES' (founder, 2026-09-29).
     "card": (
         "Your 7-day free trial starts today. On {trial_end_date}, the card on file is charged "
-        "{first_charge_amount}."
+        "{first_charge_amount}. To cancel, email {support_email} by {cancel_by_date}, and "
+        "{cancel_outcome}."
     ),
 }
+
+# How the cancel sentence ends (founder, 2026-09-29): a founding customer's
+# fee is still to come with month one, so cancelling means nothing at all is
+# charged; a standard customer's fee was paid at signing, and with no fee
+# there is only the month.
+CANCEL_OUTCOMES = {
+    "founding": "nothing is charged",
+    "at_signing": "no monthly charge is made",
+    "no_fee": "no monthly charge is made",
+}
+
+
+def card_trial_case(plan: GoLivePlan) -> str:
+    """Which of the three card-billing cases a go-live is: the setup fee comes
+    with month one ('founding'), was paid at signing ('at_signing'), or there
+    is none through Stripe ('no_fee'). Picks the cancel sentence and the
+    trial-ending email, so the two always agree."""
+    if plan.setup_fee_on_first_invoice:
+        return "founding"
+    if plan.setup_fee_paid:
+        return "at_signing"
+    return "no_fee"
 
 
 def first_charge_amount(plan: GoLivePlan) -> Decimal:
@@ -499,6 +534,7 @@ def complete_go_live(
         )
 
     job_id = schedule_first_week_checkin(session, tenant_id)
+    trial_job_id = schedule_trial_ending_reminder(session, tenant_id, plan, billing)
     advance(
         session,
         tenant_id,
@@ -515,9 +551,13 @@ def complete_go_live(
             "stripe_subscription_id": billing.subscription_id,
             "go_live_email_outbox_id": str(outbox_id) if outbox_id else None,
             "first_week_checkin_job_id": str(job_id),
+            "trial_ending_reminder_job_id": str(trial_job_id) if trial_job_id else None,
         },
         constants=constants_in_effect(
-            "FIRST_WEEK_CHECKIN_DAYS", "INVOICE_DAYS_UNTIL_DUE", "TRIAL_PERIOD_DAYS"
+            "FIRST_WEEK_CHECKIN_DAYS",
+            "INVOICE_DAYS_UNTIL_DUE",
+            "TRIAL_PERIOD_DAYS",
+            "TRIAL_ENDING_REMINDER_DAYS_BEFORE",
         ),
     )
 
@@ -539,7 +579,67 @@ def _billing_line(session: Session, tenant_id: UUID, plan: GoLivePlan, billing: 
     return line.format(
         trial_end_date=card_billing.local_date(trial_end, timezone),
         first_charge_amount=card_billing.money(int(first_charge_amount(plan) * 100)),
+        support_email=get_settings().support_email.strip(),
+        cancel_by_date=card_billing.cancel_by_date(trial_end, timezone),
+        cancel_outcome=CANCEL_OUTCOMES[card_trial_case(plan)],
     )
+
+
+def schedule_trial_ending_reminder(
+    session: Session, tenant_id: UUID, plan: GoLivePlan, billing: GoLiveBilling
+) -> UUID | None:
+    """
+    The card-billed owner's email TRIAL_ENDING_REMINDER_DAYS_BEFORE days
+    before the trial ends (founder, 2026-09-29; migration 0032). Its run time
+    is computed by the database from Stripe's trial end (D-170), falling back,
+    as the go-live email does, to TRIAL_PERIOD_DAYS from now. The amounts are
+    fixed here, from the plan the go-live email and Stripe's invoice used.
+    None (nothing scheduled) unless the go-live is by card.
+    """
+    if plan.billing_method != "card":
+        return None
+    case = card_trial_case(plan)
+    founding_rate = bool(plan.founding_price and plan.promo_monthly_price)
+    month = plan.promo_monthly_price if founding_rate and plan.promo_monthly_price else plan.monthly_price
+    fee = plan.setup_fee_on_first_invoice
+    job_id = uuid4()
+    session.execute(
+        text(
+            """
+            WITH t AS (
+                SELECT coalesce(to_timestamp(CAST(:trial_end AS double precision)),
+                                now() + make_interval(days => :trial_days)) AS trial_end_at
+            )
+            INSERT INTO scheduled_jobs (id, tenant_id, job_type, run_at, payload, dedupe_key)
+            SELECT :id, :tenant_id, 'trial_ending_reminder',
+                   t.trial_end_at - make_interval(days => :before),
+                   CAST(:payload AS jsonb) || jsonb_build_object('trial_end_at', t.trial_end_at),
+                   'trial_ending_reminder:' || :tenant_id
+              FROM t
+            ON CONFLICT (dedupe_key) DO NOTHING
+            """
+        ),
+        {
+            "id": str(job_id),
+            "tenant_id": str(tenant_id),
+            "trial_end": billing.trial_end,
+            "trial_days": TRIAL_PERIOD_DAYS,
+            "before": TRIAL_ENDING_REMINDER_DAYS_BEFORE,
+            # Whole cents, never a float (Section 3).
+            "payload": json.dumps(
+                {
+                    "template": f"trial_ending_{case}",
+                    "first_charge_cents": int(first_charge_amount(plan) * 100),
+                    "month_cents": int(month * 100),
+                    "standard_month_cents": int(plan.monthly_price * 100),
+                    "founding_rate": founding_rate,
+                    "promo_days": plan.promo_days,
+                    "setup_fee_cents": int(fee * 100) if fee else None,
+                }
+            ),
+        },
+    )
+    return job_id
 
 
 def schedule_first_week_checkin(session: Session, tenant_id: UUID) -> UUID:

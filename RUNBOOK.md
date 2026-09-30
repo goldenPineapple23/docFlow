@@ -63,11 +63,45 @@ don't run the migration.
 ### 1.3 Dropping a backup
 
 Only when you decide to, never automatically, and never while the change it
-protects is still being checked:
+protects is still being checked. When (founder, 2026-09-29):
+
+- **Staging:** once the migration's PR has merged (the suites have passed on
+  staging with the migration applied by then).
+- **Production:** 14 days after the migration was applied there, if nothing
+  about it has needed the backup.
+
+Each drop is its own decision: look at what the schema holds first, then drop
+that one schema. A backup holds customer data (in production), so it should
+not outlive its purpose.
 
 ```sql
+-- what it holds
+select table_name from information_schema.tables where table_schema = 'backup_NNNN';
+
 drop schema backup_NNNN cascade;
 ```
+
+To list every backup still there:
+
+```sql
+select n.nspname as backup, string_agg(c.relname, ', ' order by c.relname) as tables
+  from pg_namespace n left join pg_class c on c.relnamespace = n.oid and c.relkind = 'r'
+ where n.nspname like 'backup%' group by n.nspname order by n.nspname;
+```
+
+**On `docflow-staging`, 2026-09-29** (by that query). Every one of these
+migrations' PRs has merged, so each may be dropped now:
+
+| Schema | Tables | Migration |
+|---|---|---|
+| `backup_0026` | document_headers, document_lines | 0026 (kept until now by D-156; this rule replaces that hold) |
+| `backup_0027` | documents, tenants | 0027 |
+| `backup_0028` | tenant_lifecycle_events, users | 0028 |
+| `backup_0029` | email_outbox, founder_alerts, stripe_webhook_events, tenants | 0029 |
+| `backup_0030` | documents, tenants | 0030 |
+| `backup_0031` | tenants | 0031, card billing (merged 2026-09-29) |
+
+`docflow-prod` doesn't exist yet (Phase 6), so it has no backups.
 
 ### 1.4 Running the test suites against staging
 
@@ -399,8 +433,8 @@ list is the checks that sit around them. Phase 6 completes it.
 - [ ] **Stripe's own trial-ending email is off** (founder, 2026-09-29; done
   in the sandbox that day): **Settings** → **Billing** → **Subscriptions and
   emails**, the reminder Stripe sends before a free trial ends. DocFlow
-  sends its own trial-ending email to card-billed customers (its wording is
-  with the founder for approval), so with Stripe's on, customers would get
+  sends its own trial-ending email to card-billed customers, 2 days before
+  the trial ends (D-181 addendum 2), so with Stripe's on, customers would get
   two.
 
 **For each new tenant:**
@@ -580,7 +614,11 @@ tenant is still suspended: the subscription would keep billing.
 
 Customers cancel by emailing `SUPPORT_EMAIL` (the card-billing emails say so;
 they can't cancel in Stripe, because DocFlow's portal configuration has
-cancelling turned off). When a request arrives:
+cancelling turned off). The go-live and trial-ending emails ask them to
+email **by the day before the trial ends** (the cancel-by date), which leaves
+you a day to enter the cancel before Stripe charges. A request that arrives
+on the trial's last day is still before the trial ends, so 6.2 applies to it.
+When a request arrives:
 
 1. **Note the time the request arrived** (the email's timestamp). That time
    decides the refund rule below, not the time you act on it.

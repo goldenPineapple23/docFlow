@@ -56,7 +56,9 @@ invite link is there too; open it in a private window to sign in as the owner.
 
 1. The founding tenant → **Ask for a card**. **Expect** the Outbox email says
    nothing is charged now, and the setup fee ($750.00) comes with the first
-   month when the trial ends.
+   month when the trial ends; "Your go-live email will give your trial's end
+   date. To cancel, email [support address] before then, and nothing is
+   charged."; and, above the body, **Reply-To: [support address]**.
 2. As its owner, `/billing`. **Expect** "Adding one charges nothing now."
 3. **Add a card** with `4000 0000 0000 0341` (it saves, but later charges
    fail — we need that in Part 4). **Expect** Stripe's page asks for no
@@ -71,8 +73,18 @@ invite link is there too; open it in a private window to sign in as the owner.
    "invoice", no due date. **Confirm** (with the authenticator code).
 3. **Expect** in Stripe: a subscription, **Trialing**, "Charge
    automatically", with a pending $750.00 setup-fee item. In the Outbox, the
-   go-live email says "The card on file is charged when it ends."
-4. (Optional) The standard tenant: try **Go live** before its fee is paid on
+   go-live email says "On [date], the card on file is charged $949.00. To
+   cancel, email [support address] by [the day before], and nothing is
+   charged.", with Reply-To: [support address].
+4. **The trial-ending email.** It is scheduled for 2 days before the trial
+   ends. To see it now, in the Supabase SQL Editor (staging, test data):
+   `update scheduled_jobs set run_at = now() where job_type =
+   'trial_ending_reminder' and tenant_id = '<the tenant's id>';` **Expect**
+   within a few minutes, in the Outbox: "Your DocFlow free trial ends on
+   [date]", the $949.00 with "($199.00, your founding rate for the first 90
+   days, then $299.00 a month) plus the setup fee ($750.00)", and the same
+   cancel-by sentence.
+5. (Optional) The standard tenant: try **Go live** before its fee is paid on
    a fresh standard tenant. **Expect ONB-016.**
 
 ## Part 4 — A payment fails, then the card is updated

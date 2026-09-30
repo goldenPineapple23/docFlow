@@ -1,0 +1,13 @@
+Subject: Your DocFlow free trial ends on $trial_end_date
+
+Hello,
+
+Your 7-day free trial of DocFlow ends on $trial_end_date. That day, the card
+on file is charged $first_charge_amount: your first month.
+
+You don't need to do anything to keep using DocFlow.
+
+To cancel, email $support_email by $cancel_by_date, and no monthly charge is
+made.
+
+-- DocFlow

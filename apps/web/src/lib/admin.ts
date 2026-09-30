@@ -161,6 +161,8 @@ export type OutboxEmail = {
   tenant_id: string | null;
   tenant_name: string | null;
   to_address: string;
+  // The support mailbox on email to the customer's own people (0032); null otherwise.
+  reply_to: string | null;
   template: string;
   subject: string;
   body_text: string;

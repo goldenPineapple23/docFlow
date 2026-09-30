@@ -275,4 +275,6 @@ HANDLERS: dict[str, Callable[[Session, Job], None]] = {
     # Card billing (migration 0031): the owner's reminder before the date a
     # past-due tenant may be paused from.
     "past_due_reminder": card_billing.send_past_due_reminder,
+    # Card billing (migration 0032): the owner's email before the trial ends.
+    "trial_ending_reminder": card_billing.send_trial_ending_reminder,
 }

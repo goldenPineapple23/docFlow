@@ -70,6 +70,27 @@ TEMPLATE_PARAMS = {
         "setup_fee": "$1,500.00",
         "billing_url": "https://app.example.test/billing",
     },
+    # The trial-ending email (founder, 2026-09-29; migration 0032).
+    "trial_ending_founding": {
+        "trial_end_date": "October 6, 2026",
+        "cancel_by_date": "October 5, 2026",
+        "first_charge_amount": "$949.00",
+        "month_detail": "$199.00, your founding rate for the first 90 days, then $299.00 a month",
+        "setup_fee": "$750.00",
+        "support_email": "support@example.test",
+    },
+    "trial_ending_at_signing": {
+        "trial_end_date": "October 6, 2026",
+        "cancel_by_date": "October 5, 2026",
+        "first_charge_amount": "$299.00",
+        "support_email": "support@example.test",
+    },
+    "trial_ending_no_fee": {
+        "trial_end_date": "October 6, 2026",
+        "cancel_by_date": "October 5, 2026",
+        "first_charge_amount": "$299.00",
+        "support_email": "support@example.test",
+    },
     "intake_not_active": {"tenant_name": "Acme Test Distributor"},
     "intake_suspended": {"tenant_name": "Acme Test Distributor"},
     "first_week_checkin": {
@@ -302,6 +323,90 @@ def test_the_trial_length_in_card_billings_wording_is_the_constant():
 
     phrase = f"{TRIAL_PERIOD_DAYS}-day"
     assert phrase in GO_LIVE_BILLING_LINES["card"]
-    for template in ("card_request_founding", "card_request_at_signing", "card_request_no_fee"):
+    for template in (
+        "card_request_founding",
+        "card_request_at_signing",
+        "card_request_no_fee",
+        "trial_ending_founding",
+        "trial_ending_at_signing",
+        "trial_ending_no_fee",
+    ):
         _, body = email_outbox.render(template, TEMPLATE_PARAMS[template])
         assert phrase in body.replace("\n", " "), template
+
+
+# ── Reply-To (founder, 2026-09-29; migration 0032) ──────────────────────────
+
+
+def test_every_template_is_classed_as_to_the_customer_or_not_exactly_once():
+    """A new template must be put in one set, so its Reply-To is a choice."""
+    names = set(email_outbox.template_names())
+    assert email_outbox.TO_CUSTOMER | email_outbox.NOT_TO_CUSTOMER == names
+    assert not email_outbox.TO_CUSTOMER & email_outbox.NOT_TO_CUSTOMER
+
+
+def test_the_intake_replies_to_buyers_and_founder_alerts_carry_no_reply_to():
+    assert email_outbox.NOT_TO_CUSTOMER == {
+        "founder_alert", "intake_address_changed", "intake_held", "intake_not_active", "intake_suspended",
+    }
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "go_live", "card_request_founding", "payment_failed", "payment_failed_reminder",
+        "trial_ending_founding", "invite", "cancellation_confirmed",
+    ],
+)
+def test_email_to_the_customer_replies_to_the_support_mailbox(monkeypatch, template):
+    monkeypatch.setenv("SUPPORT_EMAIL", " support@example.test ")
+    get_settings.cache_clear()
+    try:
+        assert email_outbox.reply_to_for(template) == "support@example.test"
+        assert email_outbox.reply_to_for("intake_suspended") is None
+        assert email_outbox.reply_to_for("founder_alert") is None
+    finally:
+        get_settings.cache_clear()
+
+
+def test_no_reply_to_while_the_support_address_is_blank(monkeypatch):
+    monkeypatch.setenv("SUPPORT_EMAIL", "")
+    get_settings.cache_clear()
+    try:
+        assert email_outbox.reply_to_for("go_live") is None
+    finally:
+        get_settings.cache_clear()
+
+
+# ── The cancel-by date (founder, 2026-09-29) ────────────────────────────────
+
+
+def test_the_cancel_by_date_is_the_day_before_the_trial_ends_in_the_tenants_timezone():
+    from datetime import UTC, datetime
+
+    from docflow_core.card_billing import cancel_by_date, local_date
+
+    # 03:00 UTC on October 6 is still October 5 in Los Angeles.
+    trial_end = datetime(2026, 10, 6, 3, 0, tzinfo=UTC)
+    assert local_date(trial_end, "America/Los_Angeles") == "October 5, 2026"
+    assert cancel_by_date(trial_end, "America/Los_Angeles") == "October 4, 2026"
+    assert cancel_by_date(trial_end, "UTC") == "October 5, 2026"
+    # Across a month boundary, and with an unknown zone read as UTC.
+    assert cancel_by_date(datetime(2026, 11, 1, 12, tzinfo=UTC), "Not/AZone") == "October 31, 2026"
+
+
+def test_the_founding_trial_ending_email_states_the_rate_after_the_founding_period():
+    _, body = email_outbox.render("trial_ending_founding", TEMPLATE_PARAMS["trial_ending_founding"])
+    flat = " ".join(body.split())
+    assert (
+        "the card on file is charged $949.00: your first month ($199.00, your founding rate for "
+        "the first 90 days, then $299.00 a month) plus the setup fee ($750.00)."
+    ) in flat
+    assert "To cancel, email support@example.test by October 5, 2026, and nothing is charged." in flat
+
+
+@pytest.mark.parametrize("template", ["trial_ending_at_signing", "trial_ending_no_fee"])
+def test_the_standard_and_no_fee_trial_ending_emails_promise_no_monthly_charge(template):
+    _, body = email_outbox.render(template, TEMPLATE_PARAMS[template])
+    flat = " ".join(body.split())
+    assert "To cancel, email support@example.test by October 5, 2026, and no monthly charge is made." in flat
