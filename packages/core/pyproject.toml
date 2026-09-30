@@ -13,7 +13,9 @@ dependencies = [
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.1",
     "httpx>=0.27",
-    "pyjwt[crypto]>=2.8",
+    # 2.15.0 fixes CVE-2026-101918 (a deeply nested payload escaping as a raw
+    # RecursionError); the floor keeps the vulnerable versions out.
+    "pyjwt[crypto]>=2.15.0",
     "anthropic>=1.6",
     # docflow_core.extraction catches a stream dropped mid-answer, which
     # surfaces from the SDK's own transport (httpx2), not as an APIError (D-161).
