@@ -207,7 +207,8 @@ def run_export(tenant_id: UUID, export_id: UUID) -> ExportOutcome:
     that is no longer `pending` is left exactly as it is.
     """
     from docflow_core import exports
-    from docflow_core.storage import save_file
+    from docflow_core import founder_alerts
+    from docflow_core.storage import StorageError, StorageUnavailableError, save_file
 
     with tenant_session(tenant_id) as session:
         row = session.execute(
@@ -256,10 +257,12 @@ def run_export(tenant_id: UUID, export_id: UUID) -> ExportOutcome:
 
     try:
         storage_path = save_file(tenant_id, f"export.{built.extension}", built.content, area="exports")
-    except OSError as exc:
+    except StorageError as exc:
         logger.error(
             "export_storage_failed export_id=%s error_type=%s", export_id, type(exc).__name__
         )
+        if isinstance(exc, StorageUnavailableError):
+            founder_alerts.alert_storage_unavailable(tenant_id, where="export")
         return _finish_failed(tenant_id, export_id, "EXP-007")
 
     with tenant_session(tenant_id) as session:

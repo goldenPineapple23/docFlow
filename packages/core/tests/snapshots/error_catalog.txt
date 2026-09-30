@@ -250,6 +250,14 @@ DOC-022 [high/both] This order took too long to process
   what+why: DocFlow tried to process this order several times and none of the tries finished, so it stopped trying rather than leave the order waiting indefinitely.
   next:     DocFlow has already been alerted. Upload the same file again; if it fails a second time, DocFlow will look into it.
 
+DOC-025 [high/both] We couldn't save this file
+  what+why: DocFlow couldn't store your file just now, so it wasn't received and nothing was processed.
+  next:     Upload it again in a few minutes. DocFlow has already been alerted.
+
+DOC-026 [high/both] The stored file doesn't match this order
+  what+why: The file DocFlow stored for this order is missing or isn't the file that was received, so DocFlow stopped rather than read the wrong file.
+  next:     DocFlow has already been alerted. Upload the original file again to have it read from scratch.
+
 EXM-001 [warning/founder] Confirm the live golden check first
   what+why: Example prompting changes what the extraction model is sent, so it may only be switched on after a live golden-fixture run with examples has passed (Section 7.13). The confirmation wasn't ticked, so nothing was changed.
   next:     Run `pytest -m live_api tests/test_example_prompting_golden.py` in apps/api; when it passes, tick the confirmation and switch it on again.
@@ -289,6 +297,10 @@ EXP-008 [warning/tenant] QuickBooks may not keep every decimal
 EXP-009 [warning/tenant] This export didn't finish
   what+why: DocFlow started building this file, but the job stopped before it was done, so there's nothing to download. Nothing is wrong with the approved order.
   next:     Start the export again. It usually takes a few seconds.
+
+EXP-010 [warning/tenant] This file can't be downloaded right now
+  what+why: The export is ready, but DocFlow couldn't fetch the file from storage just now. The export itself is safe.
+  next:     Try the download again in a few minutes. DocFlow has already been alerted.
 
 FLD-001 [warning/founder] That isn't a field DocFlow reads
   what+why: The list of fields sent to save included a name DocFlow doesn't extract, or a setting other than required, optional or hidden. Nothing was saved.
@@ -397,6 +409,10 @@ LIFE-005 [warning/founder] That name doesn't match
 LIFE-006 [warning/founder] This tenant isn't ready to delete
   what+why: A tenant can only be hard-deleted once it is in the pending-deletion window and that window has elapsed.
   next:     Check the Ready to delete queue -- it only lists tenants past their window.
+
+LIFE-007 [high/founder] The tenant's files couldn't all be removed
+  what+why: Removing this tenant's stored files failed part-way, so its database records were left untouched and it is still in the Ready to delete queue.
+  next:     Run the delete again in a few minutes. It picks up where it stopped.
 
 LIM-001 [info/tenant] You've used most of this month's documents
   what+why: You've used {used} of {allowance} documents included in {tier} this month. Documents continue to process normally.

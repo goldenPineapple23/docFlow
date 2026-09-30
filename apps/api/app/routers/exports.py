@@ -25,10 +25,12 @@ storage path never reaches the client (Section 7.4).
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 from uuid import UUID
 
+from docflow_core import founder_alerts
 from docflow_core.db import tenant_session
 from docflow_core.errors import get_error
 from docflow_core.export_jobs import (
@@ -39,7 +41,7 @@ from docflow_core.export_jobs import (
     request_export,
 )
 from docflow_core.signed_urls import InvalidSignedUrl, mint_export_token, verify_export_token
-from docflow_core.storage import read_file
+from docflow_core.storage import StorageObjectMissingError, StorageUnavailableError, read_file
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -47,6 +49,8 @@ from sqlalchemy import text
 from app.actor import Actor, current_actor
 from app.celery_client import celery_client
 from app.errors import catalog_error
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/review", tags=["exports"])
 
@@ -227,8 +231,18 @@ def download_export(export_id: UUID, token: str = Query(min_length=1)) -> Respon
         raise HTTPException(status_code=404)
 
     filename = _download_filename(row["snapshot"], row["format"])
+    try:
+        content = read_file(verified.tenant_id, row["storage_path"])
+    except StorageObjectMissingError as exc:
+        # A ready export whose file is gone is a data fault: say it's not
+        # there, as for any export that can't be served, and log it.
+        logger.error("export_file_missing export_id=%s", export_id)
+        raise HTTPException(status_code=404) from exc
+    except StorageUnavailableError as exc:
+        founder_alerts.alert_storage_unavailable(verified.tenant_id, where="export_download")
+        raise catalog_error("EXP-010", status_code=503) from exc
     return Response(
-        content=read_file(row["storage_path"]),
+        content=content,
         media_type=_MEDIA_TYPES[row["format"]],
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',

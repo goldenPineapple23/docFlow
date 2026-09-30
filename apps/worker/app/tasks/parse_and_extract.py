@@ -55,7 +55,12 @@ from docflow_core.extraction import (
 from docflow_core.field_schema import FieldSchema
 from docflow_core.matching import bump_times_applied, match_document_lines
 from docflow_core.numbers import plain_or_none
-from docflow_core.storage import read_file, save_file
+from docflow_core.storage import (
+    StorageObjectMissingError,
+    StorageUnavailableError,
+    read_file,
+    save_derived,
+)
 from docflow_core.validation import validate_document
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -338,9 +343,6 @@ def build_preview(
     return previews.text_preview("\n\n".join(chunks))
 
 
-_PREVIEW_SUFFIXES = {"image/png": ".png", "image/jpeg": ".jpg"}
-
-
 def _store_preview(
     tenant_id: UUID, document_id: UUID, file_type: file_types.FileType, content: bytes, parts: list[dict]
 ) -> None:
@@ -353,8 +355,12 @@ def _store_preview(
         preview = build_preview(file_type, content, parts)
         if preview is None:
             return
-        suffix = _PREVIEW_SUFFIXES.get(preview.media_type, ".txt")
-        preview_path = save_file(tenant_id, f"preview{suffix}", preview.content)
+        # Fixed key per document (Stage 3b item 4): a retry overwrites it, so
+        # it never leaves an orphan. The media type is stored on the row and
+        # set on the object.
+        preview_path = save_derived(
+            tenant_id, document_id, "preview", preview.content, content_type=preview.media_type
+        )
         with tenant_session(tenant_id) as session:
             session.execute(
                 text(
@@ -391,7 +397,13 @@ def _store_extracted_text(tenant_id: UUID, document_id: UUID, parts: list[dict])
     if not body:
         return
     try:
-        path = save_file(tenant_id, "extracted.txt", body.encode("utf-8"))
+        path = save_derived(
+            tenant_id,
+            document_id,
+            "extracted_text",
+            body.encode("utf-8"),
+            content_type="text/plain; charset=utf-8",
+        )
         with tenant_session(tenant_id) as session:
             session.execute(
                 text("UPDATE documents SET extracted_text_path = :path WHERE id = :id"),
@@ -605,7 +617,7 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
         row = session.execute(
             text(
                 "SELECT storage_path, original_filename, status, sender_email, "
-                "current_extraction_run_id FROM documents WHERE id = :id"
+                "current_extraction_run_id, content_sha256 FROM documents WHERE id = :id"
             ),
             {"id": str(did)},
         ).mappings().first()
@@ -629,6 +641,7 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
         original_filename = row["original_filename"]
         sender_email = row.get("sender_email")
         already_extracted = row.get("current_extraction_run_id") is not None
+        expected_sha256 = row.get("content_sha256")
 
     if already_extracted:
         # An earlier attempt saved the model's answer and then stopped (a
@@ -637,7 +650,27 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
         _finish(tid, did)
         return
 
-    content = read_file(storage_path)
+    # Stage 3b (Q3, Q5). Outside every broad `except`, so a Storage failure
+    # can never be relabelled DOC-005.
+    try:
+        content = read_file(tid, storage_path)
+    except StorageUnavailableError:
+        # An outage: the document waits it out without using an attempt.
+        logger.error("storage_read_failed document_id=%s", did)
+        with tenant_session(tid) as session:
+            document_status.release_after_storage_outage(session, did)
+            founder_alerts.raise_storage_unavailable(session, tenant_id=tid, where="worker")
+        return
+    except StorageObjectMissingError:
+        # Not an outage: waiting would retry it forever. A data fault, loudly.
+        logger.error("stored_original_missing document_id=%s", did)
+        _mark_failed(tid, did, raw_response={"error_code": "DOC-026", "detail": "missing"})
+        return
+    if expected_sha256 and hashlib.sha256(content).hexdigest() != expected_sha256:
+        # The bytes aren't the file that was received: never read the wrong one.
+        logger.error("stored_original_hash_mismatch document_id=%s", did)
+        _mark_failed(tid, did, raw_response={"error_code": "DOC-026", "detail": "hash_mismatch"})
+        return
 
     # Defense in depth (CLAUDE.md Section 7.11): re-validate here too. Never
     # trust that upload-time validation still holds by the time this task

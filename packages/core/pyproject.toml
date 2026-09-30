@@ -27,6 +27,10 @@ dependencies = [
     # worker's requirements because both the worker and the Console's
     # matching code call the same one scoring function -- see DECISIONS.md D-055.
     "rapidfuzz>=3.9",
+    # docflow_core.storage: Supabase Storage through its S3-compatible endpoint
+    # with a Storage-only access key (Stage 3b, Q1). Exact pins in the
+    # api/worker lockfiles.
+    "boto3>=1.43",
 ]
 
 [project.optional-dependencies]

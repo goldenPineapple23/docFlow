@@ -929,7 +929,7 @@ def run_parse(tenant_id: UUID, import_id: UUID) -> str:
     from docflow_core import file_types
     from docflow_core.catalog_parsing import ImportParseError, parse_table
     from docflow_core.db import tenant_session
-    from docflow_core.storage import read_file
+    from docflow_core.storage import StorageError, StorageUnavailableError, read_file
 
     logger = logging.getLogger(__name__)
     with tenant_session(tenant_id) as session:
@@ -937,7 +937,19 @@ def run_parse(tenant_id: UUID, import_id: UUID) -> str:
     if row is None or row["status"] != "parsing":
         return "skipped"
 
-    content = read_file(row["storage_path"])
+    try:
+        content = read_file(tenant_id, row["storage_path"])
+    except StorageError as exc:
+        # Nothing was imported and the file may be fine: IMP-009 says exactly
+        # that and asks for the import to be started again (Stage 3b, Q3).
+        logger.error("import_storage_failed import_id=%s error_type=%s", import_id, type(exc).__name__)
+        if isinstance(exc, StorageUnavailableError):
+            from docflow_core import founder_alerts
+
+            founder_alerts.alert_storage_unavailable(tenant_id, where="catalog_import")
+        with tenant_session(tenant_id) as session:
+            record_parse_failure(session, import_id, "IMP-009")
+        return "failed"
     validation = file_types.validate_upload(content, row["original_filename"])
     try:
         if not validation.ok or validation.file_type is None:

@@ -27,12 +27,14 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Callable
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import RowMapping, text
+from sqlalchemy.orm import Session
 
 from docflow_core import deal_terms, founder_alerts, system_actors
 from docflow_core.db import platform_session, rowcount
@@ -550,7 +552,7 @@ def add_intake_file(
     catalog is an untrusted file); this function is not the place that
     decides what is safe.
     """
-    from docflow_core.storage import delete_file, save_staging_file
+    from docflow_core.storage import delete_staging_file, save_staging_file
 
     file_id = uuid4()
     storage_path = save_staging_file(intake_id, original_filename, content)
@@ -596,9 +598,18 @@ def add_intake_file(
                 payload={"file_id": str(file_id), "detected_type": detected_type},
             )
     except Exception:
-        delete_file(storage_path)
+        _cleanup_quietly(lambda: delete_staging_file(intake_id, storage_path), "staging_file_cleanup_failed")
         raise
     return file_id
+
+
+def _cleanup_quietly(action: Callable[[], None], event: str) -> None:
+    """Run a Storage cleanup step that must never replace the error (or the
+    success) the founder is about to see. Failures are logged by type only."""
+    try:
+        action()
+    except Exception as exc:  # noqa: BLE001 -- logged; see the docstring
+        logger.error("%s error_type=%s", event, type(exc).__name__)
 
 
 def list_intakes(*, platform_admin_user_id: UUID) -> list[dict[str, Any]]:
@@ -694,7 +705,7 @@ def create_tenant(
     refuses (ONB-010) until the Overview's Deal terms are saved.
     """
     from docflow_core.config import get_settings
-    from docflow_core.storage import copy_into_tenant, delete_file
+    from docflow_core.storage import copy_into_tenant, delete_staging_file, delete_tenant_file
 
     tenant_id = uuid4()
     owner_user_id = uuid4()
@@ -805,7 +816,9 @@ def create_tenant(
                     {"id": str(intake_id)},
                 ).mappings().all()
                 for f in files:
-                    new_path = copy_into_tenant(f["storage_path"], tenant_id, area="onboarding")
+                    new_path = copy_into_tenant(
+                        intake_id, f["storage_path"], tenant_id, area="onboarding"
+                    )
                     copied.append(new_path)
                     originals.append(f["storage_path"])
                     session.execute(
@@ -868,8 +881,14 @@ def create_tenant(
                     {"c": stripe_customer_id, "id": str(tenant_id)},
                 )
     except Exception:
+        # The copies are removed so the failed creation leaves nothing behind.
+        # Best effort: a copy that can't be removed now is under a tenant id
+        # that was never committed, and the copy script's orphan report finds
+        # it -- the original error, not this one, is what the founder sees.
         for path in copied:
-            delete_file(path)
+            _cleanup_quietly(
+                lambda path=path: delete_tenant_file(tenant_id, path), "tenant_copy_cleanup_failed"
+            )
         if stripe_customer_id:
             try:
                 from docflow_core.external_services import delete_stripe_customer
@@ -879,9 +898,13 @@ def create_tenant(
                 logger.error("stripe_customer_cleanup_failed tenant_id=%s", tenant_id)
         raise
 
-    # Committed: the staging originals can go.
+    # Committed: the staging originals can go. Best effort: the tenant exists
+    # now, so a failure here must not look like a failed creation. An
+    # original left behind is an orphan the copy script reports.
     for path in originals:
-        delete_file(path)
+        _cleanup_quietly(
+            lambda path=path: delete_staging_file(intake_id, path), "staging_original_cleanup_failed"
+        )
 
     return {"tenant_id": tenant_id, "owner_user_id": owner_user_id}
 
@@ -1500,28 +1523,38 @@ def delete_tenant(
     would simply fail its own foreign keys -- soft delete is not a
     convenience here, it is the only state the schema allows.
 
-    Storage objects are removed after the transaction commits, the same
-    order as every other cleanup in this module: never delete files for a
-    change that might still roll back.
+    Storage objects go FIRST, the rows second (Stage 3b item 7, Q4). The
+    reverse order -- today's, before 3b -- left a deleted customer's files
+    behind whenever the file step failed, with nothing recording it. Now:
+
+    1. Check the tenant is deletable and the name matches.
+    2. Remove every object under `tenants/{id}/` and confirm the prefix is
+       empty. If that fails, nothing in the database has changed, the tenant
+       is still `pending_deletion`, and the founder sees LIFE-007 and runs the
+       delete again.
+    3. Check again, then run the database transaction below.
+    4. After it commits, a final sweep lists the prefix again and removes
+       anything written during the delete (the one write still possible is an
+       export: a pending_deletion tenant keeps export access, 7.14). Its
+       count is recorded as its own admin action.
+
+    If step 3 fails after the files are gone, running the delete again
+    finishes it.
     """
     if len(confirm_name.strip()) == 0 or len(reason.strip()) < 10:
         raise ConsoleError("LIFE-005")
+    from docflow_core.storage import StorageError, delete_tenant_storage
+
     with platform_session() as session:
-        row = session.execute(
-            text(
-                # Due by the database's clock, the one that stamped the date
-                # and that the ready-to-delete list reads (D-170 #2).
-                "SELECT name, status, deletion_scheduled_at <= now() AS due FROM tenants "
-                "WHERE id = :id FOR UPDATE"
-            ),
-            {"id": str(tenant_id)},
-        ).mappings().first()
-        if row is None:
-            raise ConsoleError("CON-001")
-        if row["status"] != "pending_deletion" or not row["due"]:
-            raise ConsoleError("LIFE-006")
-        if confirm_name.strip() != row["name"]:
-            raise ConsoleError("LIFE-005")
+        _check_deletable(session, tenant_id, confirm_name, lock=False)
+    try:
+        objects_removed = delete_tenant_storage(tenant_id)
+    except StorageError as exc:
+        logger.error("tenant_delete_storage_failed tenant_id=%s error_type=%s", tenant_id, type(exc).__name__)
+        raise ConsoleError("LIFE-007") from exc
+
+    with platform_session() as session:
+        _check_deletable(session, tenant_id, confirm_name, lock=True)
 
         # The lifecycle log outlives the tenant, but the tenant's own people do
         # not: an event one of them caused (a Team-page invite, D-132) keeps
@@ -1574,7 +1607,10 @@ def delete_tenant(
                 "id": str(uuid4()),
                 "tenant_id": str(tenant_id),
                 "actor": str(platform_admin_user_id),
-                "payload": json.dumps({"reason": reason, "rows_deleted": counts}, default=str),
+                "payload": json.dumps(
+                    {"reason": reason, "rows_deleted": counts, "objects_removed": objects_removed},
+                    default=str,
+                ),
             },
         )
         _record_admin_action(
@@ -1584,12 +1620,51 @@ def delete_tenant(
             target_tenant_id=tenant_id,
             target_type="tenant",
             target_id=tenant_id,
-            payload={"reason": reason, "rows_deleted": counts, **(audit or {})},
+            payload={
+                "reason": reason,
+                "rows_deleted": counts,
+                "objects_removed": objects_removed,
+                **(audit or {}),
+            },
         )
 
-    from docflow_core.storage import delete_tenant_storage
+    # The final sweep (step 4). The tenant is deleted whatever happens here,
+    # so a failure is recorded and logged, never reported as a failed delete.
+    sweep: dict[str, Any]
+    try:
+        sweep = {"objects_removed": delete_tenant_storage(tenant_id)}
+    except StorageError as exc:
+        logger.error("tenant_delete_final_sweep_failed tenant_id=%s error_type=%s", tenant_id, type(exc).__name__)
+        sweep = {"failed": type(exc).__name__}
+    with platform_session() as session:
+        _record_admin_action(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            action="tenant_delete_final_sweep",
+            target_tenant_id=tenant_id,
+            target_type="tenant",
+            target_id=tenant_id,
+            payload=sweep,
+        )
 
-    delete_tenant_storage(tenant_id)
+
+def _check_deletable(session: Session, tenant_id: UUID, confirm_name: str, *, lock: bool) -> None:
+    """The tenant is in the Ready to delete queue and the typed name matches."""
+    row = session.execute(
+        text(
+            # Due by the database's clock, the one that stamped the date and
+            # that the ready-to-delete list reads (D-170 #2).
+            "SELECT name, status, deletion_scheduled_at <= now() AS due FROM tenants "
+            "WHERE id = :id" + (" FOR UPDATE" if lock else "")
+        ),
+        {"id": str(tenant_id)},
+    ).mappings().first()
+    if row is None:
+        raise ConsoleError("CON-001")
+    if row["status"] != "pending_deletion" or not row["due"]:
+        raise ConsoleError("LIFE-006")
+    if confirm_name.strip() != row["name"]:
+        raise ConsoleError("LIFE-005")
 
 
 # ── Tenant audit trail (Section 7.15.3's "Audit" tab; slice 5.10, D-143) ─────

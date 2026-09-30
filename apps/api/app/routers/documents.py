@@ -19,12 +19,13 @@ from docflow_core import allowance, file_types, founder_alerts, intake_gate, qua
 from docflow_core.db import tenant_session
 from docflow_core.duplicates import find_content_duplicate_at_ingest
 from docflow_core.errors import get_error
-from docflow_core.storage import save_file
+from docflow_core.storage import StorageUnavailableError, save_file
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy import text
 
 from app.celery_client import celery_client
 from app.deps import AuthenticatedIdentity, get_current_identity, require_reviewer
+from app.errors import catalog_error
 
 logger = logging.getLogger("docflow.api")
 
@@ -167,61 +168,68 @@ def ingest_upload(
     status = "staged" if is_test_batch else "pending"
     hold: str | None = None
 
-    with tenant_session(tenant_id) as session:
-        # The same abuse ceilings email intake applies (Section 7.16.2, D-126):
-        # one rule for every way a document can arrive. A held document is
-        # stored, never sent to the model, and the founder is alerted. The
-        # setup test batch is exempt (Section 7.15.2).
-        if not is_test_batch:
-            hold = intake_gate.hold_reason(session, tenant_id)
-            if hold:
-                status = "quarantined"
-        # CLAUDE.md Section 7.8: the same content for the same tenant "is
-        # linked to the existing document and surfaced as a possible
-        # duplicate". The link is written into the INSERT below rather than
-        # returned and forgotten -- see DECISIONS.md D-076, which closes D-020.
-        # The upload is never rejected: both documents exist and both process.
-        existing = find_content_duplicate_at_ingest(session, tenant_id, content_sha256)
+    # The file is written inside the transaction, so a Storage failure rolls
+    # everything back: nothing was received, nothing is processed (Stage 3b,
+    # Q3). The reader gets DOC-025 and the founder one alert an hour.
+    try:
+        with tenant_session(tenant_id) as session:
+            # The same abuse ceilings email intake applies (Section 7.16.2, D-126):
+            # one rule for every way a document can arrive. A held document is
+            # stored, never sent to the model, and the founder is alerted. The
+            # setup test batch is exempt (Section 7.15.2).
+            if not is_test_batch:
+                hold = intake_gate.hold_reason(session, tenant_id)
+                if hold:
+                    status = "quarantined"
+            # CLAUDE.md Section 7.8: the same content for the same tenant "is
+            # linked to the existing document and surfaced as a possible
+            # duplicate". The link is written into the INSERT below rather than
+            # returned and forgotten -- see DECISIONS.md D-076, which closes D-020.
+            # The upload is never rejected: both documents exist and both process.
+            existing = find_content_duplicate_at_ingest(session, tenant_id, content_sha256)
 
-        storage_path = save_file(tenant_id, original_filename, content)
-        document_id = uuid4()
+            storage_path = save_file(tenant_id, original_filename, content)
+            document_id = uuid4()
 
-        session.execute(
-            text(
-                """
-                INSERT INTO documents
-                    (id, tenant_id, original_filename, storage_path,
-                     source, status, content_sha256, is_test_batch, is_possible_duplicate,
-                     duplicate_of_document_id, created_at)
-                VALUES
-                    (:id, :tenant_id, :original_filename, :storage_path,
-                     'upload', :status, :content_sha256, :is_test_batch, :is_possible_duplicate,
-                     :duplicate_of_document_id, now())
-                """
-            ),
-            {
-                "id": str(document_id),
-                "tenant_id": str(tenant_id),
-                "original_filename": original_filename,
-                "storage_path": storage_path,
-                "status": status,
-                "content_sha256": content_sha256,
-                "is_test_batch": is_test_batch,
-                "is_possible_duplicate": existing is not None,
-                "duplicate_of_document_id": str(existing) if existing else None,
-            },
-        )
-        if hold:
             session.execute(
                 text(
-                    "UPDATE documents SET quarantine_reason = :reason, quarantined_at = now() "
-                    "WHERE id = :id AND tenant_id = :t"
+                    """
+                    INSERT INTO documents
+                        (id, tenant_id, original_filename, storage_path,
+                         source, status, content_sha256, is_test_batch, is_possible_duplicate,
+                         duplicate_of_document_id, created_at)
+                    VALUES
+                        (:id, :tenant_id, :original_filename, :storage_path,
+                         'upload', :status, :content_sha256, :is_test_batch, :is_possible_duplicate,
+                         :duplicate_of_document_id, now())
+                    """
                 ),
-                {"reason": hold, "id": str(document_id), "t": str(tenant_id)},
+                {
+                    "id": str(document_id),
+                    "tenant_id": str(tenant_id),
+                    "original_filename": original_filename,
+                    "storage_path": storage_path,
+                    "status": status,
+                    "content_sha256": content_sha256,
+                    "is_test_batch": is_test_batch,
+                    "is_possible_duplicate": existing is not None,
+                    "duplicate_of_document_id": str(existing) if existing else None,
+                },
             )
-        elif not is_test_batch:
-            # It counts now, so the 80% / 100% notices may fire (7.16.1).
-            allowance.record_thresholds(session, tenant_id)
+            if hold:
+                session.execute(
+                    text(
+                        "UPDATE documents SET quarantine_reason = :reason, quarantined_at = now() "
+                        "WHERE id = :id AND tenant_id = :t"
+                    ),
+                    {"reason": hold, "id": str(document_id), "t": str(tenant_id)},
+                )
+            elif not is_test_batch:
+                # It counts now, so the 80% / 100% notices may fire (7.16.1).
+                allowance.record_thresholds(session, tenant_id)
+    except StorageUnavailableError as exc:
+        founder_alerts.alert_storage_unavailable(tenant_id, where="upload")
+        raise catalog_error("DOC-025", status_code=503) from exc
 
     if not is_test_batch and not hold:
         # Enqueued after the transaction commits, so the task never races a

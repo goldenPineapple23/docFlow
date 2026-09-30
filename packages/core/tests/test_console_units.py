@@ -294,24 +294,23 @@ def test_supabase_refusing_for_another_reason_is_an_error_not_a_retry(_keys, mon
 # ── Staging storage ─────────────────────────────────────────────────────────
 
 
-def test_staging_files_live_outside_every_tenant_prefix(tmp_path, monkeypatch):
-    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path))
-    get_settings.cache_clear()
-    try:
+def test_staging_files_live_outside_every_tenant_prefix():
+    from tests.storage_fake import FakeStorage
+
+    fake = FakeStorage()
+    with storage.set_backend_for_tests(fake):
         intake_id, tenant_id = uuid4(), uuid4()
         staged = storage.save_staging_file(intake_id, "../../catalog.csv", b"sku,description\n")
         assert staged.startswith(f"staging/{intake_id}/") and staged.endswith(".csv")
         assert ".." not in staged
 
-        copied = storage.copy_into_tenant(staged, tenant_id, area="onboarding")
+        copied = storage.copy_into_tenant(intake_id, staged, tenant_id, area="onboarding")
         assert copied.startswith(f"tenants/{tenant_id}/onboarding/")
-        assert storage.read_file(copied) == b"sku,description\n"
+        assert storage.read_file(tenant_id, copied) == b"sku,description\n"
 
-        storage.delete_file(staged)
-        storage.delete_file(staged)  # absent is fine
-        assert not (tmp_path / staged).exists()
-    finally:
-        get_settings.cache_clear()
+        storage.delete_staging_file(intake_id, staged)
+        storage.delete_staging_file(intake_id, staged)  # absent is fine
+        assert staged not in fake.objects
 
 
 def test_the_trial_length_in_card_billings_wording_is_the_constant():

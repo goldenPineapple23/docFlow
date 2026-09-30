@@ -313,6 +313,33 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="high",
         audience="both",
     ),
+    # ── Stage 3b: Supabase Storage (BUILD-STATUS "3b detailed design") ───────
+    # The two codes below DOC-025 are reserved for Stages 3c and 3d (BUILD-STATUS).
+    "DOC-025": ErrorCatalogEntry(
+        code="DOC-025",
+        title="We couldn't save this file",
+        message=(
+            "DocFlow couldn't store your file just now, so it wasn't received and nothing was "
+            "processed."
+        ),
+        action="Upload it again in a few minutes. DocFlow has already been alerted.",
+        severity="high",
+        audience="both",
+    ),
+    "DOC-026": ErrorCatalogEntry(
+        code="DOC-026",
+        title="The stored file doesn't match this order",
+        message=(
+            "The file DocFlow stored for this order is missing or isn't the file that was "
+            "received, so DocFlow stopped rather than read the wrong file."
+        ),
+        action=(
+            "DocFlow has already been alerted. Upload the original file again to have it read "
+            "from scratch."
+        ),
+        severity="high",
+        audience="both",
+    ),
     "INT-001": ErrorCatalogEntry(
         code="INT-001",
         title="No attachment to process",
@@ -1646,6 +1673,18 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="tenant",
     ),
+    # Stage 3b: a ready export whose file Storage can't hand over right now.
+    "EXP-010": ErrorCatalogEntry(
+        code="EXP-010",
+        title="This file can't be downloaded right now",
+        message=(
+            "The export is ready, but DocFlow couldn't fetch the file from storage just now. "
+            "The export itself is safe."
+        ),
+        action="Try the download again in a few minutes. DocFlow has already been alerted.",
+        severity="warning",
+        audience="tenant",
+    ),
     # ── INT-006 · email intake (Section 7.14, slice 5.6) ────────────────────
     "INT-006": ErrorCatalogEntry(
         code="INT-006",
@@ -1737,6 +1776,19 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         ),
         action="Check the Ready to delete queue -- it only lists tenants past their window.",
         severity="warning",
+        audience="founder",
+    ),
+    # Stage 3b item 7: files go first, so a failure here leaves the database
+    # untouched and the delete can simply be run again.
+    "LIFE-007": ErrorCatalogEntry(
+        code="LIFE-007",
+        title="The tenant's files couldn't all be removed",
+        message=(
+            "Removing this tenant's stored files failed part-way, so its database records were "
+            "left untouched and it is still in the Ready to delete queue."
+        ),
+        action="Run the delete again in a few minutes. It picks up where it stopped.",
+        severity="high",
         audience="founder",
     ),
     # ── LIM / INT / QUA · allowances and quarantine (Section 7.16, slice 5.7) ─

@@ -33,6 +33,7 @@ from docflow_core import (
     external_services,
     field_schema,
     file_types,
+    founder_alerts,
     intake_admin,
     learned_rules,
     lifecycle,
@@ -55,7 +56,7 @@ from docflow_core.constants import (
 from docflow_core.db import tenant_session
 from docflow_core.errors import get_error
 from docflow_core.external_services import ExternalServiceError
-from docflow_core.storage import read_file, save_file
+from docflow_core.storage import StorageUnavailableError, read_file, save_file
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, EmailStr, Field
 
@@ -102,7 +103,15 @@ _UNPROCESSABLE = {"ONB-007", "ONB-012", "ONB-013", "ONB-014"}
 
 
 def _console_error(exc: ConsoleError) -> HTTPException:
-    status = 404 if exc.code == "CON-001" else 422 if exc.code in _UNPROCESSABLE else 409
+    status = (
+        404
+        if exc.code == "CON-001"
+        else 422
+        if exc.code in _UNPROCESSABLE
+        else 503
+        if exc.code == "LIFE-007"  # Storage failed; nothing changed (Stage 3b)
+        else 409
+    )
     return catalog_error(exc.code, status_code=status, extra=exc.detail or None)
 
 
@@ -541,7 +550,11 @@ async def upload_import(
     if file_type not in catalog_import.TABLE_FORMATS:
         raise catalog_error("IMP-001", status_code=422)
     admin_id = _console_act(identity, tenant_id, f"{kind}_import_upload", target_type="catalog_import")
-    storage_path = save_file(tenant_id, filename, content)
+    try:
+        storage_path = save_file(tenant_id, filename, content)
+    except StorageUnavailableError as exc:
+        founder_alerts.alert_storage_unavailable(tenant_id, where="console_import_upload")
+        raise catalog_error("DOC-025", status_code=503) from exc
     import_id = _start_import(
         tenant_id,
         admin_id,
@@ -581,7 +594,9 @@ def import_from_intake(
         target_type="onboarding_intake_file",
         target_id=body.intake_file_id,
     )
-    content = read_file(chosen["storage_path"])
+    # After tenant creation the intake's files sit under this tenant's
+    # `onboarding/` prefix, so the read is tenant-checked like any other.
+    content = read_file(tenant_id, chosen["storage_path"])
     import_id = _start_import(
         tenant_id,
         admin_id,

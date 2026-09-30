@@ -66,7 +66,7 @@ from docflow_core.extraction import (
     wrap_document_content,
 )
 from docflow_core.lifecycle import _lifecycle_event
-from docflow_core.storage import read_file
+from docflow_core.storage import StorageError, UnsafeStoragePathError, read_file
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +236,7 @@ def select_examples(
     buyer_id: UUID,
     *,
     exclude_document_id: UUID,
-    read: Callable[[str], bytes] = read_file,
+    read: Callable[[str], bytes] | None = None,
 ) -> list[PromptExample]:
     """
     Newest first, approved or exported only, this tenant and this buyer only,
@@ -265,6 +265,11 @@ def select_examples(
         },
     ).mappings().all()
 
+    if read is None:
+        # The storage layer checks the tenant prefix itself (Stage 3b item 3).
+        def read(path: str) -> bytes:
+            return read_file(tenant_id, path)
+
     prefix = f"tenants/{tenant_id}/"
     examples: list[PromptExample] = []
     for row in rows:
@@ -275,7 +280,7 @@ def select_examples(
             continue
         try:
             body = read(path).decode("utf-8", errors="replace")
-        except OSError as exc:
+        except (StorageError, UnsafeStoragePathError) as exc:
             logger.error(
                 "example_text_unreadable document_id=%s error_type=%s", row["id"], type(exc).__name__
             )
@@ -327,7 +332,7 @@ def plan(
     sender_email: str | None,
     parts: list[dict[str, Any]],
     session_factory: SessionFactory,
-    read: Callable[[str], bytes] = read_file,
+    read: Callable[[str], bytes] | None = None,
 ) -> ExamplePlan:
     """
     Decide whether this document gets examples, and which. Transactions are

@@ -57,7 +57,7 @@ from docflow_core.signed_urls import (
     mint_document_token,
     verify_document_token,
 )
-from docflow_core.storage import read_file
+from docflow_core.storage import StorageError, read_file
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -756,10 +756,10 @@ def original_document_url(
     if not has_preview:
         try:
             detected = file_types.detect_file_type(
-                read_file(row["storage_path"]), _extension(row["original_filename"])
+                read_file(tenant_id, row["storage_path"]), _extension(row["original_filename"])
             )
-        except OSError:
-            # The stored object is gone or unreadable. That is a storage
+        except StorageError:
+            # The stored object is gone, or Storage is unreachable. That is a storage
             # problem, not a reason to fail the whole review screen -- the
             # extracted values are what the reviewer mainly needs, and the
             # viewer says plainly that the original cannot be shown.
@@ -855,18 +855,23 @@ def original_document_content(
     # this cannot become a way to serve document-derived markup. Producing it
     # required decoding the document, which happened in the worker -- never
     # here (Section 7.11).
+    # Same reasoning as the mint route: a missing object, or Storage being
+    # unreachable, is a 404 for this one file -- the viewer says the original
+    # can't be shown -- never a 500 for the review screen.
     if row["preview_storage_path"] and row["preview_media_type"]:
+        try:
+            preview = read_file(tenant_id, row["preview_storage_path"])
+        except StorageError as exc:
+            raise HTTPException(status_code=404) from exc
         return Response(
-            content=read_file(row["preview_storage_path"]),
+            content=preview,
             media_type=row["preview_media_type"],
             headers=_viewer_headers(),
         )
 
     try:
-        content = read_file(row["storage_path"])
-    except OSError as exc:
-        # Same reasoning as the mint route: a missing storage object is a 404
-        # for this one file, never a 500 for the review screen.
+        content = read_file(tenant_id, row["storage_path"])
+    except StorageError as exc:
         raise HTTPException(status_code=404) from exc
 
     return Response(
