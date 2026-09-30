@@ -9,6 +9,7 @@ provider; DocFlow never sees them.
 Nothing is charged now. Your 7-day free trial starts when DocFlow goes
 live. When it ends, your first month ($monthly_amount) is charged. Cancel
 before the trial ends and nothing is charged.
+To cancel, email $support_email.
 
 Add your card: $billing_url
 

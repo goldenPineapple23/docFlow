@@ -464,26 +464,58 @@ def test_stripe_not_answering_is_bil_008(client, monkeypatch):
         assert response.json()["detail"]["code"] == "BIL-008"
 
 
+@pytest.fixture()
+def support_email(monkeypatch):
+    from docflow_core.config import get_settings
+
+    monkeypatch.setenv("SUPPORT_EMAIL", "support@example.test")
+    get_settings.cache_clear()
+    yield "support@example.test"
+    get_settings.cache_clear()
+
+
 @requires_console_schema
 @pytest.mark.parametrize(
-    ("deal", "template"),
+    ("deal", "template", "monthly"),
     [
-        (FOUNDING_DEAL, "card_request_founding"),
-        (STANDARD_DEAL, "card_request_at_signing"),
+        (FOUNDING_DEAL, "card_request_founding", "$199.00"),
+        (STANDARD_DEAL, "card_request_at_signing", "$299.00"),
         (
             {**STANDARD_DEAL, "setup_fee_preset": "waived", "setup_fee_note": "Test waiver"},
             "card_request_no_fee",
+            "$299.00",
         ),
     ],
 )
-def test_ask_for_a_card_sends_the_email_that_matches_the_deal(client, stripe, deal, template):
+def test_ask_for_a_card_sends_the_email_that_matches_the_deal(
+    client, stripe, support_email, deal, template, monthly
+):
     with _Console() as console:
         tenant_id = console.create_tenant(client, deal=deal).json()["tenant_id"]
         response = client.post(f"/admin/tenants/{tenant_id}/card-request", headers=console.headers())
         assert response.status_code == 200, response.text
         assert response.json()["template"] == template
         (email,) = _emails(tenant_id, template)
-        assert "/billing" in email["body_text"]
+        body = email["body_text"].replace("\n", " ")
+        assert "/billing" in body
+        assert monthly in body  # the monthly amount, from the tier
+        assert "To cancel, email support@example.test." in body
+
+
+@requires_console_schema
+def test_ask_for_a_card_refuses_without_a_support_address(client, stripe, monkeypatch):
+    from docflow_core.config import get_settings
+
+    monkeypatch.setenv("SUPPORT_EMAIL", "")
+    get_settings.cache_clear()
+    try:
+        with _Console() as console:
+            tenant_id = console.create_tenant(client, deal=FOUNDING_DEAL).json()["tenant_id"]
+            response = client.post(f"/admin/tenants/{tenant_id}/card-request", headers=console.headers())
+            assert response.status_code == 409 and response.json()["detail"]["code"] == "ONB-018"
+            assert _emails(tenant_id, "card_request_founding") == []
+    finally:
+        get_settings.cache_clear()
 
 
 # ── Go-live and reactivation ─────────────────────────────────────────────────
@@ -587,3 +619,96 @@ def test_a_setup_fee_paid_at_signing_cannot_be_edited(client, stripe):
         assert refused.status_code == 409 and refused.json()["detail"]["code"] == "ONB-017"
         # The rest of the deal stays editable until go-live.
         assert client.put(path, headers=console.headers(), json=_deal(tier="scale")).status_code == 200
+
+
+# ── A cancel confirmed during the trial (founder, 2026-09-29) ────────────────
+
+
+def _record_trial_ends(monkeypatch, *, fail: bool = False) -> list[dict]:
+    calls: list[dict] = []
+
+    def end(**kwargs):
+        if fail:
+            raise external_services.ExternalServiceError("stripe", "test: unreachable")
+        calls.append(kwargs)
+
+    monkeypatch.setattr(external_services, "end_trial_without_charge", end)
+    return calls
+
+
+def _trialing(console, client, *, deal: dict, **columns) -> str:
+    tenant_id = console.create_tenant(client, deal=deal).json()["tenant_id"]
+    _set(
+        tenant_id,
+        stripe_subscription_id=f"sub_test_{tenant_id[:8]}",
+        stripe_subscription_status="trialing",
+        billing_method="card",
+        **columns,
+    )
+    return tenant_id
+
+
+def _cancel(client, console, tenant_id, **body):
+    return client.post(
+        f"/admin/tenants/{tenant_id}/cancel",
+        headers=console.headers(),
+        json={"reason": "customer_requested", **body},
+    )
+
+
+@requires_deal_terms_schema
+@requires_console_schema
+@pytest.mark.parametrize("case", ["founding (fee pending)", "standard (fee paid at signing)"])
+def test_a_cancel_during_the_trial_ends_it_at_stripe_before_it_is_recorded(client, stripe, monkeypatch, case):
+    calls = _record_trial_ends(monkeypatch)
+    with _Console() as console:
+        if case.startswith("founding"):
+            tenant_id = _trialing(console, client, deal=FOUNDING_DEAL)
+        else:
+            tenant_id = _trialing(console, client, deal=STANDARD_DEAL)
+            with platform_session() as session:
+                session.execute(
+                    text("UPDATE tenants SET setup_fee_paid_at = now() WHERE id = :id"), {"id": tenant_id}
+                )
+        response = _cancel(client, console, tenant_id)
+        assert response.status_code == 200, response.text
+        assert response.json()["trial_ended_without_charge"] is True
+        (call,) = calls
+        assert call["subscription_id"] == f"sub_test_{tenant_id[:8]}"
+        assert call["customer_id"] == _column(tenant_id, "stripe_customer_id")
+        assert str(call["tenant_id"]) == tenant_id
+        assert _column(tenant_id, "status") == "cancelling"
+
+
+@requires_deal_terms_schema
+@requires_console_schema
+def test_a_cancel_after_the_trial_leaves_stripe_alone(client, stripe, monkeypatch):
+    calls = _record_trial_ends(monkeypatch)
+    with _Console() as console:
+        tenant_id = _trialing(console, client, deal=FOUNDING_DEAL)
+        _set(tenant_id, stripe_subscription_status="active")
+        response = _cancel(client, console, tenant_id)
+        assert response.status_code == 200 and response.json()["trial_ended_without_charge"] is False
+        assert calls == []
+
+
+@requires_deal_terms_schema
+@requires_console_schema
+def test_stripe_not_answering_changes_nothing_in_docflow(client, stripe, monkeypatch):
+    _record_trial_ends(monkeypatch, fail=True)
+    with _Console() as console:
+        tenant_id = _trialing(console, client, deal=FOUNDING_DEAL)
+        response = _cancel(client, console, tenant_id)
+        assert response.status_code == 502 and response.json()["detail"]["code"] == "CON-006"
+        assert _column(tenant_id, "status") == "active"
+
+
+@requires_deal_terms_schema
+@requires_console_schema
+def test_a_refused_cancel_never_touches_stripe(client, stripe, monkeypatch):
+    calls = _record_trial_ends(monkeypatch)
+    with _Console() as console:
+        tenant_id = _trialing(console, client, deal=FOUNDING_DEAL)
+        response = _cancel(client, console, tenant_id, reason="for_cause", note="too short")
+        assert response.status_code == 409 and response.json()["detail"]["code"] == "LIFE-002"
+        assert calls == []

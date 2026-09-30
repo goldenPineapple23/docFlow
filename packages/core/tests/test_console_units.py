@@ -51,6 +51,7 @@ TEMPLATE_PARAMS = {
     },
     "card_request_founding": {
         "tenant_name": "Acme Test Distributor",
+        "support_email": "support@example.test",
         "monthly_amount": "$199.00",
         "promo_days": "90",
         "setup_fee": "$750.00",
@@ -58,11 +59,13 @@ TEMPLATE_PARAMS = {
     },
     "card_request_no_fee": {
         "tenant_name": "Acme Test Distributor",
+        "support_email": "support@example.test",
         "monthly_amount": "$299.00",
         "billing_url": "https://app.example.test/billing",
     },
     "card_request_at_signing": {
         "tenant_name": "Acme Test Distributor",
+        "support_email": "support@example.test",
         "monthly_amount": "$299.00",
         "setup_fee": "$1,500.00",
         "billing_url": "https://app.example.test/billing",

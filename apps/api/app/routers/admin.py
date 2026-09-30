@@ -975,11 +975,39 @@ def cancel_tenant(
     """Section 7.15.4's cancel form: the effective date is computed from the
     reason and shown before confirmation; the founder may only push it
     later, never earlier (LIFE-003). Destructive: needs a recent
-    authenticator code (D-151)."""
+    authenticator code (D-151).
+
+    A tenant still in its trial (founder, 2026-09-29): before the cancel is
+    recorded, Stripe is told to end the subscription at the trial's end and
+    the pending setup fee is removed, so nothing can be charged -- no race
+    with the suspension at that moment, and no fee invoiced as the
+    subscription ends. Every cancel rule is checked first, so Stripe is only
+    touched for a cancel that will be recorded; if Stripe doesn't answer,
+    nothing changes in DocFlow (CON-006) and the founder tries again."""
     admin_id = _console_act(
         step_up.identity, tenant_id, "cancel", target_type="tenant", target_id=tenant_id,
         payload={"reason": body.reason, **step_up.audit()},
     )
+    with tenant_session(tenant_id) as session:
+        try:
+            trial = lifecycle.trial_cancel_target(
+                session,
+                tenant_id,
+                reason=body.reason,
+                note=body.note,
+                override_effective_at=body.override_effective_at,
+            )
+        except lifecycle.LifecycleError as exc:
+            raise _lifecycle_error(exc) from exc
+    if trial is not None:
+        try:
+            external_services.end_trial_without_charge(
+                subscription_id=trial.subscription_id, customer_id=trial.customer_id, tenant_id=tenant_id
+            )
+        except ExternalServiceError as exc:
+            logger.error("trial_cancel_stripe_failed tenant_id=%s error=%s", tenant_id, exc)
+            raise catalog_error("CON-006", status_code=502) from exc
+        logger.info("trial_cancel_no_charge tenant_id=%s", tenant_id)
     with tenant_session(tenant_id) as session:
         try:
             result = lifecycle.cancel(
@@ -992,7 +1020,7 @@ def cancel_tenant(
             )
         except lifecycle.LifecycleError as exc:
             raise _lifecycle_error(exc) from exc
-    return _jsonable(result)
+    return {**_jsonable(result), "trial_ended_without_charge": trial is not None}
 
 
 @router.get("/tenants/{tenant_id}/cancel/preview")

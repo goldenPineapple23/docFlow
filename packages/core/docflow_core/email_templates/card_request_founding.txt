@@ -10,6 +10,7 @@ Nothing is charged now. Your 7-day free trial starts when DocFlow goes
 live. When it ends, your card is charged your first month ($monthly_amount,
 your founding rate for the first $promo_days days) plus the setup fee
 ($setup_fee). Cancel before the trial ends and nothing is charged.
+To cancel, email $support_email.
 
 Add your card: $billing_url
 

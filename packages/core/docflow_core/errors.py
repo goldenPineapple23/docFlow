@@ -1499,6 +1499,17 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="founder",
     ),
+    "ONB-018": ErrorCatalogEntry(
+        code="ONB-018",
+        title="Set the support address first",
+        message=(
+            "The card request tells the customer how to cancel, and SUPPORT_EMAIL isn't set, "
+            "so there is no address to give them. Nothing was sent."
+        ),
+        action="Set SUPPORT_EMAIL (RUNBOOK section 3), restart the API, then ask again.",
+        severity="warning",
+        audience="founder",
+    ),
     # ── FLD-0xx · per-tenant field schema (Section 7.13, D-120) ─────────────
     "FLD-001": ErrorCatalogEntry(
         code="FLD-001",

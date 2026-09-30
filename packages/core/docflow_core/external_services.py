@@ -803,17 +803,83 @@ def complete_card_page(session_id: str) -> CompletedCardPage | None:
     )
 
 
+# DocFlow's own customer-portal configuration (founder, 2026-09-29). The
+# account's default configuration let a customer cancel their subscription in
+# Stripe -- a Stripe-side cancel that skips DocFlow's lifecycle (RUNBOOK
+# section 3) -- so every portal session DocFlow opens names this one instead:
+# update the card and see invoices, nothing else. Found by its tag, created if
+# missing, and put back if anyone changes it in the dashboard, so the rule
+# lives in code rather than in a dashboard setting.
+PORTAL_CONFIGURATION_TAG = "card-update-v1"
+PORTAL_FEATURES = {
+    "features[payment_method_update][enabled]": "true",
+    "features[invoice_history][enabled]": "true",
+    "features[subscription_cancel][enabled]": "false",
+    "features[subscription_update][enabled]": "false",
+    "features[customer_update][enabled]": "false",
+}
+
+
+def _portal_features_ok(config: dict) -> bool:
+    features = config.get("features") or {}
+
+    def enabled(name: str) -> bool:
+        return bool((features.get(name) or {}).get("enabled"))
+
+    return (
+        enabled("payment_method_update")
+        and enabled("invoice_history")
+        and not enabled("subscription_cancel")
+        and not enabled("subscription_update")
+        and not enabled("customer_update")
+    )
+
+
+@functools.lru_cache(maxsize=4)
+def _portal_configuration_id(key: str) -> str:
+    """The id of DocFlow's portal configuration for this Stripe key, found or
+    created once per process (and per key: a sandbox is an account of its
+    own). `key` is only the cache key."""
+    listed = _stripe("GET", "billing_portal/configurations", params={"active": "true", "limit": 100})
+    if listed.status_code >= 300:
+        raise ExternalServiceError("stripe", f"portal configuration list returned {listed.status_code}")
+    for config in listed.json().get("data", []):
+        if (config.get("metadata") or {}).get("docflow_portal") != PORTAL_CONFIGURATION_TAG:
+            continue
+        if not _portal_features_ok(config):
+            fixed = _stripe("POST", f"billing_portal/configurations/{config['id']}", data=PORTAL_FEATURES)
+            if fixed.status_code >= 300:
+                raise ExternalServiceError(
+                    "stripe", f"portal configuration update returned {fixed.status_code}"
+                )
+        return str(config["id"])
+    created = _stripe(
+        "POST",
+        "billing_portal/configurations",
+        data={
+            **PORTAL_FEATURES,
+            "business_profile[headline]": "DocFlow billing",
+            "metadata[docflow_portal]": PORTAL_CONFIGURATION_TAG,
+        },
+        idempotency_key=f"docflow-portal-configuration-{PORTAL_CONFIGURATION_TAG}",
+    )
+    if created.status_code >= 300:
+        raise ExternalServiceError("stripe", f"portal configuration create returned {created.status_code}")
+    return str(created.json()["id"])
+
+
 def create_card_update_page(*, customer_id: str, return_url: str) -> str:
     """Stripe's customer portal, opened straight on its "update payment
-    method" page, for an owner or admin changing the card on file. The portal
-    sets the new card as the customer's default. Accepted by Stripe in test
-    mode, 2026-09-29, with the sandbox's default portal configuration."""
+    method" page, for an owner or admin changing the card on file, under
+    DocFlow's own configuration (no cancelling in Stripe). The portal sets the
+    new card as the customer's default. Checked in test mode, 2026-09-29."""
     response = _stripe(
         "POST",
         "billing_portal/sessions",
         data={
             "customer": customer_id,
             "return_url": return_url,
+            "configuration": _portal_configuration_id(_stripe_key()),
             "flow_data[type]": "payment_method_update",
         },
     )
@@ -900,6 +966,26 @@ def latest_invoice_amount_cents(subscription_id: str) -> int | None:
     amount = invoice.get("amount_due")
     return int(amount) if isinstance(amount, int) else None
 
+
+
+def end_trial_without_charge(*, subscription_id: str, customer_id: str, tenant_id: UUID) -> None:
+    """
+    A cancel confirmed while the tenant is still in its trial (founder,
+    2026-09-29): nothing may be charged. Two things, both at once:
+      * the subscription ends at the trial's end (`cancel_at_period_end`), so
+        Stripe makes no first-month invoice -- otherwise DocFlow's suspension
+        at that same moment races Stripe's first charge;
+      * the pending setup-fee item is removed. Test mode showed that a
+        subscription ending at trial end still invoices and charges a pending
+        item tied to it (a founding customer's fee).
+    A standard customer's fee was paid at signing, so there is nothing pending,
+    and no monthly charge is made. Safe to repeat: setting the flag twice and
+    removing an item already gone both change nothing.
+    """
+    response = _stripe("POST", f"subscriptions/{subscription_id}", data={"cancel_at_period_end": "true"})
+    if response.status_code >= 300:
+        raise ExternalServiceError("stripe", f"subscription update returned {response.status_code}")
+    void_pending_setup_fee(customer_id=customer_id, tenant_id=tenant_id)
 
 def verify_webhook_signature(
     payload: bytes, sig_header: str, secret: str, *, tolerance_seconds: int = STRIPE_CLOCK_TOLERANCE_SECONDS

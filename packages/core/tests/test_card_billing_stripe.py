@@ -24,6 +24,8 @@ class FakeStripe:
         self.expired: list[str] = []
         self.sessions: dict[str, dict] = {}
         self.subscription_status = 200
+        self.portal_configs: list[dict] = []
+        self.pending_items: list[dict] = []
 
     def __call__(self, method, url, *, auth, data=None, params=None, headers=None, timeout=None):
         path = url.removeprefix("https://api.stripe.com/v1/")
@@ -42,6 +44,20 @@ class FakeStripe:
             return httpx.Response(200, json={})
         if method == "POST" and path == "billing_portal/sessions":
             return httpx.Response(200, json={"url": "https://portal.example/s"})
+        if method == "GET" and path == "billing_portal/configurations":
+            return httpx.Response(200, json={"data": self.portal_configs})
+        if method == "POST" and path == "billing_portal/configurations":
+            config = {"id": "bpc_new", "metadata": {"docflow_portal": data["metadata[docflow_portal]"]}}
+            self.portal_configs.append(config)
+            return httpx.Response(200, json=config)
+        if method == "POST" and path.startswith("billing_portal/configurations/"):
+            return httpx.Response(200, json={"id": path.rsplit("/", 1)[1]})
+        if method == "POST" and path.startswith("subscriptions/"):
+            return httpx.Response(200, json={"id": path.split("/")[1]})
+        if method == "GET" and path == "invoiceitems" and (params or {}).get("pending") == "true":
+            return httpx.Response(200, json={"data": self.pending_items})
+        if method == "DELETE" and path.startswith("invoiceitems/"):
+            return httpx.Response(200, json={"deleted": True})
         if method == "GET" and path in ("subscriptions", "invoiceitems"):
             return httpx.Response(200, json={"data": []})
         if method == "POST" and path in ("products", "coupons", "invoiceitems"):
@@ -58,6 +74,7 @@ class FakeStripe:
 
 @pytest.fixture()
 def stripe(monkeypatch):
+    es._portal_configuration_id.cache_clear()
     fake = FakeStripe()
     monkeypatch.setattr(es.httpx, "request", fake)
     monkeypatch.setattr(es, "_stripe_key", lambda: "sk_test_fake")
@@ -208,13 +225,69 @@ def test_a_reactivation_with_a_declined_card_is_refused(stripe):
     assert sent["payment_behavior"] == "error_if_incomplete"
 
 
-def test_the_update_card_page_opens_on_the_card_step(stripe):
-    assert (
-        es.create_card_update_page(customer_id="cus_1", return_url="https://a/billing")
-        == "https://portal.example/s"
-    )
-    (sent,) = stripe.posted("billing_portal/sessions")
-    assert sent["flow_data[type]"] == "payment_method_update"
+def test_the_update_card_page_opens_on_the_card_step_under_docflows_configuration(stripe):
+    url = es.create_card_update_page(customer_id="cus_1", return_url="https://a/billing")
+    assert url == "https://portal.example/s"
+    (created,) = stripe.posted("billing_portal/configurations")
+    # Update the card and see invoices; cancelling in Stripe is off (founder, 2026-09-29).
+    assert created["features[subscription_cancel][enabled]"] == "false"
+    assert created["features[subscription_update][enabled]"] == "false"
+    assert created["features[customer_update][enabled]"] == "false"
+    assert created["features[payment_method_update][enabled]"] == "true"
+    assert created["metadata[docflow_portal]"] == es.PORTAL_CONFIGURATION_TAG
+    (session,) = stripe.posted("billing_portal/sessions")
+    assert session["flow_data[type]"] == "payment_method_update"
+    assert session["configuration"] == "bpc_new"
+
+
+def _tagged(cancel: bool) -> dict:
+    return {
+        "id": "bpc_docflow",
+        "metadata": {"docflow_portal": es.PORTAL_CONFIGURATION_TAG},
+        "features": {
+            "payment_method_update": {"enabled": True},
+            "invoice_history": {"enabled": True},
+            "subscription_cancel": {"enabled": cancel},
+            "subscription_update": {"enabled": False},
+            "customer_update": {"enabled": False},
+        },
+    }
+
+
+def test_docflows_configuration_is_reused_not_created_again(stripe):
+    stripe.portal_configs = [{"id": "bpc_default", "metadata": {}}, _tagged(cancel=False)]
+    es.create_card_update_page(customer_id="cus_1", return_url="https://a/billing")
+    assert stripe.posted("billing_portal/configurations") == []
+    assert stripe.posted("billing_portal/configurations/bpc_docflow") == []
+    (session,) = stripe.posted("billing_portal/sessions")
+    assert session["configuration"] == "bpc_docflow"
+
+
+def test_cancelling_switched_on_in_the_dashboard_is_switched_off_again(stripe):
+    stripe.portal_configs = [_tagged(cancel=True)]
+    es.create_card_update_page(customer_id="cus_1", return_url="https://a/billing")
+    (fixed,) = stripe.posted("billing_portal/configurations/bpc_docflow")
+    assert fixed["features[subscription_cancel][enabled]"] == "false"
+
+
+# ── A cancel confirmed during the trial (founder, 2026-09-29) ────────────────
+
+
+def test_founding_case_ends_at_trial_end_and_removes_the_pending_fee(stripe):
+    stripe.pending_items = [
+        {"id": "ii_fee", "metadata": {"docflow_setup_fee_for": str(TENANT)}},
+        {"id": "ii_other", "metadata": {}},
+    ]
+    es.end_trial_without_charge(subscription_id="sub_1", customer_id="cus_1", tenant_id=TENANT)
+    assert stripe.posted("subscriptions/sub_1") == [{"cancel_at_period_end": "true"}]
+    deleted = [p for m, p, _ in stripe.requests if m == "DELETE"]
+    assert deleted == ["invoiceitems/ii_fee"]
+
+
+def test_standard_case_fee_already_paid_only_ends_at_trial_end(stripe):
+    es.end_trial_without_charge(subscription_id="sub_1", customer_id="cus_1", tenant_id=TENANT)
+    assert stripe.posted("subscriptions/sub_1") == [{"cancel_at_period_end": "true"}]
+    assert [p for m, p, _ in stripe.requests if m == "DELETE"] == []
 
 
 # ── Charging the open invoice after a card update (founder, 2026-09-29) ──────

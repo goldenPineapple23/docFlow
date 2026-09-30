@@ -275,6 +275,12 @@ def request_card(session: Session, tenant_id: UUID) -> tuple[UUID | None, str]:
         .mappings()
         .one()
     )
+    support = get_settings().support_email.strip()
+    if not support:
+        # Every card request says how to cancel; with no address it can't.
+        from docflow_core.onboarding import OnboardingError
+
+        raise OnboardingError("ONB-018")
     if tenant["monthly_price"] is None:
         # No plan agreed yet, so no monthly amount to state (ONB-009, as go-live).
         from docflow_core.onboarding import OnboardingError
@@ -305,6 +311,7 @@ def request_card(session: Session, tenant_id: UUID) -> tuple[UUID | None, str]:
         "tenant_name": tenant["name"],
         "billing_url": _billing_url(),
         "monthly_amount": money(int(monthly * 100)),
+        "support_email": support,
     }
     if setup_fee is not None:
         params["setup_fee"] = money(int(setup_fee * 100))

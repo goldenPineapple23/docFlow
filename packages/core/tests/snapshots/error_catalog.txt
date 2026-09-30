@@ -482,6 +482,10 @@ ONB-017 [warning/founder] The setup fee is already paid
   what+why: The customer paid this setup fee when they added their card, so its type and amount can't change.
   next:     If the deal changed, settle the difference in Stripe.
 
+ONB-018 [warning/founder] Set the support address first
+  what+why: The card request tells the customer how to cancel, and SUPPORT_EMAIL isn't set, so there is no address to give them. Nothing was sent.
+  next:     Set SUPPORT_EMAIL (RUNBOOK section 3), restart the API, then ask again.
+
 QUA-001 [info/tenant] Only DocFlow can release these documents
   what+why: These documents are held because of a surge in volume or a failed sender check, so only DocFlow can release them.
   next:     DocFlow has been alerted and will release them once they're confirmed.
