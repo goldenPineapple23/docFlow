@@ -762,6 +762,12 @@ tests), then the rollout in item 11.
     bucket. The copy script's orphan count is local files only, so they
     don't affect the delta-copy check. They are listed before anything is
     removed.
+- **Stage 5 question (founder, 2026-09-30): a catalog import failed by the
+  stuck sweep raises no alert.** The sweep marks an import left in `parsing`
+  failed with IMP-009 and tells no one. CLAUDE.md 7.9 requires an alert for a
+  document stuck past the timeout, and a stuck import is the same silent
+  failure for the founder. Exports have `exports_not_finishing` (more than 3
+  in a day); imports have nothing. To decide in Stage 5, not built in 3b.
 - **Known issue for Stage 5** (the sweep and robust test cleanup): seeded
   rows with a faked `content_sha256` fail DOC-026 if they are ever read
   again for extraction (the hash check, Q5). Fix the seed scripts to store
