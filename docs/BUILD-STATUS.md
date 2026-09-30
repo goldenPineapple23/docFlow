@@ -1679,6 +1679,33 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
     preferred over a lost one (at-least-once).** The founder is setting up
     the Postmark sending domain now (steps given in chat, 2026-09-30), so
     DNS verification isn't on the stage's critical path.
+- **Security upgrades, 2026-09-30 (branch `phase55/security-pyjwt-next`,
+  founder-approved as its own PR before 3b merges).** CI's dependency audit
+  began failing on every job for two advisories published after `main`'s
+  last green run. Neither was introduced by any branch, and the audit was
+  not weakened (no ignore entries, no skipped step).
+  - **PyJWT 2.14.0 -> 2.15.0** (CVE-2026-101918: a deeply nested payload
+    escaped as a raw `RecursionError`). Pinned in both lock files. Core's
+    floor was raised from `>=2.8` to `>=2.15.0`, so nothing can install a
+    vulnerable version.
+  - **What the changelog changes for us:** nothing about how tokens are
+    validated (audience, algorithms and leeway defaults are unchanged, and
+    `deps.py` passes all three explicitly anyway). Two errors that used to
+    escape (the recursion one, and a malformed `exp`, `nbf` or `iat`) now
+    raise `PyJWTError`, which `deps.py` already treats as "not signed in".
+    The signing-key fetch (`PyJWKClient`) now skips a malformed key in the
+    set instead of failing the whole set; we only call
+    `get_signing_key_from_jwt`.
+  - **Next.js and `eslint-config-next` 16.3.5 -> 16.3.8** (GHSA-vcvr-r3jv-pc5j,
+    critical: remote code execution in `next/og` `ImageResponse`). DocFlow
+    doesn't use `next/og` (`apps/web/src` searched), so the path wasn't
+    reachable, but it's a patch release, so no exception was made. The lock
+    file changed only the Next.js packages.
+  - Checked on this branch: `pip-audit` clean (api, worker); `npm audit` 0
+    vulnerabilities; core 629 passed; web typecheck, lint, Vitest 59,
+    `next build` on 16.3.8 and the browser suite 72 passed; the auth and
+    tenant-boundary API files on staging (below); and one sign-in by hand
+    each as a tenant user and as the founder.
 - **CI names the step that failed when there is no test report**
   (founder-approved, 2026-09-29): a worker run whose local Supabase stack
   failed to start had read as a pytest failure. The skip check now reads the
