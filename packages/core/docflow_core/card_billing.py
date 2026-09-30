@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -48,6 +48,23 @@ def local_date(moment: datetime, timezone: str | None) -> str:
         zone = ZoneInfo("UTC")
     local = moment.astimezone(zone)
     return f"{local:%B} {local.day}, {local.year}"
+
+
+def cancel_by_date(trial_end: datetime, timezone: str | None) -> str:
+    """The last day to ask to cancel (founder, 2026-09-29): the day before the
+    trial ends, in the tenant's own timezone."""
+    try:
+        zone = ZoneInfo(timezone or "UTC")
+    except ZoneInfoNotFoundError:
+        zone = ZoneInfo("UTC")
+    day = trial_end.astimezone(zone).date() - timedelta(days=1)
+    return f"{day:%B} {day.day}, {day.year}"
+
+
+class SupportEmailMissing(RuntimeError):
+    """SUPPORT_EMAIL is blank, so an email that must say how to cancel can't.
+    The job fails, is retried, and then reaches the founder as a
+    scheduled_job_failed alert (scheduled_jobs._record_failure)."""
 
 
 def money(cents: int | None) -> str:
@@ -327,3 +344,66 @@ def request_card(session: Session, tenant_id: UUID) -> tuple[UUID | None, str]:
         related_id=tenant_id,
     )
     return outbox_id, template
+
+
+def send_trial_ending_reminder(session: Session, job: Any) -> None:
+    """
+    The `trial_ending_reminder` job (founder, 2026-09-29; migration 0032):
+    the card-billed owner's email TRIAL_ENDING_REMINDER_DAYS_BEFORE days
+    before the trial ends. The amounts were fixed at go-live, from the same
+    plan as the go-live email and the invoice Stripe was given. Sends nothing
+    if the tenant is no longer card-billed, is cancelling or no longer active
+    (a trial cancel sets `cancelling`), or its subscription is no longer
+    trialing.
+    """
+    assert job.tenant_id is not None
+    tenant = (
+        session.execute(
+            text(
+                "SELECT status, timezone, billing_method, stripe_subscription_status, "
+                "CAST(:trial_end AS timestamptz) AS trial_end_at FROM tenants WHERE id = :id"
+            ),
+            {"id": str(job.tenant_id), "trial_end": job.payload["trial_end_at"]},
+        )
+        .mappings()
+        .first()
+    )
+    if (
+        tenant is None
+        or tenant["billing_method"] != "card"
+        or tenant["status"] != "active"
+        or tenant["stripe_subscription_status"] != "trialing"
+    ):
+        return
+    owner = _owner_email(session, job.tenant_id)
+    if owner is None:
+        return
+    support = get_settings().support_email.strip()
+    if not support:
+        raise SupportEmailMissing()
+    payload = job.payload
+    params: dict[str, Any] = {
+        "trial_end_date": local_date(tenant["trial_end_at"], tenant["timezone"]),
+        "cancel_by_date": cancel_by_date(tenant["trial_end_at"], tenant["timezone"]),
+        "first_charge_amount": money(int(payload["first_charge_cents"])),
+        "support_email": support,
+    }
+    template = str(payload["template"])
+    if template == "trial_ending_founding":
+        month = money(int(payload["month_cents"]))
+        if payload.get("founding_rate"):
+            month = (
+                f"{month}, your founding rate for the first {int(payload['promo_days'])} days, "
+                f"then {money(int(payload['standard_month_cents']))} a month"
+            )
+        params["month_detail"] = month
+        params["setup_fee"] = money(int(payload["setup_fee_cents"]))
+    email_outbox.enqueue(
+        session,
+        tenant_id=job.tenant_id,
+        to_address=owner,
+        template=template,
+        params=params,
+        related_type="scheduled_job",
+        related_id=job.id,
+    )

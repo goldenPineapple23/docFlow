@@ -1148,10 +1148,22 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   - cost per document measured on scanned PDFs, image and photo POs, and
     multi-page (5+ pages) orders, on staging;
   - **card billing with a 7-day trial**, decided 2026-09-29 (under "Card
-    billing with a 7-day trial"). **BUILT 2026-09-29 (D-181; branch
-    `phase55/card-billing`, migration `0031`)**; waits on the founder's backup
-    and staging apply of `0031`, the staging suites, then the Stripe
-    test-mode walkthrough (`docs/walkthroughs/card-billing.md`).
+    billing with a 7-day trial"). **MERGED 2026-09-29 (D-181; PR #28,
+    migration `0031` on staging; staging suites: worker 134 passed / 2
+    skipped, API 554 passed).** **Follow-up BUILT (branch
+    `phase55/trial-ending-email`, migration `0032`, D-181 addendum 2):** the
+    trial-ending email to card-billed owners 2 days before the trial ends;
+    the cancel-by date (the day before the trial ends, in the customer's
+    timezone) in the go-live and trial-ending emails; "Ask for a card" says
+    the go-live email gives the date; the founding rate followed by the
+    tier's list price; Reply-To = `SUPPORT_EMAIL` on every email to the
+    customer's own people (`email_outbox.reply_to`, shown in the Console
+    Outbox). `0032` applied on staging by the founder 2026-09-30 (backup
+    `backup_0032`, counts matched). Staging on `6712214`: worker 134 passed /
+    2 skipped, API 562 passed / 3 deselected; CI green on `88a84b4`. Ready to
+    merge; then the founder drops `backup_0026`-`backup_0031` (RUNBOOK 1.3).
+    The Stripe test-mode walkthrough (`docs/walkthroughs/card-billing.md`)
+    comes after it merges.
   - **The setup fee is non-refundable for standard customers** (founder,
     2026-09-29): it covers the setup work and is charged when they add their
     card, and the "Ask for a card" email says so. **Required before the first
@@ -1162,9 +1174,25 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
     the refund rule, RUNBOOK section 6.
   - **Stripe's own trial-ending email off, in live mode too** (founder,
     2026-09-29; off in the sandbox): DocFlow's own trial-ending email for
-    card-billed customers replaces it. That email, its migration `0032` and
-    error ONB-018's wording are drafted and with the founder for approval;
-    not built. RUNBOOK section 3.
+    card-billed customers replaces it (built, migration `0032`). RUNBOOK
+    section 3.
+  - **Emails must go out on time: automatic sending, or a daily Outbox
+    commitment with a stale-email alert** (founder, 2026-09-29). **Required
+    before the first pilot, one or the other.** Today every email waits in
+    the Console Outbox until the founder sends it by hand (D-103), and the
+    trial-ending email, the past-due emails and every cancel-by date promise
+    depend on it going out when it says. Either:
+    - (a) **automatic sending**: an email provider with a verified sending
+      domain and a sender that delivers queued rows, retries, and reports
+      bounces (what it would take: D-103 addendum); or
+    - (b) **the founder sends from the Outbox every day**, and an alert
+      fires when an email has waited too long, so a missed day is noticed
+      rather than a customer's reminder silently going out late.
+    **Decided (founder, 2026-09-30): (a), automatic sending, as its own
+    stage after 3e and before the first pilot; a duplicate email is
+    preferred over a lost one (at-least-once).** The founder is setting up
+    the Postmark sending domain now (steps given in chat, 2026-09-30), so
+    DNS verification isn't on the stage's critical path.
 - **CI names the step that failed when there is no test report**
   (founder-approved, 2026-09-29): a worker run whose local Supabase stack
   failed to start had read as a pytest failure. The skip check now reads the
@@ -1176,7 +1204,7 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 - Sandbox leftover: Acme Test Prospect's founding coupon was created before the invoice-count fix (D-138) and discounts one extra invoice (19 Dec). Test data only; correct it in Stripe or leave it.
 
 - **Phase 5.5 open items (2026-09-25):**
-  - `backup_0026` (document_headers, document_lines; RLS on, no policies) is kept on staging until the founder says to drop it (D-156).
+  - `backup_0026` (document_headers, document_lines; RLS on, no policies) was kept on staging until the founder said to drop it (D-156). **Superseded 2026-09-29:** backups are dropped on staging once the migration's PR has merged, and in production 14 days after the migration is applied there, each by the founder (RUNBOOK 1.3, which lists the six still on staging: `backup_0026` to `backup_0031`).
   - **Postmark IP allowlist: log-only until confirmed.** When the Stage 2 webhook authentication ships, the allowlist records source addresses but doesn't refuse. Trigger to switch to enforcing: the first real inbound mail after the Postmark account exists; confirm the observed addresses against Postmark's published list using the RUNBOOK procedure, then flip enforcement (D-155).
   - RUNBOOK.md still needs, with Stage 2: the IP-confirmation-and-enforce procedure and the webhook credential rotation procedure.
   - UAT TC-26 now requires a real QuickBooks Desktop import of high-precision amounts and rates; refuse-vs-warn (EXP-008) is decided on that evidence (D-157). **It also requires importing a non-reconciling line** (`qty 2 / rate 8.25 / amount 198.00`) and recording what QuickBooks does with it -- recalculates the amount, rejects the line, or keeps it as given. Whether an export should flag an acknowledged non-reconciling snapshot is decided on that evidence (founder, 2026-09-27).

@@ -160,6 +160,12 @@ TRIAL_PERIOD_DAYS = 7
 # CURE_PERIOD_DAYS). The job skips itself if the payment has gone through.
 PAST_DUE_REMINDER_DAYS_BEFORE = 3
 
+# Card billing (founder, 2026-09-29): a card-billed owner is emailed this many
+# days before the free trial ends -- the date, the amount, how to cancel
+# (migration 0032). Scheduled at go-live; skipped if the tenant is no longer
+# trialing or is cancelling by then.
+TRIAL_ENDING_REMINDER_DAYS_BEFORE = 2
+
 
 def constants_in_effect(*names: str) -> dict[str, Any]:
     """The named constants' current values, for a lifecycle event's

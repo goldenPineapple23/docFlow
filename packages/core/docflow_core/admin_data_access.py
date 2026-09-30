@@ -1259,7 +1259,7 @@ def list_outbox(
         rows = session.execute(
             text(
                 """
-                SELECT o.id, o.tenant_id, t.name AS tenant_name, o.to_address, o.template,
+                SELECT o.id, o.tenant_id, t.name AS tenant_name, o.to_address, o.reply_to, o.template,
                        o.subject, o.body_text, o.status, o.error, o.created_at, o.sent_at
                 FROM email_outbox o LEFT JOIN tenants t ON t.id = o.tenant_id
                 WHERE (CAST(:tenant_id AS uuid) IS NULL OR o.tenant_id = CAST(:tenant_id AS uuid))

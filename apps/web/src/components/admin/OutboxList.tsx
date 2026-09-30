@@ -5,8 +5,9 @@ import type { OutboxEmail } from "@/lib/admin";
 /**
  * Emails from the outbox (D-103). A `held` email has not been sent -- no
  * provider is configured -- and its body, including any link, is shown so
- * the founder can deliver it by hand. Rendered as plain text; nothing here
- * is ever treated as markup.
+ * the founder can deliver it by hand, with its Reply-To when it has one
+ * (the support mailbox, 0032). Rendered as plain text; nothing here is ever
+ * treated as markup.
  */
 const STATUS_STYLE: Record<OutboxEmail["status"], string> = {
   held: "bg-amber-100 text-amber-800",
@@ -34,6 +35,11 @@ export function OutboxList({ emails }: { emails: OutboxEmail[] }) {
                 {email.tenant_name ? ` · ${email.tenant_name}` : ""}
               </span>
             </summary>
+            {email.reply_to ? (
+              <p data-testid="outbox-reply-to" className="border-t border-gray-100 px-4 pt-2 text-xs text-gray-600">
+                Reply-To: {email.reply_to}
+              </p>
+            ) : null}
             <pre className="whitespace-pre-wrap break-all border-t border-gray-100 px-4 py-3 text-xs">
               {email.body_text}
             </pre>

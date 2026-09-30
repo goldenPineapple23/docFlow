@@ -9,8 +9,8 @@ provider; DocFlow never sees them.
 The setup fee ($setup_fee) is charged when you add the card. It covers the
 setup work and is non-refundable. Your 7-day free trial starts when DocFlow
 goes live. When it ends, your first month ($monthly_amount) is charged.
-Cancel before the trial ends and no monthly charge is made.
-To cancel, email $support_email.
+Your go-live email will give your trial's end date. To cancel, email
+$support_email before then, and no monthly charge is made.
 
 Add your card: $billing_url
 

@@ -30,6 +30,7 @@ What this proves:
 from __future__ import annotations
 
 import time
+from datetime import timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -114,7 +115,7 @@ def _emails(tenant_id, template: str) -> list[dict]:
     with platform_session() as session:
         rows = session.execute(
             text(
-                "SELECT to_address, subject, body_text FROM email_outbox "
+                "SELECT to_address, reply_to, subject, body_text FROM email_outbox "
                 "WHERE tenant_id = :t AND template = :tpl ORDER BY created_at"
             ),
             {"t": str(tenant_id), "tpl": template},
@@ -476,19 +477,20 @@ def support_email(monkeypatch):
 
 @requires_console_schema
 @pytest.mark.parametrize(
-    ("deal", "template", "monthly"),
+    ("deal", "template", "monthly", "outcome"),
     [
-        (FOUNDING_DEAL, "card_request_founding", "$199.00"),
-        (STANDARD_DEAL, "card_request_at_signing", "$299.00"),
+        (FOUNDING_DEAL, "card_request_founding", "$199.00", "nothing is charged"),
+        (STANDARD_DEAL, "card_request_at_signing", "$299.00", "no monthly charge is made"),
         (
             {**STANDARD_DEAL, "setup_fee_preset": "waived", "setup_fee_note": "Test waiver"},
             "card_request_no_fee",
             "$299.00",
+            "nothing is charged",
         ),
     ],
 )
 def test_ask_for_a_card_sends_the_email_that_matches_the_deal(
-    client, stripe, support_email, deal, template, monthly
+    client, stripe, support_email, deal, template, monthly, outcome
 ):
     with _Console() as console:
         tenant_id = console.create_tenant(client, deal=deal).json()["tenant_id"]
@@ -499,7 +501,13 @@ def test_ask_for_a_card_sends_the_email_that_matches_the_deal(
         body = email["body_text"].replace("\n", " ")
         assert "/billing" in body
         assert monthly in body  # the monthly amount, from the tier
-        assert "To cancel, email support@example.test." in body
+        # The approved cancel line (founder, 2026-09-29): no date exists yet.
+        flat = " ".join(body.split())
+        assert (
+            "Your go-live email will give your trial's end date. To cancel, email "
+            f"support@example.test before then, and {outcome}."
+        ) in flat
+        assert email["reply_to"] == "support@example.test"
 
 
 @requires_console_schema
@@ -542,7 +550,7 @@ def test_card_billing_needs_a_card_on_file(client, stripe, supabase_links, queue
 @requires_go_live_schema
 @requires_console_schema
 def test_a_standard_customer_billed_by_card_must_have_paid_the_fee_at_signing(
-    client, stripe, supabase_links, queue, billing
+    client, stripe, supabase_links, queue, billing, support_email
 ):
     with _Console() as console:
         tenant_id = _ready_to_go_live(client, console, deal=STANDARD_DEAL)
@@ -567,7 +575,7 @@ def test_a_standard_customer_billed_by_card_must_have_paid_the_fee_at_signing(
 @requires_go_live_schema
 @requires_console_schema
 def test_a_founding_customer_billed_by_card_pays_the_fee_with_month_one(
-    client, stripe, supabase_links, queue, billing
+    client, stripe, supabase_links, queue, billing, support_email
 ):
     with _Console() as console:
         tenant_id = _ready_to_go_live(client, console)
@@ -712,3 +720,197 @@ def test_a_refused_cancel_never_touches_stripe(client, stripe, monkeypatch):
         response = _cancel(client, console, tenant_id, reason="for_cause", note="too short")
         assert response.status_code == 409 and response.json()["detail"]["code"] == "LIFE-002"
         assert calls == []
+
+
+# ── The trial-ending email, the cancel-by date, Reply-To (migration 0032) ────
+
+
+def _trial_schema_available() -> bool:
+    """True once migration 0032 has been applied (Reply-To on the outbox)."""
+    if not database_available():
+        return False
+    try:
+        with get_engine().connect() as conn:
+            conn.execute(text("SELECT reply_to FROM email_outbox LIMIT 0"))
+        return True
+    except Exception:
+        return False
+
+
+requires_trial_ending_schema = pytest.mark.skipif(
+    not _trial_schema_available(),
+    reason="supabase/migrations/0032_trial_ending_reminder.sql has not been applied to this database yet.",
+)
+
+
+def _trial_job(tenant_id) -> dict | None:
+    with platform_session() as session:
+        row = (
+            session.execute(
+                text(
+                    "SELECT id, run_at, payload, "
+                    "CAST(payload->>'trial_end_at' AS timestamptz) AS trial_end_at "
+                    "FROM scheduled_jobs WHERE tenant_id = :t AND job_type = 'trial_ending_reminder'"
+                ),
+                {"t": str(tenant_id)},
+            )
+            .mappings()
+            .first()
+        )
+    return dict(row) if row is not None else None
+
+
+def _run_trial_job(tenant_id) -> None:
+    row = _trial_job(tenant_id)
+    assert row is not None
+    job = scheduled_jobs.Job(
+        id=UUID(str(row["id"])),
+        tenant_id=UUID(str(tenant_id)),
+        job_type="trial_ending_reminder",
+        payload=row["payload"],
+        attempts=0,
+    )
+    with tenant_session(UUID(str(tenant_id))) as session:
+        card_billing.send_trial_ending_reminder(session, job)
+
+
+def _live_by_card(client, console, *, deal: dict | None = None) -> str:
+    kwargs = {"deal": deal} if deal else {}
+    tenant_id = _ready_to_go_live(client, console, **kwargs)
+    columns = "card_on_file_at = now()" + (", setup_fee_paid_at = now()" if deal is STANDARD_DEAL else "")
+    with platform_session() as session:
+        session.execute(text(f"UPDATE tenants SET {columns} WHERE id = :id"), {"id": tenant_id})
+    response = _go_live(client, console, tenant_id, "card")
+    assert response.status_code == 200, response.text
+    # The fake Stripe answers "active"; a real card go-live starts "trialing".
+    _set(tenant_id, stripe_subscription_status="trialing")
+    return tenant_id
+
+
+@requires_trial_ending_schema
+@requires_deal_terms_schema
+@requires_go_live_schema
+@requires_console_schema
+def test_a_card_go_live_refuses_without_a_support_address(
+    client, stripe, supabase_links, queue, billing, monkeypatch
+):
+    from docflow_core.config import get_settings
+
+    monkeypatch.setenv("SUPPORT_EMAIL", "")
+    get_settings.cache_clear()
+    try:
+        with _Console() as console:
+            tenant_id = _ready_to_go_live(client, console)
+            with platform_session() as session:
+                session.execute(
+                    text("UPDATE tenants SET card_on_file_at = now() WHERE id = :id"), {"id": tenant_id}
+                )
+            refused = _go_live(client, console, tenant_id, "card")
+            assert refused.status_code == 409 and refused.json()["detail"]["code"] == "ONB-018"
+            assert billing.calls == []
+    finally:
+        get_settings.cache_clear()
+
+
+@requires_trial_ending_schema
+@requires_deal_terms_schema
+@requires_go_live_schema
+@requires_console_schema
+def test_a_founding_go_live_states_the_cancel_by_date_and_schedules_the_trial_ending_email(
+    client, stripe, supabase_links, queue, billing, support_email
+):
+    with _Console() as console:
+        tenant_id = _live_by_card(client, console)
+        job = _trial_job(tenant_id)
+        assert job is not None
+        # Two days before the trial ends, by the database's clock (D-170).
+        assert job["trial_end_at"] - job["run_at"] == timedelta(days=2)
+        assert job["payload"]["template"] == "trial_ending_founding"
+        assert job["payload"]["first_charge_cents"] == 94900
+        timezone = _column(tenant_id, "timezone")
+        cancel_by = card_billing.cancel_by_date(job["trial_end_at"], timezone)
+        (email,) = _emails(tenant_id, "go_live")
+        flat = " ".join(email["body_text"].split())
+        assert f"To cancel, email support@example.test by {cancel_by}, and nothing is charged." in flat
+        assert email["reply_to"] == "support@example.test"
+
+
+@requires_trial_ending_schema
+@requires_deal_terms_schema
+@requires_go_live_schema
+@requires_console_schema
+def test_the_founding_trial_ending_email_states_the_date_the_amount_and_how_to_cancel(
+    client, stripe, supabase_links, queue, billing, support_email
+):
+    with _Console() as console:
+        tenant_id = _live_by_card(client, console)
+        _run_trial_job(tenant_id)
+        (email,) = _emails(tenant_id, "trial_ending_founding")
+        job = _trial_job(tenant_id)
+        assert job is not None
+        timezone = _column(tenant_id, "timezone")
+        trial_end = card_billing.local_date(job["trial_end_at"], timezone)
+        cancel_by = card_billing.cancel_by_date(job["trial_end_at"], timezone)
+        assert email["subject"] == f"Your DocFlow free trial ends on {trial_end}"
+        flat = " ".join(email["body_text"].split())
+        # The founding rate, then the tier's own list price -- both from tiers, never typed in.
+        assert (
+            f"ends on {trial_end}. That day, the card on file is charged $949.00: your first month "
+            "($199.00, your founding rate for the first 90 days, then $299.00 a month) plus the "
+            "setup fee ($750.00)."
+        ) in flat
+        assert f"To cancel, email support@example.test by {cancel_by}, and nothing is charged." in flat
+        assert email["reply_to"] == "support@example.test"
+
+
+@requires_trial_ending_schema
+@requires_deal_terms_schema
+@requires_go_live_schema
+@requires_console_schema
+def test_a_standard_go_live_promises_no_monthly_charge_and_its_trial_ending_email_says_the_fee_was_paid(
+    client, stripe, supabase_links, queue, billing, support_email
+):
+    with _Console() as console:
+        tenant_id = _live_by_card(client, console, deal=STANDARD_DEAL)
+        (go_live,) = _emails(tenant_id, "go_live")
+        assert "and no monthly charge is made." in " ".join(go_live["body_text"].split())
+        _run_trial_job(tenant_id)
+        (email,) = _emails(tenant_id, "trial_ending_at_signing")
+        flat = " ".join(email["body_text"].split())
+        assert "the card on file is charged $299.00: your first month. Your setup fee was paid" in flat
+        assert "and no monthly charge is made." in flat
+
+
+@requires_trial_ending_schema
+@requires_deal_terms_schema
+@requires_go_live_schema
+@requires_console_schema
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"status": "cancelling"},
+        {"stripe_subscription_status": "active"},
+        {"billing_method": "invoice"},
+    ],
+    ids=["cancelling", "no longer trialing", "billed by invoice"],
+)
+def test_the_trial_ending_email_is_not_sent_when_it_no_longer_applies(
+    client, stripe, supabase_links, queue, billing, support_email, change
+):
+    with _Console() as console:
+        tenant_id = _live_by_card(client, console)
+        _set(tenant_id, **change)
+        _run_trial_job(tenant_id)
+        assert _emails(tenant_id, "trial_ending_founding") == []
+
+
+@requires_trial_ending_schema
+@requires_deal_terms_schema
+@requires_go_live_schema
+@requires_console_schema
+def test_an_invoice_go_live_schedules_no_trial_ending_email(client, stripe, supabase_links, queue, billing):
+    with _Console() as console:
+        tenant_id = _ready_to_go_live(client, console)
+        assert _go_live(client, console, tenant_id, "invoice").status_code == 200
+        assert _trial_job(tenant_id) is None
+
