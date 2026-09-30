@@ -89,17 +89,9 @@ select n.nspname as backup, string_agg(c.relname, ', ' order by c.relname) as ta
  where n.nspname like 'backup%' group by n.nspname order by n.nspname;
 ```
 
-**On `docflow-staging`, 2026-09-29** (by that query). Every one of these
-migrations' PRs has merged, so each may be dropped now:
-
-| Schema | Tables | Migration |
-|---|---|---|
-| `backup_0026` | document_headers, document_lines | 0026 (kept until now by D-156; this rule replaces that hold) |
-| `backup_0027` | documents, tenants | 0027 |
-| `backup_0028` | tenant_lifecycle_events, users | 0028 |
-| `backup_0029` | email_outbox, founder_alerts, stripe_webhook_events, tenants | 0029 |
-| `backup_0030` | documents, tenants | 0030 |
-| `backup_0031` | tenants | 0031, card billing (merged 2026-09-29) |
+**On `docflow-staging`: none since 2026-09-30.** The founder dropped
+`backup_0026` to `backup_0032` that day, after the PR for `0032` (the card
+billing follow-up, PR #29) merged.
 
 `docflow-prod` doesn't exist yet (Phase 6), so it has no backups.
 

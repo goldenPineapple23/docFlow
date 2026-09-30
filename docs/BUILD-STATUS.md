@@ -418,6 +418,186 @@ minted and verified by the API on one clock, so there is no foreign clock to
 tolerate, and no customer ever sees a Supabase URL or the storage host.
 Storage connects through Supavisor with a pool of its own (see 3e).
 
+**3b detailed design -- PROPOSED 2026-09-30, for the founder's review. Nothing
+is built until it is approved.** Numbered items marked **Q** need an answer.
+
+*Where things stand today.* `docflow_core/storage.py` writes to a folder on
+the machine running the code (`storage/`, 2,973 files and 3.3 MB on this
+machine). It already builds every path on the server (`tenants/{id}/{area}/
+{random}{ext}`, and `staging/{intake}/...` before a tenant exists), and it
+checks the prefix on **write** only: `read_file(path)` takes no tenant, so
+nothing stops code from reading another tenant's path. Our own signed links
+and the API streaming the file are already in place (D-089), so nothing
+changes for customers or the web app. The API and the worker call storage
+from 11 places. On Fly the API and the worker run on different machines, so
+a local folder can't work in production.
+
+1. **How DocFlow talks to Storage: Supabase's S3-compatible endpoint, with
+   an access key used only for Storage (Q1).**
+   - Recommended: `boto3`, pinned, with a Storage S3 access key (Supabase
+     dashboard -> Storage -> S3 access keys). That key reaches Storage and
+     nothing else.
+   - The alternative is the Storage REST API with
+     `SUPABASE_SERVICE_ROLE_KEY`. That key also administers sign-in (it
+     creates users and makes invite links) and bypasses RLS on the REST
+     API. Today only the API holds it. This route would put it on the worker
+     too, the process that opens hostile files, until 3c moves parsing out.
+     With the S3 key, a worker compromise reaches files but not accounts.
+   - Cost of the recommendation: one more dependency (`boto3`) and three
+     more settings: `STORAGE_S3_ENDPOINT`, `STORAGE_S3_ACCESS_KEY_ID`,
+     `STORAGE_S3_SECRET_ACCESS_KEY` (documented in `.env.example`; the
+     founder creates the key). The 3c parse service still holds no storage
+     key.
+   - Every call: 5 s connect and 30 s read timeouts, and up to 3 tries with
+     backoff. Only on requests that are safe to repeat: every write goes to a
+     key nobody else writes, so a repeated PUT is the same PUT. The worst
+     case, about 2 minutes, fits inside every 3a limit (the tightest is
+     export at 5 minutes).
+2. **One private bucket, `docflow-files`, created by migration `0033`
+   (Q2).**
+   - The bucket is private, with a 25 MB object limit (`MAX_FILE_SIZE_BYTES`)
+     and no public URL.
+   - `storage.objects` gets **no policies**. A customer's own sign-in token
+     reaches no file directly; only DocFlow's S3 key does. A test signs in
+     as a tenant user and asserts Storage refuses them.
+   - Why a migration and not the dashboard: CI's local stack gets the same
+     bucket from the same file. `0033` inserts one row into
+     `storage.buckets` and touches no existing table, so **I propose no
+     backup for it** (the rule is backup-first; this is the question).
+   - CI: `supabase/config.toml` turns `[storage]` on (it is off today).
+3. **The tenant prefix is checked on read as well as write (agreed; this is
+   how).**
+   - `read_file(tenant_id, path)` replaces `read_file(path)`, and every
+     caller passes the tenant from its own session.
+   - `read_staging_file(intake_id, path)` is the only way to read a
+     `staging/` file.
+   - Before any network call, a path must match
+     `tenants/{that tenant}/{uploads|exports|onboarding|derived}/...`, with no
+     `..`, no empty segment and no backslash. Otherwise the call raises.
+   - Test: tenant A's session asks for a path under tenant B, and the call
+     is refused with Storage never contacted. This joins the 7.5 isolation
+     tests.
+4. **Fixed keys for derived files (agreed; this is the layout).**
+   - Preview: `tenants/{t}/derived/{document_id}/preview`.
+   - Extracted text: `tenants/{t}/derived/{document_id}/extracted.txt`.
+   - A retry overwrites the same key, so it leaves no orphan. The preview's
+     media type is already stored on the document (`preview_media_type`) and
+     is also set on the object. `derived` joins `STORAGE_AREAS`.
+   - Originals and exports keep their random names. Each is written once,
+     before its row exists, so a retry can't repeat it.
+   - Existing rows keep their old paths. Nothing is renamed.
+5. **The copy of staging's files into the bucket (agreed: copy, keep the
+   local files, only files a row still references, report orphans). This is
+   how:**
+   - A script, `scripts/copy_storage_to_bucket.py`. It is a dry run unless
+     given `--apply`, and running it twice is safe.
+   - It collects every path a row references:
+     - `documents`: `storage_path`, `preview_storage_path` and
+       `extracted_text_path`;
+     - `exports.storage_path`;
+     - `onboarding_intake_files.storage_path`;
+     - `catalog_imports.storage_path`.
+
+     Soft-deleted rows are included, because their data is kept until a hard
+     delete.
+   - Each file is uploaded under **the same key**, so **no database row
+     changes**.
+   - Each copy is checked by reading it back from the bucket and comparing
+     its SHA-256 with the local file (and with the row's own SHA-256 where
+     the table has one).
+   - Report: copied; already there and identical; referenced but missing
+     locally (listed); and the orphan count (files no row references, left
+     behind).
+   - The local `storage/` folder is kept until the founder says otherwise.
+     It is only on this machine.
+6. **A Storage outage (Q3).**
+   - **Upload from the web app:** the file wasn't saved, so the document
+     doesn't exist. Proposed new catalog entry **DOC-025** "We couldn't save
+     this file", audience both:
+     - message: "DocFlow couldn't store your file just now, so it wasn't
+       received and nothing was processed.";
+     - action: "Upload it again in a few minutes. DocFlow has already been
+       alerted.";
+     - a founder alert, `storage_unavailable`, once per tenant per hour. It
+       uses the tenant's own alert path, so it needs no new insert policy.
+   - **Email intake:** answer the webhook with a 5xx so Postmark sends the
+     email again later (Postmark retries inbound webhooks), and raise the
+     same alert. Nothing is lost.
+   - **Worker reading the original:** raise, and leave the document in
+     `processing`. The stuck sweep retries it, as it does today for a
+     crashed worker. That read is outside every broad `except`, so it can't
+     be relabelled DOC-005. A long outage would end in DOC-022 "worker
+     stopped". That is honest but vague, and 3d's `processing -> pending`
+     wait (built for provider outages) is the proper home. **Proposed:** in
+     3b, log `storage_read_failed`; in 3d, Storage read failures join the
+     errors that make a document wait.
+   - **Previews and extracted text:** best effort, unchanged. A failure
+     never touches the document's status.
+   - **Export and catalog import:** they fail with their existing codes and
+     are retried by the user. (Q3 covers these too, if you want DOC-025's
+     wording there.)
+7. **Tenant hard delete: remove the files first, then the rows (Q4).**
+   - Today the rows are deleted and committed, then the folder is removed
+     with errors ignored. A failure leaves the customer's files behind with
+     nothing recording it.
+   - On Storage, removing a prefix means listing it and deleting in batches
+     of 1,000, so a partial failure is more likely.
+   - Proposed order: delete every object under `tenants/{id}/` and check
+     the listing is empty. **Only then** run the existing database
+     transaction.
+   - If the file removal fails, nothing in the database has changed, and
+     the founder sees the error and runs the delete again.
+   - If the database step fails after the files are gone, running the delete
+     again finishes it. The founder has already typed the name to confirm an
+     irreversible delete, so files going first is the direction already
+     chosen.
+   - The deletion event records how many objects were removed.
+   - No new alert and no new migration.
+8. **Tenant creation's staging copy uses Storage's server-side copy.** The
+   rollback is unchanged: a failed creation deletes the copies, and a
+   committed one deletes the staging originals.
+9. **Optional: check the original's hash on every read (Q5).**
+   `documents.content_sha256` already exists. The worker would compare it
+   with the bytes it reads before parsing, and a mismatch would fail the
+   document with a new code rather than extract the wrong file. It costs
+   one hash per read. It guards against a wrong or corrupted object, which
+   is rare. Not built unless you say yes.
+10. **Tests.**
+    - Product code has one backend, Supabase Storage. The suites run
+      against the real bucket: staging's when run from this machine, the
+      local stack's in CI. Unit tests that shouldn't touch the network get
+      an in-memory fake, defined in the test folders and never importable by
+      product code.
+    - New tests: the read-side prefix check (3); a tenant token refused by
+      Storage (2); fixed keys overwritten by a retry, with one object left
+      (4); the copy script's dry run, apply, verify and orphan report
+      against a fake (5); DOC-025 and its alert (6, if approved); files
+      removed before rows in a hard delete, and a failed removal leaving the
+      database untouched (7).
+    - **The rollback-test fix carried into 3b (approved earlier):**
+      `test_a_failed_tenant_creation_rolls_back_everything_including_the_file_move`
+      asserts that no tenant named "Acme Test Rollback" exists and that its
+      own intake is unlinked, instead of counting every tenant on staging.
+      The file check moves from the local folder to the bucket.
+11. **Rollout, in order.**
+    1. The founder creates the S3 access key and puts the three settings in
+       the root `.env`.
+    2. The founder applies `0033` on staging (it creates the bucket).
+    3. I run the copy script as a dry run, then with `--apply`, and report
+       the counts.
+    4. The staging suites run.
+    5. The walkthrough: upload, review, preview, export and download, a
+       Console catalog import from an intake file, tenant creation from an
+       intake, and a hard delete of a test tenant.
+    6. Merge.
+
+    From the switch onward, nothing reads the local folder.
+12. **Cost.** Storage holds 3.3 MB today. At the Section 5.1 envelope
+    (7.15.3 puts it at about 50,000 documents), with previews and exports,
+    that is a few GB. It is covered by the plan's included storage and egress, so
+    there is no new line item. I'll confirm against the Supabase pricing
+    page when building.
+
 **3c -- H5, the full part: the parse service.** Agreed:
 - **Bytes in, text and images out.** The worker sends the file, the service
   returns the parts. The service holds **no storage key, no database login
@@ -1160,10 +1340,11 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
     customer's own people (`email_outbox.reply_to`, shown in the Console
     Outbox). `0032` applied on staging by the founder 2026-09-30 (backup
     `backup_0032`, counts matched). Staging on `6712214`: worker 134 passed /
-    2 skipped, API 562 passed / 3 deselected; CI green on `88a84b4`. Ready to
-    merge; then the founder drops `backup_0026`-`backup_0031` (RUNBOOK 1.3).
-    The Stripe test-mode walkthrough (`docs/walkthroughs/card-billing.md`)
-    comes after it merges.
+    2 skipped, API 562 passed / 3 deselected; CI green on `88a84b4`.
+    **MERGED 2026-09-30 (PR #29, main `07c1f1f`).** The founder then dropped
+    `backup_0026` to `backup_0032` on staging (RUNBOOK 1.3), so staging holds
+    no backups. The Stripe test-mode walkthrough
+    (`docs/walkthroughs/card-billing.md`) is still to do.
   - **The setup fee is non-refundable for standard customers** (founder,
     2026-09-29): it covers the setup work and is charged when they add their
     card, and the "Ask for a card" email says so. **Required before the first
@@ -1204,7 +1385,7 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 - Sandbox leftover: Acme Test Prospect's founding coupon was created before the invoice-count fix (D-138) and discounts one extra invoice (19 Dec). Test data only; correct it in Stripe or leave it.
 
 - **Phase 5.5 open items (2026-09-25):**
-  - `backup_0026` (document_headers, document_lines; RLS on, no policies) was kept on staging until the founder said to drop it (D-156). **Superseded 2026-09-29:** backups are dropped on staging once the migration's PR has merged, and in production 14 days after the migration is applied there, each by the founder (RUNBOOK 1.3, which lists the six still on staging: `backup_0026` to `backup_0031`).
+  - `backup_0026` (document_headers, document_lines; RLS on, no policies) was kept on staging until the founder said to drop it (D-156). **Superseded 2026-09-29:** backups are dropped on staging once the migration's PR has merged, and in production 14 days after the migration is applied there, each by the founder (RUNBOOK 1.3). All of them, `backup_0026` to `backup_0032`, were dropped on staging 2026-09-30.
   - **Postmark IP allowlist: log-only until confirmed.** When the Stage 2 webhook authentication ships, the allowlist records source addresses but doesn't refuse. Trigger to switch to enforcing: the first real inbound mail after the Postmark account exists; confirm the observed addresses against Postmark's published list using the RUNBOOK procedure, then flip enforcement (D-155).
   - RUNBOOK.md still needs, with Stage 2: the IP-confirmation-and-enforce procedure and the webhook credential rotation procedure.
   - UAT TC-26 now requires a real QuickBooks Desktop import of high-precision amounts and rates; refuse-vs-warn (EXP-008) is decided on that evidence (D-157). **It also requires importing a non-reconciling line** (`qty 2 / rate 8.25 / amount 198.00`) and recording what QuickBooks does with it -- recalculates the amount, rejects the line, or keeps it as given. Whether an export should flag an acknowledged non-reconciling snapshot is decided on that evidence (founder, 2026-09-27).
