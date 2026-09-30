@@ -66,6 +66,29 @@ def test_tenant_a_cannot_read_a_tenant_b_path_and_storage_is_never_contacted(fak
     assert fake.calls == []
 
 
+def test_another_tenants_folder_is_told_apart_from_a_malformed_path():
+    """The founder's split (2026-09-30): a well-formed path under another
+    tenant alerts, a malformed one only logs -- so the check must tell them
+    apart, and neither may pass as a missing file."""
+    tenant_a, tenant_b = uuid4(), uuid4()
+
+    with pytest.raises(storage.CrossTenantStoragePathError) as crossed:
+        storage.check_tenant_path(tenant_a, f"tenants/{tenant_b}/uploads/po.pdf")
+    assert crossed.value.named_tenant_id == str(tenant_b)
+
+    for malformed in (
+        "tenants/seed/po.txt",
+        f"tenants/{tenant_b}/secrets/po.pdf",
+        f"tenants/{str(tenant_a).upper()}/uploads/po.pdf",
+        f"staging/{tenant_b}/po.pdf",
+    ):
+        with pytest.raises(UnsafeStoragePathError) as refused:
+            storage.check_tenant_path(tenant_a, malformed)
+        assert not isinstance(refused.value, storage.CrossTenantStoragePathError), malformed
+
+    assert not issubclass(UnsafeStoragePathError, storage.StorageError)
+
+
 @pytest.mark.parametrize(
     "path_for",
     [

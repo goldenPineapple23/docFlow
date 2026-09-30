@@ -59,6 +59,7 @@ from docflow_core.numbers import plain_or_none
 from docflow_core.storage import (
     StorageObjectMissingError,
     StorageUnavailableError,
+    UnsafeStoragePathError,
     read_file,
     save_derived,
 )
@@ -666,6 +667,12 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
         # Not an outage: waiting would retry it forever. A data fault, loudly.
         logger.error("stored_original_missing document_id=%s", did)
         _mark_failed(tid, did, raw_response={"error_code": "DOC-026", "detail": "missing"})
+        return
+    except UnsafeStoragePathError as exc:
+        # The row's path breaks the prefix rules, so nothing is read. A retry
+        # would refuse it again: a clean DOC-026 now (founder, 2026-09-30).
+        founder_alerts.report_refused_storage_path(exc, tenant_id=tid, where="worker", ref_id=did)
+        _mark_failed(tid, did, raw_response={"error_code": "DOC-026", "detail": "path_refused"})
         return
     if expected_sha256 and hashlib.sha256(content).hexdigest() != expected_sha256:
         # The bytes aren't the file that was received: never read the wrong one.

@@ -32,7 +32,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from docflow_core import field_schema, file_types
+from docflow_core import field_schema, file_types, founder_alerts
 from docflow_core.config import get_settings
 from docflow_core.db import tenant_session
 from docflow_core.errors import get_error
@@ -57,7 +57,7 @@ from docflow_core.signed_urls import (
     mint_document_token,
     verify_document_token,
 )
-from docflow_core.storage import StorageError, read_file
+from docflow_core.storage import StorageError, UnsafeStoragePathError, read_file
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -764,6 +764,13 @@ def original_document_url(
             # extracted values are what the reviewer mainly needs, and the
             # viewer says plainly that the original cannot be shown.
             detected = None
+        except UnsafeStoragePathError as exc:
+            # The row's path breaks the prefix rules: nothing is read, and the
+            # screen degrades the same way (founder, 2026-09-30).
+            founder_alerts.report_refused_storage_path(
+                exc, tenant_id=tenant_id, where="review_viewer", ref_id=document_id
+            )
+            detected = None
 
     previewable = has_preview or (detected is not None and detected.name not in _NOT_PREVIEWABLE)
 
@@ -863,6 +870,11 @@ def original_document_content(
             preview = read_file(tenant_id, row["preview_storage_path"])
         except StorageError as exc:
             raise HTTPException(status_code=404) from exc
+        except UnsafeStoragePathError as exc:
+            founder_alerts.report_refused_storage_path(
+                exc, tenant_id=tenant_id, where="review_viewer", ref_id=document_id
+            )
+            raise HTTPException(status_code=404) from exc
         return Response(
             content=preview,
             media_type=row["preview_media_type"],
@@ -872,6 +884,11 @@ def original_document_content(
     try:
         content = read_file(tenant_id, row["storage_path"])
     except StorageError as exc:
+        raise HTTPException(status_code=404) from exc
+    except UnsafeStoragePathError as exc:
+        founder_alerts.report_refused_storage_path(
+            exc, tenant_id=tenant_id, where="review_viewer", ref_id=document_id
+        )
         raise HTTPException(status_code=404) from exc
 
     return Response(

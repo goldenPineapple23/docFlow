@@ -41,7 +41,12 @@ from docflow_core.export_jobs import (
     request_export,
 )
 from docflow_core.signed_urls import InvalidSignedUrl, mint_export_token, verify_export_token
-from docflow_core.storage import StorageObjectMissingError, StorageUnavailableError, read_file
+from docflow_core.storage import (
+    StorageObjectMissingError,
+    StorageUnavailableError,
+    UnsafeStoragePathError,
+    read_file,
+)
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -241,6 +246,13 @@ def download_export(export_id: UUID, token: str = Query(min_length=1)) -> Respon
     except StorageUnavailableError as exc:
         founder_alerts.alert_storage_unavailable(verified.tenant_id, where="export_download")
         raise catalog_error("EXP-010", status_code=503) from exc
+    except UnsafeStoragePathError as exc:
+        # The row's path breaks the prefix rules: nothing is read, and it is
+        # answered like a missing file (founder, 2026-09-30).
+        founder_alerts.report_refused_storage_path(
+            exc, tenant_id=verified.tenant_id, where="export_download", ref_id=export_id
+        )
+        raise HTTPException(status_code=404) from exc
     return Response(
         content=content,
         media_type=_MEDIA_TYPES[row["format"]],

@@ -66,7 +66,7 @@ from docflow_core.extraction import (
     wrap_document_content,
 )
 from docflow_core.lifecycle import _lifecycle_event
-from docflow_core.storage import StorageError, UnsafeStoragePathError, read_file
+from docflow_core.storage import StorageError, UnsafeStoragePathError, check_tenant_path, read_file
 
 logger = logging.getLogger(__name__)
 
@@ -274,13 +274,22 @@ def select_examples(
     examples: list[PromptExample] = []
     for row in rows:
         path = row["extracted_text_path"]
-        if not path.startswith(prefix):
-            # Section 7.5: the storage layer's tenant prefix, checked again.
-            logger.error("example_text_outside_tenant document_id=%s", row["id"])
-            continue
         try:
+            if not path.startswith(prefix):
+                # Section 7.5: the storage layer's tenant prefix, checked
+                # again here because `read` may be a test's stand-in.
+                check_tenant_path(tenant_id, path)
             body = read(path).decode("utf-8", errors="replace")
-        except (StorageError, UnsafeStoragePathError) as exc:
+        except UnsafeStoragePathError as exc:
+            # Logged, and alerted if it names another tenant (founder,
+            # 2026-09-30); the example is simply left out.
+            from docflow_core import founder_alerts
+
+            founder_alerts.report_refused_storage_path(
+                exc, tenant_id=tenant_id, where="example_prompting", ref_id=row["id"]
+            )
+            continue
+        except StorageError as exc:
             logger.error(
                 "example_text_unreadable document_id=%s error_type=%s", row["id"], type(exc).__name__
             )

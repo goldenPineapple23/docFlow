@@ -770,6 +770,30 @@ def test_a_missing_original_fails_loudly_once_instead_of_waiting(monkeypatch):
     assert not alerts
 
 
+def test_a_refused_path_fails_cleanly_with_doc_026_and_no_retry(monkeypatch):
+    """A path the prefix rules refuse would be refused again on every retry,
+    so it ends now in DOC-026 -- not a crash, not a wait (founder, 2026-09-30)."""
+    from docflow_core.storage import UnsafeStoragePathError
+
+    import app.tasks.parse_and_extract as mod
+
+    reported: list[dict] = []
+    monkeypatch.setattr(
+        mod.founder_alerts, "report_refused_storage_path", lambda exc, **kw: reported.append(kw)
+    )
+
+    def refused(tenant_id, path):
+        raise UnsafeStoragePathError("not under this tenant's prefix")
+
+    session, alerts, failure_alerts = _drive_read(monkeypatch, read=refused)
+    failures = _to(session, "failed")
+    assert failures and failures[-1]["v_raw_json"] == {"error_code": "DOC-026", "detail": "path_refused"}
+    assert not [sql for sql, _ in session.statements if "processing_attempts - 1" in sql]
+    assert failure_alerts and failure_alerts[0]["error_code"] == "DOC-026"
+    assert reported and reported[0]["where"] == "worker"
+    assert not alerts
+
+
 def test_bytes_that_dont_match_the_received_file_are_never_parsed(monkeypatch):
     import hashlib
 

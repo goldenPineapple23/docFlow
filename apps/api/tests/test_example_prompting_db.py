@@ -43,14 +43,12 @@ class _Tenant(_BaseTenant):
     text files these tests write under the tenant's storage prefix."""
 
     def __exit__(self, *exc):
-        import shutil
-
-        from docflow_core.storage import _resolve
+        from docflow_core.storage import delete_tenant_storage
 
         try:
             super().__exit__(*exc)
         finally:
-            shutil.rmtree(_resolve(f"tenants/{self.tenant_id}"), ignore_errors=True)
+            delete_tenant_storage(self.tenant_id)
 
 
 def _schema_available() -> bool:

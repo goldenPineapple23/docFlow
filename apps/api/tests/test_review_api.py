@@ -597,6 +597,82 @@ def test_a_tenant_cannot_mint_a_viewer_url_for_another_tenants_document(client):
         assert refused.status_code == 404
 
 
+def _set_storage_path(document_id: UUID, path: str) -> None:
+    with platform_session() as session:
+        session.execute(
+            text("UPDATE documents SET storage_path = :p WHERE id = :id"),
+            {"p": path, "id": str(document_id)},
+        )
+
+
+def _path_alerts(tenant_id: UUID) -> list[dict]:
+    with platform_session() as session:
+        return [
+            dict(r)
+            for r in session.execute(
+                text(
+                    "SELECT severity, payload FROM founder_alerts "
+                    "WHERE tenant_id = :t AND type = 'storage_path_cross_tenant'"
+                ),
+                {"t": str(tenant_id)},
+            ).mappings()
+        ]
+
+
+@requires_review_schema
+def test_an_order_whose_stored_path_is_refused_shows_no_original_instead_of_a_500(client):
+    """Stage 3b (founder, 2026-09-30): a path the prefix rules refuse (here
+    the seed scripts' made-up `tenants/seed/po.txt`) is never read, and the
+    review screen degrades as for a missing file -- the original can't be
+    shown -- instead of answering 500. A malformed path raises no alert."""
+    with _ReviewTenant("Acme Test Distributor -- refused path") as tenant:
+        document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        _set_storage_path(document, "tenants/seed/po.txt")
+
+        minted = client.get(f"/review/documents/{document}/original", headers=tenant.headers())
+        assert minted.status_code == 200
+        assert minted.json()["previewable"] is False
+
+        served = client.get(minted.json()["url"])
+        assert served.status_code == 404
+        assert _path_alerts(tenant.tenant_id) == []
+
+
+@requires_review_schema
+def test_a_path_under_another_tenants_folder_is_refused_and_alerts_the_founder(client, monkeypatch):
+    """Section 7.5 caught something: the file is never served, and a critical
+    `storage_path_cross_tenant` alert is raised -- not only a log line."""
+    monkeypatch.setenv("FOUNDER_ALERT_EMAIL", "")  # the alert row only; no outbox email
+    get_settings.cache_clear()
+    with _ReviewTenant("Acme Test Distributor A") as a, _ReviewTenant("Beacon Test Supply B") as b:
+        b_content = b"PO Number: BEACON-7781\n"
+        b_path = save_file(b.tenant_id, "po.txt", b_content)
+        try:
+            document = a.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+            _set_storage_path(document, b_path)
+
+            minted = client.get(f"/review/documents/{document}/original", headers=a.headers())
+            assert minted.status_code == 200
+            served = client.get(minted.json()["url"])
+            assert served.status_code == 404
+            assert b_content not in served.content
+
+            alerts = _path_alerts(a.tenant_id)
+            assert len(alerts) == 1  # one open alert per record, however often it's opened
+            assert alerts[0]["severity"] == "critical"
+            assert alerts[0]["payload"]["named_tenant_id"] == str(b.tenant_id)
+            assert alerts[0]["payload"]["ref_id"] == str(document)
+            assert b_path not in str(alerts[0]["payload"])  # ids only, never the path
+        finally:
+            with platform_session() as session:
+                session.execute(
+                    text("DELETE FROM founder_alerts WHERE tenant_id = :t"), {"t": str(a.tenant_id)}
+                )
+            from docflow_core.storage import delete_tenant_storage
+
+            delete_tenant_storage(b.tenant_id)
+
+
 @requires_review_schema
 def test_a_viewer_token_edited_to_name_another_tenant_is_refused(client):
     """

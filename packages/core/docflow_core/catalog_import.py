@@ -929,7 +929,12 @@ def run_parse(tenant_id: UUID, import_id: UUID) -> str:
     from docflow_core import file_types
     from docflow_core.catalog_parsing import ImportParseError, parse_table
     from docflow_core.db import tenant_session
-    from docflow_core.storage import StorageError, StorageUnavailableError, read_file
+    from docflow_core.storage import (
+        StorageError,
+        StorageUnavailableError,
+        UnsafeStoragePathError,
+        read_file,
+    )
 
     logger = logging.getLogger(__name__)
     with tenant_session(tenant_id) as session:
@@ -939,6 +944,17 @@ def run_parse(tenant_id: UUID, import_id: UUID) -> str:
 
     try:
         content = read_file(tenant_id, row["storage_path"])
+    except UnsafeStoragePathError as exc:
+        # The row's path breaks the prefix rules: nothing is read. Failed now
+        # with IMP-009, not left for the stuck sweep (founder, 2026-09-30).
+        from docflow_core import founder_alerts
+
+        founder_alerts.report_refused_storage_path(
+            exc, tenant_id=tenant_id, where="catalog_import", ref_id=import_id
+        )
+        with tenant_session(tenant_id) as session:
+            record_parse_failure(session, import_id, "IMP-009")
+        return "failed"
     except StorageError as exc:
         # Nothing was imported and the file may be fine: IMP-009 says exactly
         # that and asks for the import to be started again (Stage 3b, Q3).

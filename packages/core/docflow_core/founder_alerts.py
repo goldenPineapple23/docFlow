@@ -74,6 +74,9 @@ ALERT_TYPES: dict[str, str] = {
     # Stage 3b (Q3): Storage couldn't be reached. Once an hour for the whole
     # platform, not per tenant: one outage hits every tenant at once.
     "storage_unavailable": "File storage couldn't be reached",
+    # Stage 3b (founder, 2026-09-30): a stored path named another tenant's
+    # folder and was refused before any read (Section 7.5).
+    "storage_path_cross_tenant": "A stored file path named another tenant's folder and was refused",
 }
 
 # Failure codes whose catalog text promises the reader that DocFlow has been
@@ -292,6 +295,56 @@ def raise_storage_unavailable(session: Session, *, tenant_id: UUID, where: str) 
         return False
     savepoint.commit()
     return raised
+
+
+def report_refused_storage_path(
+    exc: Exception, *, tenant_id: UUID, where: str, ref_id: UUID | str | None
+) -> None:
+    """
+    Stage 3b (founder, 2026-09-30): a stored path the prefix rules refused.
+    Nothing was read; this only records it.
+
+    * A malformed path (seed data, a bug): logged as `storage_path_refused`.
+    * A well-formed path under another tenant's folder
+      (`CrossTenantStoragePathError`): logged as `storage_path_cross_tenant`
+      and raised as a critical alert, one open alert per record, because
+      Section 7.5's isolation rule caught something.
+
+    `where` is a fixed call-site label and `ref_id` the order, export or
+    import id -- never the path or anything from a document (Section 7.10).
+    Opens its own tenant session and never raises: the caller is about to
+    answer with its own error.
+    """
+    from docflow_core.storage import CrossTenantStoragePathError
+
+    if not isinstance(exc, CrossTenantStoragePathError):
+        logger.error("storage_path_refused tenant_id=%s where=%s ref_id=%s", tenant_id, where, ref_id)
+        return
+    logger.error(
+        "storage_path_cross_tenant tenant_id=%s named_tenant_id=%s where=%s ref_id=%s",
+        tenant_id,
+        exc.named_tenant_id,
+        where,
+        ref_id,
+    )
+    from docflow_core.db import tenant_session
+
+    try:
+        with tenant_session(tenant_id) as session:
+            raise_alert(
+                session,
+                alert_type="storage_path_cross_tenant",
+                severity="critical",
+                tenant_id=tenant_id,
+                payload={
+                    "where": where,
+                    "ref_id": str(ref_id) if ref_id else None,
+                    "named_tenant_id": exc.named_tenant_id,
+                },
+                dedupe_key=f"storage_path_cross_tenant:{tenant_id}:{ref_id}",
+            )
+    except Exception:  # noqa: BLE001 -- logged above and here; the caller's error still goes out
+        logger.exception("founder_alert_not_raised tenant_id=%s alert=storage_path_cross_tenant", tenant_id)
 
 
 def alert_storage_unavailable(tenant_id: UUID, *, where: str) -> None:

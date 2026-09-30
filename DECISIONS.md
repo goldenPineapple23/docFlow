@@ -2723,3 +2723,14 @@ The fresh backup challenge passed the step-up. The rotation then stopped at `QUA
 
 **As built:** see BUILD-STATUS "3b build". Differences from the design: four settings (the region), the outage wait stays `processing` (0027 has no `processing -> pending`), and new catalog entries DOC-026, EXP-010 and LIFE-007.
 
+**Addendum -- a refused stored path (founder, 2026-09-30, from the staging API run).** A row whose `storage_path` breaks the prefix rules (seed data's `tenants/seed/po.txt`) made the review viewer answer 500, and an audit found only example prompting handled it. Decided:
+- The file is never read; the prefix check is unchanged. `UnsafeStoragePathError` stays separate from `StorageError`, so a log can tell a bug from missing data.
+- **Two kinds, told apart by the check.** A malformed path logs `storage_path_refused`. A well-formed path under *another* tenant's folder raises `CrossTenantStoragePathError` (a subclass of `UnsafeStoragePathError`), logs `storage_path_cross_tenant`, and raises a **critical** `storage_path_cross_tenant` founder alert, one open alert per record (Section 7.5; 7.9's one row, two channels). `founder_alerts.type` is free text, so no migration.
+- Each reader handles it:
+  - the review viewer (link and file): the original isn't shown, 404;
+  - export download: 404;
+  - the worker: a clean DOC-026 `path_refused`, with no retry and no wait;
+  - catalog import: IMP-009 at once, not after the stuck sweep;
+  - Console import from an intake file: SYS-001, like any failed Console read;
+  - example prompting: the example is left out.
+

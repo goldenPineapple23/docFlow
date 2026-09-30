@@ -52,7 +52,19 @@ BUCKET = "docflow-files"
 
 
 class UnsafeStoragePathError(Exception):
-    pass
+    """A path the prefix rules refuse. Never sent to Storage. Deliberately not
+    a StorageError: a refused path is a bug or bad data, not a missing file
+    or an outage, and the log must be able to tell them apart."""
+
+
+class CrossTenantStoragePathError(UnsafeStoragePathError):
+    """A well-formed path under a *different* tenant's folder. Section 7.5's
+    isolation rule caught something, so callers alert the founder
+    (`founder_alerts.report_refused_storage_path`), not only log it."""
+
+    def __init__(self, message: str, *, named_tenant_id: str) -> None:
+        super().__init__(message)
+        self.named_tenant_id = named_tenant_id
 
 
 class StorageError(Exception):
@@ -139,16 +151,25 @@ def check_tenant_path(tenant_id: UUID, storage_path: str) -> str:
     before anything is sent to Storage.
     """
     segments = _check_segments(storage_path)
-    if (
-        len(segments) < 4
-        or segments[0] != "tenants"
-        or segments[1] != str(UUID(str(tenant_id)))
-        or segments[2] not in STORAGE_AREAS
-    ):
-        raise UnsafeStoragePathError(
-            f"Storage path is not under this tenant's prefix: tenant={tenant_id} path={storage_path!r}"
+    own = str(UUID(str(tenant_id)))
+    well_formed = len(segments) >= 4 and segments[0] == "tenants" and segments[2] in STORAGE_AREAS
+    if well_formed and segments[1] == own:
+        return storage_path
+    if well_formed and _is_uuid(segments[1]):
+        raise CrossTenantStoragePathError(
+            f"Storage path is under another tenant's prefix: tenant={tenant_id} path={storage_path!r}",
+            named_tenant_id=segments[1],
         )
-    return storage_path
+    raise UnsafeStoragePathError(
+        f"Storage path is not under this tenant's prefix: tenant={tenant_id} path={storage_path!r}"
+    )
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        return str(UUID(value)) == value
+    except ValueError:
+        return False
 
 
 def check_staging_path(intake_id: UUID, storage_path: str) -> str:

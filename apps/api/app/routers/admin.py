@@ -56,7 +56,7 @@ from docflow_core.constants import (
 from docflow_core.db import tenant_session
 from docflow_core.errors import get_error
 from docflow_core.external_services import ExternalServiceError
-from docflow_core.storage import StorageUnavailableError, read_file, save_file
+from docflow_core.storage import StorageUnavailableError, UnsafeStoragePathError, read_file, save_file
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, EmailStr, Field
 
@@ -596,7 +596,16 @@ def import_from_intake(
     )
     # After tenant creation the intake's files sit under this tenant's
     # `onboarding/` prefix, so the read is tenant-checked like any other.
-    content = read_file(tenant_id, chosen["storage_path"])
+    try:
+        content = read_file(tenant_id, chosen["storage_path"])
+    except UnsafeStoragePathError as exc:
+        # Nothing is read. The founder sees the general SYS-001, as for any
+        # other Console read that fails (3b build notes); the log line and,
+        # for another tenant's folder, the alert say which (founder, 2026-09-30).
+        founder_alerts.report_refused_storage_path(
+            exc, tenant_id=tenant_id, where="console_import_from_intake", ref_id=body.intake_file_id
+        )
+        raise catalog_error("SYS-001", status_code=500) from exc
     import_id = _start_import(
         tenant_id,
         admin_id,
