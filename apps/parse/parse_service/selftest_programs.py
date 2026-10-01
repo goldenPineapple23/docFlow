@@ -82,10 +82,10 @@ def _syscall(name_or_nr, *args) -> str:
 # ── network ────────────────────────────────────────────────────────────────
 
 
-def _tcp(host: str, port: int, family: int) -> str:
+def _tcp(host: str, port: int, family: int, timeout: float = 3) -> str:
     try:
         with socket.socket(family, socket.SOCK_STREAM) as sock:
-            sock.settimeout(3)
+            sock.settimeout(timeout)
             sock.connect((host, port))
         return "reached"
     except OSError as exc:
@@ -125,9 +125,10 @@ def probe_network(args: dict) -> dict:
     every name in `args["dns"]`. Hosts are addresses resolved outside first,
     so "blocked" means the address is unreachable, not just a failed lookup."""
     out: dict = {"tcp": {}, "dns": {}}
+    timeout = float(args.get("connect_timeout", 3))
     for label, host, port, version in args.get("tcp", []):
         family = socket.AF_INET6 if int(version) == 6 else socket.AF_INET
-        out["tcp"][label] = _tcp(host, int(port), family)
+        out["tcp"][label] = _tcp(host, int(port), family, timeout)
     for name in args.get("dns", []):
         out["dns"][name] = _dns(name)
     try:

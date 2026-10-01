@@ -120,7 +120,10 @@ class Runner:
     # ── A: isolation ───────────────────────────────────────────────────────
 
     def network(self, targets: dict) -> None:
-        outside = selftest_programs.probe_network(targets)
+        # The control gets 10 s per connect: a private-network target that is
+        # up can still take more than the inside probe's 3 s to answer the
+        # first time (A4, Fly run 1). Inside, blocked connects fail at once.
+        outside = selftest_programs.probe_network({**targets, "connect_timeout": CONTROL_CONNECT_SECONDS})
         inside_job = self.job("probe_network", targets)
         inside = self.result(inside_job)
         for label, _host, _port, _v in targets["tcp"]:
@@ -616,9 +619,13 @@ class Runner:
                 json.dumps({"attempts": [["raise_limit", str(limit_file), "-1"], ["leave", str(parent_procs), "1"]]}),
             ]
             visible = json.loads(subprocess.run(visible_cmd, capture_output=True, text=True, timeout=30).stdout or "{}")
+            # The control: root may change the limit. Lowering it, which root
+            # may always do on either version; v1 refuses a memory limit above
+            # the memory+swap limit, so raising it proves nothing there (Fly
+            # run 1, 2026-10-01).
             root_can = True
             try:
-                limit_file.write_text(str(300 * config.MIB))
+                limit_file.write_text(str(200 * config.MIB))
             except OSError:
                 root_can = False
         finally:
@@ -1064,6 +1071,9 @@ def _resolve(host: str, version: int) -> str | None:
         return str(socket.getaddrinfo(host, None, family)[0][4][0])
     except OSError:
         return None
+
+
+CONTROL_CONNECT_SECONDS = 10
 
 
 def default_targets() -> dict:

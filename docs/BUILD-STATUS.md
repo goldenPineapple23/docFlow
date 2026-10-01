@@ -1577,7 +1577,7 @@ failure means stop and report.
 | B7 | Answer flood: the supervisor stops reading at the cap and kills the job | -- | | yes | yes |
 | B8 | Disk: `/work`, LibreOffice's home and `/dev/shm` each stop at their size, and their pages count against the job's memory; **`/tmp` counts against `/work`'s cap (with 128 MiB kept in `/work`, `/tmp` stops at what is left; Q14)** | -- | | yes | yes |
 | B9 | One process per file: two jobs in a row have different processes and namespaces, and nothing of the first is left in `/work` or the home | -- | yes (process only) | yes | yes |
-| B10 | The job can't raise its own limit or leave its cgroup (the files are hidden; and refused even if visible) | root can change it | | yes | yes |
+| B10 | The job can't raise its own limit or leave its cgroup (the files are hidden; and refused even if visible) | root can change it (lowers it to 200 MiB; v1 refuses raising a limit above memory+swap, Fly run 1) | | yes | yes |
 | B11 | **No leak, through the real request path** (and nothing found by the after-job backstop) (founder, 2026-10-01): the service's own Service and Handler on a loopback port, 100 real POSTs (a text order, a catalog table, the committed `po.doc`), two at a time; all answer 200, none stopped or crashed; afterwards every job cgroup is gone and the slot users own no process. **While they run, every job's namespace PID 1 is sampled from outside and must be the reaper (`sandbox_init`), never the parser or LibreOffice,** and a running job must be seen as its PID 2 | -- | | yes | yes |
 | B12 | **CPU quota (slows):** a job spinning on every core gets at most one CPU's worth of time over a timed window, and the cgroup reports throttling; the other slot's job still finishes | the same program with no quota uses more than one CPU | | yes | yes |
 | B13 | **LibreOffice runs in the sandbox** (added 2026-10-01 after `po.doc` gave DOC-017 in the real image): the committed `po.doc`, converted inside a real job with `conversion.py`'s flags and Word 97 filter, exits 0 and produces a file; reports its exit status and stderr tail, whether `/tmp` and `/var/tmp` are writable, and the same run with LibreOffice's pipe pointed at the work directory (evidence) | -- | | yes | yes |
@@ -2138,6 +2138,35 @@ Evidence: `docs/spikes/3c-fly-staging/2026-10-01-sha256-f9719965/`.
   design: `memory.limit_in_bytes` can't exceed `memory.memsw.limit_in_bytes`
   (256 MiB). Shown on the machine with a throwaway cgroup (file 05).
 - Throwaway app `docflow-3c-probe` destroyed; parse machine stopped.
+
+**Founder, 2026-10-01: stopping was right; all three fixes approved.**
+1. **Reaper:** a zombie child is reaped when it is in a PID namespace other
+   than the supervisor's and runs as a slot's user, and isn't a live job's
+   own process -- never by cgroup path. Jobs are created and registered in
+   `_live_children` under the reaper's lock (already so; now tested: a job
+   that dies before it's registered keeps its own exit status, and a
+   control shows an unregistered child would lose it). A killed job's
+   orphan is also reaped by `run_job` before it returns, so no slot starts
+   a job with one left. The backstop looks at its own slot's user. The "/"
+   unit test feeds Fly run 1's view. B5 and B11 on Fly are the proof.
+   **One change from the approved wording, flagged to the founder:** "a
+   slot's user" alone would also match the self-tests' own `setpriv`
+   children (they run as slot 0's user, in the supervisor's namespace), so
+   the PID-namespace condition is added.
+2. **B10 control:** root lowers the limit to 200 MiB.
+3. **A4:** the control's connect timeout is 10 s (inside stays 3 s).
+   **Cause checked first:** the founder's guess (the stand-in auto-stopped)
+   doesn't fit run 1. The stand-in had no services, so Fly's proxy could
+   neither stop nor start it, and its restart policy was `no`. It was
+   listed `started` at 19:49:52 (run 1 began 19:50:52), accepted
+   connections at 19:53:06 and 19:54:45, and was `started` at teardown
+   (19:56:40), so it was never stopped. Cause still unknown; the stand-in
+   was 3 minutes old, so a new machine's private route not yet everywhere
+   is a guess. Run 2 records the stand-in's state and log right before and
+   after the self-tests. Run 1's NOT-RUN stays in its evidence; the gate is
+   every item passing in one run.
+- `--ha=false` is staging only; production's machine count is a Phase 6
+  decision (RUNBOOK 8.2). A7 against the real port 8100 is preferred.
 
 **Tenth run (`0be5422`): GREEN.** core 700 tests, 0 failed; api 580, 0 failed; worker 132, 0 failed (F5 included); parse unit 122, 0 failed; parse HTTP 56, 0 failed (D1 parity on every fixture, `po.doc` included); web and web-live passed; dependency audits clean. Self-tests in the real sandbox: canary 5 of 5, A 13 of 13 PASS with A-net IPv6 NOT-RUN, S 5 of 5, B 17 of 17; E1, E3 and E4 as designed. Recorded in D-183. Next: the
 founder backs up and applies `0034` on staging (the PR text leads with it:

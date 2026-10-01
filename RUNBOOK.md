@@ -888,7 +888,10 @@ the 3c token is not carried over.
   isolation must be on, `PARSE_SERVICE_TOKEN` must be set, and any
   `PARSE_TEST_ONLY_*` setting makes it refuse to start. Private only, over
   Flycast (`fly ips list` must show one private IPv6 address and nothing
-  else, after every deploy).
+  else, after every deploy). Staging deploys with `--ha=false` (one
+  machine). **That is staging only:** production's machine count is a
+  Phase 6 decision and does not carry over by default (founder,
+  2026-10-01).
 - **Secrets:** `PARSE_SERVICE_TOKEN` goes on the worker's app and the parse
   service's app, never the API's. If it is set on the API, the API refuses
   to start ("DocFlow API refused to start: PARSE_SERVICE_TOKEN is set ...")

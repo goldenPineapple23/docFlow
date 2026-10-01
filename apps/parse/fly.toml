@@ -6,7 +6,10 @@
 # Deploy from the repository root (the image's build context):
 #
 #     fly deploy --config apps/parse/fly.toml --dockerfile apps/parse/Dockerfile \
-#         --ignorefile apps/parse/Dockerfile.dockerignore --no-public-ips .
+#         --ignorefile apps/parse/Dockerfile.dockerignore --no-public-ips --ha=false .
+#
+# --ha=false (one machine) is for staging only; production's machine count
+# is a Phase 6 decision (founder, 2026-10-01).
 #     fly ips allocate-v6 --private --app docflow-parse-staging   # once
 #     fly ips list --app docflow-parse-staging   # one private IPv6, nothing else
 #

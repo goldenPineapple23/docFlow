@@ -42,7 +42,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from parse_service import config
-from parse_service.cgroups import JOBS_PARENT, CgroupError, Cgroups, JobCgroup
+from parse_service.cgroups import CgroupError, Cgroups, JobCgroup
 
 logger = logging.getLogger("parse_service.launcher")
 
@@ -273,6 +273,11 @@ def run_job(
     evidence: dict = {"exit_status": proc.returncode}
     with _children_lock:
         _live_children.discard(proc.pid)
+        if killed and _reaper_started:
+            # kill_all returned only once the job's cgroup was empty, so its
+            # sandbox's PID 1 is already a zombie child of ours: reap it now,
+            # before this slot can start another job (Fly run 1, cgroup v1).
+            RECENT_REAPS.extend(_reap_zombie_orphans(frozenset({config.SLOT_UID_BASE + slot})))
     if job_cg is not None:
         if cause is None and job_cg.oom_kills() > oom_before:
             cause = "memory"
@@ -286,7 +291,7 @@ def run_job(
         )
     if job_cg is not None and _reaper_started and not killed and cause is None:
         # The backstop: a job that ended normally leaves no orphans.
-        found = _backstop(job_cg.name)
+        found = _backstop(slot)
         if found:
             evidence["backstop_found"] = found
     if job_cg is not None:
@@ -321,26 +326,37 @@ class _NoCgroup:
 # and would stay a zombie for the life of the service. So this process reaps
 # them the moment they end (founder, 2026-10-01: no timing window): SIGCHLD
 # wakes the reaper thread, which waits for every zombie child of ours that
-# belongs to a job cgroup and is not a live job's own Popen child.
+# came from a job's sandbox and is not a live job's own Popen child.
+#
+# "Came from a job's sandbox" is decided by what the process is, never by
+# how the kernel shows its cgroup: on Fly's cgroup v1 a dead process shows
+# "/" (Fly run 1, 2026-10-01). It must be in a PID namespace other than
+# ours (only a sandbox's processes are: the jobs' own unshare and the
+# self-tests' setpriv children stay in ours) and run as a slot's user.
 #
 # Not waitpid(-1): that would also take the exit status of this process's
 # legitimate children (the jobs' Popen processes, a self-test's other
 # subprocesses), and Python's subprocess then reports a crashed child as
 # exit 0. Each orphan is waited for by pid instead, the moment it is a
-# zombie. The SIGCHLD wakeup goes through Python's wakeup fd, written at C
-# level whichever thread takes the signal, so the reaper never waits on the
-# main thread (which may be blocked for minutes).
+# zombie. A job's Popen process is created and entered in _live_children
+# under _children_lock, the lock the reaper holds, so the reaper never sees
+# a job's pid before it is registered, however soon the job dies. The
+# SIGCHLD wakeup goes through Python's wakeup fd, written at C level
+# whichever thread takes the signal, so the reaper never waits on the main
+# thread (which may be blocked for minutes).
 #
 # A backstop runs after every job that ended normally: such a job leaves no
 # orphans (its sandbox's PID 1 reaps inside and unshare reaps that), so any
-# found is counted (BACKSTOP_FOUND; B11 fails on it) and logged.
+# found among its slot's user's processes is counted (BACKSTOP_FOUND; B11
+# fails on it) and logged.
 _children_lock = threading.Lock()
 _live_children: set[int] = set()
 PR_SET_CHILD_SUBREAPER = 36
-JOB_CGROUP_MARKER = f"/{JOBS_PARENT}/"
+SLOT_UIDS = frozenset(config.SLOT_UID_BASE + slot for slot in range(config.PARSE_SLOTS))
 RECENT_REAPS: deque = deque(maxlen=64)  # evidence for the self-tests (B5)
 BACKSTOP_FOUND: list[dict] = []
 _reaper_started = False
+_own_pid_ns: str | None = None
 
 
 def become_subreaper() -> None:
@@ -358,9 +374,10 @@ def become_subreaper() -> None:
 def start_reaper() -> None:
     """Become the subreaper and start reaping on SIGCHLD. Call once, from the
     main thread (signal handlers and the wakeup fd can only be set there)."""
-    global _reaper_started
+    global _reaper_started, _own_pid_ns
     if not sys.platform.startswith("linux") or _reaper_started:
         return
+    _own_pid_ns = os.readlink("/proc/self/ns/pid")
     become_subreaper()
     wake_r, wake_w = os.pipe()
     os.set_blocking(wake_w, False)
@@ -379,11 +396,11 @@ def _reaper_loop(wake_r: int) -> None:
         except InterruptedError:
             continue
         with _children_lock:
-            RECENT_REAPS.extend(_reap_zombie_orphans(JOB_CGROUP_MARKER))
+            RECENT_REAPS.extend(_reap_zombie_orphans(SLOT_UIDS))
 
 
 def process_facts(pid: int) -> dict:
-    """Name, state, parent, cgroup and PID namespace of one process."""
+    """Name, state, parent, user, cgroup and PID namespace of one process."""
     facts: dict = {"pid": pid}
     try:
         with open(f"/proc/{pid}/status") as handle:
@@ -391,7 +408,9 @@ def process_facts(pid: int) -> dict:
                 key, _, value = line.partition(":")
                 if key in ("Name", "State", "PPid"):
                     facts[key.lower()] = value.strip()
-    except OSError as exc:
+                elif key == "Uid":
+                    facts["uid"] = int(value.split()[0])  # the real uid
+    except (OSError, ValueError, IndexError) as exc:
         facts["status_error"] = type(exc).__name__
     try:
         with open(f"/proc/{pid}/cgroup") as handle:
@@ -405,26 +424,36 @@ def process_facts(pid: int) -> dict:
     return facts
 
 
-def _orphans_in(marker: str) -> list[dict]:
-    """Facts for every child of this process whose cgroup path contains
-    `marker` and that no live job owns. Call with _children_lock held."""
+def _from_a_sandbox(facts: dict, uids: frozenset[int]) -> bool:
+    """A process from a job's sandbox: another PID namespace, a slot's user."""
+    pid_ns = facts.get("pid_ns")
+    return (
+        isinstance(pid_ns, str)
+        and pid_ns.startswith("pid:[")
+        and _own_pid_ns is not None
+        and pid_ns != _own_pid_ns
+        and facts.get("uid") in uids
+    )
+
+
+def _orphans(uids: frozenset[int]) -> list[dict]:
+    """Facts for every child of this process that came from a job's sandbox
+    running as one of `uids` and that no live job owns. Lock held."""
     me = str(os.getpid())
     found = []
     for entry in os.listdir("/proc"):
         if not entry.isdigit() or int(entry) in _live_children:
             continue
         facts = process_facts(int(entry))
-        if facts.get("ppid") != me or not isinstance(facts.get("cgroup"), list):
-            continue
-        if any(marker in line for line in facts["cgroup"]):
+        if facts.get("ppid") == me and _from_a_sandbox(facts, uids):
             found.append(facts)
     return found
 
 
-def _reap_zombie_orphans(marker: str) -> list[dict]:
-    """Wait for each zombie orphan in `marker`'s cgroups. Lock held."""
+def _reap_zombie_orphans(uids: frozenset[int]) -> list[dict]:
+    """Wait for each zombie orphan running as one of `uids`. Lock held."""
     reaped = []
-    for facts in _orphans_in(marker):
+    for facts in _orphans(uids):
         if not str(facts.get("state", "")).startswith("Z"):
             continue
         try:
@@ -437,13 +466,14 @@ def _reap_zombie_orphans(marker: str) -> list[dict]:
     return reaped
 
 
-def _backstop(job_cg_name: str) -> list[dict]:
-    """After a job that ended normally: its orphans, if any (there should be
-    none). Zombies among them are reaped; all are counted and logged."""
-    marker = f"{JOB_CGROUP_MARKER}{job_cg_name}"
+def _backstop(slot: int) -> list[dict]:
+    """After a job that ended normally: orphans from its slot, if any (there
+    should be none; one slot runs one job at a time). Zombies among them are
+    reaped; all are counted and logged."""
+    uids = frozenset({config.SLOT_UID_BASE + slot})
     with _children_lock:
-        found = _orphans_in(marker)
-        reaped = {f["pid"] for f in _reap_zombie_orphans(marker)}
+        found = _orphans(uids)
+        reaped = {f["pid"] for f in _reap_zombie_orphans(uids)}
     for facts in found:
         facts["reaped_by_backstop"] = facts["pid"] in reaped
     if found:
