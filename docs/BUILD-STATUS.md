@@ -1663,7 +1663,13 @@ E1 and E4 refused to start as they should. Failures:
 3. **18 worker database tests: documents stay in `processing`** (H1, H3, M1,
    M3, F3, cost, the time-limit tests). These need migration `0034`, so on
    this machine they skip (staging doesn't have it); CI is their first run.
-   *Being diagnosed.*
+   **Cause: a cascade from item 2, not 18 defects.** F5 kills the parse
+   container and restarted it only after its assertions; `po.doc` came back
+   in 0.2 s, an assertion failed, and the container stayed down. Every one
+   of the 18 runs after F5 (they sort after it), found no service, and their
+   documents were held in `processing` as designed for an unreachable
+   service (`release_after_storage_outage`). F5 now restarts the container
+   in a `finally`. Their real result is the next run's.
 
 Done, in the agreed order:
 1. **D2 baseline** (`b819e8b`): 41 committed fixtures under

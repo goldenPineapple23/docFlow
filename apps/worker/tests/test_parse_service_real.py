@@ -59,12 +59,18 @@ def test_F5_a_parse_killed_mid_request_is_lost_and_the_next_try_after_a_restart_
     thread.start()
     time.sleep(1.0)
     subprocess.run(["docker", "kill", CONTAINER], check=True, capture_output=True)
-    thread.join(timeout=60)
+    try:
+        thread.join(timeout=60)
+        assert "answer" not in outcome, (
+            f"the parse finished before the kill ({outcome}); the window is too short"
+        )
+        assert isinstance(outcome.get("error"), parse_client.ParseLost), outcome
+    finally:
+        # Always, pass or fail: every later test in this job reads through
+        # this container. On 2026-10-01 an assertion above failed before the
+        # restart, and 18 database tests after it found no service.
+        subprocess.run(["docker", "start", CONTAINER], check=True, capture_output=True)
+        _wait_healthy()
 
-    assert "answer" not in outcome, f"the parse finished before the kill ({outcome}); the window is too short"
-    assert isinstance(outcome.get("error"), parse_client.ParseLost), outcome
-
-    subprocess.run(["docker", "start", CONTAINER], check=True, capture_output=True)
-    _wait_healthy()
     answer = parse_client.parse_document(content, "po.doc")
     assert answer.outcome == "ok" and "BCH-2291" in answer.parts[0]["text"]
