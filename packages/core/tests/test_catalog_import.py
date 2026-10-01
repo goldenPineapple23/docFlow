@@ -1,10 +1,11 @@
 """
 Catalog and customer-list import, the parts that need no database
-(Section 7.15.2 Steps 4-5; D-108): reading the file, guessing the columns,
-cleaning values, and the validation report -- with row numbers that match the
+(Section 7.15.2 Steps 4-5; D-108): guessing the columns, cleaning values,
+and the validation report -- with row numbers that match the
 spreadsheet the founder has open.
 
-The diff and commit, which read and write the tenant's catalog, are tested
+Reading the file moved to the parse service in Stage 3c, with its tests
+(apps/parse/tests/test_tables.py). The diff and commit, which read and write the tenant's catalog, are tested
 against the real database in apps/api/tests/test_catalog_import_api.py.
 
 All data is fictional (CLAUDE.md Section 0 rule 4).
@@ -12,89 +13,7 @@ All data is fictional (CLAUDE.md Section 0 rule 4).
 
 from __future__ import annotations
 
-import io
-
-import pytest
-
 from docflow_core import catalog_import as ci
-from docflow_core import catalog_parsing as cp
-
-# ── Reading the file ────────────────────────────────────────────────────────
-
-
-def _xlsx(rows: list[list[object]]) -> bytes:
-    from openpyxl import Workbook
-
-    workbook = Workbook()
-    for row in rows:
-        workbook.active.append(row)
-    buffer = io.BytesIO()
-    workbook.save(buffer)
-    return buffer.getvalue()
-
-
-def test_a_csv_with_a_byte_order_mark_reads_cleanly():
-    table = cp.parse_table("﻿SKU,Description\nTEST-1,Test Beans\n".encode(), "csv")
-    assert table.columns == ["SKU", "Description"]
-    assert table.rows == [["TEST-1", "Test Beans"]]
-    assert table.header_row_number == 1
-
-
-def test_a_semicolon_csv_is_detected():
-    table = cp.parse_table(b"sku;description\nTEST-1;Test Beans\n", "csv")
-    assert table.rows == [["TEST-1", "Test Beans"]]
-
-
-def test_excel_numbers_arrive_as_the_text_the_spreadsheet_shows():
-    """A SKU of 1002 must not become "1002.0", nor a price 47.500000000000004."""
-    table = cp.parse_table(_xlsx([["SKU", "Price"], [1002, 47.5], [7, 0.1 + 0.2]]), "xlsx")
-    assert table.rows[0] == ["1002", "47.5"]
-    assert table.rows[1][0] == "7"
-    assert "e" not in table.rows[1][1].lower()
-
-
-def test_row_numbers_survive_a_title_above_the_header_and_blank_rows():
-    content = b"\n\nSKU,Description\nTEST-1,Beans\n\nTEST-2,Cups\n\n\n"
-    table = cp.parse_table(content, "csv")
-    assert table.header_row_number == 3
-    # The blank row between the two items is kept, trailing blanks dropped.
-    assert table.rows == [["TEST-1", "Beans"], ["", ""], ["TEST-2", "Cups"]]
-
-
-def test_short_rows_are_padded_and_unnamed_trailing_columns_dropped():
-    table = cp.parse_table(b"SKU,Description,,\nTEST-1\nTEST-2,Cups,extra,more\n", "csv")
-    assert table.columns == ["SKU", "Description"]
-    assert table.rows == [["TEST-1", ""], ["TEST-2", "Cups"]]
-
-
-@pytest.mark.parametrize(
-    "content, file_type, code",
-    [
-        (b"", "csv", "IMP-002"),
-        (b"SKU,Description\n", "csv", "IMP-002"),
-        (b"%PDF-1.4 not a table", "pdf", "IMP-001"),
-        (b"PK\x03\x04 not really a workbook", "xlsx", "IMP-004"),
-    ],
-)
-def test_files_that_are_not_usable_tables_fail_with_a_catalog_code(content, file_type, code):
-    with pytest.raises(cp.ImportParseError) as excinfo:
-        cp.parse_table(content, file_type)
-    assert excinfo.value.code == code
-
-
-def test_a_file_over_the_row_cap_is_refused(monkeypatch):
-    monkeypatch.setattr(cp, "MAX_ROWS", 2)
-    with pytest.raises(cp.ImportParseError) as excinfo:
-        cp.parse_table(b"SKU\nA\nB\nC\n", "csv")
-    assert excinfo.value.code == "IMP-003"
-
-
-def test_formula_cells_arrive_as_their_value_never_the_formula():
-    table = cp.parse_table(_xlsx([["SKU", "Qty"], ["TEST-1", "=1+1"]]), "xlsx")
-    # openpyxl stores "=1+1" as a formula with no cached value; data_only
-    # reads the value (none here), never the formula text.
-    assert table.rows[0][1] in ("", "2")
-
 
 # ── Guessing the columns ────────────────────────────────────────────────────
 
@@ -220,9 +139,14 @@ def test_customer_list_checks():
 def test_every_code_the_import_can_report_is_in_the_catalog():
     import inspect
     import re
+    from pathlib import Path
 
     from docflow_core.errors import CATALOG
 
-    source = inspect.getsource(ci) + inspect.getsource(cp)
+    # The table reader moved to the parse service in Stage 3c; its codes
+    # still have to be in this catalog, so its source is read by path.
+    parse_service = Path(__file__).resolve().parents[3] / "apps" / "parse" / "parse_service"
+    tables = parse_service / "parsing" / "tables.py"
+    source = inspect.getsource(ci) + tables.read_text(encoding="utf-8")
     for code in set(re.findall(r'"((?:CAT|BUY|IMP)-\d{3})"', source)):
         assert code in CATALOG, code

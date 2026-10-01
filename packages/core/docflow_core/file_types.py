@@ -10,8 +10,8 @@ catalog code that names the format and the fix (Section 7.11: "Tier 3
 entries each get a catalog code", "Every rejection names the format and the
 fix"). Conversion itself never happens in this module or in the web
 process -- this module only decides *what* a file is and *whether* it is
-allowed; `apps/worker/app/conversion.py` does the converting, inside the
-isolated worker.
+allowed; the parse service (`apps/parse`) does the converting, inside a
+sandboxed job of its own (Stage 3c), after running this same check again.
 
 Every uploaded file is hostile until proven otherwise: never trust the
 extension or the Content-Type header. `detect_file_type` sniffs magic
@@ -206,6 +206,12 @@ ALL_TYPES: dict[FileTypeName, FileType] = {
 TIER1_TYPES: dict[FileTypeName, FileType] = {
     name: file_type for name, file_type in ALL_TYPES.items() if file_type.tier == "tier1"
 }
+
+# Formats a catalog or customer list may arrive in (Section 7.15.2 Steps
+# 4-5). Anything else on the allowlist (a PDF, an image) is refused with
+# IMP-001: a catalog has to be a table. One list, used by the API's upload
+# check, `catalog_import`, and the parse service's table reader.
+TABLE_FORMATS = frozenset({"csv", "xlsx", "xlsm", "xls", "txt"})
 
 ALLOWED_EXTENSIONS: dict[str, FileTypeName] = {
     ext: spec.name for spec in FORMATS for ext in spec.extensions

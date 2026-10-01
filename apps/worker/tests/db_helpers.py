@@ -106,6 +106,16 @@ class FakeAnthropic:
         self.calls.append(kwargs)
         return self._message()
 
+    # The free token count before each paid call (D-163). Not a model call,
+    # so it isn't in `calls`.
+    COUNTED_INPUT_TOKENS = 1234
+
+    def with_options(self, **kwargs: Any) -> "FakeAnthropic":
+        return self
+
+    def count_tokens(self, **kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(input_tokens=self.COUNTED_INPUT_TOKENS)
+
 
 class _FakeStream:
     """What `client.messages.stream(...)` returns (M1, D-161): no events, then

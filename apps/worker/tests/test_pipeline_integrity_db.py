@@ -63,7 +63,9 @@ def _count(sql: str, **params) -> int:
 
 def _runs(document_id: UUID) -> int:
     return _count(
-        "SELECT count(*) FROM extraction_runs WHERE document_id = :id AND run_kind = 'extraction'",
+        # Outcome rows: since 0034 a call is a started row plus its outcome (D-163).
+        "SELECT count(*) FROM extraction_runs WHERE document_id = :id AND run_kind = 'extraction' "
+        "AND run_state = 'finished'",
         id=str(document_id),
     )
 
@@ -477,7 +479,7 @@ def test_cost_a_paid_answer_that_could_not_be_saved_is_still_on_the_cost_record(
             runs = session.execute(
                 text(
                     "SELECT run_kind, succeeded, input_tokens, est_cost_usd FROM extraction_runs "
-                    "WHERE document_id = :id"
+                    "WHERE document_id = :id AND run_state = 'finished'"
                 ),
                 {"id": str(document_id)},
             ).mappings().all()

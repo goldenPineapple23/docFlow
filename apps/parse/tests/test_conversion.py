@@ -1,5 +1,5 @@
 """
-CLAUDE.md Section 7.11's required tests, worker side -- everything that can
+CLAUDE.md Section 7.11's required tests, parse side -- everything that can
 only be decided once a parser or converter actually opens the file:
 
   "a zip bomb, an XXE payload, an oversized image, a 500-page PDF, a file
@@ -10,34 +10,24 @@ only be decided once a parser or converter actually opens the file:
    and Tier 2 format -- a real PO in each -- asserting it reaches
    extraction."
 
-(The zip bomb, XXE payload, misleading extension and `.zip`-with-a-PO are
-decided before any parser runs, so they live in
-packages/core/tests/test_file_types.py; the rest are here.)
-
-Every fixture is generated at test time by tests/fixture_builders.py with
-obviously fake content (CLAUDE.md Section 0 rule 4). No test in this file
-makes a network call: "reaches extraction" is asserted against a mocked
-Anthropic client, exactly as apps/api/tests/test_golden_fixture.py does.
+Moved from the worker in Stage 3c with the code it tests. These run the
+parsing code in-process (this machine and CI's unit job); the same
+fixtures go through the running service, sandbox and all, in
+test_service_http.py, and "reaches extraction" -- the model call on the
+returned parts -- is the worker's test. Every fixture here is generated at
+test time by tests/fixture_builders.py with obviously fake content
+(CLAUDE.md Section 0 rule 4).
 """
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
-from decimal import Decimal
-from typing import Any
-
 import pytest
 from docflow_core import file_types
-from docflow_core.extraction import extract_document
 from docflow_core.file_types import FileTypeName, validate_upload
 
-from app import conversion
-from app.conversion import ConversionError, prepare_artifacts
-from app.tasks.parse_and_extract import (
-    _extract_rtf_text,
-    build_content_blocks_for_artifacts,
-)
+from parse_service.parsing import conversion
+from parse_service.parsing.conversion import ConversionError, prepare_artifacts
+from parse_service.parsing.documents import _extract_rtf_text, artifact_parts
 from tests import fixture_builders as fb
 
 LIBREOFFICE = conversion.find_libreoffice()
@@ -51,130 +41,16 @@ requires_libreoffice = pytest.mark.skipif(
 )
 
 
-# ── A mocked extraction call (no network), mirroring the golden fixture ────
-
-
-@dataclass
-class _FakeTextBlock:
-    type: str
-    text: str
-
-
-@dataclass
-class _FakeUsage:
-    input_tokens: int
-    output_tokens: int
-
-
-@dataclass
-class _FakeMessage:
-    content: list[_FakeTextBlock]
-    usage: _FakeUsage
-
-
-class _FakeStream:
-    """What `client.messages.stream(...)` returns (M1, D-161): no events, then
-    the finished message."""
-
-    def __init__(self, message):
-        self._message = message
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return None
-
-    def __iter__(self):
-        return iter(())
-
-    def get_final_message(self):
-        return self._message
-
-
-class _FakeMessagesResource:
-    def __init__(self, payload: dict[str, Any]):
-        self._payload = payload
-        self.last_content: list[dict] | None = None
-
-    def stream(self, **kwargs) -> _FakeStream:
-        self.last_content = kwargs["messages"][0]["content"]
-        return _FakeStream(
-            _FakeMessage(
-                content=[_FakeTextBlock(type="text", text=json.dumps(self._payload))],
-                usage=_FakeUsage(input_tokens=100, output_tokens=50),
-            )
-        )
-
-
-class _FakeAnthropicClient:
-    def __init__(self):
-        self.messages = _FakeMessagesResource(_MINIMAL_RESPONSE)
-
-
-_MINIMAL_RESPONSE: dict[str, Any] = {
-    "header": {
-        "po_number": "BCH-2291",
-        "order_date": "2026-03-14",
-        "requested_delivery_date": None,
-        "buyer_name": "Acme's Test Coffee House",
-        "buyer_contact_email": "orders@acmetestcoffee.example",
-        "ship_to_address": None,
-        "payment_terms": "Net 30",
-        "order_total": "1356.00",
-        "currency": "USD",
-        "notes": None,
-    },
-    "header_confidence": {
-        name: 0.95
-        for name in (
-            "po_number",
-            "order_date",
-            "requested_delivery_date",
-            "buyer_name",
-            "buyer_contact_email",
-            "ship_to_address",
-            "payment_terms",
-            "order_total",
-            "currency",
-            "notes",
-        )
-    },
-    "line_items": [
-        {
-            "line_number": 1,
-            "sku": "CF-1001",
-            "description": "Colombian Whole Bean 5lb",
-            "quantity": "12",
-            "unit": "CS",
-            "unit_price": "47.50",
-            "line_total": "570.00",
-            "confidence": 0.95,
-        }
-    ],
-    "document_notes": "",
-    "injection_suspected": False,
-    "currency_inferred": False,
-}
-
-
-def _run_to_extraction(content: bytes, filename: str):
-    """
-    The real path a document takes in the worker: validate -> convert /
-    unwrap -> build content blocks -> extract. Returns
-    (ExtractionResult, content_blocks).
-    """
+def _run_to_extraction(content: bytes, filename: str) -> list[dict]:
+    """The parse side of a document's path: validate -> convert / unwrap ->
+    the parts the worker sends the model."""
     validation = validate_upload(content, filename)
     assert validation.ok, f"{filename} was rejected: {validation.error_code} {validation.detail}"
-    artifacts = prepare_artifacts(validation.file_type, content)
-    blocks = build_content_blocks_for_artifacts(artifacts)
-    client = _FakeAnthropicClient()
-    result = extract_document(client, blocks)
-    return result, blocks
+    return artifact_parts(prepare_artifacts(validation.file_type, content))
 
 
-def _text_of(blocks: list[dict]) -> str:
-    return "\n".join(block["text"] for block in blocks if block["type"] == "text")
+def _text_of(parts: list[dict]) -> str:
+    return "\n".join(part["text"] for part in parts if part["type"] == "text")
 
 
 # ── Positive fixture per Tier 1 format ─────────────────────────────────────
@@ -195,10 +71,9 @@ def _text_of(blocks: list[dict]) -> str:
     ],
 )
 def test_tier1_fixture_reaches_extraction(filename, builder):
-    result, blocks = _run_to_extraction(builder(), filename)
-    assert result.ok
-    assert "BCH-2291" in _text_of(blocks)
-    assert result.header["order_total"] == Decimal("1356.00")
+    parts = _run_to_extraction(builder(), filename)
+    assert "BCH-2291" in _text_of(parts)
+    assert "1356" in _text_of(parts)
 
 
 def test_tier1_image_fixture_reaches_extraction_visually():
@@ -206,8 +81,7 @@ def test_tier1_image_fixture_reaches_extraction_visually():
 
     buffer = io.BytesIO()
     fb._po_image().save(buffer, format="PNG")
-    result, blocks = _run_to_extraction(buffer.getvalue(), "po.png")
-    assert result.ok
+    blocks = _run_to_extraction(buffer.getvalue(), "po.png")
     image_blocks = [block for block in blocks if block["type"] == "image"]
     assert len(image_blocks) == 1
     assert image_blocks[0]["source"]["media_type"] == "image/png"
@@ -217,7 +91,7 @@ def test_scanned_pdf_without_text_uses_the_visual_path():
     # A PDF with no text objects at all -- the scanned-fax case.
     blank = fb.build_pdf([""])
     validation = validate_upload(blank, "scan.pdf")
-    blocks = build_content_blocks_for_artifacts(prepare_artifacts(validation.file_type, blank))
+    blocks = artifact_parts(prepare_artifacts(validation.file_type, blank))
     assert any(block["type"] == "document" for block in blocks)
 
 
@@ -232,13 +106,9 @@ def test_tiff_fixture_reaches_extraction_as_one_image_per_page():
     artifacts = prepare_artifacts(validation.file_type, content)
     assert len(artifacts) == 3
     assert all(artifact.file_type.name == FileTypeName.JPEG for artifact in artifacts)
-    blocks = build_content_blocks_for_artifacts(artifacts)
-    assert [block["type"] for block in blocks] == ["text", "image", "image", "image", "text"]
-    # One <document> envelope for the whole document, not one per page.
-    assert blocks[0]["text"] == "<document>"
-    assert blocks[-1]["text"] == "</document>"
-    result = extract_document(_FakeAnthropicClient(), blocks)
-    assert result.ok
+    # One image part per page; the worker wraps them in one <document>
+    # envelope (its own test).
+    assert [block["type"] for block in artifact_parts(artifacts)] == ["image", "image", "image"]
 
 
 def test_heic_fixture_reaches_extraction():
@@ -249,23 +119,18 @@ def test_heic_fixture_reaches_extraction():
     artifacts = prepare_artifacts(validation.file_type, content)
     assert len(artifacts) == 1
     assert artifacts[0].file_type.name == FileTypeName.JPEG
-    result = extract_document(_FakeAnthropicClient(), build_content_blocks_for_artifacts(artifacts))
-    assert result.ok
+    assert [block["type"] for block in artifact_parts(artifacts)] == ["image"]
 
 
 def test_xls_fixture_reaches_extraction():
-    result, blocks = _run_to_extraction(fb.build_xls(), "po.xls")
-    assert result.ok
-    text = _text_of(blocks)
+    text = _text_of(_run_to_extraction(fb.build_xls(), "po.xls"))
     assert "BCH-2291" in text
     assert "Colombian Whole Bean 5lb" in text
 
 
 def test_odt_and_ods_fixtures_reach_extraction():
     for content, filename in ((fb.build_odt(), "po.odt"), (fb.build_ods(), "po.ods")):
-        result, blocks = _run_to_extraction(content, filename)
-        assert result.ok
-        text = _text_of(blocks)
+        text = _text_of(_run_to_extraction(content, filename))
         assert "BCH-2291" in text
         assert "CF-1001" in text
 
@@ -280,12 +145,9 @@ def test_msg_fixture_reaches_extraction_with_body_and_attachment():
         "message-body.txt",
         "purchase_order.txt",
     ]
-    blocks = build_content_blocks_for_artifacts(artifacts)
-    text = _text_of(blocks)
+    text = _text_of(artifact_parts(artifacts))
     assert "Subject: PO BCH-2291" in text
     assert "CF-1001" in text
-    result = extract_document(_FakeAnthropicClient(), blocks)
-    assert result.ok
 
 
 def test_eml_attachment_is_revalidated_and_extracted():
@@ -296,7 +158,7 @@ def test_eml_attachment_is_revalidated_and_extracted():
     assert validation.file_type.name == FileTypeName.EML
     artifacts = prepare_artifacts(validation.file_type, content)
     assert len(artifacts) == 2
-    assert "CF-1001" in _text_of(build_content_blocks_for_artifacts(artifacts))
+    assert "CF-1001" in _text_of(artifact_parts(artifacts))
 
 
 def test_eml_attachment_that_is_not_allowlisted_is_dropped_not_fatal():
@@ -312,9 +174,7 @@ def test_eml_attachment_that_is_not_allowlisted_is_dropped_not_fatal():
 def test_doc_fixture_reaches_extraction():  # pragma: no cover - environment dependent
     docx_bytes = fb.build_docx()
     converted = conversion.convert_with_libreoffice(docx_bytes, ".docx", "doc")
-    result, blocks = _run_to_extraction(converted, "po.doc")
-    assert result.ok
-    assert "BCH-2291" in _text_of(blocks)
+    assert "BCH-2291" in _text_of(_run_to_extraction(converted, "po.doc"))
 
 
 # ── One level of nesting, and no more ──────────────────────────────────────
@@ -335,7 +195,7 @@ def test_msg_inside_msg_does_not_recurse_into_the_inner_message():
     outer = fb.build_msg(attachments=[("forwarded.msg", inner)])
     validation = validate_upload(outer, "outer.msg")
     artifacts = prepare_artifacts(validation.file_type, outer)
-    text = _text_of(build_content_blocks_for_artifacts(artifacts))
+    text = _text_of(artifact_parts(artifacts))
     assert "SECRET-INNER-BODY" not in text
     assert "BCH-2291" in text
 
@@ -359,7 +219,7 @@ def test_500_page_pdf_is_rejected_cleanly():
     # The cap is enforced where the pages are actually counted -- when the
     # parser opens the document, inside the same guarded step of the task.
     with pytest.raises(ConversionError) as excinfo:
-        build_content_blocks_for_artifacts(artifacts)
+        artifact_parts(artifacts)
     assert excinfo.value.error_code == "DOC-016"
 
 
@@ -395,7 +255,7 @@ def test_password_protected_pdf_fails_with_doc_001(monkeypatch):
     """
     from pdfminer.pdfdocument import PDFPasswordIncorrect
 
-    import app.tasks.parse_and_extract as mod
+    import parse_service.parsing.documents as mod
 
     def _raise(*args, **kwargs):
         raise PDFPasswordIncorrect("password required")
@@ -427,7 +287,7 @@ def test_malformed_tier2_file_fails_cleanly(file_type_name, content):
     assert excinfo.value.error_code in ("DOC-016", "DOC-017", "DOC-018")
 
 
-def test_worker_is_healthy_after_a_converter_failure():
+def test_the_job_is_healthy_after_a_converter_failure():
     """A dead converter takes one document to failed, never the process."""
     with pytest.raises(ConversionError):
         prepare_artifacts(file_types.ALL_TYPES[FileTypeName.TIFF], b"II\x2a\x00" + b"\xff" * 512)
@@ -498,19 +358,19 @@ def test_rtf_reader_drops_metadata_groups_and_keeps_text():
     assert "generator" not in text
 
 
-# ── The allowlist and the worker agree on what is implemented ──────────────
+# ── The allowlist and the parse service agree on what is implemented ───────
 
 
-def test_every_allowlisted_format_has_a_worker_handler():
+def test_every_allowlisted_format_has_a_handler():
     """
     CLAUDE.md Section 7.11: "Adding a format is one edit plus a test
     fixture." This is the test that makes that true -- a new FormatSpec with
     no handler implementation fails here.
     """
-    from app.tasks.parse_and_extract import _inner_blocks
+    from parse_service.parsing.documents import inner_blocks
 
     tier1_handlers = {"pdf", "image", "text", "docx", "xlsx", "rtf"}
     implemented = tier1_handlers | conversion.tier2_handlers()
     for spec in file_types.FORMATS:
-        assert spec.handler in implemented, f"{spec.name.value} has no worker handler"
-    assert callable(_inner_blocks)
+        assert spec.handler in implemented, f"{spec.name.value} has no handler"
+    assert callable(inner_blocks)

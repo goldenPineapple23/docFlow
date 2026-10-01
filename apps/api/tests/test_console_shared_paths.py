@@ -38,7 +38,7 @@ PIPELINE_MODULES = {
     "docflow_core.validation",
     "docflow_core.buyers",
     "docflow_core.duplicates",
-    "docflow_core.catalog_parsing",
+    "docflow_core.parse_client",
     "docflow_core.previews",
 }
 PIPELINE_TASKS = {"docflow.parse_and_extract"}
@@ -125,14 +125,26 @@ def test_every_acting_as_route_is_the_tenant_route_itself():
         assert twin is endpoint, f"{path} is not served by the tenant's own endpoint"
 
 
+def _product_files():
+    for base in (REPO_ROOT / "apps", REPO_ROOT / "packages"):
+        for path in base.rglob("*.py"):
+            if ".venv" not in path.parts and "tests" not in path.parts and "node_modules" not in path.parts:
+                yield path
+
+
 def test_there_is_one_catalog_parser_and_only_the_one_catalog_import_uses_it():
-    users = {
+    """Since Stage 3c the one parser is the parse service's table reader,
+    and the one caller is catalog_import, through parse_client.parse_table."""
+    parsers = {
         path.relative_to(REPO_ROOT).as_posix()
-        for base in (REPO_ROOT / "apps", REPO_ROOT / "packages")
-        for path in base.rglob("*.py")
-        if ".venv" not in path.parts
-        and "tests" not in path.parts
-        and "node_modules" not in path.parts
-        and "docflow_core.catalog_parsing" in _imports(path)
+        for path in _product_files()
+        if "def parse_table(" in path.read_text(encoding="utf-8")
+        and "parse_client" not in path.name
     }
-    assert users == {"packages/core/docflow_core/catalog_import.py"}, sorted(users)
+    assert parsers == {"apps/parse/parse_service/parsing/tables.py"}, sorted(parsers)
+    callers = {
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in _product_files()
+        if "parse_client.parse_table(" in path.read_text(encoding="utf-8")
+    }
+    assert callers == {"packages/core/docflow_core/catalog_import.py"}, sorted(callers)

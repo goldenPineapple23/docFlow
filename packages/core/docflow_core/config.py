@@ -120,6 +120,11 @@ class Settings(BaseSettings):
     # with catalog code DOC-017 rather than degrading silently. A hosted
     # conversion service is never an option (Section 7.10). See SETUP.md.
     libreoffice_path: str = ""
+    # Stage 3c: the parse service, the only place a hostile file is opened.
+    # Dev: `python -m parse_service.server` in apps/parse (PARSE_ISOLATION=off).
+    # Fly: http://docflow-parse-<env>.flycast (private, over Flycast).
+    parse_service_url: str = "http://127.0.0.1:8100"
+    parse_service_token: str = ""
 
     # Supabase Storage through its S3-compatible endpoint (Stage 3b, Q1): an
     # access key that reaches Storage and nothing else, never the service

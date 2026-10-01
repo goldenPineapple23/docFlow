@@ -5,11 +5,11 @@ uvicorn[standard]>=0.30
 python-multipart>=0.0.9
 email-validator>=2.1
 
-# Phase 1: file parsing/validation used by tests and the upload endpoint's
-# defense-in-depth checks (real parsing happens in apps/worker -- see
-# CLAUDE.md Section 7.11).
-pdfplumber>=0.11
-python-docx>=1.1
+# Tests only: test_catalog_import_api.py writes a small .xlsx with it. The
+# API never opens a file a stranger sent (CLAUDE.md Section 7.11); since
+# Stage 3c only the parse service (apps/parse) does, and the parsing
+# libraries are in its image alone (apps/api/tests/test_parsing_boundary.py,
+# apps/worker/tests/test_parsing_boundary.py).
 openpyxl>=3.1
 
 # Phase 1: enqueue-only Celery client (app/celery_client.py) -- the API

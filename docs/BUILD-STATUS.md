@@ -1610,6 +1610,79 @@ The live golden run (`pytest -m live_api`, 3 tests) also runs at the 3c
 checkpoint: the content sent to the model is built on a new path, even if
 D2 shows it is unchanged.
 
+**3c build -- IN PROGRESS 2026-10-01 (branch `phase55/stage3c-design`).**
+Built and tested on this machine (dev mode; never counted as proof of
+isolation); the first CI run on the real image is next. Nothing is on Fly.
+
+Done, in the agreed order:
+1. **D2 baseline** (`b819e8b`): 41 committed fixtures under
+   `apps/parse/tests/fixtures/` (22 positive, 4 catalog tables, 15 hostile)
+   and `baseline.json`, recorded by the worker's own code before anything
+   moved.
+2. **`decide()`** (`c4c8a88`, Q9): the 3-try cap first. One correction to
+   the design's wording: the 4-try case was not an accident. 3a's own test
+   asserted it (`(3, [3]) -> retry  # the timeout's one retry beats the
+   attempt count`). The founder's Q9 reverses it.
+3. **The parse service** (`apps/parse/`): supervisor, launcher, the
+   `sandbox_init` root step, the job, the seccomp filter, cgroups v1/v2,
+   the canary and self-test programs, the Dockerfile, and the moved parsing
+   code (`git mv`, so history follows). The worker uses `parse_client`; the
+   parsing libraries are out of the worker's and the API's requirements and
+   lock files (only removals; versions unchanged; fresh-venv `pip check`
+   clean).
+4. **CI**: a new `parse` job (E1, E4, E3, the HTTP tests, the A/S/B
+   self-tests, audit) and the worker job testing against the real image.
+5. **D-163 and migration `0034`** (Q5): written. Not yet applied to staging.
+
+Local results (database off where noted):
+- parse 110 passed, with every positive and hostile fixture giving
+  byte-identical answers to the baseline, both in-process and through the
+  dev service over HTTP (56 passed);
+- core 698 passed, 1 skipped;
+- worker 83 passed, 46 skipped (database, prefork, and F5, which needs CI's
+  container);
+- API: the same 24 environment-only failures as the base branch (20
+  `test_console_mfa`, 4 `test_d170_clock`), nothing else.
+
+**Where the build differs from the design or adds to it. The founder
+reviews each before the merge:**
+- **A crashed job:** a job that dies some other way than our limits, such
+  as a parser's segfault, or SIGSYS from the seccomp filter. The design
+  covered an answer that fails the worker's checks but not this. Built the
+  same way: DOC-005 to the customer, plus a founder alert, once per tenant
+  per cause per day.
+- **The DOC-029 alert isn't in `FAILURE_ALERTS`.** That map may only hold
+  codes whose wording tells the customer "DocFlow has been alerted" (a test
+  enforces it), and the founder's DOC-029 wording doesn't. So the alert is
+  raised explicitly (`founder_alerts.raise_parse_alert`), with the agreed
+  once-per-tenant-per-day limit.
+- **The retry decision moved** to its own pure module,
+  `docflow_core.retry_rules`. `stuck_documents` may be imported only by
+  the sweep task (its cross-tenant session; `test_rls_flags.py`), and the
+  worker's task now applies the same decision. The sweep re-exports it, so
+  existing callers are unchanged.
+- **`extraction_runs.counted_input_tokens`**, a column in `0034` beside
+  `run_state` and `started_run_id`. The design said the started row
+  carries the counted tokens, but not where. Kept apart from
+  `input_tokens`, so a reader that sums tokens can never count a call
+  twice.
+- **The client's patience:** "never got in" (no connection, or a 503) is
+  retried for up to 45 s before the document waits, because a stopped Fly
+  machine is started by the first request. A 502 or 504 from Fly's proxy
+  counts as "got in, never came out". A 401 (token mismatch) is "never got
+  in", is not retried, and raises the hourly alert with reason
+  `unauthorized`.
+- **`TABLE_FORMATS` moved into `file_types`** (standard library only), so
+  the parse image doesn't need `catalog_import` and SQLAlchemy.
+  `catalog_import.TABLE_FORMATS` still exists.
+- **The image's Debian sources:** packages are pinned by exact version from
+  the normal Debian archive. A Debian security update replaces a version,
+  so the build then fails until the pin is moved. That is the deliberate
+  upgrade RUNBOOK 8 describes, but it can also stop an unrelated PR's CI.
+- **The seed script and the walkthrough file maker** now use the parse
+  service (dev) and the parse venv.
+
+
 **3d -- H4, per-tenant fairness.** Agreed design:
 - Documents wait as `pending` in the database.
 - A dispatcher takes turns between tenants, with a cap per tenant on

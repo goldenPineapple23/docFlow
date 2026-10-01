@@ -77,6 +77,10 @@ ALERT_TYPES: dict[str, str] = {
     # Stage 3b (founder, 2026-09-30): a stored path named another tenant's
     # folder and was refused before any read (Section 7.5).
     "storage_path_cross_tenant": "A stored file path named another tenant's folder and was refused",
+    # Stage 3c (founder, Q4): the parse service couldn't be reached, was busy
+    # past the worker's patience, or refused the worker's token. Once an hour
+    # for the whole platform, like storage_unavailable.
+    "parse_service_unavailable": "The parse service couldn't be reached",
 }
 
 # Failure codes whose catalog text promises the reader that DocFlow has been
@@ -345,6 +349,95 @@ def report_refused_storage_path(
             )
     except Exception:  # noqa: BLE001 -- logged above and here; the caller's error still goes out
         logger.exception("founder_alert_not_raised tenant_id=%s alert=storage_path_cross_tenant", tenant_id)
+
+
+def raise_parse_service_unavailable(session: Session, *, tenant_id: UUID, where: str, reason: str) -> bool:
+    """
+    Stage 3c (founder, Q4): the parse service couldn't be reached -- the
+    request never got in, so the document waits and no try is used. At most
+    one alert per UTC hour for the whole platform, by the same mechanism as
+    raise_storage_unavailable (one hourly key, unique across tenants; the
+    first tenant in the hour writes the row).
+
+    `where` is a fixed call-site label; `reason` is the client's fixed label
+    (no_connection, busy_or_isolation_failed, unauthorized, http_NNN), never
+    response text. Its own savepoint; never raises.
+    """
+    logger.error("parse_service_unavailable tenant_id=%s where=%s reason=%s", tenant_id, where, reason)
+    savepoint = session.begin_nested()
+    try:
+        raised = raise_alert(
+            session,
+            alert_type="parse_service_unavailable",
+            severity="high",
+            tenant_id=tenant_id,
+            payload={"first_seen_at": where, "reason": reason},
+            dedupe_key="parse_service_unavailable",
+            dedupe_per_utc_hour=True,
+        )
+    except Exception:
+        savepoint.rollback()
+        logger.exception("founder_alert_not_raised tenant_id=%s alert=parse_service_unavailable", tenant_id)
+        return False
+    savepoint.commit()
+    return raised
+
+
+def raise_parse_alert(
+    session: Session,
+    *,
+    tenant_id: UUID,
+    document_id: UUID | None,
+    error_code: str,
+    cause: str,
+    by_cause: bool,
+) -> bool:
+    """
+    Stage 3c (founder, Q3): a parse job that stopped at a limit (DOC-029), or
+    that crashed some other way or answered something the worker refused
+    (DOC-005). Either may be a file built to attack a parser, so the founder
+    hears about it even though the catalog text (founder-approved) promises
+    the customer no alert -- which is why these are not in FAILURE_ALERTS.
+
+    One `document_failed` alert per tenant per code per UTC day (DOC-029,
+    `by_cause=False`), or per tenant per code per cause per day (DOC-005,
+    whose causes are distinct faults). `cause` is a fixed label
+    (stopped:memory, crashed:signal_11, invalid:bad_part...). Its own
+    savepoint; never raises.
+    """
+    entry = get_error(error_code)
+    savepoint = session.begin_nested()
+    try:
+        raised = raise_alert(
+            session,
+            alert_type="document_failed",
+            severity="high",
+            tenant_id=tenant_id,
+            payload={
+                "error_code": entry.code,
+                "cause": cause,
+                **({"first_document_id": str(document_id)} if document_id else {}),
+            },
+            dedupe_key=f"document_failed:{tenant_id}:{entry.code}:parse" + (f":{cause}" if by_cause else ""),
+            dedupe_per_utc_day=True,
+        )
+    except Exception:
+        savepoint.rollback()
+        logger.exception("founder_alert_not_raised tenant_id=%s error_code=%s", tenant_id, entry.code)
+        return False
+    savepoint.commit()
+    return raised
+
+
+def alert_parse_service_unavailable(tenant_id: UUID, *, where: str, reason: str) -> None:
+    """raise_parse_service_unavailable in its own tenant session. Never raises."""
+    from docflow_core.db import tenant_session
+
+    try:
+        with tenant_session(tenant_id) as session:
+            raise_parse_service_unavailable(session, tenant_id=tenant_id, where=where, reason=reason)
+    except Exception:  # noqa: BLE001 -- logged; the caller's error still goes out
+        logger.exception("founder_alert_not_raised tenant_id=%s alert=parse_service_unavailable", tenant_id)
 
 
 def alert_storage_unavailable(tenant_id: UUID, *, where: str) -> None:

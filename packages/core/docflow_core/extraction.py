@@ -22,6 +22,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from decimal import Decimal
@@ -305,6 +306,44 @@ def build_example_content(examples: list[PromptExample]) -> list[dict[str, Any]]
     return blocks
 
 
+# Called just before a paid call (D-163): (run_kind, model_id, counted input
+# tokens or None). The worker commits a `started` run row there.
+CallStart = Callable[[str, str, "int | None"], None]
+
+
+def count_request_tokens(
+    client: Any, *, model: str, system: str, messages: list[dict[str, Any]], deadline: float | None = None
+) -> int | None:
+    """
+    The input a request is about to pay for, from the free token-counting
+    endpoint, before the call (D-163). One try, no SDK retries, at most
+    COUNT_TOKENS_TIMEOUT_SECONDS and never past `deadline`. Best effort: a
+    failed count returns None and the call goes ahead -- its started row is
+    still written. The output schema isn't counted, so this is a lower bound.
+    """
+    timeout = float(COUNT_TOKENS_TIMEOUT_SECONDS)
+    if deadline is not None:
+        timeout = max(1.0, min(timeout, deadline - time.monotonic()))
+    try:
+        counter = client.with_options(max_retries=0) if hasattr(client, "with_options") else client
+        counted = counter.messages.count_tokens(model=model, system=system, messages=messages, timeout=timeout)
+        return int(counted.input_tokens)
+    except Exception as exc:  # noqa: BLE001 -- see the docstring
+        logger.warning("request_token_count_failed model_id=%s error_type=%s", model, type(exc).__name__)
+        return None
+
+
+def _announce(on_call_start: CallStart | None, run_kind: str, model: str, counted: int | None) -> None:
+    """Never lets the hook stop the call: a run row that can't be written is
+    logged, and the outcome row is still written after the call."""
+    if on_call_start is None:
+        return
+    try:
+        on_call_start(run_kind, model, counted)
+    except Exception as exc:  # noqa: BLE001 -- see the docstring
+        logger.error("started_run_not_recorded run_kind=%s error_type=%s", run_kind, type(exc).__name__)
+
+
 def _count_example_tokens(client: Any, examples: list[PromptExample]) -> int | None:
     """
     The example overhead, measured with the token-counting endpoint (never a
@@ -439,6 +478,7 @@ def extract_document(
     *,
     examples: list[PromptExample] | None = None,
     deadline: float | None = None,
+    on_call_start: CallStart | None = None,
 ) -> ExtractionResult:
     """
     Runs one extraction call against the pinned model with structured
@@ -455,6 +495,10 @@ def extract_document(
     `deadline` is a `time.monotonic()` value: the worker passes the one it
     set when it claimed the document, so the whole read shares one budget.
     Without it, the budget starts now.
+
+    `on_call_start` (D-163) is called just before the paid call, with the
+    input tokens counted beforehand, so the caller can commit a started run
+    row: if the worker dies during the call, the call is still on record.
     """
     examples = list(examples or [])[:3]
     system = system_prompt_for(examples)
@@ -474,6 +518,15 @@ def extract_document(
         deadline = started + EXTRACTION_DEADLINE_SECONDS
     stopped_at_deadline = False
     stream_ref: Any = None
+    if on_call_start is not None:
+        counted = count_request_tokens(
+            client,
+            model=EXTRACTION_MODEL,
+            system=system,
+            messages=[{"role": "user", "content": user_content}],
+            deadline=deadline,
+        )
+        _announce(on_call_start, "extraction", EXTRACTION_MODEL, counted)
     try:
         # No `temperature` param: the current API generation (see DECISIONS.md
         # on EXTRACTION_MODEL) removed sampling controls for this model family
@@ -666,7 +719,18 @@ class RoutingResult:
     error_code: str | None = None
 
 
-def read_buyer_header(client: anthropic.Anthropic, content: list[dict[str, Any]]) -> RoutingResult:
+def routing_input_cost(input_tokens: int) -> Decimal:
+    """What `input_tokens` of ROUTING_MODEL input cost (D-163: a lost call's
+    lower bound)."""
+    return Decimal(input_tokens) * _ROUTING_INPUT_COST_PER_TOKEN
+
+
+def read_buyer_header(
+    client: anthropic.Anthropic,
+    content: list[dict[str, Any]],
+    *,
+    on_call_start: CallStart | None = None,
+) -> RoutingResult:
     """
     One small ROUTING_MODEL call that returns only the buyer's name and
     email. Its answer picks examples; it never becomes a stored value -- the
@@ -674,6 +738,14 @@ def read_buyer_header(client: anthropic.Anthropic, content: list[dict[str, Any]]
     raises: a failure means "no buyer known", which means no examples.
     """
     p_hash = prompt_hash(ROUTING_SYSTEM_PROMPT)
+    if on_call_start is not None:
+        counted = count_request_tokens(
+            client,
+            model=ROUTING_MODEL,
+            system=ROUTING_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": content}],
+        )
+        _announce(on_call_start, "buyer_routing", ROUTING_MODEL, counted)
     started = time.monotonic()
     try:
         response = client.messages.create(

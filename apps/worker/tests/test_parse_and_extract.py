@@ -1,99 +1,27 @@
 """
-Unit tests for the Tier 1 content-block builder and confidence rollup used
-by the isolated parsing task (CLAUDE.md Section 7.11 / Section 7.1). The
-full task (DB writes, real extraction call) is covered by
-test_parse_and_extract_integration.py, gated on the documents schema
-actually being applied (see conftest.py).
+The extraction task's own logic: what it does with each answer from the
+parse service (Stage 3c), previews, the kept text, model runs, and the
+confidence rollup. The file readers themselves moved to the parse service
+with their tests (apps/parse/tests). Every file here is one of the parse
+service's committed fixtures (apps/parse/tests/fixtures), read by the
+running service: the dev service on this machine, the real image in CI
+(conftest.py's `parse_service` fixture).
 """
 
 from __future__ import annotations
 
 from decimal import Decimal
-from io import BytesIO
 
-import docx
-import openpyxl
 import pytest
+from docflow_core import parse_client
 from docflow_core.field_schema import DEFAULT_SCHEMA, _resolve
-from docflow_core.file_types import FileType, FileTypeName
+from docflow_core.file_types import FileTypeName
 
-from app.tasks.parse_and_extract import (
-    UnhandledFileTypeError,
-    _overall_confidence,
-    build_content_blocks,
-)
+from app.tasks.parse_and_extract import _overall_confidence
+from tests.conftest import fixture_bytes
 
-
-def _ft(name: FileTypeName) -> FileType:
-    return FileType(name=name, tier="tier1", media_type="application/octet-stream")
-
-
-def test_plain_text_becomes_text_content():
-    content = "PO Number: 12345".encode("utf-8")
-    blocks = build_content_blocks(_ft(FileTypeName.TXT), content)
-    assert blocks[0]["type"] == "text"
-    assert "PO Number: 12345" in blocks[0]["text"]
-    assert "<document>" in blocks[0]["text"]
-
-
-def test_image_becomes_image_content_block():
-    content = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
-    blocks = build_content_blocks(_ft(FileTypeName.PNG), content)
-    image_blocks = [b for b in blocks if b["type"] == "image"]
-    assert len(image_blocks) == 1
-    assert image_blocks[0]["source"]["media_type"] == "image/png"
-
-
-def test_docx_extracts_paragraph_text():
-    document = docx.Document()
-    document.add_paragraph("PO Number: BCH-9999")
-    document.add_paragraph("Buyer: Acme Test Distributor")
-    buf = BytesIO()
-    document.save(buf)
-
-    blocks = build_content_blocks(_ft(FileTypeName.DOCX), buf.getvalue())
-    assert blocks[0]["type"] == "text"
-    assert "BCH-9999" in blocks[0]["text"]
-    assert "Acme Test Distributor" in blocks[0]["text"]
-
-
-def test_xlsx_extracts_cell_text():
-    workbook = openpyxl.Workbook()
-    sheet = workbook.active
-    sheet.append(["SKU", "Description", "Qty"])
-    sheet.append(["CF-1001", "Colombian Whole Bean 5lb", 12])
-    buf = BytesIO()
-    workbook.save(buf)
-
-    blocks = build_content_blocks(_ft(FileTypeName.XLSX), buf.getvalue())
-    assert blocks[0]["type"] == "text"
-    assert "CF-1001" in blocks[0]["text"]
-    assert "Colombian Whole Bean 5lb" in blocks[0]["text"]
-
-
-def test_pdf_with_extractable_text_uses_text_path(monkeypatch):
-    import app.tasks.parse_and_extract as mod
-
-    monkeypatch.setattr(mod, "_extract_pdf_text", lambda content: "PO Number: BCH-1234\n" * 20)
-    blocks = build_content_blocks(_ft(FileTypeName.PDF), b"%PDF-1.4 fake")
-    assert blocks[0]["type"] == "text"
-    assert "BCH-1234" in blocks[0]["text"]
-
-
-def test_pdf_without_extractable_text_uses_visual_path(monkeypatch):
-    import app.tasks.parse_and_extract as mod
-
-    monkeypatch.setattr(mod, "_extract_pdf_text", lambda content: "")
-    blocks = build_content_blocks(_ft(FileTypeName.PDF), b"%PDF-1.4 fake pdf bytes")
-    doc_blocks = [b for b in blocks if b["type"] == "document"]
-    assert len(doc_blocks) == 1
-    assert doc_blocks[0]["source"]["media_type"] == "application/pdf"
-
-
-def test_unhandled_file_type_raises():
-    with pytest.raises(UnhandledFileTypeError):
-        build_content_blocks(_ft(FileTypeName.DOC), b"whatever")
-
+DOCX = fixture_bytes("positive/po.docx")
+TIFF = fixture_bytes("positive/po.tif")
 
 def _fixed_derived_key(tenant_id, document_id, kind, data, content_type=None):
     """Stands in for storage.save_derived: returns the fixed key it would write."""
@@ -419,15 +347,12 @@ def test_a_matching_failure_leaves_the_extraction_intact(monkeypatch):
 
 
 def _preview_for(filename: str, content: bytes):
-    from docflow_core import file_types
+    """The preview the task builds from the parse service's real answer."""
+    from app.tasks.parse_and_extract import build_preview
 
-    from app.conversion import prepare_artifacts
-    from app.tasks.parse_and_extract import _artifact_parts, build_preview
-
-    validation = file_types.validate_upload(content, filename)
-    assert validation.ok, validation.error_code
-    parts = _artifact_parts(prepare_artifacts(validation.file_type, content))
-    return build_preview(validation.file_type, content, parts)
+    answer = parse_client.parse_document(content, filename)
+    assert answer.outcome == "ok", (answer.outcome, answer.code, answer.cause)
+    return build_preview(answer)
 
 
 def test_a_word_preview_includes_the_line_items_table():
@@ -435,9 +360,7 @@ def test_a_word_preview_includes_the_line_items_table():
     A Word PO's line items live in a table. A preview without them would put
     the extracted lines beside a document that seems not to contain them.
     """
-    from tests import fixture_builders as fb
-
-    preview = _preview_for("po.docx", fb.build_docx())
+    preview = _preview_for("po.docx", fixture_bytes("positive/po.docx"))
 
     assert preview is not None and preview.kind == "extracted_text"
     assert b"CF-1001" in preview.content
@@ -445,51 +368,39 @@ def test_a_word_preview_includes_the_line_items_table():
 
 
 @pytest.mark.parametrize(
-    "filename, builder",
-    [
-        ("po.xlsx", "build_xlsx"),
-        ("po.rtf", "build_rtf"),
-        ("po.eml", "build_eml"),
-        ("po.msg", "build_msg"),
-        ("po.xls", "build_xls"),
-        ("po.odt", "build_odt"),
-        ("po.ods", "build_ods"),
-    ],
+    "filename", ["po.xlsx", "po.rtf", "po.eml", "po.msg", "po.xls", "po.odt", "po.ods", "po.doc"]
 )
-def test_every_text_like_format_the_worker_reads_gets_a_text_preview(filename, builder):
-    from tests import fixture_builders as fb
-
-    preview = _preview_for(filename, getattr(fb, builder)())
+def test_every_text_like_format_the_worker_reads_gets_a_text_preview(filename):
+    preview = _preview_for(filename, fixture_bytes(f"positive/{filename}"))
 
     assert preview is not None, f"{filename} would show the 'can't display' fallback"
     assert preview.kind == "extracted_text"
     assert preview.media_type.startswith("text/plain")
 
 
-@pytest.mark.parametrize("filename, builder", [("fax.tif", "build_tiff"), ("photo.heic", "build_heic")])
-def test_image_like_formats_get_a_converted_image(filename, builder):
-    from tests import fixture_builders as fb
-
-    preview = _preview_for(filename, getattr(fb, builder)())
+@pytest.mark.parametrize("filename", ["po.tif", "po.heic"])
+def test_image_like_formats_get_a_converted_image(filename):
+    preview = _preview_for(filename, fixture_bytes(f"positive/{filename}"))
 
     assert preview is not None and preview.kind == "converted_image"
     assert preview.media_type == "image/png"
 
 
 def test_formats_a_browser_shows_get_no_preview():
-    from tests import fixture_builders as fb
-
-    assert _preview_for("po.pdf", fb.build_pdf(["PURCHASE ORDER " * 20])) is None
-    assert _preview_for("po.txt", b"PURCHASE ORDER\nPO Number: TEST-1\n") is None
+    assert _preview_for("po.pdf", fixture_bytes("positive/po.pdf")) is None
+    assert _preview_for("po.txt", fixture_bytes("positive/po.txt")) is None
 
 
 def test_a_page_read_visually_is_named_in_the_preview_not_dropped():
     from app.tasks.parse_and_extract import _VISUAL_PART_PLACEHOLDER, build_preview
 
-    docx_type = FileType(name=FileTypeName.DOCX, tier="tier1", media_type="application/octet-stream")
-    parts = [{"type": "text", "text": "Order body"}, {"type": "image", "source": {}}]
+    answer = parse_client.ParseAnswer(
+        "ok",
+        file_type=FileTypeName.EML.value,
+        parts=[{"type": "text", "text": "Order body"}, {"type": "image", "source": {}}],
+    )
 
-    preview = build_preview(docx_type, b"", parts)
+    preview = build_preview(answer)
 
     assert preview is not None
     assert _VISUAL_PART_PLACEHOLDER.encode() in preview.content
@@ -532,15 +443,13 @@ def test_the_task_stores_a_preview_under_the_tenant_even_when_extraction_fails(m
     a real Word upload showed "can't display". The preview is written before
     the model call, so a reviewer can see a document whose extraction failed.
     """
-    from tests import fixture_builders as fb
-
     saved: list[tuple] = []
 
     def fake_save(tenant_id, document_id, kind, data, content_type=None):
         saved.append((tenant_id, kind, data, content_type))
         return f"tenants/{tenant_id}/derived/{document_id}/{kind}"
 
-    session, tenant_id = _drive_task_over(monkeypatch, "po.docx", fb.build_docx(), save_derived=fake_save)
+    session, tenant_id = _drive_task_over(monkeypatch, "po.docx", DOCX, save_derived=fake_save)
 
     previews_saved = [entry for entry in saved if entry[1].startswith("preview")]
     assert len(previews_saved) == 1 and previews_saved[0][0] == tenant_id
@@ -556,14 +465,12 @@ def test_the_task_stores_a_preview_under_the_tenant_even_when_extraction_fails(m
 
 
 def test_a_preview_failure_never_touches_the_document(monkeypatch):
-    from tests import fixture_builders as fb
-
     def broken_save(tenant_id, document_id, kind, data, content_type=None):
         from docflow_core.storage import StorageUnavailableError
 
         raise StorageUnavailableError("fake outage")
 
-    session, _ = _drive_task_over(monkeypatch, "po.docx", fb.build_docx(), save_derived=broken_save)
+    session, _ = _drive_task_over(monkeypatch, "po.docx", DOCX, save_derived=broken_save)
 
     assert not [sql for sql, _ in session.statements if "preview_storage_path" in sql]
     # The run still reached the model call and recorded its outcome.
@@ -574,15 +481,13 @@ def test_a_preview_failure_never_touches_the_document(monkeypatch):
 
 
 def test_the_text_sent_to_the_model_is_kept_for_a_text_document(monkeypatch):
-    from tests import fixture_builders as fb
-
     saved: list[tuple] = []
 
     def fake_save(tenant_id, document_id, kind, data, content_type=None):
         saved.append((tenant_id, kind, data, document_id))
         return f"tenants/{tenant_id}/derived/{document_id}/{kind}"
 
-    session, tenant_id = _drive_task_over(monkeypatch, "po.docx", fb.build_docx(), save_derived=fake_save)
+    session, tenant_id = _drive_task_over(monkeypatch, "po.docx", DOCX, save_derived=fake_save)
 
     kept = [entry for entry in saved if entry[1] == "extracted_text"]
     assert len(kept) == 1 and kept[0][0] == tenant_id
@@ -593,15 +498,13 @@ def test_the_text_sent_to_the_model_is_kept_for_a_text_document(monkeypatch):
 
 def test_a_document_read_visually_keeps_no_text_and_can_never_be_an_example(monkeypatch):
     """An example is never a file or an image (Section 7.13, Section 10)."""
-    from tests import fixture_builders as fb
-
     saved: list[tuple] = []
 
     def fake_save(tenant_id, document_id, kind, data, content_type=None):
         saved.append((tenant_id, kind, data, document_id))
         return f"tenants/{tenant_id}/derived/{document_id}/{kind}"
 
-    session, _ = _drive_task_over(monkeypatch, "fax.tif", fb.build_tiff(), save_derived=fake_save)
+    session, _ = _drive_task_over(monkeypatch, "fax.tif", TIFF, save_derived=fake_save)
 
     assert not [entry for entry in saved if entry[1] == "extracted_text"]
     assert not [sql for sql, _ in session.statements if "extracted_text_path" in sql]
@@ -610,10 +513,8 @@ def test_a_document_read_visually_keeps_no_text_and_can_never_be_an_example(monk
 def test_a_failed_extraction_is_still_recorded_as_a_model_run(monkeypatch):
     """The daily cost breaker reads extraction_runs (Section 7.9); a call that
     failed still happened and must be there."""
-    from tests import fixture_builders as fb
-
     session, _ = _drive_task_over(
-        monkeypatch, "po.docx", fb.build_docx(), save_derived=_fixed_derived_key
+        monkeypatch, "po.docx", fixture_bytes("positive/po.docx"), save_derived=_fixed_derived_key
     )
 
     runs = [params for sql, params in session.statements if "INSERT INTO extraction_runs" in sql]
@@ -655,10 +556,8 @@ def test_the_routing_read_is_its_own_run_and_its_cost_is_part_of_the_document(mo
             est_cost_usd=Decimal("0.0100"),
         )
 
-    from tests import fixture_builders as fb
-
     session, _ = _drive_task_over(
-        monkeypatch, "po.docx", fb.build_docx(), save_derived=_fixed_derived_key
+        monkeypatch, "po.docx", fixture_bytes("positive/po.docx"), save_derived=_fixed_derived_key
     )
     # Re-drive with a routing plan in place.
     monkeypatch.setattr(mod.example_prompting, "plan", lambda *a, **k: ExamplePlan(routing=routing))
@@ -829,3 +728,112 @@ def test_the_worker_reads_with_its_documents_tenant(monkeypatch):
     from uuid import UUID
 
     assert isinstance(seen[0][0], UUID)
+
+
+# ── Stage 3c, item 6: what the task does with each answer (test F1) ──────────
+
+
+def _drive_with_answer(monkeypatch, outcome):
+    """Run the task with the parse service's answer replaced by `outcome`:
+    a ParseAnswer to return, or an exception to raise."""
+    import contextlib
+    from uuid import uuid4
+
+    import app.tasks.parse_and_extract as mod
+
+    session = _FakeSession({"storage_path": "tenants/x/uploads/y.pdf", "original_filename": "po.pdf"})
+    alerts: list[tuple[str, dict]] = []
+
+    @contextlib.contextmanager
+    def fake_tenant_session(tenant_id):
+        yield session
+
+    def fake_parse(content, filename):
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(mod, "tenant_session", fake_tenant_session)
+    monkeypatch.setattr(mod, "read_file", lambda tenant_id, path: b"%PDF-1.4 fake")
+    monkeypatch.setattr(mod.parse_client, "parse_document", fake_parse)
+    for name in ("raise_for_failure", "raise_parse_alert", "raise_parse_service_unavailable"):
+        monkeypatch.setattr(
+            mod.founder_alerts, name, lambda session, _n=name, **kw: alerts.append((_n, kw)) or True
+        )
+    sent: list[tuple] = []
+    monkeypatch.setattr(
+        mod.celery_app, "send_task", lambda name, args, queue: sent.append((name, args, queue))
+    )
+    tenant_id, document_id = uuid4(), uuid4()
+    mod.parse_and_extract(str(tenant_id), str(document_id))
+    return session, alerts, sent
+
+
+def test_never_got_in_waits_without_using_a_try(monkeypatch):
+    session, alerts, sent = _drive_with_answer(monkeypatch, parse_client.ParseUnavailable("no_connection"))
+    assert not _to(session, "failed")
+    gave_back = [sql for sql, _ in session.statements if "processing_attempts - 1" in sql]
+    assert gave_back, "the try was not given back"
+    assert [name for name, _ in alerts] == ["raise_parse_service_unavailable"]
+    assert alerts[0][1]["reason"] == "no_connection" and alerts[0][1]["where"] == "worker"
+    assert not sent
+
+
+def test_a_limit_fails_doc_029_with_its_alert(monkeypatch):
+    session, alerts, _ = _drive_with_answer(monkeypatch, parse_client.ParseAnswer("stopped", cause="memory"))
+    failures = _to(session, "failed")
+    assert failures[-1]["v_failure_code"] == "DOC-029"
+    # DOC-029's wording promises the customer nothing, so it isn't in
+    # FAILURE_ALERTS; the founder's parse alert is raised explicitly, once per
+    # tenant per day (not per cause).
+    parse_alerts = [kw for name, kw in alerts if name == "raise_parse_alert"]
+    assert [(kw["error_code"], kw["cause"], kw["by_cause"]) for kw in parse_alerts] == [
+        ("DOC-029", "stopped:memory", False)
+    ]
+
+
+def test_a_rejection_keeps_its_catalog_code(monkeypatch):
+    session, alerts, _ = _drive_with_answer(monkeypatch, parse_client.ParseAnswer("rejected", code="DOC-016"))
+    assert _to(session, "failed")[-1]["v_failure_code"] == "DOC-016"
+
+
+@pytest.mark.parametrize(
+    "outcome, cause",
+    [
+        (parse_client.ParseAnswer("crashed", cause="signal_11"), "crashed:signal_11"),
+        (parse_client.ParseAnswerInvalid("bad_part_type"), "invalid:bad_part_type"),
+    ],
+)
+def test_a_crash_or_a_refused_answer_fails_doc_005_and_tells_the_founder(monkeypatch, outcome, cause):
+    session, alerts, _ = _drive_with_answer(monkeypatch, outcome)
+    assert _to(session, "failed")[-1]["v_failure_code"] == "DOC-005"
+    assert [(name, kw["error_code"], kw["cause"], kw["by_cause"]) for name, kw in alerts] == [
+        ("raise_parse_alert", "DOC-005", cause, True)
+    ]
+
+
+def test_a_lost_try_is_recorded_and_retried_at_once(monkeypatch):
+    import app.tasks.parse_and_extract as mod
+
+    released: list = []
+    monkeypatch.setattr(mod.document_status, "record_parse_lost", lambda session, did: (1, [], [1]))
+    monkeypatch.setattr(
+        mod.document_status, "release_claim", lambda session, did: released.append(did) or True
+    )
+    session, alerts, sent = _drive_with_answer(monkeypatch, parse_client.ParseLost("ReadTimeout"))
+    assert not _to(session, "failed")
+    assert released and not alerts
+    assert [(name, queue) for name, _args, queue in sent] == [("docflow.parse_and_extract", "interactive")]
+
+
+def test_a_second_lost_try_fails_doc_022_naming_the_lost_parse(monkeypatch):
+    import app.tasks.parse_and_extract as mod
+
+    monkeypatch.setattr(mod.document_status, "record_parse_lost", lambda session, did: (2, [], [1, 2]))
+    session, alerts, sent = _drive_with_answer(monkeypatch, parse_client.ParseLost("ReadTimeout"))
+    assert _to(session, "failed")[-1]["v_failure_code"] == "DOC-022"
+    assert not sent
+    (name, kw), = alerts
+    assert name == "raise_for_failure" and kw["error_code"] == "DOC-022" and kw["cause"] == "timeout"
+    assert kw["detail"]["cause_detail"] == "parse_lost"
+    assert kw["detail"]["parse_lost_attempts"] == [1, 2]

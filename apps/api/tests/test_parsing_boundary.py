@@ -15,7 +15,8 @@ the boundary is ever crossed -- which is the point: the rule is easy to
 break by accident, because pulling in a parser to render something is always
 the shortest path to a working screen. It was nearly broken exactly that way
 when the document viewer needed to show TIFF and Word files; the previews
-are produced in the worker instead (DECISIONS.md D-092).
+are produced elsewhere instead (DECISIONS.md D-092) -- since Stage 3c, in the
+parse service's sandboxed jobs (apps/parse).
 
 The reason is worth restating, since the cost of obeying it is real: these
 files arrive from a distributor's buyers, through a public intake address,
@@ -44,6 +45,11 @@ FORBIDDEN_MODULES = {
     "striprtf",
     "defusedxml",
     "zipfile",
+    # Stage 3c: the parse service and the rest of its libraries.
+    "parse_service",
+    "pillow_heif",
+    "olefile",
+    "xlrd",
 }
 
 # `docflow_core` modules whose whole job is parsing.

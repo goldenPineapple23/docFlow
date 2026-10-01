@@ -1,0 +1,6 @@
+# Tests and linters for the parse service; never in the image's runtime.
+pytest==9.1.1
+ruff==0.16.8
+mypy==2.3.1
+# Fixture builders only (tests/make_fixtures.py): writes the legacy .xls.
+xlwt==1.3.0

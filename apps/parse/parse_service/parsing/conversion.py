@@ -4,10 +4,11 @@ Tier 2 conversion (CLAUDE.md Section 7.11's middle row): `.doc`, `.xls`,
 Tier 1 format and then parsed normally.
 
 "Tier 2 is where the risk is -- treat conversion as parsing." Everything in
-this module therefore lives in the isolated worker process and nowhere
-else: `apps/api` never imports it, and the libraries it uses (Pillow,
-pillow-heif, olefile, xlrd, and LibreOffice when present) are installed in
-the worker's environment only. Conversion is subject to every limit in
+this module therefore runs inside a parse service job (Stage 3c): its own
+namespaces, cgroups, seccomp filter and unprivileged user, one process per
+file. Neither `apps/api` nor `apps/worker` can import it, and the libraries
+it uses (Pillow, pillow-heif, olefile, xlrd, and LibreOffice) are installed
+in the parse service's image only. Conversion is subject to every limit in
 Section 7.11 -- the size cap and magic-byte/zip checks run on the input
 before a converter touches it (the caller's
 `file_types.validate_upload`), the page-count and pixel-dimension caps run
@@ -17,7 +18,7 @@ bytes we didn't write.
 
 A conversion failure is a clean, catalog-coded `ConversionError` that the
 task turns into `failed` -- never a crash, never a partial write, and the
-worker is healthy afterwards.
+service is healthy afterwards.
 
 No active content, ever (Section 7.11): nothing here executes a macro, an
 embedded object, OLE automation, or JavaScript. The legacy binary formats
@@ -215,7 +216,7 @@ def convert_heic(content: bytes) -> list[tuple[bytes, str]]:
 
         pillow_heif.register_heif_opener()
     except ImportError as exc:  # pragma: no cover - dependency is pinned
-        raise ConversionError("DOC-017", "HEIC support is not installed in this worker.") from exc
+        raise ConversionError("DOC-017", "HEIC support is not installed in the parse service.") from exc
 
     image = _open_image(content)
     try:
@@ -333,9 +334,11 @@ def find_libreoffice() -> str | None:
     conversion fails cleanly with a catalog code rather than silently
     degrading. See SETUP.md and DECISIONS.md.
     """
-    from docflow_core.config import get_settings
+    # Read from the job's environment directly: the parse image carries only
+    # the standard-library parts of docflow_core, not its settings object.
+    import os
 
-    configured = (get_settings().libreoffice_path or "").strip()
+    configured = (os.environ.get("LIBREOFFICE_PATH") or "").strip()
     if configured and Path(configured).exists():
         return configured
 
@@ -368,7 +371,7 @@ def convert_with_libreoffice(
     if binary is None:
         raise ConversionError(
             "DOC-017",
-            "LibreOffice is not installed on this worker, so legacy .doc conversion "
+            "LibreOffice is not installed in the parse service, so legacy .doc conversion "
             "is unavailable (see SETUP.md).",
         )
 
@@ -555,7 +558,7 @@ def unwrap_eml(content: bytes) -> list[tuple[bytes, str]]:
         body_part = message.get_body(preferencelist=("plain", "html"))
         if body_part is not None:
             body = body_part.get_content()
-    except Exception:  # a malformed part must not take the worker down
+    except Exception:  # a malformed part must not take the job down
         body = ""
 
     artifacts: list[tuple[bytes, str]] = []
@@ -662,6 +665,6 @@ def prepare_artifacts(
 
 
 def tier2_handlers() -> set[str]:
-    """Every handler name this module implements -- used by the worker's own
+    """Every handler name this module implements -- used by the parse service's own
     completeness test against the allowlist in `docflow_core.file_types`."""
     return set(_CONVERTERS) | set(_UNWRAPPERS)
