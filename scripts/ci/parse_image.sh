@@ -37,6 +37,10 @@ must_refuse() {
     return 1
   fi
   echo "$label PASS: refused to start and never opened its port (exit $status)"
+  # Readable from the run's summary (job logs need a token we don't have).
+  local reason
+  reason=$(grep "refused to start" <<<"$logs" | head -1)
+  echo "::notice title=$label PASS (exit $status)::$reason"
 }
 
 case "$STEP" in
@@ -67,6 +71,9 @@ case "$STEP" in
           exit 1
         fi
         echo "the parse service is up (production mode, isolation on)"
+        lines=$(docker logs docflow-parse 2>&1 | grep -E "^RESULT canary|^canary" | cut -c1-400 | tr '
+' '|' | sed 's/|/%0A/g')
+        echo "::notice title=E3 the canary at startup::$lines"
         exit 0
       fi
       sleep 1

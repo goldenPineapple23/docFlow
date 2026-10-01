@@ -454,6 +454,9 @@ jobs:
         id: selftest
         if: success() || failure()
         run: bash "${{ github.workspace }}/scripts/ci/parse_image.sh" docflow-parse:ci selftest
+      - name: The self-test evidence, as annotations
+        if: success() || failure()
+        run: python "${{ github.workspace }}/scripts/ci/selftest_annotations.py" parse-selftest.txt
       - name: Keep the self-test evidence
         if: success() || failure()
         uses: actions/upload-artifact@v4
