@@ -1993,6 +1993,20 @@ reviews each before the merge:**
   your call.
 - **B11's exiting samples (founder):** accepted only when that same pid was
   earlier sampled live as `sandbox_init`; any other is listed and fails B11.
+
+**Seventh run (`b013b6d`, the bind mount and the SIGCHLD reaper).** core 700,
+0 failed; api 580, 0 failed; parse unit 116, 0 failed; **parse HTTP 56, 0
+failed (D1 `po.doc` parity passes)**; worker 132, 1 failed (F5; **the
+worker's `po.doc` preview test passes**); web and web-live passed.
+Self-tests: canary 5 of 5; S 5 of 5; A all PASS (A14 and A11 with the bind
+mount), IPv6 NOT-RUN; **B: B5, B11 and B13 PASS** (nothing left after the
+kill or the 100 real requests; LibreOffice converts in the sandbox); B8
+failed. Both failures were test bugs, fixed in the next commit:
+- **F5** killed the container after a fixed 1 s; `po.doc` now parses in
+  under a second, so the answer came first. Now it kills the moment
+  `docker top` shows a parse job process in the container.
+- **B8's new step** kept 128 MiB in `/work` as one file, over the 64 MiB
+  per-file limit (RLIMIT_FSIZE): EFBIG, exit 1. Now four 32 MiB files.
 - **The service log gets LibreOffice's real error (founder):** a rejected
   conversion's reason, with the last 300 characters of LibreOffice's own
   stderr, goes to the job's stderr and from there to the service's log

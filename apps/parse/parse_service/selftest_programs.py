@@ -431,10 +431,13 @@ def disk(args: dict) -> dict:
                 pass
     # Q14: /tmp is /work's tmpfs, so with 128 MiB kept in /work, /tmp runs out
     # at what /work has left, not at a cap of its own.
-    kept = "/work/kept"
-    with open(kept, "wb") as handle:
-        for _ in range(128):
-            handle.write(chunk)
+    # Four 32 MiB files: one file of 128 MiB would hit the 64 MiB per-file
+    # limit (RLIMIT_FSIZE) first, which isn't what this measures.
+    kept_files = [f"/work/kept-{n}" for n in range(4)]
+    for kept in kept_files:
+        with open(kept, "wb") as handle:
+            for _ in range(32):
+                handle.write(chunk)
     written, stopped_by, files = 0, None, []
     try:
         while written < budget and stopped_by is None:
@@ -448,7 +451,7 @@ def disk(args: dict) -> dict:
     except OSError as exc:
         stopped_by = errno.errorcode.get(exc.errno or 0, str(exc.errno))
     out["/tmp_with_128_mib_in_work"] = {"written_mib": written >> 20, "stopped_by": stopped_by}
-    for path in [*files, kept]:
+    for path in [*files, *kept_files]:
         try:
             os.unlink(path)
         except OSError:

@@ -43,6 +43,17 @@ def _wait_healthy(seconds: int = 180) -> None:
     raise AssertionError("the parse service did not come back after the restart")
 
 
+def _wait_for_a_running_job(seconds: float) -> bool:
+    """True as soon as `docker top` shows a parse job process in the
+    container; False if none appears in time."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        listing = subprocess.run(["docker", "top", CONTAINER, "-eo", "args"], capture_output=True, text=True)
+        if "parse_service.job" in listing.stdout:
+            return True
+    return False
+
+
 def test_F5_a_parse_killed_mid_request_is_lost_and_the_next_try_after_a_restart_succeeds():
     content = fixture_bytes("positive/po.doc")  # LibreOffice: seconds, a window to kill in
     outcome: dict = {}
@@ -57,10 +68,14 @@ def test_F5_a_parse_killed_mid_request_is_lost_and_the_next_try_after_a_restart_
 
     thread = threading.Thread(target=call)
     thread.start()
-    time.sleep(1.0)
+    # Kill the moment the service is working on it: when a parse job process
+    # exists in the container (2026-10-01: a fixed 1 s wait stopped working
+    # once po.doc parsed in under a second).
+    in_job = _wait_for_a_running_job(seconds=30)
     subprocess.run(["docker", "kill", CONTAINER], check=True, capture_output=True)
     try:
         thread.join(timeout=60)
+        assert in_job, f"no parse job was seen running before the kill ({outcome})"
         assert "answer" not in outcome, (
             f"the parse finished before the kill ({outcome}); the window is too short"
         )
