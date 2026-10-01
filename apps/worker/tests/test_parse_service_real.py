@@ -16,6 +16,7 @@ import subprocess
 import threading
 import time
 import urllib.request
+from pathlib import Path
 
 import pytest
 from docflow_core import parse_client
@@ -43,15 +44,32 @@ def _wait_healthy(seconds: int = 180) -> None:
     raise AssertionError("the parse service did not come back after the restart")
 
 
-def _wait_for_a_running_job(seconds: float) -> bool:
-    """True as soon as `docker top` shows a parse job process in the
-    container; False if none appears in time."""
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        listing = subprocess.run(["docker", "top", CONTAINER, "-eo", "args"], capture_output=True, text=True)
-        if "parse_service.job" in listing.stdout:
-            return True
-    return False
+def _jobs_dir() -> Path:
+    """Where the container's job cgroups appear on this runner: the container
+    has its own cgroup namespace, so its /sys/fs/cgroup/docflow-jobs is
+    inside its scope here. Read straight from the runner, a job is seen the
+    moment its cgroup is created, before the parser starts."""
+    cid = subprocess.run(
+        ["docker", "inspect", "-f", "{{.Id}}", CONTAINER], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    candidates = [
+        Path("/sys/fs/cgroup/system.slice") / f"docker-{cid}.scope" / "docflow-jobs",
+        Path("/sys/fs/cgroup/docker") / cid / "docflow-jobs",
+    ]
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+    raise AssertionError(f"the container's job cgroups aren't where F5 looks: {[str(c) for c in candidates]}")
+
+
+def _wait_for_a_running_job(jobs_dir: Path, seconds: float) -> float | None:
+    """Seconds until a job cgroup exists, or None if none appears in time."""
+    started = time.monotonic()
+    while time.monotonic() - started < seconds:
+        if any(entry.name.startswith("job-") for entry in jobs_dir.iterdir()):
+            return round(time.monotonic() - started, 3)
+        time.sleep(0.002)
+    return None
 
 
 def test_F5_a_parse_killed_mid_request_is_lost_and_the_next_try_after_a_restart_succeeds():
@@ -66,16 +84,17 @@ def test_F5_a_parse_killed_mid_request_is_lost_and_the_next_try_after_a_restart_
             outcome["error"] = exc
         outcome["seconds"] = time.monotonic() - started
 
+    jobs_dir = _jobs_dir()
     thread = threading.Thread(target=call)
     thread.start()
-    # Kill the moment the service is working on it: when a parse job process
-    # exists in the container (2026-10-01: a fixed 1 s wait stopped working
-    # once po.doc parsed in under a second).
-    in_job = _wait_for_a_running_job(seconds=30)
+    # Kill the moment the service is working on it: when the job's cgroup
+    # exists (2026-10-01: a fixed 1 s wait stopped working once po.doc parsed
+    # in under a second, and `docker top` never showed the job at all).
+    in_job = _wait_for_a_running_job(jobs_dir, seconds=30)
     subprocess.run(["docker", "kill", CONTAINER], check=True, capture_output=True)
     try:
         thread.join(timeout=60)
-        assert in_job, f"no parse job was seen running before the kill ({outcome})"
+        assert in_job is not None, f"no parse job was seen running before the kill ({outcome})"
         assert "answer" not in outcome, (
             f"the parse finished before the kill ({outcome}); the window is too short"
         )

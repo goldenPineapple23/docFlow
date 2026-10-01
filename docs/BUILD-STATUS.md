@@ -2007,6 +2007,22 @@ failed. Both failures were test bugs, fixed in the next commit:
   `docker top` shows a parse job process in the container.
 - **B8's new step** kept 128 MiB in `/work` as one file, over the 64 MiB
   per-file limit (RLIMIT_FSIZE): EFBIG, exit 1. Now four 32 MiB files.
+
+**Eighth and ninth runs (`d1e1afe`, `0867e3f`).** `0867e3f`: core 700, 0
+failed; api 580, 0 failed; **the parse job green for the first time**
+(unit 122, HTTP 56, all 0 failed; canary 5 of 5, S 5 of 5, **B 17 of 17**,
+A all PASS with IPv6 NOT-RUN; E1, E3, E4 as designed); web and web-live
+passed; worker 132, 1 failed (F5). New checks all pass: A15 (`/work`:
+EACCES directly, exit 127 through the loader; the control outside runs),
+B13 with noexec (**LibreOffice still converts**), B14, B15 (`exit_70`), B16
+(`self_reported_memory_error`, no OOM kill; the real overrun `memory`), B11
+with the exiting rule.
+- **F5, still a test problem:** `docker top` never showed the job process,
+  so the kill waited 30 s and came after the answer. Now F5 watches the
+  container's job cgroups straight from the runner (the container has its
+  own cgroup namespace, so they are under its scope there): a job is seen
+  the moment its cgroup is created, before the parser starts; if the
+  directory isn't found, F5 says where it looked.
 - **The service log gets LibreOffice's real error (founder):** a rejected
   conversion's reason, with the last 300 characters of LibreOffice's own
   stderr, goes to the job's stderr and from there to the service's log
