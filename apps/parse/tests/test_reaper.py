@@ -147,10 +147,10 @@ def test_control_an_unregistered_child_would_lose_its_exit_status(reaper_matchin
     """The same dead child, never registered: the reaper takes it, and Python
     then reports exit 0. This is what the lock prevents."""
     proc = subprocess.Popen(["/bin/sh", "-c", "exit 7"])
-    _wait_until_zombie(proc.pid)
-    with launcher._children_lock:
-        reaped = launcher._reap_zombie_orphans(launcher.SLOT_UIDS)
-    assert proc.pid in [f["pid"] for f in reaped]
+    deadline = time.monotonic() + 5
+    while proc.pid not in [f["pid"] for f in launcher.RECENT_REAPS] and time.monotonic() < deadline:
+        time.sleep(0.01)  # the reaper thread takes it on its SIGCHLD
+    assert proc.pid in [f["pid"] for f in launcher.RECENT_REAPS]
     assert proc.wait(timeout=5) == 0
 
 
