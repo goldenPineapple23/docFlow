@@ -2087,7 +2087,13 @@ changed, built in the next commit:**
   secret, which is blank on this machine (D-174); CI sets a throwaway one,
   so it runs there. **Worker on staging: `130 passed, 3 skipped`** -- the two
   prefork tests (Linux only) and F5 (needs CI's container); all three run in
-  CI.
+  CI. **API on staging: `579 passed, 1 skipped, 3 deselected`** (580 in CI)
+  -- the skip is `test_a_request_carrying_the_api_settings_is_refused`
+  (`test_parse_token_boundary.py`): it needs a parse service holding a token
+  (CI's API job); the dev service here has none. The 3 deselected are the
+  `live_api` tests, excluded from every default run. The local dev parse
+  service hit its 30-minute background limit partway through and was
+  restarted; no test failed.
 
 **Tenth run (`0be5422`): GREEN.** core 700 tests, 0 failed; api 580, 0 failed; worker 132, 0 failed (F5 included); parse unit 122, 0 failed; parse HTTP 56, 0 failed (D1 parity on every fixture, `po.doc` included); web and web-live passed; dependency audits clean. Self-tests in the real sandbox: canary 5 of 5, A 13 of 13 PASS with A-net IPv6 NOT-RUN, S 5 of 5, B 17 of 17; E1, E3 and E4 as designed. Recorded in D-183. Next: the
 founder backs up and applies `0034` on staging (the PR text leads with it:
