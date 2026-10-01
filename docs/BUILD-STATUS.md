@@ -2171,6 +2171,24 @@ Evidence: `docs/spikes/3c-fly-staging/2026-10-01-sha256-f9719965/`.
 - `--ha=false` is staging only; production's machine count is a Phase 6
   decision (RUNBOOK 8.2). A7 against the real port 8100 is preferred.
 
+**CI green on `0f5850b`** (after one fix to the reaper's control test,
+which had looked for the reap in the wrong place): every job passed; parse
+unit 128 and HTTP 56, 0 failed; self-tests canary 5, S 5, B 17 (B5 leaves
+none), A with only IPv6 NOT-RUN (CI's runner). **API staging full re-run:**
+recorded above.
+
+**Fly staging run 2 (2026-10-01, image `sha256:acc99434`, same machine):
+the 3c merge gate is MET -- every item passed in one run.** Evidence:
+`docs/spikes/3c-fly-staging/2026-10-01-sha256-acc99434/`. Canary 5 of 5
+(cgroup v1); the live server held no zombie after boot; N1; every A check
+with **A-net IPv6 PASS**, A3 Upstash, A7 against the live port 8100, and
+**A4 against the stand-in PASS** (stand-in created first, `started` before
+and after, one connection logged: the control's); every S check; **all 18
+B checks**, B5 reaping exactly the root-cgroup zombies run 1 left, B10's
+control succeeding, B11 clean; N2; N3 (401 in 5.5 s, machine started by the
+request). Throwaway app destroyed, parse machine stopped. G and the
+real-target A4 wait for the first worker/API deploy (after 3e).
+
 **Tenth run (`0be5422`): GREEN.** core 700 tests, 0 failed; api 580, 0 failed; worker 132, 0 failed (F5 included); parse unit 122, 0 failed; parse HTTP 56, 0 failed (D1 parity on every fixture, `po.doc` included); web and web-live passed; dependency audits clean. Self-tests in the real sandbox: canary 5 of 5, A 13 of 13 PASS with A-net IPv6 NOT-RUN, S 5 of 5, B 17 of 17; E1, E3 and E4 as designed. Recorded in D-183. Next: the
 founder backs up and applies `0034` on staging (the PR text leads with it:
 `Desktop/PR-stage3c-parse-service.md`), I run the staging suites, the

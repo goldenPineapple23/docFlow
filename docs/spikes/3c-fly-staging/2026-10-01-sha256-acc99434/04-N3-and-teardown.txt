@@ -1,0 +1,28 @@
+== N3 (2026-10-01T20:33:19Z)
+-- destroy the keep-awake client
+8747905c42d758 has been destroyed
+-- stop the parse machine
+863662ce743978 has been successfully stopped
+-- parse machine before the request: State: stopped
+-- client machine: POST http://docflow-parse-staging.flycast/v1/table, no token
+ Machine ID: 78111123c3e418
+-- client log:
+2026-10-01T20:33:44Z app[78111123c3e418] iad [info]n3 start 20:33:44
+2026-10-01T20:33:50Z app[78111123c3e418] iad [info]n3 http_code=401 time_total=5.534401s
+2026-10-01T20:33:50Z app[78111123c3e418] iad [info]n3 body={"error": "unauthorized"}
+2026-10-01T20:33:50Z app[78111123c3e418] iad [info]n3 end 20:33:50
+-- parse machine after: State: started
+-- parse app log around the start:
+2026-10-01T20:33:45Z proxy[863662ce743978] iad [info]Starting machine
+2026-10-01T20:33:47Z runner[863662ce743978] iad [info]Machine started in 977ms
+2026-10-01T20:33:49Z app[863662ce743978] iad [info]canary: PASS
+2026-10-01T20:33:49Z app[863662ce743978] iad [info]parse service listening on port 8100
+2026-10-01T20:33:50Z app[863662ce743978] iad [info]2026-10-01 20:33:50,445 INFO parse_service http "POST /v1/table HTTP/1.1" 401 -
+
+== teardown (2026-10-01T20:34:39Z)
+ ID               NAME         STATE     IMAGE                      
+ 78111123c3e418   n3-client    stopped   curlimages/curl:latest     
+ 28744540b15958   a4-standin   started   library/python:3.13-alpine 
+Destroyed app docflow-3c-probe
+docflow-3c-probe apps listed after destroy: 0
+863662ce743978 has been successfully stopped
