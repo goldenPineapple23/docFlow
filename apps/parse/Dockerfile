@@ -65,6 +65,10 @@ COPY packages/core/pyproject.toml /opt/parse/src/core/pyproject.toml
 COPY packages/core/docflow_core /opt/parse/src/core/docflow_core
 COPY apps/parse/pyproject.toml /opt/parse/src/parse/pyproject.toml
 COPY apps/parse/parse_service /opt/parse/src/parse/parse_service
+# One committed fake purchase order ("Acme" test data, never a customer's),
+# so the self-tests S4 and B13 convert a real legacy Word file here, on CI
+# and on Fly. Read-only to the jobs, like the rest of the image.
+COPY apps/parse/tests/fixtures/positive/po.doc /opt/parse/selftest/po.doc
 RUN /opt/parse/venv/bin/pip install --no-cache-dir --no-deps /opt/parse/src/core /opt/parse/src/parse \
  && /opt/parse/venv/bin/python -c "import parse_service.server, seccomp, docflow_core.file_types"
 

@@ -5,4 +5,5 @@
 !apps/parse/pyproject.toml
 !apps/parse/requirements.lock.txt
 !apps/parse/parse_service
+!apps/parse/tests/fixtures/positive/po.doc
 **/__pycache__

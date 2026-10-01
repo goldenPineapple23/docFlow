@@ -3,12 +3,13 @@ The root-owned first step inside a parse job's new namespaces (Stage 3c,
 item 3, steps 3-6). Started by the launcher as
 
     unshare --net --mount --pid --ipc --uts --fork --mount-proc --kill-child \
-        python3 -I -m parse_service.sandbox_init <slot> <kind>
+        python3 -I -m parse_service.sandbox_init <slot> <kind> <end-record fd>
 
 so it runs as root, as PID 1 of the job's PID namespace, already inside the
 job's cgroups. It never reads the input (that waits on stdin for the job):
-it builds the job's view of the machine, sets the backstop limits, and
-replaces itself with the unprivileged job.
+it builds the job's view of the machine, sets the backstop limits, starts
+the unprivileged job, and stays as the namespace's PID 1: a minimal reaper,
+itself unprivileged and under the job's seccomp filter (_reap_as_init).
 
 The view (founder's item 3, Q7, D-150 spike findings):
 - every existing mount read-only;
@@ -26,6 +27,7 @@ file.
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import resource
 import stat
@@ -34,6 +36,8 @@ import sys
 from parse_service import config
 
 EXIT_ISOLATION_FAILED = 70
+PR_SET_NO_NEW_PRIVS = 38
+PR_SET_DUMPABLE = 4
 
 MS_RDONLY = 0x1
 MS_NOSUID = 0x2
@@ -135,8 +139,16 @@ def _limits() -> None:
         resource.setrlimit(which, (value, value))
 
 
+def _report(status_fd: int, record: dict) -> None:
+    """One line on the launcher's private end-record pipe (never the job's)."""
+    try:
+        os.write(status_fd, (json.dumps(record) + "\n").encode())
+    except OSError:
+        pass
+
+
 def main(argv: list[str]) -> int:
-    slot, kind = int(argv[1]), argv[2]
+    slot, kind, status_fd = int(argv[1]), argv[2], int(argv[3])
     uid = config.SLOT_UID_BASE + slot
     try:
         _mount("none", "/", None, MS_REC | MS_PRIVATE)
@@ -151,6 +163,7 @@ def main(argv: list[str]) -> int:
         _limits()
     except Exception as exc:  # noqa: BLE001 -- any failure here is the service's, not the file's
         print(f"sandbox_init failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        _report(status_fd, {"sandbox": "failed"})
         return EXIT_ISOLATION_FAILED
 
     env = {
@@ -177,8 +190,69 @@ def main(argv: list[str]) -> int:
         kind,
     ]
     os.chdir(config.WORK_DIR)
-    os.execve(setpriv[0], setpriv, env)
-    return EXIT_ISOLATION_FAILED  # not reached
+    job = os.fork()
+    if job == 0:
+        try:
+            os.close(status_fd)  # the job never holds the end-record pipe
+            os.execve(setpriv[0], setpriv, env)
+        finally:
+            os._exit(EXIT_ISOLATION_FAILED)
+    return _reap_as_init(job, uid, status_fd)
+
+
+def _reap_as_init(job: int, uid: int, status_fd: int) -> int:
+    """
+    This process stays PID 1 of the job's namespace as a minimal reaper
+    (founder, 2026-10-01): an orphan inside the sandbox, such as a process
+    LibreOffice leaves behind, is reparented to PID 1, and the parser would
+    never wait for it. First it drops to the slot's user under
+    no-new-privileges and the same seccomp filter as the job; then it only
+    waits. When the job exits it exits too, and its exit ends every other
+    process in the namespace (the kernel kills them).
+
+    How the job ended goes to the launcher as one record on a pipe only this
+    process holds (`status_fd`; the job's copy is closed before it starts,
+    and this process is non-dumpable, so the job can't reach it through
+    /proc): {"exited": code} or {"signaled": N}. Never as this process's
+    exit status, which a parser could imitate (founder, 2026-10-01): the
+    launcher decides a job's end from its own records -- the cgroup's OOM
+    count, its own kill decisions -- and this record only says how the
+    parser ended when nothing else did.
+    """
+    try:
+        devnull = os.open("/dev/null", os.O_RDWR)
+        os.dup2(devnull, 0)  # the job holds the pipes; this process never reads or writes them
+        os.dup2(devnull, 1)
+        os.setgroups([])
+        os.setresgid(uid, uid, uid)
+        os.setresuid(uid, uid, uid)
+        if _libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
+            raise OSError(ctypes.get_errno(), "prctl(PR_SET_DUMPABLE)")
+        if _libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
+            raise OSError(ctypes.get_errno(), "prctl(PR_SET_NO_NEW_PRIVS)")
+        from parse_service import seccomp_filter
+
+        seccomp_filter.load()
+    except Exception as exc:  # noqa: BLE001 -- never leave a root process beside the job
+        print(f"sandbox_init reaper failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        os.kill(job, 9)
+        _report(status_fd, {"sandbox": "failed"})
+        return EXIT_ISOLATION_FAILED
+    while True:
+        try:
+            pid, status = os.wait()
+        except ChildProcessError:
+            _report(status_fd, {"sandbox": "failed"})  # the job gone without a status: not possible
+            return EXIT_ISOLATION_FAILED
+        except InterruptedError:
+            continue
+        if pid != job:
+            continue  # an orphan, now reaped
+        if os.WIFSIGNALED(status):
+            _report(status_fd, {"signaled": os.WTERMSIG(status)})
+        else:
+            _report(status_fd, {"exited": os.waitstatus_to_exitcode(status)})
+        return 0  # the record above is the job's end; this status means nothing
 
 
 if __name__ == "__main__":

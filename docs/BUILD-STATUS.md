@@ -1521,7 +1521,7 @@ this as well). The API needs `SUPABASE_URL` to check sign-in tokens (JWKS)
 for the upload test. It gets no Stripe, Postmark, service-role or
 Anthropic key in 3c.
 
-**3c test table.** 56 tests (55 agreed, plus B13, 2026-10-01).
+**3c test table.** 58 tests (55 agreed, plus B13, B14 and S4's second check, 2026-10-01).
 
 Where each test runs:
 - **L** = this Windows machine, dev mode. Logic only, never counted as
@@ -1565,7 +1565,7 @@ failure means stop and report.
 | S1 | **The shipped rule set, with a test-only errno in place of EPERM, inside the real sandbox:** every refused call returns that errno, so the filter (not a missing privilege) answered: `unshare`, `clone` with each new-namespace flag, `setns`, `mount`, `umount2`, the newer mount calls, `ptrace`, `process_vm_readv/writev`, `bpf`, `keyctl`, `add_key`, `request_key`, `perf_event_open`, `init_module`, `finit_module`, `delete_module`, `kexec_load`, `kexec_file_load`, **`io_uring_setup`, `io_uring_enter`, `io_uring_register`, `userfaultfd`** | -- | | yes | yes |
 | S2 | **The filter as shipped (EPERM), inside the real sandbox:** every call in S1 fails, io_uring and `userfaultfd` included; `/proc/self/status` shows `Seccomp: 2` and `NoNewPrivs: 1` | -- | | yes | yes |
 | S3 | **What the filter alone stops:** the same calls in the sandbox **without** the filter, reported call by call (on Fly today: `unshare(CLONE_NEWUSER)`, `clone` after it, and `keyctl` succeed) | is the control | | yes | yes |
-| S4 | `clone3` answers ENOSYS; a thread and a fork still work under the filter; LibreOffice converts a real `.doc` under it (with D1) | -- | | yes | yes |
+| S4 | Two checks. `S4:normal-work-under-the-filter`: `clone3` answers ENOSYS; a thread and a fork still work under the filter. **`S4:real-doc-under-the-filter-alone`** (corrected 2026-10-01: the row used to say S4 converts a `.doc`, "with D1"; it didn't): the real document code converts the committed `po.doc` under the seccomp filter and no-new-privileges alone, as the slot user, with no namespaces, no read-only root, no cgroup and no rlimits, and finds its PO number. With B13 (the full sandbox), a `.doc` failure points at the filter (S4 fails) or at the filesystem and limits (only B13 fails) | -- | | yes | yes |
 | S5 | The filter allows only x86_64 (its exported form is checked), so calls from another architecture are killed; **an x32 call (`getpid` with the `0x40000000` bit set) kills the process with SIGSYS** | the same x32 call without the filter, reported (ENOSYS if the kernel has no x32) | | yes | yes |
 | **B. Limits** (fixed self-test programs in the image, through the real launcher) | | | | | |
 | B1 | Memory, one process: a program allocating past the job's cgroup limit is stopped as `stopped: memory`; the service answers the next request. **The job's memory+swap limit equals its memory limit, and the machine has no active swap** | the same program with no cgroup limit survives | | yes (v2) | yes (v1) |
@@ -1578,9 +1578,10 @@ failure means stop and report.
 | B8 | Disk: `/work`, LibreOffice's home and `/dev/shm` each stop at their size, and their pages count against the job's memory | -- | | yes | yes |
 | B9 | One process per file: two jobs in a row have different processes and namespaces, and nothing of the first is left in `/work` or the home | -- | yes (process only) | yes | yes |
 | B10 | The job can't raise its own limit or leave its cgroup (the files are hidden; and refused even if visible) | root can change it | | yes | yes |
-| B11 | No leak: after 100 jobs, every job cgroup is gone and the slot users own no process | -- | | yes | yes |
+| B11 | **No leak, through the real request path** (founder, 2026-10-01): the service's own Service and Handler on a loopback port, 100 real POSTs (a text order, a catalog table, the committed `po.doc`), two at a time; all answer 200, none stopped or crashed; afterwards every job cgroup is gone and the slot users own no process. **While they run, every job's namespace PID 1 is sampled from outside and must be the reaper (`sandbox_init`), never the parser or LibreOffice,** and a running job must be seen as its PID 2 | -- | | yes | yes |
 | B12 | **CPU quota (slows):** a job spinning on every core gets at most one CPU's worth of time over a timed window, and the cgroup reports throttling; the other slot's job still finishes | the same program with no quota uses more than one CPU | | yes | yes |
-| B13 | **LibreOffice runs in the sandbox** (added 2026-10-01 after `po.doc` gave DOC-017 in the real image): one conversion with `conversion.py`'s flags inside a real job exits 0 and produces a file; reports its exit status and stderr tail | -- | | yes | yes |
+| B13 | **LibreOffice runs in the sandbox** (added 2026-10-01 after `po.doc` gave DOC-017 in the real image): the committed `po.doc`, converted inside a real job with `conversion.py`'s flags and Word 97 filter, exits 0 and produces a file; reports its exit status and stderr tail, whether `/tmp` and `/var/tmp` are writable, and the same run with LibreOffice's pipe pointed at the work directory (evidence) | -- | | yes | yes |
+| B14 | **A parser's own exit code is never read as a kill** (founder, 2026-10-01): a job that exits 137 by itself, in the real sandbox, is `crashed: exit_137`, with no OOM kill and the reaper's record `{"exited": 137}`; unit tests cover every combination (`apps/parse/tests/test_classify.py`) | -- | | yes | yes |
 | **C. Hostile files** (through `POST /v1/document`, the real path. After each one, a known-good PO parses correctly, so the service is shown healthy) | | | | | |
 | C1 | Zip bomb; XXE payload; oversized image; 500-page PDF; `.exe` renamed `.pdf`; password-protected PDF; a `.zip` holding a valid PO. Each gets the catalog code it gets today | -- | yes | yes | yes |
 | C2 | A malformed file of **each** Tier 2 format (`.doc`, `.xls`, `.tif`, `.heic`, `.msg`, `.odt`, `.ods`) that kills or hangs its converter: a clean `rejected` or `stopped`, never a crash | -- | yes | yes | yes |
@@ -1700,6 +1701,46 @@ F5's kill window); the 18 database tests pass. The evidence:
   directory. B13's variants (above) test that next run. **No fix is made:**
   whichever it is (a pipe path inside `/work`, or a writable `/tmp`) comes
   to the founder first.
+
+**Fifth run (`749a5cd`).** core 700 tests, 0 failed; api 580, 0 failed (the
+token tests run, none skipped); worker 132, 2 failed (both `po.doc`); web
+and web-live passed; parse unit 110, 0 failed; parse HTTP 56, 1 failed
+(`po.doc`). Self-tests: canary 5 of 5, S 4 of 4, A all PASS with A-net IPv6
+reported **NOT-RUN**, B 12 of 15 (B5, B11, B13 failed). Earlier runs for the
+record: `bbc0932` core 699/0, api 575/0, worker 131/20 (the F5 cascade);
+`fb8e538` core 699/0, api 575/0, worker 131/2.
+- **B5/B11: the founder's question answered, and a cleanup bug, not an
+  escape.** The reaper took the killed jobs' sandbox PID 1s (B1 reaped pid
+  101, B5's own job 165). Three zombies remained, each in **its job's own
+  cgroup** (`/docflow-jobs/job-0-... (deleted)`) and **its job's own PID
+  namespace** (`pid:[4026532468]` and others, never the supervisor's
+  `pid:[4026532403]`); B10 passed. They came from OOM-killed jobs: a
+  process the kernel has killed leaves `cgroup.procs` at once, so the
+  snapshot I reaped from never listed it. **Fixed:** after every job the
+  launcher reaps every orphan that is now its own child (any child that is
+  not a live job's Popen child), and after any limit stop it keeps looking
+  for 5 s. The checks are unchanged.
+- **B13: LibreOffice ignores the pipe redirect.** `/tmp` and `/var/tmp` are
+  EROFS, `TMPDIR` is `/work/tmp`; as `conversion.py` runs it, with
+  `OSL_SOCKET_PATH` in the environment, and with `-env:OSL_SOCKET_PATH`, all
+  three fail in 0.0 s with `ERROR: no valid pipe path found.` My reading:
+  the message comes from LibreOffice's launcher (`oosplash`, which `soffice`
+  runs first), which checks only `/tmp` and `/var/tmp` and exits before the
+  office itself (`soffice.bin`), which honours `OSL_SOCKET_PATH`, ever
+  starts. The next run adds the evidence for that: `soffice.bin` run
+  directly with `OSL_SOCKET_PATH` in `/work` (retrying once on exit 81, the
+  restart oosplash would do on a fresh profile). **Q14, the founder's
+  decision; nothing is changed until then:**
+  1. *Call `soffice.bin` directly, pipe in `/work`.* No filesystem change.
+     Costs: we bypass LibreOffice's own launcher, so we take on its one job
+     that matters here (restart on exit 81), and depend on an internal path
+     (`/usr/lib/libreoffice/program/soffice.bin`).
+  2. *Bind-mount `/work/tmp` over `/tmp` inside the sandbox.* LibreOffice
+     runs as shipped. Not a second writable area: `/tmp` would be the same
+     tmpfs as `/work`, under `/work`'s existing cap (B8 would add a line
+     showing writes to `/tmp` count against it). It is a change to the
+     sandbox's filesystem view.
+  My recommendation waits for the next run's evidence on option 1.
 
 Done, in the agreed order:
 1. **D2 baseline** (`b819e8b`): 41 committed fixtures under
@@ -1843,6 +1884,32 @@ reviews each before the merge:**
   not proof.
 - **The orphan reaper (B5/B11; founder: fix by reaping, never by filtering
   the check):** see the third run below.
+- **PID 1 inside a real job is now a reaper (founder, 2026-10-01).** It was
+  the parser: `sandbox_init` ran as the namespace's PID 1 and then `exec`'d
+  into `setpriv` and the job, so anything LibreOffice left behind was
+  reparented to a parser that never waits; the self-tests hid it, because
+  their own PID 1 behaved differently. Now `sandbox_init` forks the job and
+  stays PID 1 (`_reap_as_init`): it drops to the slot's user,
+  no-new-privileges, non-dumpable, the job's seccomp filter, and only
+  waits; when the job exits it exits, which ends every other process in the
+  namespace. B11 checks it through the real request path (the row above).
+- **How a job ended is decided from the supervisor's own records (founder,
+  2026-10-01).** First built as "a signal N arrives as exit 128+N", which a
+  parser exiting 137 by itself would imitate. Now: the supervisor's kill
+  decisions (wall clock, CPU budget, answer cap) and the cgroup's OOM count
+  (memory) decide; only when none applies does the parser's own end, and
+  then only as a parser failure. That end comes from the reaper as one
+  record on a pipe only the reaper holds (the job's copy is closed before
+  it starts; the reaper is non-dumpable, so the job can't reach it through
+  `/proc`): `{"exited": n}` or `{"signaled": n}`. No record, or
+  `{"sandbox": "failed"}`, is the service failing to isolate. B14 and
+  `test_classify.py`. **Open (Q13):** two exit codes still decide an outcome,
+  both the job's own report: 70 (`job.harden` failed before reading a byte:
+  `isolation_failed`, the document waits) and 71 (Python's `MemoryError`
+  under the RLIMIT_AS backstop: `stopped: memory`, DOC-029). A compromised
+  parser could exit 70 or 71 after reading the file. Under your rule both
+  would become plain parser failures (`crashed`, DOC-005); I haven't changed
+  them without asking.
 - **The service log gets LibreOffice's real error (founder):** a rejected
   conversion's reason, with the last 300 characters of LibreOffice's own
   stderr, goes to the job's stderr and from there to the service's log

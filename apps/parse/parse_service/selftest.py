@@ -32,8 +32,11 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,6 +44,9 @@ from parse_service import config, selftest_programs
 from parse_service.cgroups import Cgroups, active_swap
 from parse_service.launcher import JobResult, Limits, become_subreaper, process_facts, run_job
 
+# The committed fake purchase order copied into the image (Dockerfile) for
+# S4 and B13 and B11: a real legacy Word file, on CI and on Fly.
+SELFTEST_DOC = Path("/opt/parse/selftest/po.doc")
 EXPECTED_DEV = {"null", "zero", "full", "random", "urandom", "shm", "fd", "stdin", "stdout", "stderr"}
 ALLOWED_JOB_ENV = {"PATH", "HOME", "TMPDIR", "LANG", "PARSE_ISOLATION", "LIBREOFFICE_PATH", "LC_CTYPE"}
 DOCFLOW_SETTING_NAMES = (
@@ -616,24 +622,123 @@ class Runner:
         )
 
     def no_leak(self, count: int = 100) -> None:
+        """B11 through the real request path (founder, 2026-10-01): the same
+        Service and Handler the parse service runs, in this process on a
+        loopback port, and `count` real POSTs (a text order, a catalog table
+        and the committed po.doc, in turn), two at a time like the service's
+        two slots. While they run, every process in a job's PID namespace is
+        sampled from outside: its namespace PID 1 must always be the reaper
+        (sandbox_init), never the parser or LibreOffice. Afterwards no job
+        cgroup and no slot-user process may be left."""
+        from parse_service.server import Handler, Service, _Server
+
+        service = Service(self.settings, self.cgroups)
+        Handler.service = service
+        service.healthy = True
+        server = _Server(("127.0.0.1", 0), Handler, socket.AF_INET)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        port = server.server_address[1]
+
+        requests = [
+            ("/v1/document", ".txt", b"PURCHASE ORDER\nAcme Test Distributor\nPO TEST-0011\n1 Test Widget 4.50\n"),
+            ("/v1/table", ".csv", b"sku,description\nTEST-1001,Acme Test Widget\n"),
+            ("/v1/document", ".doc", SELFTEST_DOC.read_bytes() if SELFTEST_DOC.exists() else b""),
+        ]
+        statuses: dict[str, int] = {}
         outcomes: dict[str, int] = {}
-        for i in range(count):
-            job = self.job("sleep", {"seconds": 0}, slot=i % config.PARSE_SLOTS)
-            outcomes[job.outcome] = outcomes.get(job.outcome, 0) + 1
+        lock = threading.Lock()
+        done = threading.Event()
+        pid1_seen: dict[str, int] = {}
+        pid2_seen: dict[str, int] = {}
+
+        def post(path: str, extension: str, body: bytes) -> None:
+            headers = {"Content-Type": "application/octet-stream", "X-File-Extension": extension}
+            if self.settings.token:
+                headers["Authorization"] = f"Bearer {self.settings.token}"
+            for _attempt in range(50):  # a 503 means both slots were busy for a moment
+                request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", body, headers, method="POST")
+                try:
+                    with urllib.request.urlopen(request, timeout=200) as response:
+                        status, answer = response.status, json.loads(response.read() or b"{}")
+                except urllib.error.HTTPError as exc:
+                    status, answer = exc.code, {}
+                if status != 503:
+                    break
+                time.sleep(0.2)
+            with lock:
+                statuses[str(status)] = statuses.get(str(status), 0) + 1
+                key = f"{extension}:{answer.get('outcome')}"
+                outcomes[key] = outcomes.get(key, 0) + 1
+
+        def worker(indexes: list[int]) -> None:
+            for i in indexes:
+                post(*requests[i % len(requests)])
+
+        def sample() -> None:
+            while not done.is_set():
+                for pid, nspid, cmdline in _namespaced_processes():
+                    target = pid1_seen if nspid == 1 else pid2_seen if nspid == 2 else None
+                    if target is not None:
+                        with lock:
+                            target[cmdline] = target.get(cmdline, 0) + 1
+                time.sleep(0.02)
+
+        sampler = threading.Thread(target=sample, daemon=True)
+        sampler.start()
+        workers = [threading.Thread(target=worker, args=(list(range(n, count, 2)),)) for n in range(2)]
+        for thread in workers:
+            thread.start()
+        for thread in workers:
+            thread.join()
+        done.set()
+        sampler.join(timeout=5)
+        server.shutdown()
+
         leftover = self.cgroups.job_dirs()
         left = _processes_of(config.SLOT_UID_BASE) + _processes_of(config.SLOT_UID_BASE + 1)
+        pid1_is_the_reaper = bool(pid1_seen) and all("parse_service.sandbox_init" in c for c in pid1_seen)
+        saw_a_running_job = any("parse_service.job" in c for c in pid2_seen)
         self.add(
             Check(
-                "B11:no-leak",
-                _verdict(outcomes == {"selftest": count} and not leftover and not left),
+                "B11:no-leak-through-the-real-request-path",
+                _verdict(
+                    statuses == {"200": count}
+                    and not any(k.endswith((":stopped", ":crashed", ":None")) for k in outcomes)
+                    and not leftover
+                    and not left
+                    and pid1_is_the_reaper
+                    and saw_a_running_job
+                ),
                 {
-                    "jobs": outcomes,
+                    "http_statuses": statuses,
+                    "outcomes": outcomes,
+                    "namespace_pid1_seen": pid1_seen,
+                    "namespace_pid2_seen": pid2_seen,
                     "job_cgroups_left": leftover,
                     "slot_user_processes_left": left,
                     "left_details": _describe(left),
                     "pid1": _pid1(),
                     "supervisor_pid_ns": _supervisor_pid_ns(),
                 },
+            )
+        )
+
+    def own_exit_137(self) -> None:
+        """B14 (founder, 2026-10-01): a parser that exits 137 by itself, in
+        the real sandbox, is a parser failure -- never read as a kill or as
+        running out of memory. The supervisor names kills from its own
+        records (its decisions, the cgroup's OOM count)."""
+        job = self.job("exit_with", {"code": 137})
+        self.add(
+            Check(
+                "B14:own-exit-137-is-a-parser-failure",
+                _verdict(
+                    job.outcome == "crashed"
+                    and job.cause == "exit_137"
+                    and job.evidence.get("oom_kills") == 0
+                    and job.evidence.get("job_end") == {"exited": 137}
+                ),
+                {"outcome": job.outcome, "cause": job.cause, **job.evidence},
             )
         )
 
@@ -649,6 +754,64 @@ class Runner:
                     and bool(result.get("as_conversion_py", {}).get("produced"))
                 ),
                 {"outcome": job.outcome, "cause": job.cause, "result": result, **job.evidence},
+            )
+        )
+
+    def real_doc_under_the_filter_alone(self) -> None:
+        """S4, second part (founder, 2026-10-01): the real document code
+        converts the committed po.doc under the seccomp filter and
+        no-new-privileges ALONE, as the slot's user -- no namespaces, no
+        read-only root, no cgroup, no rlimits, the image's own writable /tmp.
+        With B13 (the full sandbox), a .doc failure then points either at the
+        filter (this fails) or at the filesystem and limits (only B13 fails)."""
+        uid = config.SLOT_UID_BASE
+        if not SELFTEST_DOC.exists():
+            self.add(Check("S4:real-doc-under-the-filter-alone", "FAIL", {"missing": str(SELFTEST_DOC)}))
+            return
+        home = tempfile.mkdtemp(prefix="s4-doc-")
+        os.chown(home, uid, uid)
+        argv = [
+            "/usr/bin/setpriv",
+            f"--reuid={uid}",
+            f"--regid={uid}",
+            "--clear-groups",
+            "--inh-caps=-all",
+            "--no-new-privs",
+            "--",
+            sys.executable,
+            "-I",
+            "-m",
+            "parse_service.job",
+            "document",
+        ]
+        env = {
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "LANG": "C.UTF-8",
+            "HOME": home,
+            "TMPDIR": home,
+            "PARSE_ISOLATION": "on",  # the job loads the filter itself (job.harden)
+            "LIBREOFFICE_PATH": self.settings.libreoffice_path,
+        }
+        stdin = json.dumps({"filename": "upload.doc"}).encode() + b"\n" + SELFTEST_DOC.read_bytes()
+        started = time.monotonic()
+        try:
+            done = subprocess.run(argv, input=stdin, capture_output=True, env=env, cwd=home, timeout=180)
+            answer = json.loads(done.stdout or b"{}")
+            evidence = {
+                "exit_status": done.returncode,
+                "outcome": answer.get("outcome"),
+                "code": answer.get("code"),
+                "has_po_number": "BCH-2291" in json.dumps(answer.get("parts", [])),
+                "stderr_tail": done.stderr.decode("utf-8", errors="replace")[-600:],
+            }
+        except (subprocess.TimeoutExpired, ValueError) as exc:
+            evidence = {"error": type(exc).__name__}
+        evidence["seconds"] = round(time.monotonic() - started, 1)
+        self.add(
+            Check(
+                "S4:real-doc-under-the-filter-alone",
+                _verdict(evidence.get("outcome") == "ok" and evidence.get("has_po_number") is True),
+                evidence,
             )
         )
 
@@ -745,6 +908,26 @@ def _describe(pids: list[int]) -> list[dict]:
     return [process_facts(pid) for pid in pids]
 
 
+def _namespaced_processes() -> list[tuple[int, int, str]]:
+    """(pid, pid inside its own namespace, command line) for every process
+    in a child PID namespace -- that is, every process of a running job."""
+    out = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            status = (entry / "status").read_text()
+            cmdline = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
+        except OSError:
+            continue
+        for line in status.splitlines():
+            if line.startswith("NSpid:"):
+                fields = line.split()[1:]
+                if len(fields) >= 2:
+                    out.append((int(entry.name), int(fields[-1]), cmdline))
+    return out
+
+
 def _supervisor_pid_ns() -> str:
     try:
         return os.readlink("/proc/self/ns/pid")
@@ -837,6 +1020,7 @@ def run_all(runner: Runner, groups: str, extra_targets: dict) -> None:
         runner.concurrent()
     if "S" in groups:
         runner.seccomp()
+        runner.real_doc_under_the_filter_alone()
     if "B" in groups:
         runner.memory()
         runner.cpu()
@@ -846,6 +1030,7 @@ def run_all(runner: Runner, groups: str, extra_targets: dict) -> None:
         runner.disk()
         runner.one_per_file()
         runner.cgroup_escape()
+        runner.own_exit_137()
         runner.libreoffice()
         runner.no_leak()
 

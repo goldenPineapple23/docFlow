@@ -843,6 +843,11 @@ If any B test fails on Fly, nothing goes to production: stop and report
   `PARSE_TEST_ONLY_*` setting makes it refuse to start. Private only, over
   Flycast (`fly ips list` must show one private IPv6 address and nothing
   else, after every deploy).
+- **Secrets:** `PARSE_SERVICE_TOKEN` goes on the worker's app and the parse
+  service's app, never the API's. If it is set on the API, the API refuses
+  to start ("DocFlow API refused to start: PARSE_SERVICE_TOKEN is set ...")
+  and Fly keeps restarting it: `fly secrets unset PARSE_SERVICE_TOKEN -a
+  <api app>`.
 
 ### 8.3 Reading the startup log (the canary)
 

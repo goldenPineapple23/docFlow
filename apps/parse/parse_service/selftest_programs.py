@@ -451,15 +451,18 @@ def cgroup_escape(args: dict) -> dict:
     return out
 
 
+SELFTEST_DOC = "/opt/parse/selftest/po.doc"  # the image's committed fake PO (Dockerfile)
+
+
 def _libreoffice_once(binary: str, work: str, label: str, extra_args: list[str], extra_env: dict) -> dict:
     from parse_service.parsing.conversion import LIBREOFFICE_TIMEOUT_SECONDS
 
     base = os.path.join(work, label)
     out = os.path.join(base, "out")
     os.makedirs(out, exist_ok=True)
-    source = os.path.join(base, "input.txt")
-    with open(source, "w", encoding="utf-8") as handle:
-        handle.write("Acme Test Distributor\nPO TEST-0013\n")
+    source = os.path.join(base, "input.doc")
+    with open(SELFTEST_DOC, "rb") as original, open(source, "wb") as copy:
+        copy.write(original.read())
     command = [
         binary,
         "--headless",
@@ -469,6 +472,7 @@ def _libreoffice_once(binary: str, work: str, label: str, extra_args: list[str],
         "--nodefault",
         "--nofirststartwizard",
         f"-env:UserInstallation=file://{base}/profile",
+        "--infilter=MS Word 97",
         *extra_args,
         "--convert-to",
         "docx",
@@ -495,10 +499,24 @@ def _libreoffice_once(binary: str, work: str, label: str, extra_args: list[str],
     }
 
 
+SOFFICE_BIN = "/usr/lib/libreoffice/program/soffice.bin"
+
+
+def _soffice_bin(work: str, socket_dir: str) -> dict:
+    if not os.path.exists(SOFFICE_BIN):
+        return {"binary": None}
+    first = _libreoffice_once(SOFFICE_BIN, work, "bin", [], {"OSL_SOCKET_PATH": socket_dir})
+    if first.get("exit_status") != 81:
+        return {"first": first}
+    # The same profile again, as oosplash's restart would use it.
+    again = _libreoffice_once(SOFFICE_BIN, work, "bin", [], {"OSL_SOCKET_PATH": socket_dir})
+    return {"first": first, "after_restart": again}
+
+
 def libreoffice(args: dict) -> dict:
     """B13: LibreOffice converts a file inside the real sandbox, run the way
-    parsing/conversion.py runs it (same flags, throwaway profile, the .doc
-    path's docx target), on a small text file this program writes itself.
+    parsing/conversion.py runs it (same flags, throwaway profile, the Word 97
+    import filter, docx target), on the committed po.doc in the image.
     `as_conversion_py` decides the check. The rest is evidence for the
     founder's decision, not a change (founder, 2026-10-01: any limit or
     filesystem change comes to them first): whether LibreOffice's usual pipe
@@ -508,8 +526,8 @@ def libreoffice(args: dict) -> dict:
     from parse_service.parsing.conversion import find_libreoffice
 
     binary = find_libreoffice()
-    if binary is None:
-        return {"binary": None}
+    if binary is None or not os.path.exists(SELFTEST_DOC):
+        return {"binary": binary, "selftest_doc": os.path.exists(SELFTEST_DOC)}
     work = os.path.join(os.environ.get("TMPDIR", "/tmp"), "b13")
     socket_dir = os.path.join(work, "sockets")
     os.makedirs(socket_dir, exist_ok=True)
@@ -520,7 +538,18 @@ def libreoffice(args: dict) -> dict:
         "as_conversion_py": _libreoffice_once(binary, work, "plain", [], {}),
         "OSL_SOCKET_PATH_env": _libreoffice_once(binary, work, "env", [], {"OSL_SOCKET_PATH": socket_dir}),
         "OSL_SOCKET_PATH_arg": _libreoffice_once(binary, work, "arg", [f"-env:OSL_SOCKET_PATH={socket_dir}"], {}),
+        # The soffice launcher (oosplash) checks only /tmp and /var/tmp for its
+        # pipe and exits before the office starts; the office itself
+        # (soffice.bin) honours OSL_SOCKET_PATH. Run it directly; it may ask
+        # for one restart (exit 81) on a fresh profile, which oosplash would do.
+        "soffice_bin_OSL_SOCKET_PATH": _soffice_bin(work, socket_dir),
     }
+
+
+def exit_with(args: dict) -> dict:
+    """B14: the parser ends itself with a chosen exit code (137 looks like a
+    SIGKILL to anything that reads exit codes as 128+N)."""
+    os._exit(int(args.get("code", 137)))
 
 
 def sleep(args: dict) -> dict:
@@ -544,6 +573,7 @@ PROGRAMS = {
     "leave": leave,
     "cgroup_escape": cgroup_escape,
     "sleep": sleep,
+    "exit_with": exit_with,
     "libreoffice": libreoffice,
 }
 
