@@ -186,7 +186,7 @@ are D-149 – D-153.
 | 0 | Safety net: push, CI green, `main` protected (done before 5.5 began); **CI database and the unapproved-skip check** (H7 part 2); core type-checked and pinned in CI | DONE (PR #3, merged 2026-09-25) | D-148 |
 | 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents. **Plus the two defects the founder's walkthrough found on the real stack (2026-09-27): the review screen said nothing when an edit raised a check (D-166), and a session token one second ahead of this clock was refused as "signed out" (D-167).** | **CHECKPOINT DONE 2026-09-26, awaiting "go"** (`CHECKPOINTS.md`: C1, H1, H3, M1, M3, H2, M4, M5 all closed). 1a DONE (PR #4, D-156); 1b DONE (PR #6, migration `0027`, D-158 – D-160); 1c DONE (PR #7: golden rename, M1 streaming measured, H2/M4/M5, one read budget, every paid call costed, Audit tab on one clock; D-159, D-161 – D-164); named system actors DONE (PR #8, migration `0028` applied and verified on staging 2026-09-26: 3 system actors, no blank lifecycle actor, idle-transaction cap 5 min; D-165); Stage 1 checkpoint run on `b04f16d`; walkthrough fixes DONE (D-166 the review screen, D-167 clock skew, D-169 the line table marking the rows and numbers a check is about, and the live end-to-end suite that catches this class of defect) | D-149, D-154 – D-169 |
 | 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events (record the event in the same transaction as its effect; ignore an event older than the state already saved; **an event in the same second as the saved state can't be ordered by `created` (one-second resolution), so it re-fetches the subscription from Stripe and saves that, never guesses** -- a webhook-side fetch, not a page-load one, so within 7.15.3 (founder, 2026-09-26); the Phase 6 plan-change reconcile reuses this guard). **Plus two clock items folded in from the D-170 sweep:** `first_past_due_at` written from Stripe's event time rather than the app clock, and tests that a stale and a future-dated Stripe webhook signature are both refused (the 300 s tolerance is real but untested today). **Also carries 2a's deferred `intake_webhook_refused` alert** and the `founder_alerts` insert policy it needs (the `rollup_raise` pattern from 0017), since `0029` is the migration already planned (D-171). **2a (H8) DONE (PR #14):** the inbound webhook now authenticates the provider with Postmark's HTTP Basic credentials, checked before the payload is parsed and before the token is resolved; the per-tenant token identifies the tenant and no longer authenticates the request. A blank credential refuses all inbound mail on purpose (D-171), so RUNBOOK 2.1's cutover order is a requirement: credentials set and deployed, *then* Postmark pointed at the URL carrying them. A refusal logs which reason it was, and **raises a high-severity `intake_webhook_refused` alert in 2c, not 2a** -- a tenant-less alert needs its own RLS insert policy, which needs a migration, and 2c already has `0029`; `test_rls_flags.py` caught the attempt to raise it from the router and located the right home (D-171). **Blocking condition (founder, 2026-09-27): credential enforcement must not go live on an address real customers send to until 2c's alert lands.** A refused request is, from outside, either a misconfigured cutover or an attacker, and the first means no mail arrives at all -- so until the alert exists, the only signal is a log line nobody is watching. Staging and a test address are fine; the RUNBOOK 2.1 cutover on a production intake address waits for 2c. The IP allowlist is log-only with no enforcing branch (D-155); RUNBOOK 2.3 is the confirm-then-enforce procedure and 2.2 the rotation procedure. 12 tests; 10 of them fail with the credential check disabled **2b (H10) DONE (PR #15):** a suspended or pending-deletion tenant can no longer upload -- refused with a new `INT-010` before the file is validated or stored, so it costs nothing; read and export stay open, asserted against `/home`, the order history, one order in full and its export history, in both blocked states (7.14). `cancelling` deliberately does not block. One predicate, `intake_gate.blocks_new_intake`, is shared by both intake channels so the lifecycle answer cannot drift -- which is how the defect existed. Two departures from the review's proposed fix, reasoned in D-172: a new catalog entry rather than reusing INT-006 (whose reader is a buyer whose mail bounced, not the tenant's own user), and the gate reads lifecycle status rather than `intake_address_active` (which is also false before go-live). The refused attempt is recorded in `intake_rejections` (the file is not), so a customer who keeps trying is visible -- a retention signal, not only an audit one. Three drift tests beyond the shared predicate: both real endpoints asserted to agree across four states, a structural test forbidding the status pair inside any condition, and the invariant that the suspend transition sets `status` and clears `intake_address_active` together (they are different columns and only the transition keeps them in step). 14 tests; 3 fail with the gate disabled **2c (H11, clock items #3 and #6, 2a's deferred alert) BUILT, migration `0029` not yet applied to staging:** Stripe events go through `record_stripe_subscription_event()`, a SECURITY DEFINER function called inside the tenant's own session, which records the event id in the same transaction as the status write, applies the ordering guard (older events recorded, not applied; a NULL saved time applies), and cross-checks the customer against the session's tenant. A same-second event fetches Stripe's state with no transaction open and re-checks the guard before saving. `first_past_due_at` is Stripe's event time and `unpaid` no longer resets it. No session can write `stripe_webhook_events` any more; EXECUTE is revoked from PUBLIC **and from Supabase's `anon`/`authenticated`** (which get it by default -- found while building, D-175). A refused inbound webhook now raises a high-severity `intake_webhook_refused` alert, one per reason, never changing the 401 -- **which satisfies 2a's blocking condition once 0029 is applied** (RUNBOOK 2.1). Stripe's clock against ours has one named tolerance, `STRIPE_CLOCK_TOLERANCE_SECONDS` (300 s), enforced at the signature and, on the database's clock, at the event time: an event stamped beyond it is not applied and alerts the founder (D-176). 29 new API tests (22 webhook, 7 refusal alert) plus 5 static core tests | 2a, 2b DONE; **2c DONE** (PR #18; `0029` applied to staging 2026-09-28; on `b540433`: API 477 passed / 3 deselected, core 547 passed, worker 107 passed; CI green); **2d (H9) DONE** (PR #20; lost-device drill passed on staging 2026-09-28, D-177): the Console needs an aal2 session (AUTH-006); seven destructive actions -- hard delete, clear quarantine, cancel, address rotation, buyer merge, go live, tier change -- need a TOTP challenge under 5 min old (AUTH-007, 30 s GoTrue allowance); a wrong code is AUTH-008, mirrored in the web app and kept in step by a test; `CONSOLE_MFA_ENFORCED` ships off, with a startup warning, a Console banner and a founder alert while off; enrol and add a backup at /admin/security; RUNBOOK section 4. No migration. 24 API tests (11 fail with the checks disabled), 4 Vitest, 4 e2e. **Founder enrolled 2026-09-28: two authenticators, both verified** (checked through the Supabase admin API). The backup first failed: Supabase refuses a second factor with the same name (422), and both were named after the date -- fixed in PR #21 (each new authenticator gets a name not already taken; 2 Vitest). A failed enrolment now shows its own catalog entry, **`AUTH-009`** (PR #22), mirrored in the web app and drift-tested like AUTH-008, instead of the generic "We couldn't reach DocFlow" (founder, 2026-09-28, who also set its next-step wording; 2 e2e). **The e2e suite now fails any test whose browser reaches a host other than this machine** (`apps/web/e2e/networkGuard.ts`, every spec imports it and a check fails the suite if one doesn't) -- one AUTH-009 test draft had reached real staging; shown failing with a test pointed at staging. **Second lost-device drill with enforcement on PASSED 2026-09-28 (D-178)**: backup-only sign-in, stale step-up refused, fresh one accepted, dashboard removal leaving only enrolment, re-enrol; drill admin revoked and deleted. **`CONSOLE_MFA_ENFORCED` is on** for the local API (`.env` and the running process agree). A CI timing race in `test_console_mfa.py` was found and fixed (D-178) | D-151, D-170, D-171, D-172, D-173, D-175, D-176, D-177 |
-| 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation (**host settled, D-150: Fly.io, each parse process in its own network namespace; proof spike PASSED 2026-09-28. Carried in from the spike: hide `/.fly` and `/sys` in a mount namespace, and re-run the probe against the real Upstash and API**), H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) -- **including a login for the Stripe webhook that holds EXECUTE on 2c's event function, with EXECUTE then revoked from `docflow_app`**, which closes the residual risk D-173 names. **Also moves with it (founder, 2026-09-28): 0029's `platform_admin_read` policy on `stripe_webhook_events`** -- a flag policy on `app.is_platform_admin`, so it goes to real login separation with D-173's function grant; likewise 0029's `app.intake_refusal` policies (D-175 §8). **H6 note: signed URLs become cross-clock** -- minted and verified on the app clock today (`signed_urls.py`), one clock because one service does both; on Supabase Storage the expiry is Supabase's clock, so D-170 applies (a named tolerance and a test, or the expiry decided in one place) -- **settled 2026-09-29: the expiry is decided in one place, our own signed links with the API streaming from Storage.** **Also carried from the Stage 1 checkpoint (D-163):** a run row before the model call, so a worker killed mid-call still records the call's cost | **IN PROGRESS** -- design agreed 2026-09-29 ("Stage 3 -- agreed with the founder before building", below); order 3a -> 3e. **3b MERGED 2026-09-30 (PR #31, main `5810a54`, D-182). 3c: detailed design PROPOSED 2026-09-30, awaiting the founder's answers and approval of the Fly staging price; nothing built, nothing on Fly.** **3a BUILT** (D-179; branch `phase55/stage3a-task-limits`, migration `0030`), including reactivation option C (**3a MERGED, PR #26**). **Card billing, between 3a and 3b: BUILT** (D-181; branch `phase55/card-billing`, migration `0031` waiting on staging; see "Card billing with a 7-day trial"). **Also (founder, 2026-09-29): a second test run against the same database refuses to start** -- an advisory lock in the API and worker suites (D-180, RUNBOOK 1.4). `0030` applied to staging 2026-09-29 after the founder's backup (`backup_0030`: documents, tenants, RLS on). Staging suites on `621141f`: worker 134 passed / 2 skipped (the two prefork tests, Linux only; they pass in CI), API 518 passed / 1 failed / 3 deselected, core 564 passed. The one API failure, `test_a_failed_tenant_creation_rolls_back_everything_including_the_file_move`, counts every tenant on staging and saw the count fall from 20 to 19 during the test -- something else was writing to staging at that moment; a failed creation cannot remove a tenant. Rerun alone: the file 13 passed, the test 3 of 3 passed. D-163 moved to 3c | D-003, D-150, D-159, D-163, D-170, D-173 |
+| 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation (**host settled, D-150: Fly.io, each parse process in its own network namespace; proof spike PASSED 2026-09-28. Carried in from the spike: hide `/.fly` and `/sys` in a mount namespace, and re-run the probe against the real Upstash and API**), H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) -- **including a login for the Stripe webhook that holds EXECUTE on 2c's event function, with EXECUTE then revoked from `docflow_app`**, which closes the residual risk D-173 names. **Also moves with it (founder, 2026-09-28): 0029's `platform_admin_read` policy on `stripe_webhook_events`** -- a flag policy on `app.is_platform_admin`, so it goes to real login separation with D-173's function grant; likewise 0029's `app.intake_refusal` policies (D-175 §8). **H6 note: signed URLs become cross-clock** -- minted and verified on the app clock today (`signed_urls.py`), one clock because one service does both; on Supabase Storage the expiry is Supabase's clock, so D-170 applies (a named tolerance and a test, or the expiry decided in one place) -- **settled 2026-09-29: the expiry is decided in one place, our own signed links with the API streaming from Storage.** **Also carried from the Stage 1 checkpoint (D-163):** a run row before the model call, so a worker killed mid-call still records the call's cost | **IN PROGRESS** -- design agreed 2026-09-29 ("Stage 3 -- agreed with the founder before building", below); order 3a -> 3e. **3b MERGED 2026-09-30 (PR #31, main `5810a54`, D-182). 3c: detailed design PROPOSED 2026-09-30 and revised the same day after the founder's review (approved in principle; Q1-Q7 answered, staging price option B chosen); the founder's pre-build cgroup check ran on a throwaway Fly machine, since destroyed (`docs/spikes/3c-cgroup-check/`: v2 memory unavailable as Fly delivers it, v1 per-job memory works, seccomp works); Q8-Q10 open; the 50-test table is with the founder. Nothing built.** **3a BUILT** (D-179; branch `phase55/stage3a-task-limits`, migration `0030`), including reactivation option C (**3a MERGED, PR #26**). **Card billing, between 3a and 3b: BUILT** (D-181; branch `phase55/card-billing`, migration `0031` waiting on staging; see "Card billing with a 7-day trial"). **Also (founder, 2026-09-29): a second test run against the same database refuses to start** -- an advisory lock in the API and worker suites (D-180, RUNBOOK 1.4). `0030` applied to staging 2026-09-29 after the founder's backup (`backup_0030`: documents, tenants, RLS on). Staging suites on `621141f`: worker 134 passed / 2 skipped (the two prefork tests, Linux only; they pass in CI), API 518 passed / 1 failed / 3 deselected, core 564 passed. The one API failure, `test_a_failed_tenant_creation_rolls_back_everything_including_the_file_move`, counts every tenant on staging and saw the count fall from 20 to 19 during the test -- something else was writing to staging at that moment; a failed creation cannot remove a tenant. Rerun alone: the file 13 passed, the test 3 of 3 passed. D-163 moved to 3c | D-003, D-150, D-159, D-163, D-170, D-173 |
 | 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items. **Also (founder, 2026-09-29): audit the ~23 broad `except` blocks on the document path.** Each one turns *any* exception into a data outcome -- DOC-005 (parsing, conversion), DOC-021 (saving, validation) or VAL-016 (buyer identification, matching, duplicate detection) -- so a real bug in our code can be shown as a problem with the customer's file. After the audit only the exceptions each block expects get a catalog code; anything else fails loudly as our error. Found while designing 3a's timeouts, not in 3a's scope | PLANNED | D-152 |
 | 5 | Remaining findings, doc/code contradictions, proposed CLAUDE.md additions; **audit every test that counts a whole table** (the `deal7` pattern) and move each one to data only that test can see, after which staging suites may run concurrently again (RUNBOOK 1.4); **robust test cleanup** (every test that creates data cleans it up in a fixture or `finally`, so a failing test still leaves nothing); **a staging sweep script** that lists tenants named "Acme Test ..." older than a day, with what each holds, and deletes one only on the founder's per-action OK (a stopped run always strands something); **triage the API suite's warnings** (425 on the 2026-09-26 run): list each kind, say which are harmless library deprecations and which point at a real problem in our code -- listed, not fixed (triage done 2026-09-26, D-163: all 439 are test-only; 438 are PyJWT's `InsecureKeyLengthWarning` from short test signing keys); **use a test JWT secret of at least 32 bytes** to clear that noise (founder); **a test that expects the database to refuse a write** must run in a transaction that is always rolled back, or on data it owns, so it can't leave a row behind when the refusal doesn't happen (D-165 incident); **two audit-trail findings from the second lost-device drill (D-178; founder: fixed before any pilot, with tests; design settled 2026-09-28)** -- (1) refused Console and step-up attempts are recorded server-side (AUTH-006/007); AUTH-008 is never browser-reported, and Supabase's database audit log was checked and records nothing on this project, so that gap is documented and Supabase's rate limit covers wrong-code guessing (its behaviour measured with the test account at build time); 5 refusals in 15 min for one account raise one high-severity founder alert per window, set only after measuring what a normal sign-in and step-up produce; (2) the outcome is a second, append-only `admin_actions` row referencing the intent row (succeeded, or failed with its code; no migration), and an intent with no outcome is shown in the Console as crashed midway, never as done; *low priority, not a blocker:* **count rows in spreadsheet and CSV orders for free before extraction** (no model call needed), so an oversized order is caught before a paid read (founder, D-163) | PLANNED | D-160, D-163, D-165, D-178 |
 
@@ -953,9 +953,12 @@ tests), then the rollout in item 11.
   3**, on a Fly staging deployment. It is priced first, and the founder
   approves the monthly number before anything is stood up.
 
-**3c detailed design -- PROPOSED 2026-09-30. Nothing is built and nothing
-goes on Fly until the founder answers Q1-Q7 (end of this section) and
-approves the monthly price (item 12).** Items marked *proposed* are mine.
+**3c detailed design -- PROPOSED 2026-09-30, revised the same day after the
+founder's review ("approved in principle with these changes"). Q1-Q7
+answered (end of this section). Still open: Q8-Q10, which the founder's
+own pre-build check raised. Nothing is built, and nothing goes on Fly
+except throwaway check machines, until those are answered and the founder
+has seen the test table (item 11).**
 
 *Where things stand today.* Every hostile file is opened inside the Celery
 worker process, the same process that holds the database login, the
@@ -971,15 +974,69 @@ places that open a file a stranger sent:
 | worker, `parse_import` | catalog and customer-list files (`catalog_parsing.parse_table`) | openpyxl, xlrd, csv |
 | API, upload / email intake / Console staging | the gate before storing: magic bytes, the zip's entry list, the first bytes of each XML part (`validate_upload`) | Python's own `zipfile`, `zlib`, `re` |
 
+**The founder's pre-build check on a real Fly machine (2026-09-30).** The
+founder asked, before anything is built, whether the service can create a
+per-job cgroup v2 memory limit on a Fly machine. Checked on a throwaway
+app (`docflow-spike-cgroup-ekqxmh`: shared-cpu-1x, 1 GB, `iad`, no
+services, no IP, no credential; destroyed afterwards, `fly apps list`: no
+apps). Script, Dockerfile and output: `docs/spikes/3c-cgroup-check/`.
+Every check that needs a control had one beside it (RUNBOOK 1.7).
+- **cgroup v2 memory limits are not available as Fly delivers the
+  machine.** Kernel `6.12.105-fly`, booted with `cgroup_enable=memory
+  swapaccount=1`. Fly's init mounts the cgroup **v1** controllers (memory,
+  pids, cpu/cpuacct and the rest) under `/sys/fs/cgroup`, and a v2
+  hierarchy at `/sys/fs/cgroup/unified` with **no controllers**. A
+  controller can belong to only one hierarchy, so v2 has no `memory.max`.
+- **Moving `memory` to v2 failed.** Root could unmount the v1 memory
+  hierarchy, but the controller was not handed to v2: `/proc/cgroups`
+  still showed it on v1 hierarchy 8 with 5 cgroups lingering. Taking
+  Fly's setup apart at startup would be fragile anyway.
+- **The cgroup v1 memory controller works per job** (run 2, all PASS):
+  one process over a 256 MiB limit was killed, while 400 MiB with no limit
+  survived as the control; **4 processes x 120 MiB, together over 256 MiB,
+  were stopped**; the limit held inside the full sandbox (namespaces, uid
+  10001, no capabilities); the sandboxed job couldn't raise its limit or
+  move out (EACCES), and with `/sys` hidden the files weren't there at
+  all (ENOENT); root could still change the limit; emptied job cgroups
+  were removed cleanly; a v1 `pids.max` of 20 stopped a fork loop at 19.
+- **The founder's point, confirmed:** the same 4 x 120 MiB processes, each
+  under its own 256 MiB `setrlimit` and no cgroup, **all survived**.
+  `setrlimit` multiplies with the processes, as the founder said.
+- **v1 has no "kill the whole group" switch** (v2's `memory.oom.group`):
+  after the family test one process was still left in the cgroup. So the
+  supervisor must kill the whole job itself on any out-of-memory kill
+  (item 3).
+- **seccomp works on Fly's kernel** (run 1, 2b/2c/2e PASS): every call on
+  the founder's list was answered by the filter, both as root and when
+  uid 10001 loaded it itself under `no_new_privs`. `clone3` got ENOSYS,
+  and a normal thread and a normal fork still worked.
+- **Why seccomp matters here, measured:** without the filter, uid 10001
+  with no capabilities **could** create a user namespace
+  (`unshare(CLONE_NEWUSER)` succeeded; `max_user_namespaces` is 3716),
+  then clone a new network namespace from inside it, and could use
+  `keyctl`. With the filter, none of those worked.
+- **Block devices are visible on the machine:** `vda`, `vdb`, `vdc`, 8
+  `loop`, 16 `nbd`, all root-only. That is the control for the new `/dev`
+  test (A13).
+- No swap on the machine (`/proc/swaps` empty); 985 MB of usable memory
+  on a 1 GB machine.
+- Method notes, stated plainly: run 1's 1l and 1m results said nothing
+  about the design (the job files they probed were never created, because
+  v2 had no controllers), and are superseded by run 2's A6 and A7. A
+  re-check line produced from PowerShell (`controllers=[]`) was read on
+  this machine, not on Fly; the evidence file says so, and the valid
+  re-read is beside it.
+
 1. **What moves into the parse service.** Everything in the first three
-   rows. The worker keeps: reading the original from Storage and checking
-   its SHA-256 (3b), sending the bytes, checking the answer (item 6),
-   turning returned text into the text preview (string work, no file), the
-   model call, and everything after it. Exports stay in the worker: it
-   writes those files itself, and the round-trip check reads back only
-   bytes DocFlow wrote. **The API's gate (last row) stays where it is
-   unless the founder says otherwise (Q1).**
-   - **Afterwards the worker and the API cannot parse.** pdfplumber,
+   rows of the table above. The worker keeps: reading the original from
+   Storage and checking its SHA-256 (3b), sending the bytes, checking the
+   answer (item 6), turning returned text into the text preview (string
+   work, no file), the model call, and everything after it. Exports stay
+   in the worker: it writes those files itself, and the round-trip check
+   reads back only bytes DocFlow wrote. **The API's gate (last row) stays
+   in the API (Q1: yes);** the same check runs again in the sandbox before
+   anything else.
+   - **Afterwards the worker and the API can't parse.** pdfplumber,
      python-docx, Pillow, pillow-heif, olefile, xlrd and defusedxml leave
      both requirement files, and LibreOffice leaves the worker's machine.
      openpyxl stays in the worker for writing `.xlsx` exports only. A
@@ -988,321 +1045,544 @@ places that open a file a stranger sent:
      importable from `apps/worker` or `apps/api` product code.
 2. **The service.** A new `apps/parse/`, its own requirements and lock
    file, its own Dockerfile.
-   - **One image, built once.** The Dockerfile pins the base image by
-     digest and LibreOffice by Debian package version. CI and Fly run the
-     same file; the dependency audit covers its lock file like the others.
-   - **Private only.** A Fly app with no public IP, reached by the worker
-     over Fly's private network (Flycast). It holds **no storage key, no
-     database login and no model key** (agreed).
+   - **One image, built once.** Base `debian:trixie-slim` (Debian 13),
+     pinned by digest, so Debian's own Python is 3.13 (what CI uses) and
+     its `python3-seccomp` binding is available. LibreOffice and
+     `python3-seccomp` are pinned by Debian package version. CI and Fly run
+     the same file, and the dependency audit covers its lock file. (The
+     check machine ran Debian 12; CI is the first place trixie is proven.)
+   - **Private only, reached over Flycast (founder's item 4, confirmed).**
+     The parse app has **no public IP address** and no `[http_service]`.
+     Flycast still needs a services section for Fly's proxy to route to the
+     app at all (Fly's Flycast docs: "either an `[http_service]` section or
+     `[services]` sections"). So the app has a `[[services]]` block, plain
+     HTTP (Flycast is HTTP-only; no TLS handler, no `force_https`), with
+     `auto_stop_machines` and `auto_start_machines` on: a worker request to
+     `docflow-parse-staging.flycast` starts a stopped machine. The address
+     is private because the app holds only a private IPv6 address
+     (`fly ips allocate-v6 --private`). Fly's docs warn that any public IP
+     on the app would expose the services section to the internet, so
+     **tests N1-N2 check the IP list after every deploy.**
    - **Two calls:** `POST /v1/document` (bytes in; text parts, page or
      image parts, and the preview out) and `POST /v1/table` (bytes in;
-     rows of text cells out, for catalog imports). Each answer is one of:
+     rows of text cells out, for catalog imports). Each answer is one of
      `ok`, `rejected` (a catalog code, exactly as today: DOC-001, DOC-005,
-     DOC-010 to DOC-019 and IMP-004), or `stopped` (a limit was hit, item
-     3).
+     DOC-010 to DOC-019 and IMP-004), or `stopped` (a limit was hit,
+     item 3).
    - **The supervisor never opens a file.** It is a small HTTP process
-     that caps the request size (`MAX_FILE_SIZE_BYTES`), starts one sandboxed
-     job per request, reads the job's answer up to a cap, checks the
-     answer's shape, and replies. Everything that reads the file's contents
-     runs in the job.
-   - **Slots.** *Proposed:* 2 jobs at once per machine
-     (`PARSE_SLOTS`). A request that finds no free slot gets a 503 with
-     `Retry-After`; the worker treats that as "wait", never as a failure.
-3. **Every job (agreed list; this is how).** The supervisor runs as root
-   (it must, to create namespaces) and starts the job as:
-   1. new network, mount, PID, IPC and UTS namespaces (`unshare --net
-      --mount --pid --ipc --uts --fork`). The network namespace has only a
-      loopback that is down; the PID namespace means the job sees only its
-      own processes, and killing its first process kills all of them,
-      LibreOffice's helpers included;
-   2. inside the mount namespace: an empty tmpfs over `/.fly` and `/sys`
-      (the spike's two findings), a fresh `/proc` for the new PID
-      namespace, and a private size-capped tmpfs as the only writable
-      place (`/work`, where the input file is placed);
-   3. `setrlimit`: address space (memory), CPU seconds, open files,
-      processes, file size, no core dumps;
-   4. an empty environment (a fixed `PATH`, `HOME=/work`, `LANG`);
-   5. drop to an unprivileged user with `setpriv`: no capabilities, an
-      empty bounding set, `no_new_privs`, no supplementary groups. As in
-      the spike. *Proposed:* **one user ID per slot** (10001, 10002), so the
-      process limit is per job and two jobs never share an owner;
-   6. exec the job's Python entry point, which does exactly what today's
-      worker code does and writes its answer to stdout.
+     that caps the request size (`MAX_FILE_SIZE_BYTES`), starts one
+     sandboxed job per request, reads the job's answer up to a cap, checks
+     the answer's shape, and replies. Everything that reads the file's
+     contents runs in the job.
+   - **Slots:** 2 jobs at once per machine (`PARSE_SLOTS`). A request
+     that finds no free slot gets a 503 with `Retry-After`, which the
+     worker treats as "wait", never as a failure.
+   - **Who can call it (Q2: yes):** a shared token, `PARSE_SERVICE_TOKEN`,
+     held by the worker and the supervisor only, never passed into a job.
+3. **Every job.** The supervisor runs as root (it must, to create
+   namespaces and cgroups) and, for each request:
+   1. **creates the job's cgroups** (Q8; recommended, v1 as Fly delivers
+      it): a memory cgroup with the job's memory limit (and the same
+      memory+swap limit, so turning on swap later can't let a job
+      escape), a pids cgroup with the job's process cap, and a cpuacct
+      cgroup to read the job's total CPU. The job's first process is moved
+      into them before it starts anything, so everything it starts is
+      born inside the limits;
+   2. starts the job in new network, mount, PID, IPC and UTS namespaces
+      (`unshare --net --mount --pid --ipc --uts --fork`). The network
+      namespace has only a loopback that is down. Killing the PID
+      namespace's first process kills every process in it, LibreOffice's
+      helpers included;
+   3. inside the mount namespace (founder's items 3 and Q7):
+      - **the root filesystem is read-only** (Q7: yes);
+      - **writable, size-capped tmpfs only:** `/work` (the input file and
+        temporary files) and a separate home for LibreOffice's profile
+        (`HOME`). Their pages count against the job's memory limit too;
+      - an empty tmpfs over `/.fly` and `/sys` (the D-150 spike's two
+        findings), which also hides the job's own cgroup files;
+      - a fresh `/proc` for the new PID namespace;
+      - **its own minimal `/dev`** (founder's item 3): a new tmpfs holding
+        only `null`, `zero`, `full`, `random` and `urandom`, plus a
+        size-capped `/dev/shm`. No block device, nothing else;
+   4. `setrlimit` **as backstops** (founder: the cgroup is the primary
+      cap): address space per process, CPU seconds per process, processes
+      per user, open files, file size, no core dumps;
+   5. an empty environment (a fixed `PATH`, `HOME`, `TMPDIR=/work`,
+      `LANG`);
+   6. drops to an unprivileged user with `setpriv`: no capabilities, an
+      empty bounding set, `no_new_privs`, no supplementary groups, **one
+      user ID per slot** (10001, 10002);
+   7. execs the job's Python entry point, which **first** (founder's item
+      1) sets `PR_SET_NO_NEW_PRIVS` itself and loads the seccomp filter
+      (below), then checks `/proc/self/status` shows `NoNewPrivs: 1` and
+      `Seccomp: 2`, and only then opens the input. If either check fails,
+      it exits without reading the file and the supervisor answers as for
+      an isolation failure. The filter is inherited by everything the job
+      starts, LibreOffice included.
 
-   **The supervisor's own limits:** a wall-clock timer that SIGKILLs the
-   job's first process (so the whole PID namespace dies); a cap on the
-   answer's size (it stops reading and kills the job past it); `/work` is
-   gone when the job ends, so nothing outlives a file. Every job is a new
-   process: **one subprocess per file, never reused** (agreed).
+   **The seccomp filter (founder's item 1).** Default allow, with these
+   refused (each answers EPERM):
+   - the founder's list: `unshare`; `clone` with any new-namespace flag;
+     `setns`; `mount` and `umount2`; `ptrace`; `bpf`; `keyctl`;
+     `perf_event_open`; `init_module`, `finit_module`, `delete_module`;
+     `kexec_load`, `kexec_file_load`;
+   - **the calls that do the same jobs by another name**, without which
+     the list could be stepped around (*proposed*, inside the founder's
+     intent): the newer mount calls (`fsopen`, `fsconfig`, `fsmount`,
+     `fspick`, `move_mount`, `open_tree`, `mount_setattr`); the rest of
+     the key family (`add_key`, `request_key`); and `ptrace`'s relatives
+     `process_vm_readv` and `process_vm_writev`;
+   - **`clone3` answers ENOSYS**, not EPERM. It passes its flags in a
+     memory block the filter can't read, so it is refused in a way that
+     makes the C library fall back to `clone`, whose flags the filter
+     can read (Fly check 2c: threads and fork still work);
+   - calls from any other CPU architecture are killed (libseccomp's
+     default for a filter built for x86_64 only), so a 32-bit call can't
+     slip past the rules.
+
+   **The supervisor's own limits:**
+   - a wall-clock timer that SIGKILLs the job's first process, so the
+     whole PID namespace dies;
+   - a watch on the job's cgroups every 100 ms while it runs. **Any
+     out-of-memory kill in the job kills the whole job** (v1 kills one
+     process at a time; the Fly check left one behind). So does the job's
+     **total** CPU passing its cap (*proposed*, Q8: CPU seconds multiply
+     with processes exactly as memory does);
+   - a cap on the answer's size (it stops reading and kills the job past
+     it);
+   - after the job, the cgroups are removed and `/work` and the home are
+     gone, so nothing outlives a file. Every job is a new process: **one
+     subprocess per file, never reused.**
 
    *Proposed numbers, then measured (the real Tier 1 and Tier 2 POs must
-   all parse under them in CI, item 11 D, before they are fixed):*
+   all parse under them in CI and on Fly, D1, before they are fixed):*
 
-   | Constant | Proposed | Why |
+   | Limit | Proposed | Kind |
    |---|---|---|
-   | `PARSE_JOB_WALL_SECONDS` | 180 | Above LibreOffice's own 120 s (kept), well inside the 20-minute read budget (D-163) |
-   | CPU seconds | 150 | Below the wall clock, so a spinning parser hits the CPU limit first |
-   | Memory (address space) | 1 GiB | Two slots fit a 2 GB machine with room for the supervisor |
-   | Processes per job user | 128 | LibreOffice runs a few dozen threads; threads count |
+   | `PARSE_JOB_WALL_SECONDS` | 180 | supervisor; above LibreOffice's own 120 s (kept), well inside the 20-minute read budget (D-163) |
+   | Job memory (cgroup) | 768 MiB | **primary**; two slots fit a 2 GB machine with room for the supervisor |
+   | Job CPU total (cpuacct) | 150 s | **primary** if Q8 says yes |
+   | Job processes (cgroup pids) | 128 | **primary**; LibreOffice runs a few dozen threads, and threads count |
+   | Address space per process | 2 GiB | backstop, set high on purpose: LibreOffice reserves far more than it uses |
+   | CPU seconds per process | 170 | backstop |
+   | Processes per slot user | 256 | backstop |
    | Open files | 256 | |
    | Largest file the job may write | 64 MiB | |
-   | `/work` tmpfs | 256 MiB | |
-   | Answer cap | 48 MiB | A 25 MB scanned PDF returned base64 is about 34 MB |
+   | `/work` tmpfs | 256 MiB | counts against job memory |
+   | LibreOffice home tmpfs | 128 MiB | counts against job memory |
+   | `/dev/shm` | 64 MiB | counts against job memory |
+   | Answer cap | 48 MiB | a 25 MB scanned PDF returned base64 is about 34 MB |
 
-   **Known risk:** LibreOffice reserves a lot of address space it never
-   uses, and an address-space limit counts reservations. If 1 GiB
-   refuses real `.doc` files, the alternative is a cgroup memory limit
-   for the job, which counts memory actually used. I'll measure first and
-   **ask before switching** rather than raise the number quietly.
-4. **Refuses to start in production mode unless isolation is active
-   (agreed; this is how).**
-   - Production mode is on when `FLY_APP_NAME` is set (Fly sets it on every
-     machine) or `DOCFLOW_ENV=production`. `PARSE_ISOLATION=off`, the dev
-     setting, is refused in production mode: it can't be switched off on
-     Fly by a stray setting.
+   **CI and Fly take different cgroup paths, stated plainly.** GitHub's
+   runners are cgroup v2 only, and Fly is v1. The supervisor detects which
+   one it has at startup: v2 memory if it is available, otherwise v1. If
+   Fly ever moves to v2, the same image follows it. So CI proves the
+   supervisor's logic on v2, and **the v1 path production uses is proven
+   only on Fly**. That is why the B tests are required on Fly before the
+   merge, not only in CI.
+4. **Refuses to start in production mode unless isolation is active.**
+   - Production mode is on when `FLY_APP_NAME` is set (Fly sets it on
+     every machine) or `DOCFLOW_ENV=production`. `PARSE_ISOLATION=off`,
+     the dev setting, is refused in production mode, so a stray setting
+     can't switch it off on Fly.
    - **At startup, before the port opens,** the supervisor runs a canary
-     job through the same launcher: a fixed check built into the image (no
-     input) that tries the spike's probes and expects every one to fail,
-     and checks its own user ID, capabilities, `no_new_privs`, limits and
-     that `/.fly` and `/sys/class/net` are empty. Any unexpected success,
-     or a launcher that can't create the namespaces, exits with an error.
-     Fly restarts it, it fails again, and the health check never passes,
-     so the worker gets "unavailable" (item 6) and the founder an alert.
+     job through the same launcher. It is a fixed program built into the
+     image and takes no input. It checks that:
+     - every network probe fails;
+     - `/.fly`, `/sys` and the block devices are hidden;
+     - the root filesystem is read-only;
+     - it has the slot's user, no capabilities, `NoNewPrivs: 1` and
+       `Seccomp: 2`;
+     - a few calls from the seccomp list are refused;
+     - **a memory limit really kills** (a small allocation past a small
+       cgroup limit must be stopped).
+
+     Any unexpected success, or a cgroup or namespace that can't be
+     created, exits with an error. Fly restarts it, it fails again, and the
+     health check never passes, so the worker gets "unavailable" (item 6)
+     and the founder an alert.
    - `/health` answers OK only after the canary passed.
    - There is **no HTTP endpoint that runs a probe or a test program.**
-     The canary and the limit self-tests in item 11 are fixed programs in
+     The canary and the self-test programs in item 11 are fixed programs in
      the image, started through the same launcher from a shell on the
-     machine (`fly ssh console`), never over the network.
-5. **Who can call it (Q2).** Fly's private network spans the whole
-   organisation, so the API (the internet-facing app) can reach the parse
-   service too. *Proposed:* a shared token, `PARSE_SERVICE_TOKEN`, held by
-   the worker and the supervisor only, never passed into a job. It is a
-   low-value secret (it only lets someone ask for a file to be parsed in
-   the sandbox), but it means the service answers nothing to any app but
-   the worker.
+     machine (`fly ssh console`, or `docker exec` in CI), never over the
+     network.
+5. **(Folded into item 2: the shared token, Q2.)**
 6. **The worker's side: what each answer does.** A new `parse_client`
-   module; connect timeout 5 s, read timeout `PARSE_JOB_WALL_SECONDS` + 30 s.
+   module. Connect timeout 5 s; read timeout `PARSE_JOB_WALL_SECONDS` +
+   30 s.
 
    | Answer | Document | Catalog import |
    |---|---|---|
-   | `ok` | parts checked (item below), then the read goes ahead as today | rows checked, then as today |
+   | `ok` | parts checked (below), then the read goes ahead as today | rows checked, then as today |
    | `rejected` with a code | `failed` with that code, as today | `failed` with that code, as today |
-   | `stopped` (a limit) | `failed` with **new DOC-029** (Q3) | `failed` with IMP-004, as today for an unreadable file |
-   | **Never got in:** connection refused, DNS failure, 503 no free slot, the service unhealthy | **waits, as a Storage outage does (3b):** stays `processing`, the attempt given back, the sweep retries; `parse_service_unavailable` alert (Q4) | IMP-009 ("start again"), same alert |
-   | **Got in, never came out:** the connection dropped or the read timed out after the file was sent | the attempt counts, like a worker crash: the sweep retries and 3a's rules end it in DOC-022. *Why not wait:* a file that takes the whole machine down would otherwise wait forever and take a slot down with it each time | IMP-009 |
-   | An answer that fails the worker's checks | `failed` DOC-005 and a founder alert (Q3) | IMP-004 and the same alert |
+   | `stopped` (a limit) | `failed` with **DOC-029** (Q3), founder alert. Final: no retry | `failed` with IMP-004, as today for an unreadable file |
+   | **Never got in:** connection refused, DNS failure, 503 no free slot, the service unhealthy | **waits, as a Storage outage does (3b):** stays `processing`, the try given back, the sweep retries; `parse_service_unavailable` alert, at most once an hour platform-wide (Q4) | IMP-009 ("start again"), same alert |
+   | **Got in, never came out:** the connection dropped or the read timed out after the file was sent | **a timeout-class try** (item 6a); the worker applies the sweep's own decision at once | IMP-009 |
+   | An answer that fails the worker's checks | `failed` DOC-005 and the DOC-029 founder alert (Q3) | IMP-004 and the same alert |
 
    - **The worker checks every answer** (a converter's output is still
      untrusted, Section 7.11): only the part types the model call takes;
      media types from a fixed list; base64 that decodes; text and total
      sizes within caps. The worker never decodes an image or PDF to check
-     it; that would be parsing again.
+     it, because that would be parsing again.
    - **All of this sits outside the broad `except` blocks**, as the 3b
      Storage read does, so no service failure can be relabelled DOC-005.
    - Previews stay best effort: a preview the service can't produce never
      touches the document's status.
+
+   **6a. How "got in, never came out" combines with 3a's timeout rule
+   (founder's item 5).** Today there are two rules: a crash gets retries
+   up to `MAX_PROCESSING_ATTEMPTS` (3) tries in all, and a timeout gets at
+   most one retry. **Found while answering this: today's `decide()` can
+   already break the 3-try cap.** Its timeout branch is checked first and
+   never looks at the cap. So a crash, a crash, then a timeout on try 3
+   (`processing_attempts` 3, `timeout_attempts` [3]) returns "retry" and
+   allows a **4th** try (`stuck_documents.py`, `decide()`). It's a 3a
+   defect, not something 3c introduces, and the founder's rule names
+   exactly this case.
+
+   *Proposed* (Q9):
+   - A "got in, never came out" try is recorded as a **timeout-class
+     try**, alongside 3a's hard time limit, because in both cases the file
+     is the suspect.
+   - **One decision for both, in `decide()`, checked in this order:**
+
+     | State | Outcome |
+     |---|---|
+     | 3 tries used | fail DOC-022: cause `timeout` if any try was timeout-class, else `worker_stopped` |
+     | a timeout-class try happened, and a try has run since the first one | fail DOC-022, cause `timeout` |
+     | otherwise | retry |
+
+   - **The guarantee, whatever the mix:** at most 3 tries in all, and at
+     most one try after the first timeout-class try.
+
+     | Sequence | Today | Proposed |
+     |---|---|---|
+     | crash, crash, crash | 3 tries, `worker_stopped` | same |
+     | timeout, timeout | 2 tries, `timeout` | same |
+     | crash, timeout, anything | 3 tries, `timeout` | same |
+     | **crash, crash, timeout** | **4th try** | **3 tries, `timeout`** |
+     | lost, lost | -- | 2 tries, `timeout` (cause detail `parse_lost`) |
+     | crash, lost, crash | -- | 3 tries, `timeout` |
+     | never got in (any number of times) | -- | no try used; waits |
+     | stopped by a limit | -- | 1 try, DOC-029, final |
+
+   - The worker, which is still alive after a lost try, records it and
+     applies `decide()` at once, so a lost file is retried or failed in
+     seconds, not after the 30-minute sweep. The sweep calls the same
+     function. **One decision, one place.**
+   - *Recording (Q9):* proposed, a `documents.parse_lost_attempts
+     integer[]` column in `0034` beside 3a's `timeout_attempts`. Both
+     count as timeout-class in `decide()`, and the DOC-022 alert's payload
+     can then say which happened (`cause_detail: parse_lost` or
+     `task_time_limit`). The alternative is no column: a lost try goes
+     into `timeout_attempts`, and the alert can't tell the two apart.
 7. **Dev on Windows.** The same service runs locally with
-   `PARSE_ISOLATION=off`: still one subprocess per file, still the
-   wall-clock kill, and LibreOffice from the existing Windows install, but
-   no namespaces, no user switch and no `setrlimit`, which Windows doesn't
-   have. The worker reaches it at `PARSE_SERVICE_URL`
-   (`http://127.0.0.1:8100` in dev). The worker's test suite starts it as
-   a fixture. **None of this counts as proof of isolation** (agreed: CI
-   and Fly are the only places isolation runs).
-8. **The API's gate (Q1).** `validate_upload` in the API reads the zip's
-   entry list (no extraction) and inflates at most 16 KB from the start of
-   each XML part, 8 MB in total, to look for a DOCTYPE or ENTITY. It uses
-   only Python's standard library. It is the gate that decides whether a
-   file is stored at all, and the uploader gets an immediate answer
-   ("we can't read `.zip` files ..."). *Proposed:* **keep it in the API**;
-   the same check runs again inside the sandbox before anything else. The
-   alternative is the API calling the parse service on every upload: a
-   synchronous dependency on the upload path, and an outage of the parse
-   service would then refuse uploads instead of making documents wait.
-9. **D-163: a run row before the model call (agreed to be designed here,
-   Q5).** Today a worker killed during the model call (a lost machine, a
-   crash; not 3a's limit, which can't land there) writes nothing, so that
-   call's cost is lost. `extraction_runs` is append-only by design
-   (D-057, no `updated_at`) and `succeeded` is `NOT NULL`.
-   - **Recommended: a "started" row, then the outcome as a second row**,
-     the same pattern already agreed for `admin_actions` (Stage 5, D-178).
-     Migration `0034`: `extraction_runs.run_state` (`started` |
-     `finished`, existing rows `finished`), `started_run_id` (the outcome
-     row points at its start row), and `succeeded` allowed to be NULL only
-     on a `started` row (a check constraint). Nothing is ever updated.
-     - Before each paid call (routing and extraction), the worker counts
-       the input tokens (`count_tokens`, free, 15 s per try, D-163) and
-       commits the started row with the model ID and that count.
-     - After the call, the outcome row as today.
-     - **A started row with no outcome** is found by the stuck sweep when it
-       takes the document over. It writes the outcome row itself:
-       `succeeded false`, error `worker_lost_during_call`, the input cost
-       from the counted tokens, `cost_complete: false` (the output tokens
-       are unknown, as for a dropped stream, D-163). So the cost breaker,
-       the cost per document and the KPIs see a lower bound instead of
-       nothing.
-     - Every reader that sums cost or counts runs reads outcome rows only.
-       A test holds that for each of them (breaker, rollup, health strip,
-       cost per document).
-     - Cost: one extra free API call per paid call, about 0.2-0.5 s.
-   - The alternative is a nullable `succeeded` updated after the call:
-     smaller, but it ends the append-only rule for this table.
-   - Backup first: `extraction_runs` (and `documents`, which the sweep
-     writes in the same step). `0034` deletes nothing.
+   `PARSE_ISOLATION=off`. It still uses one subprocess per file, still has
+   the wall-clock kill, and uses LibreOffice from the existing Windows
+   install. It has no namespaces, cgroups, user switch, seccomp or
+   `setrlimit`, none of which Windows has. The worker reaches it at
+   `PARSE_SERVICE_URL` (`http://127.0.0.1:8100` in dev). The worker's test
+   suite starts it as a fixture. **None of this counts as proof of
+   isolation:** CI and Fly are the only places isolation runs.
+8. **The API's gate (Q1: stays).** `validate_upload` in the API reads the
+   zip's entry list (no extraction) and inflates at most 16 KB from the
+   start of each XML part, 8 MB in total, to look for a DOCTYPE or ENTITY.
+   It uses only Python's standard library. It decides whether a file is
+   stored at all, and gives the uploader an immediate answer. The same
+   check runs again inside the sandbox.
+9. **D-163: a run row before the model call (Q5: option 1, decided).**
+   - **A "started" row, then the outcome as a second row**, as agreed for
+     `admin_actions` (Stage 5, D-178). Migration `0034`:
+     - `extraction_runs.run_state` (`started` | `finished`; existing rows
+       become `finished`);
+     - `started_run_id` (the outcome row points at its start row);
+     - `succeeded` may be NULL only on a `started` row (a check
+       constraint).
+
+     Nothing is ever updated.
+   - Before each paid call (routing and extraction), the worker counts the
+     input tokens (`count_tokens`, free, 15 s per try, D-163) and commits
+     the started row with the model ID and that count. After the call, it
+     writes the outcome row as today.
+   - **A started row with no outcome** is found by the stuck sweep when it
+     takes the document over. The sweep writes the outcome row itself:
+     `succeeded false`, error `worker_lost_during_call`, the input cost
+     from the counted tokens, and `cost_complete: false` (the output tokens
+     are unknown, as for a dropped stream, D-163). So the cost breaker, the
+     cost per document and the KPIs see a lower bound instead of nothing.
+   - Every reader that sums cost or counts runs reads outcome rows only. A
+     test holds that for each of them: the breaker, the rollup, the health
+     strip and cost per document.
+   - Cost: one extra free API call per paid call, about 0.2-0.5 s.
+   - **Backup first** (founder): `extraction_runs` and `documents` (which
+     also gains `parse_lost_attempts` if Q9 is yes). Backup SQL and the
+     row counts come before the PR link. `0034` deletes nothing.
 10. **What else changes.**
-    - New `DECISIONS.md` entry D-183 (3c as built).
-    - `RUNBOOK.md`: running and deploying the parse service; the
-      parser-upgrade process (CLAUDE.md 7.11 requires it, and it now
-      means rebuilding one image: base digest, LibreOffice version, lock
-      file); reading the canary's startup log; what to do when
-      `parse_service_unavailable` fires.
+    - A new `DECISIONS.md` entry, D-183 (3c as built).
+    - `RUNBOOK.md`:
+      - running and deploying the parse service;
+      - the parser-upgrade process (CLAUDE.md 7.11 requires it, and it now
+        means rebuilding one image: base digest, LibreOffice and
+        `python3-seccomp` versions, the lock file);
+      - reading the canary's startup log;
+      - what to do when `parse_service_unavailable` fires;
+      - stopping the staging machines at the end of a test session.
     - `CLAUDE.md`'s parsing-worker bullet says the per-file limits are
       "still to be built and tested in Stage 3". When 3c passes, I'll
-      **propose** the new wording to the founder; I don't edit it.
+      **propose** new wording to the founder; I won't edit it.
     - `SETUP.md`: starting the parse service in dev.
-    - Catalog: DOC-029 (Q3); founder-facing wording for the two alerts.
-11. **Tests, and where each runs.** Three places. **L** = this Windows
-    machine, dev mode: logic only, never counted as proof of isolation.
-    **CI** = a new CI job that builds `apps/parse/Dockerfile` (the
-    production image), runs it with `--privileged` (on Fly the container is
-    root in its own VM, and this is the closest a GitHub runner gets), and
-    tests it from the runner over HTTP and with `docker exec` for the
-    self-test programs. **Fly** = the same image on Fly staging (item 12).
-    Every isolation probe runs first **outside** the sandbox as its
-    positive control and reports its own evidence; RUNBOOK 1.7 applies to
-    every run: an isolation failure means stop and report.
+    - Catalog: DOC-029 (Q3, wording approved); founder-facing wording for
+      the `parse_service_unavailable` alert and the DOC-029 alert.
+11. **Tests, and where each runs.** See "3c test table" directly below this
+    section. It has 50 tests. The first version had 33; the founder's
+    additions (seccomp, `/dev`, Flycast, the retry rule) and the cgroup
+    findings added the rest.
+12. **Fly staging: what is stood up, and the price.** Q6 decided: **stopped
+    between test sessions**, Upstash pay-as-you-go. The founder sets the
+    secrets.
+    - Rates read from Fly's pricing page on 2026-09-30. The page computes
+      them from shared vCPU $0.00000075/s and RAM $0.00000193/GB-s, region
+      `iad` = 1.0x.
 
-    | | Test | L | CI | Fly |
-    |---|---|---|---|---|
-    | **A. Isolation, per job** | | | | |
-    | A1 | Internet unreachable: IPv4 and IPv6 TCP, HTTPS by name | | yes | yes |
-    | A2 | DNS: system resolver; Fly's resolver `[fdaa::3]:53` | | yes (system) | yes (both) |
-    | A3 | **Real Upstash** (its private IPv6 address, resolved outside first) | | | yes |
-    | A4 | **Real staging API and real worker** (by private address) | | | yes |
-    | A5 | Fly Machines API `_api.internal:4280` | | | yes |
-    | A6 | The hosts that hold our data: the Supabase database and Storage hosts, `api.anthropic.com` | | yes | yes |
-    | A7 | The supervisor's own port, from inside the job | | yes | yes |
-    | A8 | `/.fly` empty (the socket isn't there, not just refused); `/sys/class/net` empty; the only interface is `lo`, down | | yes (`/sys`) | yes (both) |
-    | A9 | Identity: the slot's user, `CapEff` 0, empty bounding set, `NoNewPrivs` 1, no supplementary groups | | yes | yes |
-    | A10 | No way out: `nsenter` into the machine's namespaces, bringing up an interface, `mount` -- all refused | | yes | yes |
-    | A11 | The job sees only its own processes; a second job running at the same time can't see the first one's files or processes | | yes | yes |
-    | A12 | The job's environment has none of DocFlow's setting names (database, Storage, Anthropic, Supabase, Stripe, Postmark, the parse token) | | yes | yes |
-    | **B. Limits** (fixed self-test programs in the image, through the real launcher) | | | | |
-    | B1 | Memory: a program allocating past the cap is stopped; the service answers the next request | | yes | yes |
-    | B2 | CPU: a spinning program is stopped by the CPU limit before the wall clock | | yes | yes |
-    | B3 | Wall clock: a program that ignores SIGTERM and starts children is killed at the limit, **and no process of that job user is left** | | yes | yes |
-    | B4 | Fork bomb: stopped at the process limit; the machine stays healthy | | yes | yes |
-    | B5 | Answer flood: the supervisor stops reading at the cap and kills the job | | yes | yes |
-    | B6 | Disk: filling `/work` stops at its size | | yes | yes |
-    | B7 | One process per file: two jobs in a row have different processes and namespaces, and nothing from the first is left in `/work` | yes (process only) | yes | yes |
-    | **C. Hostile files** (through `POST /v1/document`, the real path; after each, a known-good PO parses correctly, proving the service is healthy) | | | | |
-    | C1 | Zip bomb; XXE payload; oversized image; 500-page PDF; `.exe` renamed `.pdf`; password-protected PDF; a `.zip` holding a valid PO -- each the catalog code it gets today | yes | yes | yes |
-    | C2 | A malformed file of **each** Tier 2 format (`.doc`, `.xls`, `.tif`, `.heic`, `.msg`, `.odt`, `.ods`) that kills or hangs the converter: a clean `rejected` or `stopped`, never a crash | yes | yes | yes |
-    | **D. Real orders still parse** | | | | |
-    | D1 | A real PO in every Tier 1 and Tier 2 format parses **under the limits** -- this is what sets the numbers in item 3 | yes | yes | yes |
-    | D2 | **Same answer as today:** before anything moves, today's code is run over the whole fixture set and its parts saved; the service must return the same parts byte for byte | yes | yes | |
-    | D3 | Catalog files (`.xlsx`, `.xls`, `.csv`) through `POST /v1/table` give the same rows as today | yes | yes | yes |
-    | **E. Refusal to start** | | | | |
-    | E1 | Production mode with namespaces unavailable: CI runs the same image **without** `--privileged`, so creating them really fails. The process exits and never opens its port | | yes | |
-    | E2 | `PARSE_ISOLATION=off` with `FLY_APP_NAME` set: refused | yes | yes | |
-    | E3 | The startup log shows the canary's result line by line | | yes | yes |
-    | **F. The worker's side** | | | | |
-    | F1 | Each row of item 6's table, against the running service (unreachable, busy, stopped, dropped mid-request, malformed answer) | yes (dev service) | yes (real image) | |
-    | F2 | The dependency-graph test: no parsing library importable from the worker or the API | yes | yes | |
-    | F3 | D-163: a worker killed during a (stubbed) model call leaves a started row; the sweep writes its outcome with the counted input cost; every cost reader ignores started rows | yes (DB, staging) | yes (DB) | |
-    | **G. End to end on Fly staging** | | | | |
-    | G1 | An upload through the staging API (over `fly proxy`), through the real Upstash, the worker on Fly and the parse service, to `needs_review`: the golden fixture, a `.doc`, and a scanned image. Paid: a few cents | | | yes |
-    | G2 | A catalog import from the Console through the same path | | | yes |
-
-    The live golden run (`pytest -m live_api`, 3 tests) is also run at the
-    3c checkpoint: the content sent to the model is built on a new path,
-    even if D2 shows it is unchanged.
-12. **Fly staging: what is stood up, and the price (Q6).**
-    Rates read from Fly's pricing page on 2026-09-30 (the page computes
-    them from shared vCPU $0.00000075/s and RAM $0.00000193/GB-s, region
-    `iad` = 1.0x), and Upstash's pay-as-you-go rate from Fly's Upstash page.
-
-    | App | Size | Always on, per month |
+    | App | Size | If left running, per month |
     |---|---|---|
-    | `docflow-parse-staging` | shared-cpu-2x, 2 GB (two 1 GiB slots) | $11.39 |
+    | `docflow-parse-staging` | shared-cpu-2x, 2 GB (two 768 MiB slots) | $11.39 |
     | `docflow-worker-staging` | shared-cpu-1x, 1 GB (no parsing any more) | $5.70 |
     | `docflow-api-staging` | shared-cpu-1x, 512 MB, **private only, no public IP** | $3.19 |
-    | Upstash Redis | pay-as-you-go $0.20 per 100k commands, or fixed 250 MB at $10 | see below |
+    | Upstash Redis | pay-as-you-go, $0.20 per 100k commands | per use |
 
-    - **Option A, always on: about $30 a month** with Upstash's $10 fixed
-      plan. A Celery worker polls Redis all the time it runs; I haven't
-      measured how many commands that is, so the fixed plan is the safe
-      ceiling.
-    - **Option B, recommended: stopped between test sessions.** Fly bills
-      a running machine per second; a stopped one costs only its disk,
-      $0.15 per GB per 30 days (about $0.50 a month for the three images).
-      With Upstash pay-as-you-go, nothing polls while the worker is
-      stopped. All three machines running cost about $0.03 an hour plus
-      Upstash's commands. **A month with 40 hours of testing: roughly
-      $2-5.** I'd report the real figure from the first week's bill.
-    - Not included: no dedicated IPv4 (nothing public), no volumes, egress
-      at $0.02/GB (megabytes here). Builds run on Fly's remote builder;
-      its cost is to be confirmed on the first deploy (the spike's builds
-      were cents).
-    - **Secrets on Fly:** the API and worker need staging's database URL,
-      the Storage S3 key, the Supabase keys and (the worker) the Anthropic
-      key, plus the parse token if Q2 is yes. The parse app gets **only**
-      the parse token. The founder sets them with `fly secrets set`, or
-      approves me doing it.
+    - Stopped, each machine costs only its disk: $0.15 per GB per 30 days,
+      about $0.50 a month for all three. Running, all three cost about
+      $0.03 an hour plus Upstash's commands. **A month with 40 hours of
+      testing: roughly $2-5.**
+    - **Celery's Redis command count is measured in the first session and
+      reported** (founder): commands before and after a timed idle hour
+      and a timed busy one, read from Upstash.
+    - **The spending cap: not available as far as I can find (Q10).**
+      `fly redis create` and `fly redis update` have no budget or cap flag
+      (flyctl v0.4.108, read 2026-09-30), and Fly's Upstash page mentions
+      none: only 10,000 commands/s and 10 GB storage limits. Usage is
+      billed hourly on the Fly bill. The Upstash console (`fly redis
+      dashboard`) may have a budget setting; I can only see that once the
+      database exists. Options are in Q10.
+    - The worker on Fly runs **no Celery beat**: no scheduled sweeps or
+      lifecycle jobs from Fly against staging. It only takes documents and
+      imports enqueued through the Fly API. The local worker and API keep
+      using the local Redis, so the two never share a queue.
+    - Not included: no dedicated IPv4 (nothing public), no volumes, and
+      egress at $0.02/GB (megabytes here). Builds run on Fly's remote
+      builder; whether it is charged will show on the first bill (today's two
+      check deploys ran under a cent of machine time).
+    - **Secrets on Fly, set by the founder** (exact commands below). Each
+      app gets only what its process reads. Non-secret settings
+      (`DOCFLOW_ENV`, `PARSE_SERVICE_URL`, `PARSE_ISOLATION`) go in each
+      app's `fly.toml`. If the build finds a process needs a setting not
+      listed here, it comes back to the founder before it is set.
     - **Not in 3c:** pointing Postmark's or Stripe's webhooks at Fly, the
       web app, a public API, and production. Those are Phase 6.
 13. **Order of work.**
     1. The D2 baseline: today's parser output over every fixture, saved.
-    2. `apps/parse/` (service, launcher, job, self-test programs,
-       Dockerfile), dev mode on this machine, the worker switched to
-       `parse_client`, the parsing libraries removed from the worker and the
-       API.
-    3. The CI job (A, B, C, D, E with the real image); CI green.
-    4. D-163 and `0034`: backup SQL and row counts first, then the
-       founder applies it on staging; staging suites.
-    5. **Only then, and only with the price approved:** the three Fly apps
-       and Upstash, the secrets, the canary log, A-D and G on Fly. Evidence
-       saved under `docs/spikes/3c-fly-staging/`, like the D-150 spike.
-    6. The machines stopped (option B), the checkpoint, the PR.
-14. **Not proposed** (so the founder knows they were considered): a seccomp
-    filter for the job (the agreed list doesn't include one; it can be
-    added later without changing the design); a read-only root
-    filesystem for the job (Q7).
+    2. The `decide()` fix and its tests (Q9), on its own commit.
+    3. `apps/parse/`: service, launcher, job, filter, self-test programs,
+       Dockerfile. Dev mode on this machine. The worker switched to
+       `parse_client`, and the parsing libraries removed from the worker
+       and the API.
+    4. The CI job (the A, S, B, C, D and E rows with the real image); CI
+       green.
+    5. D-163 and `0034`: backup SQL and row counts first, then the founder
+       applies it on staging; staging suites.
+    6. Fly: I create the three apps (no secrets) and the Upstash database;
+       **the founder sets the secrets**; deploy; check the canary log; run
+       the N, A, S, B, C, D and G rows on Fly. Evidence goes under
+       `docs/spikes/3c-fly-staging/`.
+    7. The machines stopped, the command count reported, the checkpoint,
+       the PR.
+14. **Not proposed** (so the founder knows they were considered): an
+    allowlist-style seccomp filter (default deny). It is stricter, but
+    LibreOffice's syscall set would have to be mapped and kept up to date
+    on every upgrade. The deny list above blocks the calls that matter for
+    escaping and hiding.
 
-**Questions for the founder (3c), all answered before anything is built:**
-- **Q1.** The API's gate (`validate_upload`: zip entry list and the first
-  16 KB of each XML part, standard library only) stays in the API, with the
-  same check repeated in the sandbox? *Recommended: yes* (item 8).
-- **Q2.** A shared token between the worker and the parse service
-  (`PARSE_SERVICE_TOKEN`)? *Recommended: yes* (item 5).
-- **Q3.** A new catalog entry for a file stopped by a limit, **DOC-029**
-  "This file was too much to read", audience tenant, severity warning:
-  - message: "Reading this file needed more memory or time than DocFlow
-    allows for one file, so it was stopped before anything was read. This
-    usually means a very large or damaged file.";
-  - action: "Ask the sender for a smaller copy -- fewer pages, or saved as
-    a PDF -- and upload that.";
-  - plus a founder alert when it happens? *Recommended: yes*, through
-    `FAILURE_ALERTS` (a file hitting a limit may be an attack), once per
-    tenant per day like `document_failed`; the same alert for an answer the
-    worker's checks refused (item 6).
-- **Q4.** A new alert, `parse_service_unavailable`, at most once per hour
-  for the whole platform (the 3b `storage_unavailable` pattern, no
-  migration), and the "never got in -> wait / got in, never came out ->
-  counts" rule in item 6? *Recommended: yes.*
-- **Q5.** D-163: a started row plus an outcome row (append-only kept,
-  migration `0034`, one free token count per paid call), or a nullable
-  `succeeded` updated after the call? *Recommended: started + outcome*
-  (item 9).
-- **Q6.** Fly staging: option B (stopped between sessions, Upstash
-  pay-as-you-go, roughly $2-5 a month at 40 test hours, ~$30 if left
-  always on), or option A (always on, about $30)? And who sets the Fly
-  secrets? *Recommended: B; the founder sets the secrets.*
-- **Q7.** Also make the job's root filesystem read-only (one more mount
-  flag; `/work` stays the only writable place)? Not in the agreed list,
-  so I'm asking rather than adding it. *Recommended: yes* -- cheap, and it
-  stops a compromised parser writing into the image. Measured against the
-  real fixtures like the limits.
+**Questions for the founder (3c).**
+
+*Answered 2026-09-30:*
+- **Q1** yes, the API's gate stays.
+- **Q2** yes, `PARSE_SERVICE_TOKEN`.
+- **Q3** yes: DOC-029 as worded, plus the founder alert.
+- **Q4** yes: `parse_service_unavailable`, and the wait/count rule.
+- **Q5** option 1 (a started row plus an outcome row, append-only), with
+  the backup first.
+- **Q6** stopped between test sessions; Upstash pay-as-you-go with a cap;
+  Celery's command count measured in the first session; the founder sets
+  the Fly secrets.
+- **Q7** yes, a read-only root, with a writable size-capped tmpfs for
+  LibreOffice's home and profile.
+
+*Open, raised by the pre-build check:*
+- **Q8. The memory cap.** v2 isn't available on Fly as delivered (above).
+  *Recommended:*
+  - the **cgroup v1 memory and pids controllers per job** as the primary
+    caps, as the check proved on a real machine;
+  - the supervisor kills the whole job on any out-of-memory kill;
+  - startup detection prefers v2 if Fly ever offers it, and the canary
+    proves the limit kills before the service opens;
+  - `setrlimit` as the backstops;
+  - **also** a job-wide CPU cap from cpuacct, because CPU seconds multiply
+    with processes exactly as memory does.
+
+  The alternative is rearranging Fly's cgroups at startup. It failed in
+  the check, and it would depend on Fly's internals.
+- **Q9. The retry rule (item 6a).** Fix `decide()` so the 3-try cap is
+  checked first (today's crash, crash, timeout gets a 4th try)? And record
+  a lost try in a new `documents.parse_lost_attempts` column in `0034`,
+  so the alert can say which it was? *Recommended: yes to both.*
+- **Q10. The Upstash spending cap.** No cap is offered through flyctl or
+  Fly's docs. When I create the database, I'll look in the Upstash
+  console for a budget setting and set it if there is one. If there
+  isn't:
+  - **(a)** pay-as-you-go without a cap, guarded by the machines being
+    stopped (nothing polls Redis then) and by my reporting the command
+    count after every session. At an assumed 10 commands a second
+    (unmeasured, an example only), a worker forgotten for a whole day
+    costs about $1.73;
+  - **(b)** Upstash's fixed 250 MB plan, $10 a month flat: a hard ceiling
+    by price.
+
+  *Recommended: (a) for staging,* with the count reported, because it
+  costs cents in a test month.
+
+**Fly secrets, the founder's commands** (PowerShell; placeholders in
+`<...>`):
+- `--stage` stores each secret without restarting machines; the next
+  deploy applies them.
+- PowerShell keeps typed commands in its history file
+  (`(Get-PSReadLineOption).HistorySavePath`). Either remove these lines
+  from it afterwards, or put the `NAME=value` lines in a file and pipe it
+  with `Get-Content <file> | fly secrets import --app <app> --stage`,
+  then delete the file.
+
+```powershell
+$fly = "$env:USERPROFILE\.fly\bin\fly.exe"
+
+# The token: any long random string, the same value on both apps.
+& $fly secrets set --app docflow-parse-staging --stage `
+  PARSE_SERVICE_TOKEN=<random-token>
+
+& $fly secrets set --app docflow-worker-staging --stage `
+  PARSE_SERVICE_TOKEN=<random-token> `
+  DATABASE_URL=<staging docflow_app connection string, as in the root .env> `
+  REDIS_URL=<the private redis:// URL printed by `fly redis create`> `
+  ANTHROPIC_API_KEY=<the staging Anthropic key> `
+  STORAGE_S3_ENDPOINT=<as in the root .env> `
+  STORAGE_S3_REGION=<as in the root .env> `
+  STORAGE_S3_ACCESS_KEY_ID=<as in the root .env> `
+  STORAGE_S3_SECRET_ACCESS_KEY=<as in the root .env>
+
+& $fly secrets set --app docflow-api-staging --stage `
+  DATABASE_URL=<staging docflow_app connection string, as in the root .env> `
+  REDIS_URL=<the same Upstash URL> `
+  SUPABASE_URL=<as in the root .env> `
+  STORAGE_S3_ENDPOINT=<as in the root .env> `
+  STORAGE_S3_REGION=<as in the root .env> `
+  STORAGE_S3_ACCESS_KEY_ID=<as in the root .env> `
+  STORAGE_S3_SECRET_ACCESS_KEY=<as in the root .env>
+
+# Check: names only, never values.
+& $fly secrets list --app docflow-parse-staging
+& $fly secrets list --app docflow-worker-staging
+& $fly secrets list --app docflow-api-staging
+```
+
+The parse app must list **only** `PARSE_SERVICE_TOKEN` (test A12 checks
+this as well). The API needs `SUPABASE_URL` to check sign-in tokens (JWKS)
+for the upload test. It gets no Stripe, Postmark, service-role or
+Anthropic key in 3c.
+
+**3c test table.** 50 tests.
+
+Where each test runs:
+- **L** = this Windows machine, dev mode. Logic only, never counted as
+  proof of isolation.
+- **CI** = a new CI job. It builds `apps/parse/Dockerfile` (the production
+  image) and runs it with `--privileged`: on Fly the container is root in
+  its own VM, and this is the closest a GitHub runner gets. It tests the
+  running image from the runner over HTTP, and with `docker exec` for the
+  self-test programs. CI's cgroups are v2.
+- **Fly** = the same image on Fly staging, cgroups v1 (the production
+  path).
+
+Every isolation and limit test runs its control first: the same probe
+**outside** the sandbox, or the same program without the limit. Each test
+reports its own evidence. RUNBOOK 1.7 applies to every run: an isolation
+failure means stop and report.
+
+| # | Test | Control | L | CI | Fly |
+|---|---|---|---|---|---|
+| **N. Network placement** | | | | | |
+| N1 | The parse app has exactly one IP address, a private IPv6 (`fly ips list`), checked after every deploy; the API app has no public IP either | -- | | | yes |
+| N2 | From outside Fly's network (this machine, WireGuard off), the parse and API apps have no public address that answers | the same request over `fly proxy` answers | | | yes |
+| N3 | A stopped parse machine is started by a worker request to `docflow-parse-staging.flycast` | the machine shows `stopped` before | | | yes |
+| **A. Isolation, per job** | | | | | |
+| A1 | Internet unreachable: IPv4 and IPv6 TCP, HTTPS by name | reached outside | | yes | yes |
+| A2 | DNS: the system resolver; Fly's resolver `[fdaa::3]:53` | answered outside | | yes (system) | yes (both) |
+| A3 | **The real Upstash** (its private IPv6 address, resolved outside first) | reached outside | | | yes |
+| A4 | **The real staging API and the real worker** (by private address) | reached outside | | | yes |
+| A5 | The Fly Machines API, `_api.internal:4280` | reached outside | | | yes |
+| A6 | The hosts that hold our data: the Supabase database and Storage hosts, `api.anthropic.com` | reached outside | | yes | yes |
+| A7 | The supervisor's own port, from inside the job | reached outside | | yes | yes |
+| A8 | `/.fly` empty (the socket isn't there, not just refused); `/sys` empty; the only interface is `lo`, down | present outside | | yes (`/sys`) | yes (both) |
+| A9 | Identity: the slot's user, `CapEff` 0, empty bounding set, `NoNewPrivs` 1, no supplementary groups | root outside | | yes | yes |
+| A10 | No way out: `nsenter` into the machine's namespaces, bringing up an interface, `mount` -- all refused | work as root outside | | yes | yes |
+| A11 | The job sees only its own processes; two jobs running at once can't see each other's files or processes | -- | | yes | yes |
+| A12 | The job's environment holds none of DocFlow's setting names (database, Storage, Anthropic, Supabase, Stripe, Postmark, the parse token); on Fly, the parse app's secret list is the token alone | the supervisor's own environment has the token | | yes | yes |
+| A13 | **`/dev` (founder's item 3):** no block device at all, and only `null`, `zero`, `full`, `random`, `urandom` and `shm` | block devices listed outside (CI: the runner's; Fly: `vda`-`vdc`, `loop`, `nbd`) | | yes | yes |
+| A14 | **Read-only root (Q7):** writing to `/`, `/usr`, `/app`, `/etc` or `/tmp` fails (EROFS); `/work` and LibreOffice's home are writable up to their caps | the same writes as root outside succeed (into a throwaway path) | | yes | yes |
+| **S. seccomp (founder's item 1)** | | | | | |
+| S1 | **The shipped rule set, with a test-only errno in place of EPERM, inside the real sandbox:** every refused call returns that errno, so the filter (not a missing privilege) answered: `unshare`, `clone` with each new-namespace flag, `setns`, `mount`, `umount2`, the newer mount calls, `ptrace`, `process_vm_readv/writev`, `bpf`, `keyctl`, `add_key`, `request_key`, `perf_event_open`, `init_module`, `finit_module`, `delete_module`, `kexec_load`, `kexec_file_load` | -- | | yes | yes |
+| S2 | **The filter as shipped (EPERM), inside the real sandbox:** every call in S1 fails; `/proc/self/status` shows `Seccomp: 2` and `NoNewPrivs: 1` | -- | | yes | yes |
+| S3 | **What the filter alone stops:** the same calls in the sandbox **without** the filter, reported call by call (on Fly today: `unshare(CLONE_NEWUSER)`, `clone` after it, and `keyctl` succeed) | is the control | | yes | yes |
+| S4 | `clone3` answers ENOSYS; a thread and a fork still work under the filter; LibreOffice converts a real `.doc` under it (with D1) | -- | | yes | yes |
+| S5 | The filter allows only x86_64 (its exported form is checked), so calls from another architecture are killed | -- | | yes | yes |
+| **B. Limits** (fixed self-test programs in the image, through the real launcher) | | | | | |
+| B1 | Memory, one process: a program allocating past the job's cgroup limit is stopped as `stopped: memory`; the service answers the next request | the same program with no cgroup limit survives | | yes (v2) | yes (v1) |
+| B2 | **Memory, the founder's point:** four processes, each under its own per-process backstop, together over the job's limit, are stopped | the same four with only `setrlimit` all survive | | yes (v2) | yes (v1) |
+| B3 | **One out-of-memory kill ends the whole job:** no process of that job is left afterwards (v1 kills one at a time) | -- | | yes (v2) | yes (v1) |
+| B4 | CPU (Q8): a family of spinning processes is stopped at the job's total CPU cap, before the wall clock | one process alone stays under it | | yes | yes |
+| B5 | Wall clock: a program that ignores SIGTERM and starts children is killed at the limit, **and no process of that job user is left** | -- | | yes | yes |
+| B6 | Fork bomb: stopped at the job's `pids` cap; the machine stays healthy | -- | | yes | yes |
+| B7 | Answer flood: the supervisor stops reading at the cap and kills the job | -- | | yes | yes |
+| B8 | Disk: `/work`, LibreOffice's home and `/dev/shm` each stop at their size, and their pages count against the job's memory | -- | | yes | yes |
+| B9 | One process per file: two jobs in a row have different processes and namespaces, and nothing of the first is left in `/work` or the home | -- | yes (process only) | yes | yes |
+| B10 | The job can't raise its own limit or leave its cgroup (the files are hidden; and refused even if visible) | root can change it | | yes | yes |
+| B11 | No leak: after 100 jobs, every job cgroup is gone and the slot users own no process | -- | | yes | yes |
+| **C. Hostile files** (through `POST /v1/document`, the real path. After each one, a known-good PO parses correctly, so the service is shown healthy) | | | | | |
+| C1 | Zip bomb; XXE payload; oversized image; 500-page PDF; `.exe` renamed `.pdf`; password-protected PDF; a `.zip` holding a valid PO. Each gets the catalog code it gets today | -- | yes | yes | yes |
+| C2 | A malformed file of **each** Tier 2 format (`.doc`, `.xls`, `.tif`, `.heic`, `.msg`, `.odt`, `.ods`) that kills or hangs its converter: a clean `rejected` or `stopped`, never a crash | -- | yes | yes | yes |
+| **D. Real orders still parse** | | | | | |
+| D1 | A real PO in every Tier 1 and Tier 2 format parses **under the limits**, which is what fixes the numbers in item 3 | -- | yes | yes | yes |
+| D2 | **Same answer as today:** before anything moves, today's code runs over the whole fixture set and its parts are saved; the service must return the same parts, byte for byte | -- | yes | yes | |
+| D3 | Catalog files (`.xlsx`, `.xls`, `.csv`) through `POST /v1/table` give the same rows as today | -- | yes | yes | yes |
+| **E. Refusal to start** | | | | | |
+| E1 | Production mode with namespaces unavailable: CI runs the same image **without** `--privileged`, so creating them really fails; the process exits and never opens its port | the privileged run starts | | yes | |
+| E2 | `PARSE_ISOLATION=off` with `FLY_APP_NAME` set: refused | without `FLY_APP_NAME`, dev mode starts | yes | yes | |
+| E3 | The startup log shows every canary check, line by line, ending in PASS | -- | | yes | yes |
+| E4 | No working memory cap: CI runs the image with the cgroup filesystem mounted read-only, so no job cgroup can be created; the canary fails and the service never opens its port | the normal run starts | | yes | |
+| **F. The worker's side** | | | | | |
+| F1 | Each row of item 6's table, against the running service: unreachable, busy, `stopped`, dropped mid-request, a malformed answer | -- | yes (dev service) | yes (real image) | |
+| F2 | The dependency-graph test: no parsing library importable from the worker or the API | -- | yes | yes | |
+| F3 | D-163: a worker killed during a (stubbed) model call leaves a started row; the sweep writes its outcome with the counted input cost; every cost reader ignores started rows | -- | yes (DB, staging) | yes (DB) | |
+| F4 | **The retry rule (6a):** `decide()` over every sequence in 6a's table, including crash, crash, timeout (3 tries, not 4) and lost, lost | today's code fails the crash-crash-timeout case | yes | yes | |
+| F5 | A lost try against the real service (CI kills the parse container mid-request): recorded at once, and retried or failed by `decide()` within seconds; the next try after a restart succeeds | -- | | yes | |
+| **G. End to end on Fly staging** | | | | | |
+| G1 | An upload through the staging API (over `fly proxy`), through the real Upstash, the worker on Fly and the parse service, to `needs_review`: the golden fixture, a `.doc`, and a scanned image. Paid: a few cents | -- | | | yes |
+| G2 | A catalog import through the same path | -- | | | yes |
+| G3 | **Celery's Redis command count** (founder): an idle hour and a busy one, reported | -- | | | yes |
+
+The live golden run (`pytest -m live_api`, 3 tests) also runs at the 3c
+checkpoint: the content sent to the model is built on a new path, even if
+D2 shows it is unchanged.
 
 **3d -- H4, per-tenant fairness.** Agreed design:
 - Documents wait as `pending` in the database.

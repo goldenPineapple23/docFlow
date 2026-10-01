@@ -1,0 +1,17 @@
+NOTE (written afterwards): the "controllers=[]" line below is NOT evidence. PowerShell ran $(cat ...) on the
+Windows machine, not on Fly (see the Get-Content error). The valid controllers read is in
+evidence-run2-recheck2.txt. The /proc/cgroups line ("memory 8 5 1") and /proc/cmdline below are valid.
+
+fly.exe : Connecting to fdaa:cb:76d5:a7b:897:fcd5:fb36:2...
+At line:1 char:346
++ ... n\fly.exe"; & $fly ssh console --app docflow-spike-cgroup-ekqxmh -C " ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Connecting to f...:fcd5:fb36:2...:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Thu Oct  1 00:13:17 UTC 2026
+controllers=[]
+13
+memory	8	5	1
+0
+console=ttyS0 reboot=k panic=1 pci=off cgroup_enable=memory swapaccount=1 random.trust_cpu=on i8042.noaux i8042.nomux i8042.nopnp i8042.dumbkbd acpi=off lapic=notscdeadline sysctl.kernel.panic_on_rcu_stall=1 sysctl.kernel.max_rcu_stall_to_panic=5 quiet rdinit=/fly/init pci=off virtio_mmio.device=4K@0xc0001000:6 virtio_mmio.device=4K@0xc0002000:7 virtio_mmio.device=4K@0xc0003000:8 virtio_mmio.device=4K@0xc0004000:9 virtio_mmio.device=4K@0xc0005000:10 virtio_mmio.device=4K@0xc0006000:11

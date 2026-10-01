@@ -1,0 +1,53 @@
+fly.exe : Connecting to fdaa:cb:76d5:a7b:897:fcd5:fb36:2...
+At line:1 char:533
++ ... ct -Last 4; & $fly ssh console --app docflow-spike-cgroup-ekqxmh -C " ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Connecting to f...:fcd5:fb36:2...:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+### A. cgroup v1 memory controller (as Fly mounts it)
+RESULT A0 v1 memory hierarchy present: PASS -- use_hierarchy=1 memsw file=True
+RESULT A1 create v1 job ctrl: PASS -- limit=9223372036854771712 err=None
+RESULT A2 control: 400MiB in an unlimited v1 job survives: PASS -- rc=0 out='ALLOC_OK' ''
+RESULT A1 create v1 job job1: PASS -- limit=268435456 err=None
+RESULT A3 one process over a 256MiB v1 limit is OOM-killed: PASS -- rc=-9 oom_kill 0->1 max_usage=268435456 failcnt=48
+RESULT A1 create v1 job job2: PASS -- limit=268435456 err=None
+RESULT A4 the 4 x 120MiB family in a 256MiB v1 job is stopped (cap holds for the whole job): PASS -- rc=-9 out='' oom_kill 0->2 max_usage=268435456 procs left='654'
+RESULT A1 create v1 job job3: PASS -- limit=268435456 err=None
+RESULT A5 inside the full sandbox (namespaces + uid 10001 + no caps): killed at the v1 limit: PASS -- rc=1 oom_kill 0->1 err='unshare: sigprocmask unblock failed: Invalid argument'
+RESULT A5' control: same sandboxed program in the unlimited job survives: PASS -- rc=0 out='ALLOC_OK'
+RESULT A1 create v1 job job4: PASS -- limit=268435456 err=None
+RESULT A6 sandboxed job, /sys visible: can't raise its limit or leave: PASS -- RAISE_LIMIT EACCES | LEAVE_CGROUP EACCES | ROOT_CGROUP EACCES limit now=268435456
+RESULT A7 with /sys hidden (the design): the cgroup files aren't there at all: PASS -- RAISE_LIMIT ENOENT | LEAVE_CGROUP ENOENT | ROOT_CGROUP ENOENT err=''
+RESULT A8 control: root (the supervisor) can change the job's limit: PASS -- err=None limit=314572800
+RESULT A9 v1 pids.max=20 stops a fork loop at the cap: PASS -- err=None out='FORKED=19' pids.events='max 1'
+RESULT A10 emptied v1 job cgroups are removable: PASS -- ctrl,job1,job2,job3,job4,job
+
+### B. Moving the memory controller to v2 (alters the machine's setup)
+RESULT B0 before: v2 controllers: INFO -- ''
+RESULT B1 v1 memory hierarchy has no child cgroups left: PASS -- children=''
+RESULT B2 root can unmount the v1 memory hierarchy: PASS -- UMOUNTED
+RESULT B3 after: memory available to v2: FAIL -- cgroup.controllers=''
+
+### Summary
+PASS  A0 v1 memory hierarchy present
+PASS  A1 create v1 job ctrl
+PASS  A2 control: 400MiB in an unlimited v1 job survives
+PASS  A1 create v1 job job1
+PASS  A3 one process over a 256MiB v1 limit is OOM-killed
+PASS  A1 create v1 job job2
+PASS  A4 the 4 x 120MiB family in a 256MiB v1 job is stopped (cap holds for the whole job)
+PASS  A1 create v1 job job3
+PASS  A5 inside the full sandbox (namespaces + uid 10001 + no caps): killed at the v1 limit
+PASS  A5' control: same sandboxed program in the unlimited job survives
+PASS  A1 create v1 job job4
+PASS  A6 sandboxed job, /sys visible: can't raise its limit or leave
+PASS  A7 with /sys hidden (the design): the cgroup files aren't there at all
+PASS  A8 control: root (the supervisor) can change the job's limit
+PASS  A9 v1 pids.max=20 stops a fork loop at the cap
+PASS  A10 emptied v1 job cgroups are removable
+PASS  B1 v1 memory hierarchy has no child cgroups left
+PASS  B2 root can unmount the v1 memory hierarchy
+FAIL  B3 after: memory available to v2
+Error: ssh shell: Process exited with status 1
