@@ -42,10 +42,14 @@ jobs:
       SNAPSHOT: ${{ needs.date.outputs.snapshot }}
     steps:
       - uses: actions/checkout@v4
-      - name: Set DEBIAN_SNAPSHOT in the Dockerfile
+      - name: Set DEBIAN_SNAPSHOT in the Dockerfiles
+        # The parse image (tested by the suite above) and the worker and API
+        # images on Fly, which use the same base and snapshot.
         run: |
-          sed -i "s/^ARG DEBIAN_SNAPSHOT=.*/ARG DEBIAN_SNAPSHOT=${SNAPSHOT}/" apps/parse/Dockerfile
-          grep -q "^ARG DEBIAN_SNAPSHOT=${SNAPSHOT}$" apps/parse/Dockerfile
+          for file in apps/parse/Dockerfile apps/worker/Dockerfile apps/api/Dockerfile; do
+            sed -i "s/^ARG DEBIAN_SNAPSHOT=.*/ARG DEBIAN_SNAPSHOT=${SNAPSHOT}/" "$file"
+            grep -q "^ARG DEBIAN_SNAPSHOT=${SNAPSHOT}$" "$file"
+          done
       - name: Push the branch
         run: |
           if git diff --quiet; then

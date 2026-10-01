@@ -1,0 +1,36 @@
+# The parse service on Fly staging (Stage 3c; BUILD-STATUS "3c detailed
+# design", item 12; RUNBOOK section 8). Private only: no public IP, reached
+# by the worker over Flycast (http://docflow-parse-staging.flycast). Stopped
+# when idle and started by the first request (founder's Q6, option B).
+#
+# Deploy from the repository root (the image's build context):
+#
+#     fly deploy --config apps/parse/fly.toml --dockerfile apps/parse/Dockerfile \
+#         --ignorefile apps/parse/Dockerfile.dockerignore --no-public-ips .
+#     fly ips allocate-v6 --private --app docflow-parse-staging   # once
+#     fly ips list --app docflow-parse-staging   # one private IPv6, nothing else
+#
+# Production mode is on because Fly sets FLY_APP_NAME: isolation must be on,
+# PARSE_SERVICE_TOKEN must be set (a secret, set by the founder), and any
+# PARSE_TEST_ONLY_* setting stops it starting.
+
+app = "docflow-parse-staging"
+primary_region = "iad"
+
+[http_service]
+  internal_port = 8100
+  force_https = false
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "60s"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"

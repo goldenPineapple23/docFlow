@@ -1,0 +1,31 @@
+# The API on Fly staging (Stage 3c; BUILD-STATUS "3c detailed design",
+# item 12). Private only: no public IP (N1/N2). Reached for the G tests over
+# `fly proxy 8000 --app docflow-api-staging`, or from other Fly apps at
+# http://docflow-api-staging.flycast. Stopped when idle, started on request.
+#
+# Deploy from the repository root:
+#
+#     fly deploy --config apps/api/fly.toml --dockerfile apps/api/Dockerfile \
+#         --ignorefile apps/api/Dockerfile.dockerignore --no-public-ips .
+#     fly ips allocate-v6 --private --app docflow-api-staging   # once
+#
+# Secrets (set by the founder): DATABASE_URL, REDIS_URL, SUPABASE_*,
+# STORAGE_S3_*, DOCUMENT_URL_SIGNING_SECRET and the rest in BUILD-STATUS item
+# 12. Never PARSE_SERVICE_TOKEN: the API refuses to start with it (Q12).
+
+app = "docflow-api-staging"
+primary_region = "iad"
+
+[env]
+  DOCFLOW_ENV = "staging"
+
+[http_service]
+  internal_port = 8000
+  force_https = false
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

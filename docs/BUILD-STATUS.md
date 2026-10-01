@@ -2049,6 +2049,23 @@ changed, built in the next commit:**
   error), so a Fly start failure can be told apart from a parser crash.
   Tests: `test_parse_client.py`, `test_retry_rules_detail.py`. RUNBOOK 8.4.
 
+**Fly staging stood up (2026-10-01, design item 13 step 6; RUNBOOK 8.1):**
+- Created, empty (no machines, no IPs, no secrets): `docflow-parse-staging`,
+  `docflow-worker-staging`, `docflow-api-staging`; and the Upstash database
+  `docflow-staging-redis` (pay-as-you-go, eviction disabled so the queue
+  never drops a task, no replicas, ProdPack and auto-upgrade declined).
+- New deploy files: `apps/parse/fly.toml` (private: `--no-public-ips`, then
+  one private Flycast IPv6; stopped when idle, started on request;
+  shared-cpu-2x, 2 GB), `apps/worker/{Dockerfile,fly.toml}` (Celery worker
+  only, no beat, no services, no IP), `apps/api/{Dockerfile,fly.toml}`
+  (private only). The worker and API images use the parse image's base digest
+  and the same `DEBIAN_SNAPSHOT`, run as an unprivileged user, and the weekly
+  snapshot job now moves all three dates. All three images built on Fly's
+  remote builder (build only).
+- Waiting on the founder: the secrets (`Desktop/3c-fly-secrets.txt`, the
+  design's list), and whether the API also gets `DOCUMENT_URL_SIGNING_SECRET`
+  (it reads it for signed links; not on the design's list, so asked first).
+
 **Tenth run (`0be5422`): GREEN.** core 700 tests, 0 failed; api 580, 0 failed; worker 132, 0 failed (F5 included); parse unit 122, 0 failed; parse HTTP 56, 0 failed (D1 parity on every fixture, `po.doc` included); web and web-live passed; dependency audits clean. Self-tests in the real sandbox: canary 5 of 5, A 13 of 13 PASS with A-net IPv6 NOT-RUN, S 5 of 5, B 17 of 17; E1, E3 and E4 as designed. Recorded in D-183. Next: the
 founder backs up and applies `0034` on staging (the PR text leads with it:
 `Desktop/PR-stage3c-parse-service.md`), I run the staging suites, the
