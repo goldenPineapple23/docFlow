@@ -2076,9 +2076,21 @@ changed, built in the next commit:**
   local `.env` connects as `docflow_app` (NOBYPASSRLS, no CREATE) through
   Supabase's transaction pooler. So for now only the parse app gets its
   secret (`PARSE_SERVICE_TOKEN`), which is all the RUNBOOK 8.1 merge gate
-  needs; the worker and the API (the N2, N3 and G rows) wait for their
-  logins. **Founder's call:** move N2, N3 and G to after 3e, or build F-1
-  before 3c merges.
+  needs; the worker and the API wait for their logins. **Founder's call
+  (2026-10-01): option (a), narrowed.** Only G moves to after 3e. N2 runs
+  from outside Fly against the parse app alone; N3 uses a client machine
+  in a throwaway app calling the parse app's Flycast address with no token
+  (a 401 proves the request started the machine and the token is
+  enforced), destroyed afterwards and recorded in the evidence. A4 runs now
+  against a stand-in listener on the private network, control first, and
+  must not come out NOT-RUN; it runs again against the real API and worker
+  after 3e. **3c merge gate:** canary, every A/S/B self-test (IPv6 PASS),
+  A4 against the stand-in, N1-N3, all on the Fly machine. **G and the
+  real-target A4 gate the first worker/API deploy, not the 3c merge**
+  (RUNBOOK 8.1). At that deploy a fresh `PARSE_SERVICE_TOKEN` is generated
+  and set on the parse app and the worker together.
+- `ovntvsmhekqefsrpjtih` confirmed by the founder as `docflow-staging`;
+  `PARSE_SERVICE_TOKEN` set (staged) on `docflow-parse-staging`.
 - Secrets are typed in a PowerShell window with history saving off
   (`Set-PSReadLineOption -HistorySaveStyle SaveNothing`; RUNBOOK 8.1).
 - **Core on staging: `701 passed, 1 skipped`** -- the skip is
@@ -2091,9 +2103,41 @@ changed, built in the next commit:**
   -- the skip is `test_a_request_carrying_the_api_settings_is_refused`
   (`test_parse_token_boundary.py`): it needs a parse service holding a token
   (CI's API job); the dev service here has none. The 3 deselected are the
-  `live_api` tests, excluded from every default run. The local dev parse
-  service hit its 30-minute background limit partway through and was
-  restarted; no test failed.
+  `live_api` tests, excluded from every default run. That run is context
+  only: the local dev parse service hit its 30-minute background limit
+  partway through and was restarted (no test failed). **Founder: re-run the
+  whole suite once with the service up; that run's line is the record**
+  (below, when it finishes).
+
+**Fly staging run 1 (2026-10-01, image `sha256:f9719965`, machine
+`863662ce743978`, kernel 6.12.105-fly, cgroup v1): merge gate NOT met.**
+Evidence: `docs/spikes/3c-fly-staging/2026-10-01-sha256-f9719965/`.
+- PASS: canary (5 of 5, cgroup v1), N1 (one private IPv6, nothing else), N2
+  (no public A/AAAA; Fly's edge with the name forced gives the same 301 as
+  a made-up name; nothing reached the app), N3 (stopped machine started by
+  a no-token Flycast POST, 401 in 5.2 s), every A check with **A-net IPv6
+  PASS** and A3 Upstash PASS, every S check, 15 of 18 B checks (B13
+  LibreOffice, B16 and the rest).
+- **A4 (stand-in):** NOT-RUN in the full run (the control's 3 s connect
+  timed out; the stand-in logged no connection); PASS in a group-A rerun
+  two minutes later (control reached, blocked inside). Cause of the first
+  timeout not known.
+- **B5 FAIL, B11 FAIL: zombie orphans of killed jobs are not reaped on
+  cgroup v1.** Every survivor is a zombie (state Z), uid of a slot user,
+  in its own job PID namespace, parent the supervisor; `/proc/<pid>/cgroup`
+  shows `/` on every controller, so the reaper (which reaps only zombies
+  whose cgroup contains `/docflow-jobs/`) and the after-job backstop never
+  match them. The live server has the same leak: pid 712, left by its own
+  boot canary's memory kill, still a zombie of the server (pid 643) nine
+  minutes later. B11's 100 requests left nothing new (no job cgroups, the
+  backstop found nothing); it failed on the 7 earlier zombies. Per the
+  founder's rule (a survivor outside its cgroup is reported as a B10
+  failure), stopped and reported.
+- **B10 NOT-RUN:** the real check held (inside ENOENT, slot user EACCES),
+  but its control (root raises the limit to 300 MiB) is refused on v1 by
+  design: `memory.limit_in_bytes` can't exceed `memory.memsw.limit_in_bytes`
+  (256 MiB). Shown on the machine with a throwaway cgroup (file 05).
+- Throwaway app `docflow-3c-probe` destroyed; parse machine stopped.
 
 **Tenth run (`0be5422`): GREEN.** core 700 tests, 0 failed; api 580, 0 failed; worker 132, 0 failed (F5 included); parse unit 122, 0 failed; parse HTTP 56, 0 failed (D1 parity on every fixture, `po.doc` included); web and web-live passed; dependency audits clean. Self-tests in the real sandbox: canary 5 of 5, A 13 of 13 PASS with A-net IPv6 NOT-RUN, S 5 of 5, B 17 of 17; E1, E3 and E4 as designed. Recorded in D-183. Next: the
 founder backs up and applies `0034` on staging (the PR text leads with it:

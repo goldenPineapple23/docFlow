@@ -1,0 +1,98 @@
+== N2 from outside Fly (2026-10-01T19:51:04Z); this machine's public IP: (a residential address outside Fly; redacted)
+-- nslookup -type=A docflow-parse-staging.fly.dev 1.1.1.1
+    timeout was 2 seconds.
+Server:  UnKnown
+Address:  1.1.1.1
+
+DNS request timed out.
+    timeout was 2 seconds.
+DNS request timed out.
+    timeout was 2 seconds.
+-- nslookup -type=A docflow-parse-staging.fly.dev 8.8.8.8
+    timeout was 2 seconds.
+Server:  UnKnown
+Address:  8.8.8.8
+
+DNS request timed out.
+    timeout was 2 seconds.
+DNS request timed out.
+    timeout was 2 seconds.
+-- nslookup -type=AAAA docflow-parse-staging.fly.dev 1.1.1.1
+    timeout was 2 seconds.
+Server:  UnKnown
+Address:  1.1.1.1
+
+DNS request timed out.
+    timeout was 2 seconds.
+DNS request timed out.
+    timeout was 2 seconds.
+-- nslookup -type=AAAA docflow-parse-staging.fly.dev 8.8.8.8
+    timeout was 2 seconds.
+Server:  UnKnown
+Address:  8.8.8.8
+
+DNS request timed out.
+    timeout was 2 seconds.
+DNS request timed out.
+    timeout was 2 seconds.
+-- curl https://docflow-parse-staging.fly.dev/health
+curl: (6) Could not resolve host: docflow-parse-staging.fly.dev
+http_code=000
+-- curl http://docflow-parse-staging.fly.dev/health
+curl: (6) Could not resolve host: docflow-parse-staging.fly.dev
+http_code=000
+-- curl the private ingress address directly: http://[fdaa:cb:76d5:0:1::3]/health
+curl: (7) Failed to connect to fdaa:cb:76d5:0:1::3:80 after 0 ms: Could not connect to server
+http_code=000
+-- curl the machine's 6PN address directly: http://[fdaa:cb:76d5:a7b:579:9ce4:c6c8:2]:8100/health
+curl: (7) Failed to connect to fdaa:cb:76d5:a7b:579:9ce4:c6c8:2:8100 after 0 ms: Could not connect to server
+http_code=000
+-- fly ips list
+ VERSION │ IP                  │ TYPE            │ REGION │ NETWORK │ CREATED AT 
+ v6      │ fdaa:cb:76d5:0:1::3 │ private ingress │ global │ default │ 6m16s ago  
+
+
+== N2 DNS over HTTPS (2026-10-01T19:51:40Z); control first
+-- fly.io A via https://cloudflare-dns.com/dns-query: Status 0 answers ['37.16.18.81']
+-- fly.io A via https://dns.google/resolve: Status 0 answers ['37.16.18.81']
+-- fly.io AAAA via https://cloudflare-dns.com/dns-query: Status 0 answers ['2a09:8280:1::a:791']
+-- fly.io AAAA via https://dns.google/resolve: Status 0 answers ['2a09:8280:1::a:791']
+-- docflow-parse-staging.fly.dev A via https://cloudflare-dns.com/dns-query: Status 0 answers []
+-- docflow-parse-staging.fly.dev A via https://dns.google/resolve: Status 0 answers []
+-- docflow-parse-staging.fly.dev AAAA via https://cloudflare-dns.com/dns-query: Status 0 answers []
+-- docflow-parse-staging.fly.dev AAAA via https://dns.google/resolve: Status 0 answers []
+-- system resolver, control then target
+
+Name:    fly.io
+Addresses:  2a09:8280:1::a:791
+	  37.16.18.81
+
+Name:    docflow-parse-staging.fly.dev
+
+
+== N2 via Fly's public edge, name forced (2026-10-01T19:51:55Z)
+-- https, SNI+Host docflow-parse-staging.fly.dev -> 37.16.18.81
+curl: (35) schannel: failed to receive handshake, SSL/TLS connection failed
+http_code=000
+-- http, Host docflow-parse-staging.fly.dev -> 37.16.18.81
+HTTP/1.1 301 Moved Permanently
+cache-control: max-age=0, private, must-revalidate
+date: Thu, 01 Oct 2026 19:51:55 GMT
+location: https://docflow-parse-staging.fly.dev/health
+server: Fly/6d530f8f2 (2026-09-29)
+via: 1.1 fly.io, 1.1 fly.io
+-- https, SNI+Host docflow-parse-staging.fly.dev -> [2a09:8280:1::a:791]
+curl: (7) Failed to connect to docflow-parse-staging.fly.dev:443 after 0 ms: Could not connect to server
+http_code=000
+-- http, Host docflow-parse-staging.fly.dev -> [2a09:8280:1::a:791]
+curl: (7) Failed to connect to 2a09:8280:1::a:791:80 after 0 ms: Could not connect to server
+-- control: the same edge serves fly.io
+http_code=200
+-- control for the 301: Host no-such-app-3c-probe-7f2a.fly.dev -> 37.16.18.81
+HTTP/1.1 301 Moved Permanently
+cache-control: max-age=0, private, must-revalidate
+date: Thu, 01 Oct 2026 19:52:11 GMT
+location: https://no-such-app-3c-probe-7f2a.fly.dev/health
+server: Fly/6d530f8f2 (2026-09-29)
+-- parse app log lines in the last minutes that are not the keep-awake /health polls:
+(end)

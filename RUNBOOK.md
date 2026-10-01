@@ -850,6 +850,31 @@ The procedure:
 If any self-test fails on Fly, nothing merges and nothing goes to
 production: stop and report (1.7).
 
+**What gates the 3c merge, and what waits (founder, 2026-10-01).** The
+worker and the API are not on Fly until F-1's own logins exist (Stage 3e),
+so the 3c merge gate is the parse app alone, every item on the Fly machine:
+- the canary (8.3), every line PASS;
+- every A, S and B self-test PASS, A-net IPv6 PASS (not NOT-RUN);
+- **A4 against a stand-in:** a TCP listener on the private network, in a
+  throwaway app, passed with `--targets`. The control (reached from outside
+  the sandbox on the parse machine) runs first and must succeed; inside a
+  job the same address must be blocked. NOT-RUN fails the gate;
+- **N1:** `fly ips list` shows one private IPv6 and nothing else;
+- **N2:** from outside Fly, the app's public name resolves to no public
+  address and nothing answers;
+- **N3:** with the parse machine stopped, a client machine in a throwaway
+  app calls `http://docflow-parse-staging.flycast/...` with no token. A
+  401 proves the request started the machine and the token is enforced.
+
+The throwaway app is destroyed afterwards; its name, machine IDs and times
+go in the evidence.
+
+**These gate the first worker/API deploy, not the 3c merge:** G (end to end
+through the queue and the parse service), and A4 again against the real
+staging API and worker. At that deploy, generate a fresh
+`PARSE_SERVICE_TOKEN` and set it on the parse app and the worker together;
+the 3c token is not carried over.
+
 ### 8.2 Running it
 
 - **Dev (this Windows machine):** SETUP.md Step 7a. `PARSE_ISOLATION=off`,

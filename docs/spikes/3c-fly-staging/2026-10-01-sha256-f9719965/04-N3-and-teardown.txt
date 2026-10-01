@@ -1,0 +1,36 @@
+== N3 (2026-10-01T19:55:08Z)
+-- destroy the keep-awake client
+18577297c13078 has been destroyed
+-- stop the parse machine
+863662ce743978 has been successfully stopped
+-- parse machine state before the request:
+State: stopped
+ State         │ stopped                                                     
+-- client machine: POST http://docflow-parse-staging.flycast/v1/table, no token
+ Machine ID: 837013a7949448
+Machine started, you can connect via the following private ip
+  fdaa:cb:76d5:a7b:58f:8306:169d:2
+-- client log:
+2026-10-01T19:55:48Z app[837013a7949448] iad [info]n3 start 19:55:48
+2026-10-01T19:55:53Z app[837013a7949448] iad [info]n3 http_code=401 time_total=5.196593s
+2026-10-01T19:55:53Z app[837013a7949448] iad [info]n3 body={"error": "unauthorized"}
+2026-10-01T19:55:53Z app[837013a7949448] iad [info]n3 end 19:55:53
+-- parse machine state after:
+State: started
+-- parse app log around the start:
+2026-10-01T19:45:01Z app[863662ce743978] iad [info]parse service listening on port 8100
+2026-10-01T19:55:49Z proxy[863662ce743978] iad [info]Starting machine
+2026-10-01T19:55:50Z app[863662ce743978] iad [info] INFO [fly api proxy] listening at /.fly/api
+2026-10-01T19:55:50Z app[863662ce743978] iad [info]2026/10/01 19:55:50 INFO SSH listening listen_address=[fdaa:cb:76d5:a7b:579:9ce4:c6c8:2]:22
+2026-10-01T19:55:50Z runner[863662ce743978] iad [info]Machine started in 957ms
+2026-10-01T19:55:52Z app[863662ce743978] iad [info]canary: PASS
+2026-10-01T19:55:52Z app[863662ce743978] iad [info]parse service listening on port 8100
+2026-10-01T19:55:53Z app[863662ce743978] iad [info]2026-10-01 19:55:53,660 INFO parse_service http "POST /v1/table HTTP/1.1" 401 -
+
+== teardown (2026-10-01T19:56:40Z)
+ ID               NAME         STATE     IMAGE                      
+ d8911d61a47178   a4-standin   started   library/python:3.13-alpine 
+ 837013a7949448   n3-client    stopped   curlimages/curl:latest     
+Destroyed app docflow-3c-probe
+docflow-3c-probe apps listed after destroy: 0
+863662ce743978 has been successfully stopped

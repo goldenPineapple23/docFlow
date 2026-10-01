@@ -1,0 +1,14 @@
+Connecting to fdaa:cb:76d5:a7b:579:9ce4:c6c8:2...
+== kernel: 6.12.105-fly
+== the live server and every zombie now:
+  PID  PPID STAT USER         ELAPSED COMMAND
+  643     1 Sl   root           09:25 /opt/parse/venv/bin/python -m parse_service.server
+  712   643 Z    parse0         09:23 [python] <defunct>
+ 3333  3330 S    root           00:00 awk NR==1 || /parse_service.server/ || $3 ~ /^Z/
+-- zombie 712: ppid=643 uid=10001 memory-cgroup=8:memory:/ pidns=pid:[4026532245]
+== B10 control on cgroup v1: raise memory.limit_in_bytes above memsw
+set limit 256 MiB: ok
+set memsw 256 MiB: ok
+raise limit to 300 MiB: refused (above memsw)
+lower limit to 200 MiB: ok
+diag cgroup removed

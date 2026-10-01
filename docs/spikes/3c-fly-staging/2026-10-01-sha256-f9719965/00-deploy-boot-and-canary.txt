@@ -1,0 +1,32 @@
+== fly deploy --config apps/parse/fly.toml --dockerfile apps/parse/Dockerfile --ignorefile apps/parse/Dockerfile.dockerignore --no-public-ips --ha=false --remote-only .
+   (branch phase55/stage3c-design at 21e9de7; built on Fly's remote builder)
+image: registry.fly.io/docflow-parse-staging:deployment-01M3WFY9C99CSFN04XW4JW8KZS
+digest: sha256:f9719965e0134ac2b41c34fa7272ce5b768757a01a71787ff8a31b19a27f12e0
+image size: 213 MB
+> Machine 863662ce743978 [app] was created
+deploy exit=0
+
+== fly ips allocate-v6 --private; fly ips list (N1)
+ VERSION | IP                  | TYPE            | REGION | NETWORK
+ v6      | fdaa:cb:76d5:0:1::3 | private ingress | global | default
+(nothing else)
+
+== fly secrets list (names only)
+ PARSE_SERVICE_TOKEN | a43f9bd58d77156e | Deployed
+
+== boot log (fly logs, copied when read at 19:45; Fly's buffer has since moved on)
+2026-10-01T19:44:41Z runner[863662ce743978] iad [info]Pulling container image registry.fly.io/docflow-parse-staging@sha256:f9719965e0134ac2b41c34fa7272ce5b768757a01a71787ff8a31b19a27f12e0
+2026-10-01T19:44:57Z app[863662ce743978] iad [info] INFO Preparing to run: `/opt/parse/venv/bin/python -m parse_service.server` as root
+2026-10-01T19:44:57Z runner[863662ce743978] iad [info]Machine created and started in 16.364s
+2026-10-01T19:44:57Z app[863662ce743978] iad [info]canary: cgroup v1
+2026-10-01T19:44:58Z health[863662ce743978] iad [error]Health check 'servicecheck-00-http-8100' on port 8100 has failed. (the port opens only after the canary, 4 s later)
+2026-10-01T19:44:59Z app[863662ce743978] iad [info]RESULT canary:network PASS -- {"tcp": {"internet-ipv4": "blocked: ENETUNREACH", "internet-ipv6": "blocked: EADDRNOTAVAIL", "fly-dns": "blocked: EADDRNOTAVAIL", "fly-machines-api": "blocked: EADDRNOTAVAIL"}, "dns": {"example.com": "blocked: gaierror"}, "interfaces": ["lo(down)"]}
+2026-10-01T19:44:59Z app[863662ce743978] iad [info]RESULT canary:view PASS -- {"uid": 10001, "CapEff": "0000000000000000", "NoNewPrivs": "1", "Seccomp": "2", "fly_dir": [], "sys_dir": [], "writes": {"/": "EROFS", "/usr": "EROFS", "/etc": "EROFS", "/tmp": "writable", "/var/tmp": "writable", "/opt": "EROFS", "/work": "writable", "/lohome": "writable"}}
+2026-10-01T19:44:59Z app[863662ce743978] iad [info]RESULT canary:seccomp PASS -- {"unshare(NEWUSER)": "EPERM", "mount": "EPERM", "keyctl": "EPERM", "io_uring_setup": "EPERM", "userfaultfd": "EPERM"}
+2026-10-01T19:44:59Z app[863662ce743978] iad [info][    2.411758] Memory cgroup out of memory: Killed process 702 (python) total-vm:145524kB, anon-rss:52480kB, file-rss:5800kB, shmem-rss:0kB, UID:10001 pgtables:172kB oom_score_adj:0
+2026-10-01T19:44:59Z app[863662ce743978] iad [info]RESULT canary:memory-cap-kills PASS -- {"outcome": "stopped", "cause": "memory", "swap": {"memory": "67108864", "memory_swap": "67108864", "machine_has_active_swap": false}, "cgroup_version": 1}
+2026-10-01T19:45:01Z app[863662ce743978] iad [info]RESULT canary:cpu-quota-set-and-budget-kills PASS -- {"outcome": "stopped", "cause": "cpu", "quota": "100000 100000"}
+2026-10-01T19:45:01Z app[863662ce743978] iad [info]canary: PASS
+2026-10-01T19:45:01Z app[863662ce743978] iad [info]parse service listening on port 8100
+2026-10-01T19:45:01Z app[863662ce743978] iad [info]2026-10-01 19:45:01,186 INFO parse_service http "GET /health HTTP/1.1" 200 -
+2026-10-01T19:45:01Z health[863662ce743978] iad [info]Health check 'servicecheck-00-http-8100' on port 8100 is now passing.

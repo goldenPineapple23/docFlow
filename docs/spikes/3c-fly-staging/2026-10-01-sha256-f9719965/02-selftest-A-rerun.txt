@@ -1,0 +1,54 @@
+Connecting to fdaa:cb:76d5:a7b:579:9ce4:c6c8:2...
+== machine: 863662ce743978 image: registry.fly.io/docflow-parse-staging:deployment-01M3WFY9C99CSFN04XW4JW8KZS
+== date: 2026-10-01T19:54:44Z
+== targets:
+{"tcp": [["A3:upstash", "fdaa:cb:76d5:0:1::2", 6379, 6], ["A4:standin-private-network", "fdaa:cb:76d5:a7b:253:eb10:6d93:2", 9000, 6]], "dns": ["fly-docflow-staging-redis.upstash.io", "docflow-3c-probe.internal"]}
+
+cgroup v1; machine has active swap: False
+RESULT A-net:internet-ipv4 PASS -- {"outside": "reached", "inside": "blocked: ENETUNREACH"}
+RESULT A-net:internet-ipv6 PASS -- {"outside": "reached", "inside": "blocked: EADDRNOTAVAIL"}
+RESULT A-net:fly-dns PASS -- {"outside": "reached", "inside": "blocked: EADDRNOTAVAIL"}
+RESULT A-net:fly-machines-api PASS -- {"outside": "reached", "inside": "blocked: EADDRNOTAVAIL"}
+RESULT A-net:A6:anthropic-api PASS -- {"outside": "reached", "inside": "blocked: ENETUNREACH"}
+RESULT A-net:A6:supabase PASS -- {"outside": "reached", "inside": "blocked: ENETUNREACH"}
+RESULT A-net:A6:supabase-db PASS -- {"outside": "reached", "inside": "blocked: ENETUNREACH"}
+RESULT A-net:A7:supervisor-port PASS -- {"outside": "reached", "inside": "blocked: ENETUNREACH"}
+RESULT A-net:A3:upstash PASS -- {"outside": "reached", "inside": "blocked: EADDRNOTAVAIL"}
+RESULT A-net:A4:standin-private-network PASS -- {"outside": "reached", "inside": "blocked: EADDRNOTAVAIL"}
+RESULT A2:dns:example.com PASS -- {"outside": "resolved", "inside": "blocked: gaierror"}
+RESULT A2:dns:fly-docflow-staging-redis.upstash.io PASS -- {"outside": "resolved", "inside": "blocked: gaierror"}
+RESULT A2:dns:docflow-3c-probe.internal PASS -- {"outside": "resolved", "inside": "blocked: gaierror"}
+RESULT A8:interfaces PASS -- {"outside": ["lo(UP)", "dummy0(down)", "eth0(UP)", "teql0(down)"], "inside": ["lo(down)"]}
+RESULT A8:/.fly-and-/sys PASS -- {"outside": {"fly": ["api", "fly-src.pub", "fusermount3", "hallpass", "kmsfs", "swapon"], "sys": 10}, "inside": {"fly": [], "sys": []}}
+RESULT A9:identity PASS -- {"outside_uid": 0, "inside": {"uid": 10001, "gid": 10001, "groups": [], "CapEff": "0000000000000000", "CapBnd": "0000000000000000", "CapPrm": "0000000000000000", "NoNewPrivs": "1", "Seccomp": "2"}}
+RESULT A12:environment PASS -- {"inside": ["HOME", "LANG", "LIBREOFFICE_PATH", "PARSE_ISOLATION", "PATH", "TMPDIR"], "docflow_names_inside": [], "outside_has_parse_token": true}
+RESULT A13:/dev PASS -- {"outside_block_devices": ["loop0", "loop1", "loop2", "loop3", "loop4", "loop5", "loop6", "loop7", "nbd0", "nbd1", "nbd10", "nbd11"], "inside": {"fd": "link", "full": "char", "null": "char", "random": "char", "shm": "dir", "stderr": "link", "stdin": "link", "stdout": "link", "urandom": "char", "zero": "char"}}
+RESULT A14:read-only-root PASS -- {"outside": {"/": "writable", "/usr": "writable", "/etc": "writable", "/tmp": "writable", "/var/tmp": "writable", "/opt": "writable", "/work": "writable", "/lohome": "writable"}, "inside": {"/": "EROFS", "/usr": "EROFS", "/etc": "EROFS", "/tmp": "writable", "/var/tmp": "writable", "/opt": "EROFS", "/work": "writable", "/lohome": "writable"}, "tmp_and_var_tmp_are_the_work_tmpfs": {"/tmp": true, "/var/tmp": true}}
+RESULT A15:noexec PASS -- {"outside": {"loader": "/lib64/ld-linux-x86-64.so.2", "/tmp/a15-control-7rl_pceb": {"direct": "ran:0", "via_loader": "exit:0", "via_loader_stderr": ""}}, "inside": {"loader": "/lib64/ld-linux-x86-64.so.2", "/work": {"direct": "EACCES", "via_loader": "exit:127", "via_loader_stderr": "/work/a15-true-2: error while loading shared libraries: /work/a15-true-2: failed to map segment from shared object\n"}, "/tmp": {"direct": "EACCES", "via_loader": "exit:127", "via_loader_stderr": "/tmp/a15-true-2: error while loading shared libraries: /tmp/a15-true-2: failed to map segment from shared object\n"}, "/var/tmp": {"direct": "EACCES", "via_loader": "exit:127", "via_loader_stderr": "/var/tmp/a15-true-2: error while loading shared libraries: /var/tmp/a15-true-2: failed to map segment from shared object\n"}, "/lohome": {"direct": "EACCES", "via_loader": "exit:127", "via_loader_stderr": "/lohome/a15-true-2: error while loading shared libraries: /lohome/a15-true-2: failed to map segment from shared object\n"}}}
+RESULT A10:no-way-out PASS -- {"control_root_in_throwaway_namespace": {"setns": "ok(0)", "mount_tmpfs": "ok(0)", "interface_up": "ok"}, "inside": {"setns": "EPERM", "mount_tmpfs": "EPERM", "interface_up": "EPERM"}}
+RESULT A11:concurrent-jobs PASS -- {"second_job_sees_processes": [1, 2], "second_job_work": ["tmp"], "first_job_left_in_its_tmp": "a11-marker-1790884485506640616", "second_job_tmp": [], "first": "selftest"}
+
+### Summary
+PASS       A-net:internet-ipv4
+PASS       A-net:internet-ipv6
+PASS       A-net:fly-dns
+PASS       A-net:fly-machines-api
+PASS       A-net:A6:anthropic-api
+PASS       A-net:A6:supabase
+PASS       A-net:A6:supabase-db
+PASS       A-net:A7:supervisor-port
+PASS       A-net:A3:upstash
+PASS       A-net:A4:standin-private-network
+PASS       A2:dns:example.com
+PASS       A2:dns:fly-docflow-staging-redis.upstash.io
+PASS       A2:dns:docflow-3c-probe.internal
+PASS       A8:interfaces
+PASS       A8:/.fly-and-/sys
+PASS       A9:identity
+PASS       A12:environment
+PASS       A13:/dev
+PASS       A14:read-only-root
+PASS       A15:noexec
+PASS       A10:no-way-out
+PASS       A11:concurrent-jobs
+== selftest exit=0
