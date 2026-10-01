@@ -37,11 +37,15 @@ dependencies = [
 
 [project.optional-dependencies]
 # The one file library core uses: openpyxl writes the .xlsx export
-# (docflow_core.exports). Optional because the API installs core too. Every
-# library that opens a file a stranger sent lives in the parse service's
-# image only (Stage 3c). Same pin as apps/worker's lockfile.
+# (docflow_core.exports). openpyxl writes through lxml when it is installed and
+# through its own writer otherwise, and the two give different bytes, so lxml
+# is pinned with it: the export's pinned digest and its round trip depend on
+# it. Optional because the API installs core too. Every library that opens a
+# file a stranger sent lives in the parse service's image only (Stage 3c).
+# Same pins as apps/worker's lockfile.
 files = [
     "openpyxl==3.1.5",
+    "lxml==6.1.3",
 ]
 # Exact pins, the same as apps/worker/requirements.lock.txt, which is what
 # the core CI job installs (H7).

@@ -24,7 +24,7 @@ RUN apt-get update \
       python3-seccomp=2.6.0-2 \
       libseccomp2=2.6.0-2 \
       util-linux=2.41.5-0+deb13u1 \
-      libreoffice-writer-nogui=4:25.2.3-2+deb13u6 \
+      libreoffice-writer-nogui=4:25.2.3-2+deb13u7 \
  && rm -rf /var/lib/apt/lists/* \
  && command -v unshare && command -v setpriv && command -v soffice
 

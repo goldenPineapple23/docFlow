@@ -11,6 +11,9 @@ email-validator>=2.1
 # libraries are in its image alone (apps/api/tests/test_parsing_boundary.py,
 # apps/worker/tests/test_parsing_boundary.py).
 openpyxl>=3.1
+# Tests only, with openpyxl: core's export tests run in this environment in
+# CI, and openpyxl writes different .xlsx bytes without lxml.
+lxml>=6.1
 
 # Phase 1: enqueue-only Celery client (app/celery_client.py) -- the API
 # never defines or runs task bodies, it only sends tasks by name onto the

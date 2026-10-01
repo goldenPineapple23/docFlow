@@ -1612,7 +1612,32 @@ D2 shows it is unchanged.
 
 **3c build -- IN PROGRESS 2026-10-01 (branch `phase55/stage3c-design`).**
 Built and tested on this machine (dev mode; never counted as proof of
-isolation); the first CI run on the real image is next. Nothing is on Fly.
+isolation). Nothing is on Fly.
+
+**First CI run (`09c68ed`, `899efdb`, 2026-10-01): failed, three causes,
+none of them a sandbox finding; all three fixed in the next commit.**
+1. **The image didn't build** (parse and worker jobs; `apt-get` exit 100).
+   I pinned LibreOffice at `25.2.3-2+deb13u6` from the main archive without
+   checking the security archive, which already had `deb13u7`; apt takes the
+   security version for the writer's exact-version dependencies, so u6
+   can't be installed. Pin moved to `deb13u7` (RUNBOOK 8.5's case, before
+   the first build). The other pinned packages have no newer security
+   version. So the self-tests, E1, E4 and the canary haven't run yet.
+2. **Core: 5 xlsx export failures** (pinned digest, OS-independence, the
+   hostile round trip). I took `lxml` out of the worker's and the API's
+   locks with the parsing libraries. openpyxl writes the .xlsx through lxml
+   when it's installed and through its own writer otherwise, and the bytes
+   differ. My local venv still had lxml, so it passed here. Reproduced
+   locally with `OPENPYXL_LXML=False` (5 failed, 36 passed). `lxml==6.1.3`
+   restored exactly as on `main` (both locks, both requirements files,
+   core's `files` extra), with a comment saying why; it is never handed a
+   file. `pip-audit`: no known vulnerabilities.
+3. **API: 33 failures** (catalog import, and onboarding and card billing,
+   which need a committed catalog). The catalog tests call the worker's
+   parse step (`catalog_import.run_parse`), which now reads through the
+   parse service, and the API job started none. Locally my dev service was
+   running. The API job now builds and starts the real image, as the
+   worker job does.
 
 Done, in the agreed order:
 1. **D2 baseline** (`b819e8b`): 41 committed fixtures under

@@ -285,12 +285,33 @@ jobs:
       - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
         id: app_role
         run: python "${{ github.workspace }}/scripts/ci/create_app_role.py"
+      # Stage 3c: the catalog tests run the worker's parse step
+      # (catalog_import.run_parse), which reads through the real parse service
+      # image, as in the worker job.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the parse service image
+        id: parse_image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/parse/Dockerfile
+          tags: docflow-parse:ci
+          load: true
+          cache-from: type=gha,scope=parse
+      - name: Start the parse service (production mode, isolation on)
+        id: parse_service
+        env:
+          PARSE_SERVICE_TOKEN: ci-parse-token-not-a-secret
+        run: bash "${{ github.workspace }}/scripts/ci/parse_image.sh" docflow-parse:ci serve
       - id: ruff
         run: ruff check .
       - id: mypy
         run: mypy app
       - name: Test (against the local Supabase stack, as docflow_app; live_api deselected)
         id: test
+        env:
+          PARSE_SERVICE_URL: http://127.0.0.1:8100
+          PARSE_SERVICE_TOKEN: ci-parse-token-not-a-secret
         run: pytest -v --junitxml=junit.xml
       - name: No unapproved skipped tests
         if: success() || failure()

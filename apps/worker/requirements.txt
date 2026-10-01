@@ -10,6 +10,9 @@ httpx>=0.27
 # back the bytes it wrote for the round-trip check. It never opens a file a
 # stranger sent.
 openpyxl>=3.1
+# openpyxl writes through lxml when it is installed, and the .xlsx bytes (the
+# export's pinned digest) depend on which writer ran. Never handed a file.
+lxml>=6.1
 
 # Stage 3c: every library that opens a file a stranger sent (pdfplumber,
 # python-docx, Pillow, pillow-heif, olefile, xlrd, defusedxml) and LibreOffice
