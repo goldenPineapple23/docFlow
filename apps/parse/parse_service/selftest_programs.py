@@ -451,6 +451,54 @@ def cgroup_escape(args: dict) -> dict:
     return out
 
 
+def libreoffice(args: dict) -> dict:
+    """B13: LibreOffice converts a file inside the real sandbox, run the way
+    parsing/conversion.py runs it (same flags, throwaway profile, the .doc
+    path's docx target), on a small text file this program writes itself.
+    Reports the converter's exit status and the tail of its own stderr, so a
+    failure in CI says why (the parse service's answer carries only DOC-017)."""
+    from parse_service.parsing.conversion import LIBREOFFICE_TIMEOUT_SECONDS, find_libreoffice
+
+    binary = find_libreoffice()
+    if binary is None:
+        return {"binary": None}
+    work = os.path.join(os.environ.get("TMPDIR", "/tmp"), "b13")
+    os.makedirs(os.path.join(work, "out"), exist_ok=True)
+    source = os.path.join(work, "input.txt")
+    with open(source, "w", encoding="utf-8") as handle:
+        handle.write("Acme Test Distributor\nPO TEST-0013\n")
+    command = [
+        binary,
+        "--headless",
+        "--invisible",
+        "--norestore",
+        "--nolockcheck",
+        "--nodefault",
+        "--nofirststartwizard",
+        f"-env:UserInstallation=file://{work}/profile",
+        "--convert-to",
+        "docx",
+        "--outdir",
+        os.path.join(work, "out"),
+        source,
+    ]
+    started = time.monotonic()
+    try:
+        done = subprocess.run(
+            command, stdin=subprocess.DEVNULL, capture_output=True, timeout=LIBREOFFICE_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired:
+        return {"binary": binary, "timed_out": True, "seconds": round(time.monotonic() - started, 1)}
+    return {
+        "binary": binary,
+        "exit_status": done.returncode,
+        "seconds": round(time.monotonic() - started, 1),
+        "produced": sorted(os.listdir(os.path.join(work, "out"))),
+        "stderr_tail": done.stderr.decode("utf-8", errors="replace")[-800:],
+        "stdout_tail": done.stdout.decode("utf-8", errors="replace")[-300:],
+    }
+
+
 def sleep(args: dict) -> dict:
     """A11: stays alive a little so a second job can look for it."""
     time.sleep(float(args.get("seconds", 2)))
@@ -472,6 +520,7 @@ PROGRAMS = {
     "leave": leave,
     "cgroup_escape": cgroup_escape,
     "sleep": sleep,
+    "libreoffice": libreoffice,
 }
 
 

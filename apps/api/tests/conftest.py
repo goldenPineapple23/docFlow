@@ -1,4 +1,6 @@
 import base64
+import os
+from contextlib import contextmanager
 
 import pytest
 from docflow_core.config import get_settings
@@ -384,6 +386,29 @@ def _console_mfa_off_unless_a_test_asks(monkeypatch):
     monkeypatch.setenv("CONSOLE_MFA_ENFORCED", "false")
     get_settings.cache_clear()
     yield
+    get_settings.cache_clear()
+
+
+# The parse service's token, given to worker code only (founder, 2026-10-01).
+# The API never holds PARSE_SERVICE_TOKEN: CI's API job puts the token under
+# this name instead, and only `as_the_worker` reads it, around calls to the
+# worker's own code (catalog_import.run_parse). test_parse_token_boundary.py
+# checks that the API's settings carry no token.
+WORKER_HARNESS_PARSE_TOKEN = "WORKER_HARNESS_PARSE_TOKEN"
+
+
+@contextmanager
+def as_the_worker():
+    """Run worker code with the worker's parse token, then take it away."""
+    token = os.environ.get(WORKER_HARNESS_PARSE_TOKEN, "")
+    with pytest.MonkeyPatch.context() as patch:
+        if token:
+            patch.setenv("PARSE_SERVICE_TOKEN", token)
+        get_settings.cache_clear()
+        try:
+            yield
+        finally:
+            get_settings.cache_clear()
     get_settings.cache_clear()
 
 

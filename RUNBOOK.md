@@ -884,13 +884,26 @@ Every library in the image reads files strangers send. When a CVE lands in
 one (pdfplumber, python-docx, openpyxl, Pillow, pillow-heif, olefile, xlrd,
 defusedxml, LibreOffice, libseccomp, or the base image):
 1. Move the pin: `apps/parse/requirements.lock.txt` for a Python package;
-   the exact Debian version in `apps/parse/Dockerfile` for LibreOffice or
-   libseccomp; the digest for the base image.
+   `DEBIAN_SNAPSHOT` in `apps/parse/Dockerfile` for LibreOffice, libseccomp
+   or any other Debian package (a snapshot.debian.org date, e.g.
+   `20261008T000000Z`: every Debian package in the image comes from the
+   archive as it was then); the digest for the base image.
 2. CI must pass in full: the unit tests, D2 parity (every fixture's text
    must stay the same), and the self-tests in the real sandbox.
-3. Then 8.1: deploy to Fly staging, check the canary log, run B1-B12 there.
+3. Then 8.1: deploy to Fly staging, check the canary log, run B1-B13 there.
 4. Only then deploy to production.
 
-A Debian security update can replace a pinned version in the archive, which
-breaks the image build until the pin is moved. That is this procedure
-starting, not a CI fault.
+**The weekly Debian move (D-183).** Every Monday at 06:00 UTC
+`.github/workflows/debian-snapshot.yml` runs the whole CI workflow with the
+image built from that day's snapshot. Green: it pushes
+`deps/debian-snapshot-<date>` with the new date, and the run's summary page
+has the PR link. Open the PR, let its own CI run pass, merge, then 8.1.
+Red: nothing is pushed and GitHub emails the failure; read the run's
+annotations (D2 parity and the self-tests name what changed) and treat it
+as step 2 failing. Run it by hand any time from the Actions tab ("Run
+workflow"), for example the day a LibreOffice CVE is announced, rather than
+waiting for Monday.
+
+A build never changes by itself: until the date moves, a rebuild installs
+exactly what the last one did. If snapshot.debian.org is down, the build
+fails; it never falls back to the live archive.

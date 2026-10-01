@@ -1521,7 +1521,7 @@ this as well). The API needs `SUPABASE_URL` to check sign-in tokens (JWKS)
 for the upload test. It gets no Stripe, Postmark, service-role or
 Anthropic key in 3c.
 
-**3c test table.** 55 tests.
+**3c test table.** 56 tests (55 agreed, plus B13, 2026-10-01).
 
 Where each test runs:
 - **L** = this Windows machine, dev mode. Logic only, never counted as
@@ -1580,6 +1580,7 @@ failure means stop and report.
 | B10 | The job can't raise its own limit or leave its cgroup (the files are hidden; and refused even if visible) | root can change it | | yes | yes |
 | B11 | No leak: after 100 jobs, every job cgroup is gone and the slot users own no process | -- | | yes | yes |
 | B12 | **CPU quota (slows):** a job spinning on every core gets at most one CPU's worth of time over a timed window, and the cgroup reports throttling; the other slot's job still finishes | the same program with no quota uses more than one CPU | | yes | yes |
+| B13 | **LibreOffice runs in the sandbox** (added 2026-10-01 after `po.doc` gave DOC-017 in the real image): one conversion with `conversion.py`'s flags inside a real job exits 0 and produces a file; reports its exit status and stderr tail | -- | | yes | yes |
 | **C. Hostile files** (through `POST /v1/document`, the real path. After each one, a known-good PO parses correctly, so the service is shown healthy) | | | | | |
 | C1 | Zip bomb; XXE payload; oversized image; 500-page PDF; `.exe` renamed `.pdf`; password-protected PDF; a `.zip` holding a valid PO. Each gets the catalog code it gets today | -- | yes | yes | yes |
 | C2 | A malformed file of **each** Tier 2 format (`.doc`, `.xls`, `.tif`, `.heic`, `.msg`, `.odt`, `.ods`) that kills or hangs its converter: a clean `rejected` or `stopped`, never a crash | -- | yes | yes | yes |
@@ -1595,7 +1596,7 @@ failure means stop and report.
 | E5 | **Any test-only switch that weakens a cap is refused when `FLY_APP_NAME` is set:** the service exits at startup | without `FLY_APP_NAME` the switch is accepted (CI only) | yes | yes | |
 | **F. The worker's side** | | | | | |
 | F1 | Each row of item 6's table, against the running service: unreachable, busy, `stopped`, dropped mid-request, a malformed answer | -- | yes (dev service) | yes (real image) | |
-| F2 | The dependency-graph test: no parsing library importable from the worker or the API | -- | yes | yes | |
+| F2 | The dependency-graph test (as built, a static scan): no import of a parsing library (PDF, image, Word, legacy Excel, LibreOffice's bindings) in the worker's, core's or the API's product code, none in their requirements; **the XML guard** (founder, 2026-10-01): no direct lxml import and no `openpyxl.load_workbook` use in `apps/api/app` or `apps/worker/app` | -- | yes | yes | |
 | F3 | D-163: a worker killed during a (stubbed) model call leaves a started row; the sweep writes its outcome with the counted input cost; every cost reader ignores started rows | -- | yes (DB, staging) | yes (DB) | |
 | F4 | **The retry rule (6a):** `decide()` over every sequence in 6a's table, including crash, crash, timeout (3 tries, not 4) and lost, lost | today's code fails the crash-crash-timeout case | yes | yes | |
 | F5 | A lost try against the real service (CI kills the parse container mid-request): recorded at once, and retried or failed by `decide()` within seconds; the next try after a restart succeeds | -- | | yes | |
@@ -1638,6 +1639,31 @@ none of them a sandbox finding; all three fixed in the next commit.**
    parse service, and the API job started none. Locally my dev service was
    running. The API job now builds and starts the real image, as the
    worker job does.
+
+**Second CI run (`5a00275`): the image built; the sandbox ran for the first
+time.** core 699 tests, 0 failed; api 571, 0 failed; web and web-live
+passed; parse unit 110, 0 failed. In the real sandbox (cgroup v2 on the
+runner; Fly is v1, so the v1 path is proven only on Fly): canary 5 of 5;
+S 4 of 4; A all PASS except A-net IPv6, NO-CONTROL (the runner has no IPv6
+outside either, so the control can't show the block matters; Fly has IPv6);
+E1 and E4 refused to start as they should. Failures:
+1. **B5 and B11:** processes owned by the slot user still exist after the
+   job, while the job's cgroup was empty and removed (B5: 6, B11: 8; the 100
+   normal jobs in B11 added none). *Not yet diagnosed.* My guess, unproven:
+   zombies of killed jobs. When the cgroup is killed, `unshare` dies with
+   its child, the child is reparented to the container's PID 1 (the
+   self-test program, with no init to reap it), and its `/proc` entry stays.
+   The next run reports each one's state, parent and PID 1 before anything
+   is changed.
+2. **`po.doc` gives DOC-017 in the real image** (parse HTTP test, the
+   worker's preview test, and F5, whose kill window needs a slow LibreOffice
+   parse but got a 0.2 s refusal). LibreOffice fails inside the sandbox; the
+   answer says only DOC-017. New self-test B13 reports LibreOffice's own
+   exit status and stderr from inside a real job.
+3. **18 worker database tests: documents stay in `processing`** (H1, H3, M1,
+   M3, F3, cost, the time-limit tests). These need migration `0034`, so on
+   this machine they skip (staging doesn't have it); CI is their first run.
+   *Being diagnosed.*
 
 Done, in the agreed order:
 1. **D2 baseline** (`b819e8b`): 41 committed fixtures under
@@ -1700,10 +1726,59 @@ reviews each before the merge:**
 - **`TABLE_FORMATS` moved into `file_types`** (standard library only), so
   the parse image doesn't need `catalog_import` and SQLAlchemy.
   `catalog_import.TABLE_FORMATS` still exists.
-- **The image's Debian sources:** packages are pinned by exact version from
-  the normal Debian archive. A Debian security update replaces a version,
-  so the build then fails until the pin is moved. That is the deliberate
-  upgrade RUNBOOK 8 describes, but it can also stop an unrelated PR's CI.
+- **The image's Debian sources (changed 2026-10-01, founder):** first built
+  with exact version pins against the live archive, which broke on the first
+  security update (above) and could have held a vulnerable LibreOffice in
+  place. Now: the base image by digest, and apt reads only a dated
+  snapshot of the archive (snapshot.debian.org, main and security,
+  `DEBIAN_SNAPSHOT` in the Dockerfile, first date `20261001T000000Z`), with
+  an `apt-get upgrade` so the base image's own packages also come from that
+  date. No version pins: the date is the pin. A weekly workflow
+  (`.github/workflows/debian-snapshot.yml`, Mondays 06:00 UTC) runs the whole
+  CI workflow on today's date; green, it pushes `deps/debian-snapshot-<date>`
+  with the new date and leaves the PR link as a notice; red, it pushes
+  nothing and GitHub emails the failure. The founder opens the PR; 8.1 (Fly
+  staging) comes before production. Recorded in D-183. *My choice, yours to
+  change:* the job pushes a branch rather than only testing, because the
+  date has to change in the repository for the tested image to be the one
+  that ships. *Risk:* snapshot.debian.org is slower and less available than
+  the live archive; apt retries 5 times, and an outage fails a build rather
+  than changing what it installs.
+- **lxml stays in the worker and API (founder: listed here).** openpyxl
+  writes the .xlsx export through lxml when it's installed, and the bytes
+  differ without it (first CI run, above), so `lxml==6.1.3` is pinned beside
+  openpyxl as on `main`. It is never handed a file. **F2 as built:** a
+  static scan of import statements and of the requirements files. lxml was
+  never on its lists, so F2 neither changed nor failed. It never checked
+  what is installed, so "no parsing library importable" overstated it. Now
+  (founder, 2026-10-01): F2 keeps the import check for the real parsing
+  libraries (PDF, image, Word, legacy Excel, and now LibreOffice's bindings
+  `uno`/`unohelper`), and adds **the XML guard**: any direct lxml import
+  (including `importlib.import_module("lxml...")`) or any
+  `openpyxl.load_workbook` use, in any form, in `apps/api/app` or
+  `apps/worker/app` fails CI, with a test that each form is caught. **Open
+  (Q11):** core's `exports.py` calls `load_workbook` to read back the .xlsx
+  it just wrote, which is the round-trip check Section 7.4 requires (EXP-004
+  at runtime). It runs in the worker but lives in `packages/core`, so the
+  guard as you worded it doesn't scan it.
+- **The parse token in CI (founder, 2026-10-01):** the API process never
+  holds `PARSE_SERVICE_TOKEN`. In `5a00275` the API job did put it in the
+  test step's environment, so the API's settings had it in that run. Now
+  the step has `WORKER_HARNESS_PARSE_TOKEN` instead, read only by
+  `as_the_worker` (apps/api/tests/conftest.py) around the worker's own
+  `catalog_import.run_parse`. `test_parse_token_boundary.py`: the API's
+  settings (environment and root .env) carry no token; a request made with
+  the API's settings is refused by the real service as `unauthorized`, and
+  the same request with the worker's token gets in (the control). Checked
+  locally against a tokened dev service, and both tests fail when the API
+  is given the token. **Open (Q12):** nothing stops the API *starting* with
+  a token on Fly; that is the secrets list (RUNBOOK). Should the API refuse
+  to start in production when `PARSE_SERVICE_TOKEN` is set?
+- **Self-test additions:** B5 and B11 now report each leftover process's
+  name, state and parent, and what PID 1 is. **B13** runs LibreOffice once
+  inside the real sandbox, the way `conversion.py` does, and reports its
+  exit status and its own stderr tail, because the service's answer for
+  `po.doc` carries only DOC-017.
 - **The seed script and the walkthrough file maker** now use the parse
   service (dev) and the parse venv.
 

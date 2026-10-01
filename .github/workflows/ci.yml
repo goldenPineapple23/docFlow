@@ -3,6 +3,15 @@ name: CI
 on:
   push:
   pull_request:
+  # The weekly Debian snapshot job (debian-snapshot.yml) runs this whole
+  # workflow with the parse image built from a newer snapshot date.
+  workflow_call:
+    inputs:
+      debian_snapshot:
+        description: "snapshot.debian.org date for the parse image, e.g. 20261008T000000Z (empty: the Dockerfile's)"
+        type: string
+        required: false
+        default: ""
 
 # The Python suites run against a real Supabase stack (Postgres 17 with the
 # auth schema and Supabase roles), started by the Supabase CLI from
@@ -297,6 +306,7 @@ jobs:
           file: apps/parse/Dockerfile
           tags: docflow-parse:ci
           load: true
+          build-args: ${{ inputs.debian_snapshot && format('DEBIAN_SNAPSHOT={0}', inputs.debian_snapshot) || '' }}
           cache-from: type=gha,scope=parse
       - name: Start the parse service (production mode, isolation on)
         id: parse_service
@@ -310,8 +320,10 @@ jobs:
       - name: Test (against the local Supabase stack, as docflow_app; live_api deselected)
         id: test
         env:
-          PARSE_SERVICE_URL: http://127.0.0.1:8100
-          PARSE_SERVICE_TOKEN: ci-parse-token-not-a-secret
+          # Never PARSE_SERVICE_TOKEN here: the API doesn't hold the parse
+          # token. Only the harness that runs worker code reads this name
+          # (tests/conftest.py as_the_worker; test_parse_token_boundary.py).
+          WORKER_HARNESS_PARSE_TOKEN: ci-parse-token-not-a-secret
         run: pytest -v --junitxml=junit.xml
       - name: No unapproved skipped tests
         if: success() || failure()
@@ -371,6 +383,7 @@ jobs:
           file: apps/parse/Dockerfile
           tags: docflow-parse:ci
           load: true
+          build-args: ${{ inputs.debian_snapshot && format('DEBIAN_SNAPSHOT={0}', inputs.debian_snapshot) || '' }}
           cache-from: type=gha,scope=parse
       - name: Start the parse service (production mode, isolation on)
         id: parse_service
@@ -450,6 +463,7 @@ jobs:
           file: apps/parse/Dockerfile
           tags: docflow-parse:ci
           load: true
+          build-args: ${{ inputs.debian_snapshot && format('DEBIAN_SNAPSHOT={0}', inputs.debian_snapshot) || '' }}
           cache-from: type=gha,scope=parse
           cache-to: type=gha,mode=max,scope=parse
       - name: "E1: refuses to start without the privileges isolation needs"

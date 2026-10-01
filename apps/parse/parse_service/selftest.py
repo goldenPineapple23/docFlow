@@ -487,6 +487,8 @@ class Runner:
                     "cause": job.cause,
                     "seconds": job.seconds,
                     "slot_user_processes_after": left,
+                    "left_details": _describe(left),
+                    "pid1": _pid1(),
                     **job.evidence,
                 },
             )
@@ -621,7 +623,24 @@ class Runner:
             Check(
                 "B11:no-leak",
                 _verdict(outcomes == {"selftest": count} and not leftover and not left),
-                {"jobs": outcomes, "job_cgroups_left": leftover, "slot_user_processes_left": left},
+                {
+                    "jobs": outcomes,
+                    "job_cgroups_left": leftover,
+                    "slot_user_processes_left": left,
+                    "left_details": _describe(left),
+                    "pid1": _pid1(),
+                },
+            )
+        )
+
+    def libreoffice(self) -> None:
+        job = self.job("libreoffice")
+        result = self.result(job)
+        self.add(
+            Check(
+                "B13:libreoffice-converts-in-the-sandbox",
+                _verdict(job.outcome == "selftest" and result.get("exit_status") == 0 and bool(result.get("produced"))),
+                {"outcome": job.outcome, "cause": job.cause, "result": result, **job.evidence},
             )
         )
 
@@ -710,6 +729,30 @@ def _processes_of(uid: int) -> list[int]:
     return out
 
 
+def _describe(pids: list[int]) -> list[dict]:
+    """Name, state and parent of each process, so a leak says what it is."""
+    out = []
+    for pid in pids:
+        fields: dict[str, int | str] = {"pid": pid}
+        try:
+            for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+                key, _, value = line.partition(":")
+                if key in ("Name", "State", "PPid"):
+                    fields[key.lower()] = value.strip()
+        except OSError as exc:
+            fields["error"] = type(exc).__name__
+        out.append(fields)
+    return out
+
+
+def _pid1() -> str:
+    """What is reaping orphans in this PID namespace."""
+    try:
+        return Path("/proc/1/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
+    except OSError as exc:
+        return type(exc).__name__
+
+
 def _resolve(host: str, version: int) -> str | None:
     family = socket.AF_INET6 if version == 6 else socket.AF_INET
     try:
@@ -796,6 +839,7 @@ def run_all(runner: Runner, groups: str, extra_targets: dict) -> None:
         runner.disk()
         runner.one_per_file()
         runner.cgroup_escape()
+        runner.libreoffice()
         runner.no_leak()
 
 

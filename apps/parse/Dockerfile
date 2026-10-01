@@ -5,7 +5,8 @@
 #     docker build -f apps/parse/Dockerfile -t docflow-parse .
 #
 # Pinned, so what CI tested is what runs: the base image by digest, Debian
-# packages by exact version, Python packages by apps/parse/requirements.lock.txt.
+# packages by a dated snapshot of the archive (DEBIAN_SNAPSHOT below), Python
+# packages by apps/parse/requirements.lock.txt.
 # Changing any pin is a deliberate upgrade (RUNBOOK section 8), and the Fly
 # B tests must pass on staging before it reaches production (RUNBOOK 8.1).
 #
@@ -17,14 +18,31 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      python3=3.13.5-1 \
-      python3-venv=3.13.5-1 \
-      python3-seccomp=2.6.0-2 \
-      libseccomp2=2.6.0-2 \
-      util-linux=2.41.5-0+deb13u1 \
-      libreoffice-writer-nogui=4:25.2.3-2+deb13u7 \
+# apt reads the Debian archive as it was at one moment (snapshot.debian.org,
+# main and security), never the live archive: every package, the base
+# image's own included (the upgrade), comes from that date, so a rebuild
+# gives the same image and the date is the one thing that moves it. Exact
+# version pins against the live archive broke on each security update and
+# could hold a vulnerable LibreOffice in place. A weekly job
+# (.github/workflows/debian-snapshot.yml) moves the date forward and runs
+# the full suite (D-183). Check-Valid-Until is off because an old snapshot's
+# Release files are past their expiry by design; signatures are still checked.
+ARG DEBIAN_SNAPSHOT=20261001T000000Z
+RUN sed -i \
+      -e "s#http://deb.debian.org/debian-security#http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}#" \
+      -e "s#http://deb.debian.org/debian\$#http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}#" \
+      /etc/apt/sources.list.d/debian.sources \
+ && ! grep -q deb.debian.org /etc/apt/sources.list.d/debian.sources \
+ && test "$(grep -c "snapshot.debian.org/archive/.*/${DEBIAN_SNAPSHOT}" /etc/apt/sources.list.d/debian.sources)" = 2 \
+ && apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=5 update \
+ && apt-get -o Acquire::Retries=5 -y upgrade \
+ && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+      python3 \
+      python3-venv \
+      python3-seccomp \
+      libseccomp2 \
+      util-linux \
+      libreoffice-writer-nogui \
  && rm -rf /var/lib/apt/lists/* \
  && command -v unshare && command -v setpriv && command -v soffice
 
