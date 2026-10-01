@@ -95,9 +95,15 @@ select n.nspname as backup, string_agg(c.relname, ', ' order by c.relname) as ta
  where n.nspname like 'backup%' group by n.nspname order by n.nspname;
 ```
 
-**On `docflow-staging`: none since 2026-09-30.** The founder dropped
-`backup_0026` to `backup_0032` that day, after the PR for `0032` (the card
-billing follow-up, PR #29) merged.
+**On `docflow-staging`:** the founder dropped `backup_0026` to
+`backup_0032` on 2026-09-30, after the PR for `0032` (the card billing
+follow-up, PR #29) merged. Since then:
+- `backup_3b` (the 3b cutover's restore point), unless the founder has
+  dropped it;
+- **`backup_0034`** (documents 105, extraction_runs 17; live = backup),
+  taken 2026-10-01 before `0034`. The founder keeps it until 3c has merged
+  and run cleanly on staging for a few days; then it is dropped and recorded
+  here.
 
 `docflow-prod` doesn't exist yet (Phase 6), so it has no backups.
 
@@ -880,7 +886,7 @@ switch isolation off to get it running.**
 ### 8.4 When the founder gets a `parse_service_unavailable` alert
 
 At most once an hour for the whole platform. The payload's `reason`:
-- `no_connection` / `busy_or_isolation_failed`: the service is down,
+- `no_connection` / `http_503`: the service is down,
   overloaded, or its canary is failing. Check the app's machines and its
   startup log (8.3). Documents wait and retry by themselves; nothing is
   failed for waiting.
@@ -888,6 +894,22 @@ At most once an hour for the whole platform. The payload's `reason`:
   differ. Set the same value on both apps.
 - `http_4xx`: a request the service refused (a DocFlow bug, never the
   file's fault). Report it.
+
+A **DOC-022** alert whose detail has `last_lost_reason` (`http_502`,
+`http_504`, or a read error such as `ReadTimeout`) means the parse requests
+got in and never came out: a 502/504 is Fly's proxy (the machine died or
+didn't start), not a parser crash, which arrives as a `crashed` answer and
+DOC-005.
+
+**A `parse_seccomp_kill` alert** (founder, 2026-10-01: every one, never
+rate-limited) means a parse job was killed by the seccomp filter (SIGSYS).
+The filter kills only a system call from a foreign architecture (x32 or
+32-bit), which no parser makes by accident: treat the file as an attack.
+The alert has no syscall number (the kill reports none; only the kernel's
+audit log on the parse machine has it, in `fly logs` if the kernel printed
+it). The document failed with DOC-005 (an import with IMP-004); nothing
+else needs doing in DocFlow. Keep the file's hash from the alert's
+document for any follow-up.
 
 ### 8.5 Upgrading a parser (an ongoing duty, CLAUDE.md 7.11)
 

@@ -997,6 +997,13 @@ def run_parse(tenant_id: UUID, import_id: UUID) -> str:
             code = answer.code or "IMP-004"
         elif answer.outcome in ("stopped", "crashed"):
             code = "IMP-004"
+            if answer.outcome == "crashed" and answer.cause == "signal_31":
+                # Every seccomp kill alerts, here as in the worker (founder).
+                from docflow_core import founder_alerts
+
+                founder_alerts.alert_seccomp_kill(
+                    tenant_id, where="catalog_import", ref_id=import_id, error_code="IMP-004"
+                )
     if code is not None:
         # Codes and counts only -- never cell text (Section 7.10).
         logger.info("import_parse_failed import_id=%s code=%s", import_id, code)

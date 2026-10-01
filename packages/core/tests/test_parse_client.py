@@ -131,7 +131,7 @@ def test_busy_is_retried_then_never_got_in(service):
     stub = service(_json(503, {"error": "busy"}, {"Retry-After": "1"}))
     with pytest.raises(parse_client.ParseUnavailable) as excinfo:
         parse_client.parse_document(b"x", "po.pdf")
-    assert excinfo.value.reason == "busy_or_isolation_failed"
+    assert excinfo.value.reason == "http_503"
     assert len(stub.requests) >= 2  # retried within the patience
 
 

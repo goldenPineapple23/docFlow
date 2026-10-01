@@ -226,7 +226,9 @@ def _post(kind: str, content: bytes, filename: str | None) -> dict:
             if response.status_code in (502, 504):
                 raise ParseLost(f"http_{response.status_code}")
             if response.status_code == 503:
-                reason = "busy_or_isolation_failed"
+                # Named by status (founder, departure #5): busy, or its
+                # isolation failed, as against a 502/504 from Fly's proxy.
+                reason = "http_503"
                 retry_after = response.headers.get("Retry-After", "")
                 if retry_after.isdigit():
                     delay = max(delay, float(retry_after))

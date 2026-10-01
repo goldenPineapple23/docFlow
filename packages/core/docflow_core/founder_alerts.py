@@ -81,7 +81,24 @@ ALERT_TYPES: dict[str, str] = {
     # past the worker's patience, or refused the worker's token. Once an hour
     # for the whole platform, like storage_unavailable.
     "parse_service_unavailable": "The parse service couldn't be reached",
+    # Stage 3c (founder, 2026-10-01, departure #1): a parse job killed by the
+    # seccomp filter (SIGSYS). Every one alerts, never rate-limited: the
+    # filter kills only a call from a foreign architecture, which no parser
+    # makes by accident.
+    "parse_seccomp_kill": "A parse job was killed by the seccomp filter",
 }
+
+# Why a seccomp kill's alert has no syscall number (founder: say so when it
+# can't be had). The filter answers every listed call with EPERM; only a call
+# from a foreign architecture (x32 or 32-bit) gets KILL_PROCESS, which ends
+# the process without telling anyone which call it was -- the parent sees
+# only SIGSYS, and the number goes to the kernel's audit log on the machine,
+# which the parse service can't read.
+SECCOMP_KILL_CAUSE = "crashed:signal_31"
+SECCOMP_SYSCALL_UNAVAILABLE = (
+    "not available: the filter kills a call from a foreign architecture (x32 or 32-bit) without "
+    "reporting which call; only the kernel's audit log on the parse machine has it"
+)
 
 # Failure codes whose catalog text promises the reader that DocFlow has been
 # alerted, and the alert that keeps the promise (D-145). The catalog is what a
@@ -351,6 +368,55 @@ def report_refused_storage_path(
         logger.exception("founder_alert_not_raised tenant_id=%s alert=storage_path_cross_tenant", tenant_id)
 
 
+def raise_seccomp_kill(
+    session: Session, *, tenant_id: UUID, where: str, ref_id: UUID | None, error_code: str
+) -> bool:
+    """
+    A parse job killed by the seccomp filter (founder, 2026-10-01). Its own
+    alert type, raised for every kill: the dedupe key names the document or
+    import, and there is no daily or hourly window. Its own savepoint; never
+    raises.
+    """
+    savepoint = session.begin_nested()
+    try:
+        raised = raise_alert(
+            session,
+            alert_type="parse_seccomp_kill",
+            severity="high",
+            tenant_id=tenant_id,
+            payload={
+                "error_code": error_code,
+                "cause": "seccomp_kill",
+                "signal": "SIGSYS (31)",
+                "syscall": None,
+                "syscall_unavailable": SECCOMP_SYSCALL_UNAVAILABLE,
+                "where": where,
+                **({"ref_id": str(ref_id)} if ref_id else {}),
+            },
+            dedupe_key=f"parse_seccomp_kill:{where}:{ref_id or uuid4()}",
+        )
+    except Exception:
+        savepoint.rollback()
+        logger.exception("founder_alert_not_raised tenant_id=%s alert=parse_seccomp_kill", tenant_id)
+        return False
+    savepoint.commit()
+    logger.error("parse_seccomp_kill tenant_id=%s where=%s ref_id=%s", tenant_id, where, ref_id)
+    return raised
+
+
+def alert_seccomp_kill(tenant_id: UUID, *, where: str, ref_id: UUID | None, error_code: str) -> None:
+    """raise_seccomp_kill in its own tenant session. Never raises."""
+    try:
+        from docflow_core.db import tenant_session
+
+        with tenant_session(tenant_id) as session:
+            raise_seccomp_kill(
+                session, tenant_id=tenant_id, where=where, ref_id=ref_id, error_code=error_code
+            )
+    except Exception:
+        logger.exception("founder_alert_not_raised tenant_id=%s alert=parse_seccomp_kill", tenant_id)
+
+
 def raise_parse_service_unavailable(session: Session, *, tenant_id: UUID, where: str, reason: str) -> bool:
     """
     Stage 3c (founder, Q4): the parse service couldn't be reached -- the
@@ -360,7 +426,7 @@ def raise_parse_service_unavailable(session: Session, *, tenant_id: UUID, where:
     first tenant in the hour writes the row).
 
     `where` is a fixed call-site label; `reason` is the client's fixed label
-    (no_connection, busy_or_isolation_failed, unauthorized, http_NNN), never
+    (no_connection, http_503, unauthorized, http_NNN), never
     response text. Its own savepoint; never raises.
     """
     logger.error("parse_service_unavailable tenant_id=%s where=%s reason=%s", tenant_id, where, reason)
@@ -406,6 +472,10 @@ def raise_parse_alert(
     savepoint; never raises.
     """
     entry = get_error(error_code)
+    if cause == SECCOMP_KILL_CAUSE:
+        return raise_seccomp_kill(
+            session, tenant_id=tenant_id, where="worker", ref_id=document_id, error_code=entry.code
+        )
     savepoint = session.begin_nested()
     try:
         raised = raise_alert(

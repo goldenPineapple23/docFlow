@@ -2025,6 +2025,30 @@ with the exiting rule.
   the moment its cgroup is created, before the parser starts; if the
   directory isn't found, F5 says where it looked.
 
+**`0034` applied on `docflow-staging` (founder, 2026-10-01).** Backup
+`backup_0034` first (documents, extraction_runs; RLS on). Row counts before:
+documents 105, extraction_runs 17; after: documents 105, extraction_runs 17;
+live and backup match on both. `backup_0034` stays until 3c has merged and
+run cleanly on staging for a few days, then it is dropped and recorded
+(RUNBOOK 1.3).
+
+**Departures reviewed (founder, 2026-10-01): 14 approved as written; two
+changed, built in the next commit:**
+- **#1: SIGSYS is its own alert,** `parse_seccomp_kill`, raised for every
+  seccomp kill, never rate-limited (one row per document or import, no
+  daily window), from the worker and from catalog import (which raised no
+  alert for a crashed parse before). The syscall number can't be had: the
+  filter answers listed calls with EPERM and kills only a call from a
+  foreign architecture, and KILL_PROCESS reports nothing to anyone but the
+  kernel's audit log. The alert says so (`syscall: null`,
+  `syscall_unavailable`). Test:
+  `test_F6_every_seccomp_kill_alerts_and_says_why_there_is_no_syscall_number`.
+- **#5: the 5xx status is named.** The unavailable reason for a 503 is now
+  `http_503` (was `busy_or_isolation_failed`); a lost parse's DOC-022 alert
+  detail carries `last_lost_reason` (`http_502`, `http_504`, or the read
+  error), so a Fly start failure can be told apart from a parser crash.
+  Tests: `test_parse_client.py`, `test_retry_rules_detail.py`. RUNBOOK 8.4.
+
 **Tenth run (`0be5422`): GREEN.** core 700 tests, 0 failed; api 580, 0 failed; worker 132, 0 failed (F5 included); parse unit 122, 0 failed; parse HTTP 56, 0 failed (D1 parity on every fixture, `po.doc` included); web and web-live passed; dependency audits clean. Self-tests in the real sandbox: canary 5 of 5, A 13 of 13 PASS with A-net IPv6 NOT-RUN, S 5 of 5, B 17 of 17; E1, E3 and E4 as designed. Recorded in D-183. Next: the
 founder backs up and applies `0034` on staging (the PR text leads with it:
 `Desktop/PR-stage3c-parse-service.md`), I run the staging suites, the

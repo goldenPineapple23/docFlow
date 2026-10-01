@@ -297,6 +297,37 @@ def test_F6_a_crash_alert_is_once_per_cause_per_day():
         assert raised == [True, False, True]
 
 
+def test_F6_every_seccomp_kill_alerts_and_says_why_there_is_no_syscall_number():
+    """Founder, departure #1: SIGSYS is its own alert, never rate-limited."""
+    with WorkerTestTenant("Acme Test Seccomp Kill") as tenant:
+        documents = [uuid4(), uuid4(), uuid4()]
+        raised = []
+        for document_id in documents:
+            with tenant_session(tenant.tenant_id) as session:
+                raised.append(
+                    founder_alerts.raise_parse_alert(
+                        session,
+                        tenant_id=tenant.tenant_id,
+                        document_id=document_id,
+                        error_code="DOC-005",
+                        cause=founder_alerts.SECCOMP_KILL_CAUSE,
+                        by_cause=True,
+                    )
+                )
+        rows = _rows(
+            "SELECT payload FROM founder_alerts WHERE type = 'parse_seccomp_kill' AND tenant_id = :t",
+            t=str(tenant.tenant_id),
+        )
+        assert raised == [True, True, True]
+        assert sorted(r["payload"]["ref_id"] for r in rows) == sorted(str(d) for d in documents)
+        for row in rows:
+            assert row["payload"]["syscall"] is None
+            assert row["payload"]["syscall_unavailable"] == founder_alerts.SECCOMP_SYSCALL_UNAVAILABLE
+            assert row["payload"]["signal"] == "SIGSYS (31)"
+        # A seccomp kill is not also a rate-limited document_failed alert.
+        assert _parse_alerts(tenant.tenant_id, "DOC-005") == 0
+
+
 def test_F7_parse_service_unavailable_fires_once_per_hour_across_tenants():
     with WorkerTestTenant("Acme Test Unavailable A") as a, WorkerTestTenant("Acme Test Unavailable B") as b:
         with tenant_session(a.tenant_id) as session:

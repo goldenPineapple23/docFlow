@@ -367,7 +367,7 @@ def _parse_alert(tenant_id: UUID, document_id: UUID, code: str, cause: str, *, b
         logger.exception("founder_alert_not_raised document_id=%s error_code=%s", document_id, code)
 
 
-def _after_lost_parse(tenant_id: UUID, document_id: UUID) -> None:
+def _after_lost_parse(tenant_id: UUID, document_id: UUID, reason: str) -> None:
     """
     Item 6a: record the lost try and apply the sweep's own `decide()` at once,
     so a lost file is retried or failed in seconds, not after the 30-minute
@@ -397,7 +397,7 @@ def _after_lost_parse(tenant_id: UUID, document_id: UUID) -> None:
                     error_code=retry_rules.STUCK_CODE,
                     document_id=document_id,
                     cause=cause,
-                    detail=retry_rules.failure_detail(attempts, timeouts, lost),
+                    detail=retry_rules.failure_detail(attempts, timeouts, lost, last_lost_reason=reason),
                 )
     if retry:
         # After the commit: the next job must see the released claim.
@@ -580,7 +580,7 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
     except parse_client.ParseLost as exc:
         # Got in, never came out: a timeout-class try (item 6a), decided now.
         logger.error("parse_lost document_id=%s reason=%s", did, exc.reason)
-        _after_lost_parse(tid, did)
+        _after_lost_parse(tid, did, exc.reason)
         return
     except parse_client.ParseAnswerInvalid as exc:
         logger.error("parse_answer_invalid document_id=%s reason=%s", did, exc.reason)

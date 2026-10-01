@@ -54,13 +54,23 @@ def decide(
     return ("retry", None)
 
 
-def failure_detail(attempts: int, timeout_attempts: list[int], parse_lost_attempts: list[int]) -> dict:
-    """The DOC-022 alert's numbers (Section 7.10: numbers only, it is
-    emailed). `cause_detail` says which timeout-class tries there were, so a
-    lost parse is never hidden behind a task time limit (Stage 3c, Q9)."""
+def failure_detail(
+    attempts: int,
+    timeout_attempts: list[int],
+    parse_lost_attempts: list[int],
+    last_lost_reason: str | None = None,
+) -> dict:
+    """The DOC-022 alert's numbers (Section 7.10: numbers and fixed labels
+    only, it is emailed). `cause_detail` says which timeout-class tries there
+    were, so a lost parse is never hidden behind a task time limit (Stage 3c,
+    Q9). `last_lost_reason` names how the last lost parse was lost -- a 502 or
+    504 from Fly's proxy, or the read error -- so a Fly machine failing to
+    start can be told apart from a parser crash (founder, departure #5)."""
     detail: dict = {"attempts": attempts, "timed_out_attempts": timeout_attempts}
     if parse_lost_attempts:
         detail["parse_lost_attempts"] = parse_lost_attempts
+    if last_lost_reason:
+        detail["last_lost_reason"] = last_lost_reason
     kinds = [name for name, tries in (("task_time_limit", timeout_attempts),
                                       ("parse_lost", parse_lost_attempts)) if tries]
     if kinds:
