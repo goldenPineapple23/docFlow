@@ -808,10 +808,12 @@ startup log, the parser-upgrade process, and the
 ### 8.1 Gate: the Fly B tests pass before any production deploy that touches it (founder, 2026-10-01)
 
 CI runs on cgroup v2. Fly machines run cgroup v1, the path production
-uses, and **only a Fly run proves that path**. So the B tests (the memory,
-swap, CPU, process, disk and leak limits; BUILD-STATUS "3c test table"
-B1-B12) must pass **on Fly staging** before any production deploy that
-touches the parse service, not only at the 3c checkpoint.
+uses, and **only a Fly run proves that path**. So the self-tests must pass
+**on Fly staging** before any production deploy that touches the parse
+service, not only at the 3c checkpoint: all of them, `python -m
+parse_service.selftest all` (the canary, A, S and B; BUILD-STATUS "3c test
+table", B1-B16 and A15 included). **IPv6 isolation is proven only there:**
+CI's runner has no IPv6, so A-net IPv6 is NOT-RUN in CI (D-183).
 
 "Touches the parse service" means any change to:
 - its code (`apps/parse/`), its Dockerfile, base image or packages
@@ -822,11 +824,12 @@ touches the parse service, not only at the 3c checkpoint.
 The procedure:
 1. Deploy the change to Fly staging first.
 2. Check the canary's startup log: every line PASS.
-3. Run B1-B12 on Fly staging, and keep the evidence (where to put it
-   comes with the 3c build).
+3. Run the self-tests on Fly staging (every line PASS; A-net IPv6 must be
+   PASS there, not NOT-RUN), and keep the output in
+   `docs/spikes/3c-fly-staging/` with the date and the image digest.
 4. Only then deploy to production.
 
-If any B test fails on Fly, nothing goes to production: stop and report
+If any self-test fails on Fly, nothing goes to production: stop and report
 (1.7).
 
 ### 8.2 Running it
@@ -895,7 +898,8 @@ defusedxml, LibreOffice, libseccomp, or the base image):
    archive as it was then); the digest for the base image.
 2. CI must pass in full: the unit tests, D2 parity (every fixture's text
    must stay the same), and the self-tests in the real sandbox.
-3. Then 8.1: deploy to Fly staging, check the canary log, run B1-B13 there.
+3. Then 8.1: deploy to Fly staging, check the canary log, run all the
+   self-tests there.
 4. Only then deploy to production.
 
 **The weekly Debian move (D-183).** Every Monday at 06:00 UTC
