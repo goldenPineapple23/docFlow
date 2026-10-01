@@ -796,3 +796,35 @@ A `document_failed` alert with **DOC-026** is different: the stored original
 is missing or isn't the file that was received. That is never an outage. Ask
 the customer to upload the file again, and look for how the object went
 missing.
+
+## 8. The parse service (Stage 3c)
+
+The parse service opens every file a stranger sends, inside a per-file
+sandbox (BUILD-STATUS "3c detailed design"). More of this section is
+written as 3c is built: running it, deploying it, reading the canary's
+startup log, the parser-upgrade process, and the
+`parse_service_unavailable` alert.
+
+### 8.1 Gate: the Fly B tests pass before any production deploy that touches it (founder, 2026-10-01)
+
+CI runs on cgroup v2. Fly machines run cgroup v1, the path production
+uses, and **only a Fly run proves that path**. So the B tests (the memory,
+swap, CPU, process, disk and leak limits; BUILD-STATUS "3c test table"
+B1-B12) must pass **on Fly staging** before any production deploy that
+touches the parse service, not only at the 3c checkpoint.
+
+"Touches the parse service" means any change to:
+- its code (`apps/parse/`), its Dockerfile, base image or packages
+  (LibreOffice and `python3-seccomp` included), or its lock file;
+- its `fly.toml`;
+- the worker's `parse_client`.
+
+The procedure:
+1. Deploy the change to Fly staging first.
+2. Check the canary's startup log: every line PASS.
+3. Run B1-B12 on Fly staging, and keep the evidence (where to put it
+   comes with the 3c build).
+4. Only then deploy to production.
+
+If any B test fails on Fly, nothing goes to production: stop and report
+(1.7).

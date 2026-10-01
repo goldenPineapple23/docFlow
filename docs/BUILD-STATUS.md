@@ -953,12 +953,13 @@ tests), then the rollout in item 11.
   3**, on a Fly staging deployment. It is priced first, and the founder
   approves the monthly number before anything is stood up.
 
-**3c detailed design -- PROPOSED 2026-09-30, revised the same day after the
-founder's review ("approved in principle with these changes"). Q1-Q7
-answered (end of this section). Still open: Q8-Q10, which the founder's
-own pre-build check raised. Nothing is built, and nothing goes on Fly
-except throwaway check machines, until those are answered and the founder
-has seen the test table (item 11).**
+**3c detailed design -- APPROVED 2026-10-01; BUILDING.** Proposed
+2026-09-30 and revised twice after the founder's reviews. Q1-Q10 are
+answered (end of this section), and the founder's second review added
+changes 1-5 (io_uring, userfaultfd and x32 in the filter; swap; a CPU
+quota as well as a CPU budget; token and alert-dedupe tests; the Fly
+gate before any production deploy), all folded in below. Then: "build
+3c".
 
 *Where things stand today.* Every hostile file is opened inside the Celery
 worker process, the same process that holds the database login, the
@@ -1081,13 +1082,25 @@ Every check that needs a control had one beside it (RUNBOOK 1.7).
      held by the worker and the supervisor only, never passed into a job.
 3. **Every job.** The supervisor runs as root (it must, to create
    namespaces and cgroups) and, for each request:
-   1. **creates the job's cgroups** (Q8; recommended, v1 as Fly delivers
-      it): a memory cgroup with the job's memory limit (and the same
-      memory+swap limit, so turning on swap later can't let a job
-      escape), a pids cgroup with the job's process cap, and a cpuacct
-      cgroup to read the job's total CPU. The job's first process is moved
-      into them before it starts anything, so everything it starts is
-      born inside the limits;
+   1. **creates the job's cgroups** (Q8: approved; v1 as Fly delivers it,
+      v2 where the machine offers it):
+      - **memory:** the job's memory limit, **and the memory+swap limit
+        set to the same value** (v1 `memory.memsw.limit_in_bytes`; v2
+        `memory.swap.max` = 0). v1's `memory.limit_in_bytes` doesn't count
+        swap, so without this a machine with swap would let a job go past
+        its limit into swap (founder's change 2). The supervisor refuses to
+        start a job if the swap limit can't be set, and the canary also
+        confirms the machine has no active swap;
+      - **pids:** the job's process cap;
+      - **cpu (founder's change 3, both):** a **quota** (v1
+        `cpu.cfs_quota_us` / `cpu.cfs_period_us`; v2 `cpu.max`) of one CPU
+        per job, which *slows a job down* so it can't starve the other
+        slot; and a **CPU-seconds budget** read from cpuacct (v1
+        `cpuacct.usage`; v2 `cpu.stat` `usage_usec`), which *kills* the
+        job when its processes together pass it.
+
+      The job's first process is moved into them before it starts
+      anything, so everything it starts is born inside the limits;
    2. starts the job in new network, mount, PID, IPC and UTS namespaces
       (`unshare --net --mount --pid --ipc --uts --fork`). The network
       namespace has only a loopback that is down. Killing the PID
@@ -1120,8 +1133,8 @@ Every check that needs a control had one beside it (RUNBOOK 1.7).
       an isolation failure. The filter is inherited by everything the job
       starts, LibreOffice included.
 
-   **The seccomp filter (founder's item 1).** Default allow, with these
-   refused (each answers EPERM):
+   **The seccomp filter (founder's item 1 and change 1).** Default allow,
+   with these refused (each answers EPERM):
    - the founder's list: `unshare`; `clone` with any new-namespace flag;
      `setns`; `mount` and `umount2`; `ptrace`; `bpf`; `keyctl`;
      `perf_event_open`; `init_module`, `finit_module`, `delete_module`;
@@ -1132,13 +1145,21 @@ Every check that needs a control had one beside it (RUNBOOK 1.7).
      `fspick`, `move_mount`, `open_tree`, `mount_setattr`); the rest of
      the key family (`add_key`, `request_key`); and `ptrace`'s relatives
      `process_vm_readv` and `process_vm_writev`;
+   - **founder's change 1:** `io_uring_setup`, `io_uring_enter`,
+     `io_uring_register` (io_uring performs I/O in kernel threads the
+     filter never sees), and `userfaultfd` (a common tool for winning
+     kernel race conditions);
    - **`clone3` answers ENOSYS**, not EPERM. It passes its flags in a
      memory block the filter can't read, so it is refused in a way that
      makes the C library fall back to `clone`, whose flags the filter
      can read (Fly check 2c: threads and fork still work);
-   - calls from any other CPU architecture are killed (libseccomp's
-     default for a filter built for x86_64 only), so a 32-bit call can't
-     slip past the rules.
+   - calls from any other CPU architecture are killed (the filter is
+     built for x86_64 only, with its "wrong architecture" action set
+     explicitly to kill the process), so a 32-bit call can't slip past the
+     rules; **and any x32 call, a call number with the `0x40000000` bit
+     set, kills the process** (founder's change 1). x32 calls report the
+     same architecture as x86_64, so the architecture check alone doesn't
+     catch them; the filter checks the bit itself.
 
    **The supervisor's own limits:**
    - a wall-clock timer that SIGKILLs the job's first process, so the
@@ -1146,7 +1167,7 @@ Every check that needs a control had one beside it (RUNBOOK 1.7).
    - a watch on the job's cgroups every 100 ms while it runs. **Any
      out-of-memory kill in the job kills the whole job** (v1 kills one
      process at a time; the Fly check left one behind). So does the job's
-     **total** CPU passing its cap (*proposed*, Q8: CPU seconds multiply
+     **total** CPU passing its budget (Q8: approved; CPU seconds multiply
      with processes exactly as memory does);
    - a cap on the answer's size (it stops reading and kills the job past
      it);
@@ -1161,7 +1182,9 @@ Every check that needs a control had one beside it (RUNBOOK 1.7).
    |---|---|---|
    | `PARSE_JOB_WALL_SECONDS` | 180 | supervisor; above LibreOffice's own 120 s (kept), well inside the 20-minute read budget (D-163) |
    | Job memory (cgroup) | 768 MiB | **primary**; two slots fit a 2 GB machine with room for the supervisor |
-   | Job CPU total (cpuacct) | 150 s | **primary** if Q8 says yes |
+   | Job CPU quota (cfs / `cpu.max`) | 1 CPU per job | **primary**: slows, never kills; one job can't starve the other slot |
+   | Job CPU budget (cpuacct) | 150 s | **primary**: kills the whole job |
+   | Job memory+swap | = job memory | **primary**: no swap past the limit |
    | Job processes (cgroup pids) | 128 | **primary**; LibreOffice runs a few dozen threads, and threads count |
    | Address space per process | 2 GiB | backstop, set high on purpose: LibreOffice reserves far more than it uses |
    | CPU seconds per process | 170 | backstop |
@@ -1180,6 +1203,18 @@ Every check that needs a control had one beside it (RUNBOOK 1.7).
    supervisor's logic on v2, and **the v1 path production uses is proven
    only on Fly**. That is why the B tests are required on Fly before the
    merge, not only in CI.
+
+   **Gate (founder's change 5): the Fly B tests must pass before any
+   production deploy that touches the parse service** -- its code, its
+   image, its base image or packages, its `fly.toml`, or the worker's
+   `parse_client` -- not only at the 3c checkpoint. The procedure: deploy
+   the change to Fly staging first, run B1-B12 there, keep the evidence,
+   then deploy to production. RUNBOOK section 8 holds it, and the 3c PR
+   description repeats it.
+
+   **A test-only switch that breaks a cap** (E4, if CI needs one) is
+   refused whenever `FLY_APP_NAME` is set: the service exits at startup.
+   Test E5 checks that.
 4. **Refuses to start in production mode unless isolation is active.**
    - Production mode is on when `FLY_APP_NAME` is set (Fly sets it on
      every machine) or `DOCFLOW_ENV=production`. `PARSE_ISOLATION=off`,
@@ -1195,7 +1230,10 @@ Every check that needs a control had one beside it (RUNBOOK 1.7).
        `Seccomp: 2`;
      - a few calls from the seccomp list are refused;
      - **a memory limit really kills** (a small allocation past a small
-       cgroup limit must be stopped).
+       cgroup limit must be stopped);
+     - **the machine has no active swap** (`/proc/swaps`), and the job's
+       memory+swap limit is set (founder's change 2);
+     - the CPU quota is set and the CPU budget kills.
 
      Any unexpected success, or a cgroup or namespace that can't be
      created, exits with an error. Fly restarts it, it fails again, and the
@@ -1336,8 +1374,9 @@ Every check that needs a control had one beside it (RUNBOOK 1.7).
     - Catalog: DOC-029 (Q3, wording approved); founder-facing wording for
       the `parse_service_unavailable` alert and the DOC-029 alert.
 11. **Tests, and where each runs.** See "3c test table" directly below this
-    section. It has 50 tests. The first version had 33; the founder's
-    additions (seccomp, `/dev`, Flycast, the retry rule) and the cgroup
+    section. It has 55 tests. The first version had 33; the founder's
+    additions (seccomp, `/dev`, Flycast, the retry rule, the token, the
+    alert limits, the test-only switch, the CPU quota) and the cgroup
     findings added the rest.
 12. **Fly staging: what is stood up, and the price.** Q6 decided: **stopped
     between test sessions**, Upstash pay-as-you-go. The founder sets the
@@ -1359,7 +1398,8 @@ Every check that needs a control had one beside it (RUNBOOK 1.7).
       testing: roughly $2-5.**
     - **Celery's Redis command count is measured in the first session and
       reported** (founder): commands before and after a timed idle hour
-      and a timed busy one, read from Upstash.
+      and a timed busy one, read from Upstash. **If the idle hour x 720
+      costs more than $10 a month, switch to the fixed $10 plan** (Q10).
     - **The spending cap: not available as far as I can find (Q10).**
       `fly redis create` and `fly redis update` have no budget or cap flag
       (flyctl v0.4.108, read 2026-09-30), and Fly's Upstash page mentions
@@ -1420,38 +1460,19 @@ Every check that needs a control had one beside it (RUNBOOK 1.7).
 - **Q7** yes, a read-only root, with a writable size-capped tmpfs for
   LibreOffice's home and profile.
 
-*Open, raised by the pre-build check:*
-- **Q8. The memory cap.** v2 isn't available on Fly as delivered (above).
-  *Recommended:*
-  - the **cgroup v1 memory and pids controllers per job** as the primary
-    caps, as the check proved on a real machine;
-  - the supervisor kills the whole job on any out-of-memory kill;
-  - startup detection prefers v2 if Fly ever offers it, and the canary
-    proves the limit kills before the service opens;
-  - `setrlimit` as the backstops;
-  - **also** a job-wide CPU cap from cpuacct, because CPU seconds multiply
-    with processes exactly as memory does.
-
-  The alternative is rearranging Fly's cgroups at startup. It failed in
-  the check, and it would depend on Fly's internals.
-- **Q9. The retry rule (item 6a).** Fix `decide()` so the 3-try cap is
-  checked first (today's crash, crash, timeout gets a 4th try)? And record
-  a lost try in a new `documents.parse_lost_attempts` column in `0034`,
-  so the alert can say which it was? *Recommended: yes to both.*
-- **Q10. The Upstash spending cap.** No cap is offered through flyctl or
-  Fly's docs. When I create the database, I'll look in the Upstash
-  console for a budget setting and set it if there is one. If there
-  isn't:
-  - **(a)** pay-as-you-go without a cap, guarded by the machines being
-    stopped (nothing polls Redis then) and by my reporting the command
-    count after every session. At an assumed 10 commands a second
-    (unmeasured, an example only), a worker forgotten for a whole day
-    costs about $1.73;
-  - **(b)** Upstash's fixed 250 MB plan, $10 a month flat: a hard ceiling
-    by price.
-
-  *Recommended: (a) for staging,* with the count reported, because it
-  costs cents in a test month.
+*Answered 2026-10-01 (raised by the pre-build check):*
+- **Q8** approved: cgroup v1 memory and pids per job as the primary caps
+  (v2 where offered), the whole job killed on any out-of-memory kill, the
+  canary proving the cap kills before the service opens, `setrlimit` as
+  backstops, and a job-wide CPU budget. Change 3 adds a CPU quota beside
+  the budget.
+- **Q9** approved: `decide()` checks the 3-try cap first, and
+  `documents.parse_lost_attempts` goes in `0034`.
+- **Q10** (a): pay-as-you-go. A spending cap is set in the Upstash console
+  if one exists. **Rule (founder): after G3, if the idle-hour command
+  count x 720 costs more than $10 a month at $0.20 per 100k commands
+  (that is, more than about 69,400 commands in the idle hour), switch to
+  the fixed $10 plan.**
 
 **Fly secrets, the founder's commands** (PowerShell; placeholders in
 `<...>`):
@@ -1500,7 +1521,7 @@ this as well). The API needs `SUPABASE_URL` to check sign-in tokens (JWKS)
 for the upload test. It gets no Stripe, Postmark, service-role or
 Anthropic key in 3c.
 
-**3c test table.** 50 tests.
+**3c test table.** 55 tests.
 
 Where each test runs:
 - **L** = this Windows machine, dev mode. Logic only, never counted as
@@ -1524,6 +1545,7 @@ failure means stop and report.
 | N1 | The parse app has exactly one IP address, a private IPv6 (`fly ips list`), checked after every deploy; the API app has no public IP either | -- | | | yes |
 | N2 | From outside Fly's network (this machine, WireGuard off), the parse and API apps have no public address that answers | the same request over `fly proxy` answers | | | yes |
 | N3 | A stopped parse machine is started by a worker request to `docflow-parse-staging.flycast` | the machine shows `stopped` before | | | yes |
+| N4 | **The token (founder's change 4):** a request with no token and one with a wrong token are both refused (401) before the body is read; nothing starts a job | the right token parses | | yes | yes |
 | **A. Isolation, per job** | | | | | |
 | A1 | Internet unreachable: IPv4 and IPv6 TCP, HTTPS by name | reached outside | | yes | yes |
 | A2 | DNS: the system resolver; Fly's resolver `[fdaa::3]:53` | answered outside | | yes (system) | yes (both) |
@@ -1540,16 +1562,16 @@ failure means stop and report.
 | A13 | **`/dev` (founder's item 3):** no block device at all, and only `null`, `zero`, `full`, `random`, `urandom` and `shm` | block devices listed outside (CI: the runner's; Fly: `vda`-`vdc`, `loop`, `nbd`) | | yes | yes |
 | A14 | **Read-only root (Q7):** writing to `/`, `/usr`, `/app`, `/etc` or `/tmp` fails (EROFS); `/work` and LibreOffice's home are writable up to their caps | the same writes as root outside succeed (into a throwaway path) | | yes | yes |
 | **S. seccomp (founder's item 1)** | | | | | |
-| S1 | **The shipped rule set, with a test-only errno in place of EPERM, inside the real sandbox:** every refused call returns that errno, so the filter (not a missing privilege) answered: `unshare`, `clone` with each new-namespace flag, `setns`, `mount`, `umount2`, the newer mount calls, `ptrace`, `process_vm_readv/writev`, `bpf`, `keyctl`, `add_key`, `request_key`, `perf_event_open`, `init_module`, `finit_module`, `delete_module`, `kexec_load`, `kexec_file_load` | -- | | yes | yes |
-| S2 | **The filter as shipped (EPERM), inside the real sandbox:** every call in S1 fails; `/proc/self/status` shows `Seccomp: 2` and `NoNewPrivs: 1` | -- | | yes | yes |
+| S1 | **The shipped rule set, with a test-only errno in place of EPERM, inside the real sandbox:** every refused call returns that errno, so the filter (not a missing privilege) answered: `unshare`, `clone` with each new-namespace flag, `setns`, `mount`, `umount2`, the newer mount calls, `ptrace`, `process_vm_readv/writev`, `bpf`, `keyctl`, `add_key`, `request_key`, `perf_event_open`, `init_module`, `finit_module`, `delete_module`, `kexec_load`, `kexec_file_load`, **`io_uring_setup`, `io_uring_enter`, `io_uring_register`, `userfaultfd`** | -- | | yes | yes |
+| S2 | **The filter as shipped (EPERM), inside the real sandbox:** every call in S1 fails, io_uring and `userfaultfd` included; `/proc/self/status` shows `Seccomp: 2` and `NoNewPrivs: 1` | -- | | yes | yes |
 | S3 | **What the filter alone stops:** the same calls in the sandbox **without** the filter, reported call by call (on Fly today: `unshare(CLONE_NEWUSER)`, `clone` after it, and `keyctl` succeed) | is the control | | yes | yes |
 | S4 | `clone3` answers ENOSYS; a thread and a fork still work under the filter; LibreOffice converts a real `.doc` under it (with D1) | -- | | yes | yes |
-| S5 | The filter allows only x86_64 (its exported form is checked), so calls from another architecture are killed | -- | | yes | yes |
+| S5 | The filter allows only x86_64 (its exported form is checked), so calls from another architecture are killed; **an x32 call (`getpid` with the `0x40000000` bit set) kills the process with SIGSYS** | the same x32 call without the filter, reported (ENOSYS if the kernel has no x32) | | yes | yes |
 | **B. Limits** (fixed self-test programs in the image, through the real launcher) | | | | | |
-| B1 | Memory, one process: a program allocating past the job's cgroup limit is stopped as `stopped: memory`; the service answers the next request | the same program with no cgroup limit survives | | yes (v2) | yes (v1) |
-| B2 | **Memory, the founder's point:** four processes, each under its own per-process backstop, together over the job's limit, are stopped | the same four with only `setrlimit` all survive | | yes (v2) | yes (v1) |
-| B3 | **One out-of-memory kill ends the whole job:** no process of that job is left afterwards (v1 kills one at a time) | -- | | yes (v2) | yes (v1) |
-| B4 | CPU (Q8): a family of spinning processes is stopped at the job's total CPU cap, before the wall clock | one process alone stays under it | | yes | yes |
+| B1 | Memory, one process: a program allocating past the job's cgroup limit is stopped as `stopped: memory`; the service answers the next request. **The job's memory+swap limit equals its memory limit, and the machine has no active swap** | the same program with no cgroup limit survives | | yes (v2) | yes (v1) |
+| B2 | **Memory, the founder's point:** four processes, each under its own per-process backstop, together over the job's limit, are stopped; the swap limit is checked as in B1 | the same four with only `setrlimit` all survive | | yes (v2) | yes (v1) |
+| B3 | **One out-of-memory kill ends the whole job:** no process of that job is left afterwards (v1 kills one at a time); the swap limit is checked as in B1 | -- | | yes (v2) | yes (v1) |
+| B4 | **CPU budget (kills):** a family of spinning processes is killed when their CPU seconds together pass the job's budget, before the wall clock, as `stopped: cpu` | one process alone stays under it | | yes | yes |
 | B5 | Wall clock: a program that ignores SIGTERM and starts children is killed at the limit, **and no process of that job user is left** | -- | | yes | yes |
 | B6 | Fork bomb: stopped at the job's `pids` cap; the machine stays healthy | -- | | yes | yes |
 | B7 | Answer flood: the supervisor stops reading at the cap and kills the job | -- | | yes | yes |
@@ -1557,6 +1579,7 @@ failure means stop and report.
 | B9 | One process per file: two jobs in a row have different processes and namespaces, and nothing of the first is left in `/work` or the home | -- | yes (process only) | yes | yes |
 | B10 | The job can't raise its own limit or leave its cgroup (the files are hidden; and refused even if visible) | root can change it | | yes | yes |
 | B11 | No leak: after 100 jobs, every job cgroup is gone and the slot users own no process | -- | | yes | yes |
+| B12 | **CPU quota (slows):** a job spinning on every core gets at most one CPU's worth of time over a timed window, and the cgroup reports throttling; the other slot's job still finishes | the same program with no quota uses more than one CPU | | yes | yes |
 | **C. Hostile files** (through `POST /v1/document`, the real path. After each one, a known-good PO parses correctly, so the service is shown healthy) | | | | | |
 | C1 | Zip bomb; XXE payload; oversized image; 500-page PDF; `.exe` renamed `.pdf`; password-protected PDF; a `.zip` holding a valid PO. Each gets the catalog code it gets today | -- | yes | yes | yes |
 | C2 | A malformed file of **each** Tier 2 format (`.doc`, `.xls`, `.tif`, `.heic`, `.msg`, `.odt`, `.ods`) that kills or hangs its converter: a clean `rejected` or `stopped`, never a crash | -- | yes | yes | yes |
@@ -1568,13 +1591,16 @@ failure means stop and report.
 | E1 | Production mode with namespaces unavailable: CI runs the same image **without** `--privileged`, so creating them really fails; the process exits and never opens its port | the privileged run starts | | yes | |
 | E2 | `PARSE_ISOLATION=off` with `FLY_APP_NAME` set: refused | without `FLY_APP_NAME`, dev mode starts | yes | yes | |
 | E3 | The startup log shows every canary check, line by line, ending in PASS | -- | | yes | yes |
-| E4 | No working memory cap: CI runs the image with the cgroup filesystem mounted read-only, so no job cgroup can be created; the canary fails and the service never opens its port | the normal run starts | | yes | |
+| E4 | No working memory cap: CI runs the image with the cgroup filesystem mounted read-only, so no job cgroup can be created; the canary fails and the service never opens its port. *If Docker won't allow that mount, I come back to the founder before using any other way* | the normal run starts | | yes | |
+| E5 | **Any test-only switch that weakens a cap is refused when `FLY_APP_NAME` is set:** the service exits at startup | without `FLY_APP_NAME` the switch is accepted (CI only) | yes | yes | |
 | **F. The worker's side** | | | | | |
 | F1 | Each row of item 6's table, against the running service: unreachable, busy, `stopped`, dropped mid-request, a malformed answer | -- | yes (dev service) | yes (real image) | |
 | F2 | The dependency-graph test: no parsing library importable from the worker or the API | -- | yes | yes | |
 | F3 | D-163: a worker killed during a (stubbed) model call leaves a started row; the sweep writes its outcome with the counted input cost; every cost reader ignores started rows | -- | yes (DB, staging) | yes (DB) | |
 | F4 | **The retry rule (6a):** `decide()` over every sequence in 6a's table, including crash, crash, timeout (3 tries, not 4) and lost, lost | today's code fails the crash-crash-timeout case | yes | yes | |
 | F5 | A lost try against the real service (CI kills the parse container mid-request): recorded at once, and retried or failed by `decide()` within seconds; the next try after a restart succeeds | -- | | yes | |
+| F6 | **DOC-029's founder alert fires at most once per tenant per UTC day** (founder's change 4): many stopped files in one tenant, one alert; another tenant gets its own | -- | yes (DB, staging) | yes (DB) | |
+| F7 | **`parse_service_unavailable` fires at most once per UTC hour across all tenants:** failures from several tenants in one hour, one alert; the next hour, a new one | -- | yes (DB, staging) | yes (DB) | |
 | **G. End to end on Fly staging** | | | | | |
 | G1 | An upload through the staging API (over `fly proxy`), through the real Upstash, the worker on Fly and the parse service, to `needs_review`: the golden fixture, a `.doc`, and a scanned image. Paid: a few cents | -- | | | yes |
 | G2 | A catalog import through the same path | -- | | | yes |
