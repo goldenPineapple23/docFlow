@@ -121,12 +121,61 @@ def test_the_limits_are_in_the_order_the_claims_need():
         (2, [1], ("fail", "timeout")),  # the retry has run
         (2, [1, 2], ("fail", "timeout")),  # ...and timed out too
         (2, [2], ("retry", None)),  # a crash, then a first timeout
-        (3, [3], ("retry", None)),  # the timeout's one retry beats the attempt count
+        # Stage 3c (founder, Q9): the 3-try cap comes first. Before, the
+        # timeout's one retry beat the cap and crash, crash, timeout got a 4th try.
+        (3, [3], ("fail", "timeout")),
         (4, [3], ("fail", "timeout")),
     ],
 )
 def test_the_stuck_sweep_decides_by_the_agreed_table(attempts, timeouts, expected):
     assert stuck_documents.decide(attempts, timeouts, max_attempts=3) == expected
+
+
+# Stage 3c, item 6a: every sequence in the design's table. Each entry is the
+# tries so far as (kind, ...) and the decision after the last one. "crash"
+# leaves no mark; "timeout" is 3a's hard limit; "lost" is a parse request
+# that got in and never came out.
+@pytest.mark.parametrize(
+    ("sequence", "expected"),
+    [
+        (["crash", "crash", "crash"], ("fail", "worker_stopped")),
+        (["timeout"], ("retry", None)),
+        (["timeout", "timeout"], ("fail", "timeout")),
+        (["crash", "timeout"], ("retry", None)),
+        (["crash", "timeout", "crash"], ("fail", "timeout")),
+        (["crash", "timeout", "timeout"], ("fail", "timeout")),
+        (["crash", "crash", "timeout"], ("fail", "timeout")),  # 3 tries, not 4
+        (["lost"], ("retry", None)),
+        (["lost", "lost"], ("fail", "timeout")),
+        (["crash", "lost"], ("retry", None)),
+        (["crash", "lost", "crash"], ("fail", "timeout")),
+        (["lost", "timeout"], ("fail", "timeout")),
+        (["timeout", "lost"], ("fail", "timeout")),
+        (["crash", "crash", "lost"], ("fail", "timeout")),
+    ],
+)
+def test_crashes_timeouts_and_lost_parses_never_exceed_either_rule(sequence, expected):
+    timeouts = [i for i, kind in enumerate(sequence, start=1) if kind == "timeout"]
+    lost = [i for i, kind in enumerate(sequence, start=1) if kind == "lost"]
+    decision = stuck_documents.decide(len(sequence), timeouts, max_attempts=3, parse_lost_attempts=lost)
+    assert decision == expected
+
+
+def test_no_sequence_gets_a_fourth_try_or_two_tries_after_a_timeout():
+    """Exhaustive over every 1-3 try history: the two guarantees hold."""
+    import itertools
+
+    for length in (1, 2, 3):
+        for sequence in itertools.product(["crash", "timeout", "lost"], repeat=length):
+            timeouts = [i for i, k in enumerate(sequence, start=1) if k == "timeout"]
+            lost = [i for i, k in enumerate(sequence, start=1) if k == "lost"]
+            action, _ = stuck_documents.decide(
+                len(sequence), timeouts, max_attempts=3, parse_lost_attempts=lost
+            )
+            if action == "retry":
+                assert len(sequence) < 3, sequence
+                first = min(timeouts + lost, default=None)
+                assert first is None or len(sequence) == first, sequence
 
 
 def test_the_request_finds_the_ids_positional_or_by_keyword():

@@ -3,6 +3,15 @@ name: CI
 on:
   push:
   pull_request:
+  # The weekly Debian snapshot job (debian-snapshot.yml) runs this whole
+  # workflow with the parse image built from a newer snapshot date.
+  workflow_call:
+    inputs:
+      debian_snapshot:
+        description: "snapshot.debian.org date for the parse image, e.g. 20261008T000000Z (empty: the Dockerfile's)"
+        type: string
+        required: false
+        default: ""
 
 # The Python suites run against a real Supabase stack (Postgres 17 with the
 # auth schema and Supabase roles), started by the Supabase CLI from
@@ -285,12 +294,36 @@ jobs:
       - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
         id: app_role
         run: python "${{ github.workspace }}/scripts/ci/create_app_role.py"
+      # Stage 3c: the catalog tests run the worker's parse step
+      # (catalog_import.run_parse), which reads through the real parse service
+      # image, as in the worker job.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the parse service image
+        id: parse_image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/parse/Dockerfile
+          tags: docflow-parse:ci
+          load: true
+          build-args: ${{ inputs.debian_snapshot && format('DEBIAN_SNAPSHOT={0}', inputs.debian_snapshot) || '' }}
+          cache-from: type=gha,scope=parse
+      - name: Start the parse service (production mode, isolation on)
+        id: parse_service
+        env:
+          PARSE_SERVICE_TOKEN: ci-parse-token-not-a-secret
+        run: bash "${{ github.workspace }}/scripts/ci/parse_image.sh" docflow-parse:ci serve
       - id: ruff
         run: ruff check .
       - id: mypy
         run: mypy app
       - name: Test (against the local Supabase stack, as docflow_app; live_api deselected)
         id: test
+        env:
+          # Never PARSE_SERVICE_TOKEN here: the API doesn't hold the parse
+          # token. Only the harness that runs worker code reads this name
+          # (tests/conftest.py as_the_worker; test_parse_token_boundary.py).
+          WORKER_HARNESS_PARSE_TOKEN: ci-parse-token-not-a-secret
         run: pytest -v --junitxml=junit.xml
       - name: No unapproved skipped tests
         if: success() || failure()
@@ -338,15 +371,36 @@ jobs:
       - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
         id: app_role
         run: python "${{ github.workspace }}/scripts/ci/create_app_role.py"
-      - name: Install LibreOffice (the .doc converter, D-041), so its tests run
-        id: libreoffice
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer
+      # Stage 3c: the worker no longer opens files. Its tests read through the
+      # real parse service image (isolation on, production mode), built here
+      # from the parse job's layer cache.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the parse service image
+        id: parse_image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/parse/Dockerfile
+          tags: docflow-parse:ci
+          load: true
+          build-args: ${{ inputs.debian_snapshot && format('DEBIAN_SNAPSHOT={0}', inputs.debian_snapshot) || '' }}
+          cache-from: type=gha,scope=parse
+      - name: Start the parse service (production mode, isolation on)
+        id: parse_service
+        env:
+          PARSE_SERVICE_TOKEN: ci-parse-token-not-a-secret
+        run: bash "${{ github.workspace }}/scripts/ci/parse_image.sh" docflow-parse:ci serve
       - id: ruff
         run: ruff check .
       - id: mypy
         run: mypy app
       - name: Test (against the local Supabase stack, as docflow_app)
         id: test
+        env:
+          PARSE_SERVICE_URL: http://127.0.0.1:8100
+          PARSE_SERVICE_TOKEN: ci-parse-token-not-a-secret
+          # Test F5 kills and restarts this container mid-request.
+          PARSE_CONTAINER: docflow-parse
         run: pytest -v --junitxml=junit.xml
       - name: No unapproved skipped tests
         if: success() || failure()
@@ -354,5 +408,99 @@ jobs:
           # Which earlier step failed, so a missing test report names it.
           CI_STEPS: ${{ toJSON(steps) }}
         run: python "${{ github.workspace }}/scripts/ci/check_skips.py" worker junit.xml
+      - name: Dependency audit (fail on known vulnerabilities)
+        run: pip-audit
+
+  parse:
+    # Stage 3c: the parse service. CI is the only place before Fly where the
+    # real sandbox runs (dev is Windows): this job builds the production
+    # image and exercises the real namespaces, cgroups (v2 here; Fly is v1,
+    # so the Fly B tests gate production, RUNBOOK 8.1), seccomp and limits.
+    name: parse service (lint, unit, image, sandbox, limits, audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/parse
+    env:
+      PARSE_SERVICE_TOKEN: ci-parse-token-not-a-secret
+      # Test D2: re-encoded images are compared by size off the machine the
+      # baseline was recorded on (tests/test_parity.py says why).
+      PARITY_REENCODED: size
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: apps/parse/requirements.lock.txt
+      - run: python -m pip install --upgrade pip
+      - id: deps
+        run: pip install -r requirements.lock.txt -r requirements-dev.txt
+      - id: core
+        run: pip install --no-deps -e ../../packages/core -e .
+      - run: pip install pip-audit
+      - name: Install LibreOffice (the in-process .doc tests)
+        id: libreoffice
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer
+      - id: ruff
+        run: ruff check .
+      - id: mypy
+        run: mypy parse_service
+      - name: Unit tests (in-process; logic only, never proof of isolation)
+        id: unit
+        run: pytest -v --junitxml=junit-unit.xml
+      - name: No unapproved skipped tests (unit)
+        if: success() || failure()
+        env:
+          CI_STEPS: ${{ toJSON(steps) }}
+        run: python "${{ github.workspace }}/scripts/ci/check_skips.py" parse junit-unit.xml
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the production image
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/parse/Dockerfile
+          tags: docflow-parse:ci
+          load: true
+          build-args: ${{ inputs.debian_snapshot && format('DEBIAN_SNAPSHOT={0}', inputs.debian_snapshot) || '' }}
+          cache-from: type=gha,scope=parse
+          cache-to: type=gha,mode=max,scope=parse
+      - name: "E1: refuses to start without the privileges isolation needs"
+        id: e1
+        run: bash "${{ github.workspace }}/scripts/ci/parse_image.sh" docflow-parse:ci e1
+      - name: "E4: refuses to start without a working memory cap"
+        id: e4
+        run: bash "${{ github.workspace }}/scripts/ci/parse_image.sh" docflow-parse:ci e4
+      - name: "E3: start the service (production mode); its canary log"
+        id: serve
+        run: bash "${{ github.workspace }}/scripts/ci/parse_image.sh" docflow-parse:ci serve
+      - name: "HTTP tests against the real image (C1, C2, D1, D2, D3, N4)"
+        id: http
+        env:
+          PARSE_SERVICE_URL: http://127.0.0.1:8100
+        run: pytest -v tests/test_parity.py tests/test_service.py --junitxml=junit-http.xml
+      - name: No unapproved skipped tests (HTTP)
+        if: success() || failure()
+        env:
+          CI_STEPS: ${{ toJSON(steps) }}
+        run: python "${{ github.workspace }}/scripts/ci/check_skips.py" parse junit-http.xml
+      - name: "Self-tests in the real sandbox (A, S, B), each with its control"
+        id: selftest
+        if: success() || failure()
+        run: bash "${{ github.workspace }}/scripts/ci/parse_image.sh" docflow-parse:ci selftest
+      - name: The self-test evidence, as annotations
+        if: success() || failure()
+        run: python "${{ github.workspace }}/scripts/ci/selftest_annotations.py" parse-selftest.txt
+      - name: Keep the self-test evidence
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parse-selftest
+          path: apps/parse/parse-selftest.txt
+          if-no-files-found: warn
+      - name: The service's log
+        if: success() || failure()
+        run: docker logs docflow-parse 2>&1 | tail -200 || true
       - name: Dependency audit (fail on known vulnerabilities)
         run: pip-audit

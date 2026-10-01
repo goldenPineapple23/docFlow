@@ -2,9 +2,10 @@
 Reading a catalog or customer-list file into a plain table (CLAUDE.md
 Section 7.15.2 Steps 4-5; DECISIONS.md D-108).
 
-**Worker only.** This opens a file a prospect sent -- untrusted input -- so it
-runs where every other parser runs (Section 7.11), and
-`apps/api/tests/test_parsing_boundary.py` forbids importing it in the API.
+**Parse service only (Stage 3c).** This opens a file a prospect sent --
+untrusted input -- so it runs where every other parser runs: inside a parse
+service job (Section 7.11). The dependency-graph tests forbid importing it
+from the API or the worker.
 The file has already passed `file_types.validate_upload` (magic bytes, size,
 decompression limits) before it reaches here.
 
@@ -21,8 +22,7 @@ import io
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
-# Defined with the rest of the import rules, which the API may import too.
-from docflow_core.catalog_import import TABLE_FORMATS  # noqa: E402
+from docflow_core.file_types import TABLE_FORMATS
 
 MAX_ROWS = 50_000
 MAX_COLUMNS = 100
@@ -151,7 +151,31 @@ def parse_table(content: bytes, file_type: str) -> ParsedTable:
         if file_type in ("xlsx", "xlsm"):
             return _parse_xlsx(content)
         return _parse_xls(content)
-    except ImportParseError:
-        raise
+    except (ImportParseError, MemoryError):
+        raise  # MemoryError is a limit, not the file's content: the supervisor answers `stopped`
     except Exception as exc:  # noqa: BLE001 -- any library failure on a hostile file
         raise ImportParseError("IMP-004", f"{file_type} unreadable: {type(exc).__name__}") from exc
+
+
+def parse(content: bytes, filename: str) -> dict:
+    """
+    The job's answer for one catalog or customer-list file (Stage 3c):
+    {"outcome": "rejected", "code": IMP-0xx}, or {"outcome": "ok", "columns",
+    "rows", "header_row_number"}. Re-validates the bytes first, as the
+    worker did before the move.
+    """
+    from docflow_core import file_types
+
+    validation = file_types.validate_upload(content, filename)
+    if not validation.ok or validation.file_type is None:
+        return {"outcome": "rejected", "code": "IMP-004"}
+    try:
+        table = parse_table(content, validation.file_type.name.value)
+    except ImportParseError as exc:
+        return {"outcome": "rejected", "code": exc.code}
+    return {
+        "outcome": "ok",
+        "columns": table.columns,
+        "rows": table.rows,
+        "header_row_number": table.header_row_number,
+    }

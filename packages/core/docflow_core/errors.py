@@ -374,6 +374,20 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="tenant",
     ),
+    # Stage 3c (founder, Q3, 2026-09-30): the parse service stopped the job at
+    # a limit (memory, CPU, the wall clock, or an oversized answer).
+    "DOC-029": ErrorCatalogEntry(
+        code="DOC-029",
+        title="This file was too much to read",
+        message=(
+            "Reading this file needed more memory or time than DocFlow allows for one file, "
+            "so it was stopped before anything was read. This usually means a very large or "
+            "damaged file."
+        ),
+        action="Ask the sender for a smaller copy -- fewer pages, or saved as a PDF -- and upload that.",
+        severity="warning",
+        audience="tenant",
+    ),
     "INT-001": ErrorCatalogEntry(
         code="INT-001",
         title="No attachment to process",

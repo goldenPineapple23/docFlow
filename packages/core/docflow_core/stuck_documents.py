@@ -43,7 +43,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from docflow_core import document_status, founder_alerts
+from docflow_core import document_status, founder_alerts, model_runs
 from docflow_core.constants import (
     EXPORTS_NOT_FINISHED_ALERT_PER_DAY,
     MAX_PROCESSING_ATTEMPTS,
@@ -51,40 +51,21 @@ from docflow_core.constants import (
 )
 from docflow_core.db import pipeline_sweep_session, tenant_session
 
+# The decision itself is pure and lives apart (Stage 3c), so the worker's task
+# can apply it to a lost parse try without importing this module, whose sweep
+# session only the sweep task may reach (tests/test_rls_flags.py).
+from docflow_core.retry_rules import (  # noqa: F401 -- re-exported for callers and tests
+    CAUSE_TIMEOUT,
+    CAUSE_WORKER_STOPPED,
+    STUCK_CODE,
+    decide,
+    failure_detail,
+)
+
 logger = logging.getLogger(__name__)
 
-STUCK_CODE = "DOC-022"
 EXPORT_NOT_FINISHED_CODE = "EXP-009"
 IMPORT_NOT_FINISHED_CODE = "IMP-009"
-CAUSE_TIMEOUT = "timeout"
-CAUSE_WORKER_STOPPED = "worker_stopped"
-
-
-def decide(
-    processing_attempts: int, timeout_attempts: list[int], *, max_attempts: int = MAX_PROCESSING_ATTEMPTS
-) -> tuple[str, str | None]:
-    """
-    What to do with a document stuck in `processing`: ("retry", None) or
-    ("fail", cause). Agreed with the founder before building (Stage 3a):
-
-    | State                                          | Outcome              |
-    |------------------------------------------------|----------------------|
-    | its first timeout was on the latest attempt    | retry once           |
-    | a try has already run since its first timeout  | fail, cause timeout  |
-    | no timeout, max_attempts used                  | fail, worker_stopped |
-    | otherwise                                      | retry                |
-
-    A timeout gets at most one retry: a file that hangs a parser will hang
-    it again. Pure, so the table is tested without a database.
-    """
-    if timeout_attempts:
-        first_timeout = min(timeout_attempts)
-        if processing_attempts > first_timeout:
-            return ("fail", CAUSE_TIMEOUT)
-        return ("retry", None)
-    if processing_attempts >= max_attempts:
-        return ("fail", CAUSE_WORKER_STOPPED)
-    return ("retry", None)
 
 
 @dataclass
@@ -108,7 +89,8 @@ def sweep_tenant(
         stale = session.execute(
             text(
                 """
-                SELECT id, status, processing_attempts, timeout_attempts FROM documents
+                SELECT id, status, processing_attempts, timeout_attempts, parse_lost_attempts
+                  FROM documents
                 WHERE deleted_at IS NULL
                   AND (
                     (status = 'processing'
@@ -128,9 +110,15 @@ def sweep_tenant(
             if row["status"] != "processing":
                 result.waiting.append(document_id)
                 continue
+            # D-163: a call the dead attempt started and never finished goes
+            # on the cost record before anything else, whatever is decided.
+            model_runs.close_lost_runs(session, tenant_id, document_id)
             timeout_attempts = [int(n) for n in (row["timeout_attempts"] or [])]
+            lost_attempts = [int(n) for n in (row["parse_lost_attempts"] or [])]
             attempts = int(row["processing_attempts"])
-            action, cause = decide(attempts, timeout_attempts, max_attempts=max_attempts)
+            action, cause = decide(
+                attempts, timeout_attempts, max_attempts=max_attempts, parse_lost_attempts=lost_attempts
+            )
             if action == "retry":
                 result.requeued.append(document_id)
                 continue
@@ -150,7 +138,7 @@ def sweep_tenant(
                     document_id=document_id,
                     cause=cause,
                     # Numbers only (Section 7.10: the payload is emailed).
-                    detail={"attempts": attempts, "timed_out_attempts": timeout_attempts},
+                    detail=failure_detail(attempts, timeout_attempts, lost_attempts),
                 )
 
         if result.waiting:

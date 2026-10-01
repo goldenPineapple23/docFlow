@@ -126,6 +126,7 @@ def daily_ai_spend(session: Session, tenant_id: UUID) -> tuple[Decimal, int]:
                    coalesce(sum(coalesce(r.input_tokens, 0) + coalesce(r.output_tokens, 0)), 0) AS tokens
             FROM extraction_runs r JOIN documents d ON d.id = r.document_id
             WHERE r.tenant_id = :tenant_id
+              AND r.run_state = 'finished'  -- outcome rows only (D-163, 0034)
               AND NOT d.is_test_batch
               AND (r.created_at AT TIME ZONE 'UTC')::date = (now() AT TIME ZONE 'UTC')::date
             """

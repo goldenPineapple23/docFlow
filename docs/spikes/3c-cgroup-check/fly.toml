@@ -1,0 +1,10 @@
+# Throwaway app for the 3c cgroup v2 / seccomp check. No services, no public IP, no secrets.
+app = "docflow-spike-cgroup-<suffix>"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

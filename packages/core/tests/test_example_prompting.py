@@ -166,16 +166,28 @@ def world(monkeypatch):
     monkeypatch.setattr(ep, "approved_count", lambda s, t, b: state["approved"])
     monkeypatch.setattr(ep, "select_examples", lambda *a, **k: state["examples"])
 
-    def fake_read(client, content):
+    state["events"] = []
+
+    def fake_read(client, content, *, on_call_start=None):
+        # As the real read does (D-163): the started row before the paid call.
+        if on_call_start is not None:
+            on_call_start("buyer_routing", "routing-model", 321)
+        state["events"].append("call")
         state["routing_calls"] += 1
         return _routing()
 
     monkeypatch.setattr(ep, "read_buyer_header", fake_read)
     state["recorded_routing"] = 0
 
-    def fake_record(session, tenant_id, document_id, routing):
+    def fake_started(session, tenant_id, document_id, *, run_kind, model_id, counted_input_tokens):
+        state["events"].append(f"started:{run_kind}:{counted_input_tokens}")
+        return "started-run-id"
+
+    def fake_record(session, tenant_id, document_id, routing, *, started_run_id=None):
+        state["events"].append(f"outcome:{started_run_id}")
         state["recorded_routing"] += 1
 
+    monkeypatch.setattr(ep.model_runs, "record_started", fake_started)
     monkeypatch.setattr(ep.model_runs, "record_routing", fake_record)
     return state
 
@@ -278,3 +290,9 @@ def test_cost_no_routing_call_means_no_routing_record(world):
     world["any_qualifies"] = False
     _plan()
     assert world["recorded_routing"] == 0
+
+
+def test_D163_the_routing_call_has_a_started_row_before_it_and_its_outcome_points_at_it(world):
+    state = world
+    _plan()
+    assert state["events"] == ["started:buyer_routing:321", "call", "outcome:started-run-id"]

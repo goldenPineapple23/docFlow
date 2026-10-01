@@ -1,0 +1,3 @@
+# The parse service fixtures are exact bytes with fixed SHA-256 hashes
+# (Stage 3c, test D2): never convert their line endings.
+apps/parse/tests/fixtures/** -text

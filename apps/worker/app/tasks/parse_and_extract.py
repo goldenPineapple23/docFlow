@@ -1,11 +1,13 @@
 """
-The isolated parsing/extraction task (CLAUDE.md Section 7.11: "parsing never
-runs in the web process... a worker that dies takes one document to `failed`,
-never the app"). This module IS that isolated worker -- the API layer
-(apps/api/app/routers/documents.py) only validates bytes and enqueues this
-task, it never parses. Tier 2 conversion happens here too, one step earlier
-in the same process (see app/conversion.py), because "Tier 2 is where the
-risk is -- treat conversion as parsing."
+The extraction task (CLAUDE.md Section 7.11: "parsing never runs in the web
+process"). Since Stage 3c this task never opens the file either: it reads
+the original from Storage, checks its hash, and sends the bytes to the parse
+service (`docflow_core.parse_client`), where every file is opened in a
+sandboxed job of its own -- its own namespaces, cgroups, seccomp filter and
+unprivileged user, one process per file. What comes back (text parts, page
+or image parts, an image preview) is checked by the client, then sent to the
+model here. The API (apps/api/app/routers/documents.py) only validates bytes
+and enqueues this task.
 
 `tenant_id` is a required argument, not derived from anything inside this
 task: the enqueuing caller (the upload endpoint) already resolved it from
@@ -20,13 +22,10 @@ doesn't apply here; this module is not `/admin/*` and must never import it).
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import logging
-import re
 import time
 from decimal import Decimal
-from io import BytesIO
 from uuid import UUID, uuid4
 
 import anthropic
@@ -37,7 +36,9 @@ from docflow_core import (
     file_types,
     founder_alerts,
     model_runs,
+    parse_client,
     previews,
+    retry_rules,
     review_digest,
 )
 from docflow_core.buyers import identify_and_link_buyer
@@ -68,251 +69,18 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
-from app.conversion import ConversionError, PreparedArtifact, format_cell_value, prepare_artifacts
 
 logger = logging.getLogger(__name__)
 
-# Below this many extracted characters, a PDF is treated as scanned/
-# image-only and sent to the model visually instead (mirrors docs/parse_pos.py).
-PDF_MIN_TEXT_CHARS = 100
-
-_IMAGE_MEDIA_TYPES = {
-    file_types.FileTypeName.PNG: "image/png",
-    file_types.FileTypeName.JPEG: "image/jpeg",
-    file_types.FileTypeName.GIF: "image/gif",
-    file_types.FileTypeName.WEBP: "image/webp",
-}
-
-_PLAIN_TEXT_LIKE = {
-    file_types.FileTypeName.TXT,
-    file_types.FileTypeName.CSV,
-    file_types.FileTypeName.MD,
-    file_types.FileTypeName.HTML,
-}
-
-
-def _extract_pdf_text(content: bytes) -> str:
-    """
-    Also the enforcement point for two Section 7.11 limits a PDF can only be
-    checked for once it is open: the page-count cap
-    (`file_types.MAX_DOCUMENT_PAGES`) and password protection. Both raise a
-    catalog-coded ConversionError, so the task records the same clean
-    `failed` it records for a Tier 2 conversion failure -- never a crash,
-    and the file is never handed to the model.
-    """
-    import pdfplumber
-    from pdfminer.pdfdocument import PDFPasswordIncorrect
-
-    try:
-        with pdfplumber.open(BytesIO(content)) as pdf:
-            page_count = len(pdf.pages)
-            if page_count > file_types.MAX_DOCUMENT_PAGES:
-                raise ConversionError(
-                    "DOC-016",
-                    f"PDF has {page_count} pages (limit {file_types.MAX_DOCUMENT_PAGES}).",
-                )
-            chunks = [page.extract_text() or "" for page in pdf.pages]
-    except PDFPasswordIncorrect as exc:
-        # Never brute-forced, never passed to the model (Section 7.11).
-        raise ConversionError("DOC-001", "PDF is password-protected.") from exc
-    return "\n".join(chunks).strip()
-
-
-def _extract_docx_text(content: bytes) -> str:
-    """
-    Paragraphs *and* tables: a purchase order's line items almost always
-    live in a table, and python-docx's `paragraphs` skips table content
-    entirely. Nothing is executed -- python-docx reads the XML part only, it
-    has no macro or embedded-object path (Section 7.11: "No active content,
-    ever").
-    """
-    import docx
-
-    document = docx.Document(BytesIO(content))
-    lines = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
-    for table in document.tables:
-        for row in table.rows:
-            cells = [cell.text.replace("\n", " ").strip() for cell in row.cells]
-            if any(cells):
-                lines.append(", ".join(cells))
-    return "\n".join(lines)
-
-
-def _extract_xlsx_text(content: bytes) -> str:
-    import openpyxl
-
-    workbook = openpyxl.load_workbook(BytesIO(content), data_only=True, keep_vba=False)
-    lines: list[str] = []
-    for sheet in workbook.worksheets:
-        for row in sheet.iter_rows(values_only=True):
-            if any(cell is not None for cell in row):
-                lines.append(", ".join(format_cell_value(cell) for cell in row))
-    return "\n".join(lines)
-
-
-_RTF_HEX_RE = re.compile(r"\\'([0-9a-fA-F]{2})")
-_RTF_CONTROL_RE = re.compile(r"\\([a-zA-Z]+)(-?\d+)?[ ]?")
-# Destination groups whose contents are metadata, not document text.
-_RTF_SKIPPED_DESTINATIONS = {
-    "fonttbl",
-    "colortbl",
-    "stylesheet",
-    "info",
-    "pict",
-    "object",
-    "themedata",
-    "colorschememapping",
-    "latentstyles",
-    "datastore",
-    "generator",
-}
-
-
-def _extract_rtf_text(content: bytes) -> str:
-    """
-    A deliberately small, dependency-free RTF reader: it walks the control
-    words it needs for text flow and drops every destination group that
-    carries metadata, embedded objects or pictures. It is a *reader*, not an
-    interpreter -- there is no path here that executes an embedded object,
-    which is exactly why RTF is not handed to a heavier library
-    (Section 7.11: "No active content, ever").
-    """
-    text_value = content.decode("cp1252", errors="replace")
-    out: list[str] = []
-    skip_depth = 0
-    depth = 0
-    index = 0
-    length = len(text_value)
-    while index < length:
-        char = text_value[index]
-        if char == "{":
-            depth += 1
-            index += 1
-            continue
-        if char == "}":
-            if skip_depth and depth <= skip_depth:
-                skip_depth = 0
-            depth -= 1
-            index += 1
-            continue
-        if char == "\\":
-            hex_match = _RTF_HEX_RE.match(text_value, index)
-            if hex_match:
-                if not skip_depth:
-                    out.append(bytes([int(hex_match.group(1), 16)]).decode("cp1252", errors="replace"))
-                index = hex_match.end()
-                continue
-            if index + 1 < length and text_value[index + 1] in "\\{}":
-                if not skip_depth:
-                    out.append(text_value[index + 1])
-                index += 2
-                continue
-            control_match = _RTF_CONTROL_RE.match(text_value, index)
-            if control_match:
-                word = control_match.group(1)
-                if word == "*" or word in _RTF_SKIPPED_DESTINATIONS:
-                    skip_depth = skip_depth or depth
-                elif not skip_depth:
-                    if word in ("par", "line", "row", "sect", "page"):
-                        out.append("\n")
-                    elif word in ("tab", "cell"):
-                        out.append("\t")
-                index = control_match.end()
-                continue
-            index += 1
-            continue
-        if not skip_depth:
-            out.append(char)
-        index += 1
-    lines = [" ".join(line.split()) for line in "".join(out).splitlines()]
-    return "\n".join(line for line in lines if line)
-
-
-class UnhandledFileTypeError(Exception):
-    pass
-
-
-def _inner_blocks(file_type: file_types.FileType, content: bytes) -> list[dict]:
-    """
-    The content blocks for one Tier 1 artifact, *without* the <document>
-    delimiters -- so several artifacts (a multi-page TIFF's pages, an
-    Outlook message's body plus its attachment) can be wrapped in one
-    envelope by `build_content_blocks_for_artifacts`.
-    """
-    name = file_type.name
-
-    if name == file_types.FileTypeName.PDF:
-        text_content = _extract_pdf_text(content)
-        if len(text_content) >= PDF_MIN_TEXT_CHARS:
-            return [{"type": "text", "text": text_content}]
-        encoded = base64.standard_b64encode(content).decode("utf-8")
-        return [
-            {
-                "type": "document",
-                "source": {"type": "base64", "media_type": "application/pdf", "data": encoded},
-            }
-        ]
-
-    if name in _IMAGE_MEDIA_TYPES:
-        encoded = base64.standard_b64encode(content).decode("utf-8")
-        return [
-            {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": _IMAGE_MEDIA_TYPES[name],
-                    "data": encoded,
-                },
-            }
-        ]
-
-    if name in _PLAIN_TEXT_LIKE:
-        return [{"type": "text", "text": content.decode("utf-8", errors="replace")}]
-
-    if name == file_types.FileTypeName.RTF:
-        return [{"type": "text", "text": _extract_rtf_text(content)}]
-
-    if name == file_types.FileTypeName.DOCX:
-        return [{"type": "text", "text": _extract_docx_text(content)}]
-
-    if name == file_types.FileTypeName.XLSX:
-        return [{"type": "text", "text": _extract_xlsx_text(content)}]
-
-    raise UnhandledFileTypeError(f"No Tier 1 content-block builder for {name}")
-
-
 def _envelope(parts: list[dict]) -> list[dict]:
+    """
+    One <document> envelope for the whole document, however many parts the
+    parse service returned (CLAUDE.md Section 7.2: document content is
+    always delimited, and it is data, never instructions).
+    """
     if len(parts) == 1 and parts[0]["type"] == "text":
         return build_text_content(parts[0]["text"])
     return wrap_document_content(parts)
-
-
-def build_content_blocks(file_type: file_types.FileType, content: bytes) -> list[dict]:
-    """
-    Native-text PDFs and text-like formats are sent as text; images and
-    text-less (scanned) PDFs are sent to the model visually, matching
-    docs/parse_pos.py's proven approach, extended to Tier 1's full format
-    list (CLAUDE.md Section 8.2 / DECISIONS.md D-010). Tier 2 formats never
-    reach this function as themselves -- they arrive as the Tier 1 artifacts
-    app/conversion.py produced from them.
-    """
-    return _envelope(_inner_blocks(file_type, content))
-
-
-def _artifact_parts(artifacts: list[PreparedArtifact]) -> list[dict]:
-    parts: list[dict] = []
-    for artifact in artifacts:
-        parts.extend(_inner_blocks(artifact.file_type, artifact.content))
-    return parts
-
-
-def build_content_blocks_for_artifacts(artifacts: list[PreparedArtifact]) -> list[dict]:
-    """
-    One <document> envelope for the whole document, however many Tier 1
-    artifacts it turned into (CLAUDE.md Section 7.2: document content is
-    always delimited, and it is data, never instructions).
-    """
-    return _envelope(_artifact_parts(artifacts))
 
 
 # Stands in, in a text preview, for a page the model read visually (a scanned
@@ -324,37 +92,36 @@ _VISUAL_PART_PLACEHOLDER = (
 )
 
 
-def build_preview(
-    file_type: file_types.FileType, content: bytes, parts: list[dict]
-) -> previews.Preview | None:
+def build_preview(answer: parse_client.ParseAnswer) -> previews.Preview | None:
     """
     A viewable rendering for a format no browser displays (DECISIONS.md D-092),
     or None when the browser can show the original as it is.
 
-    Image-like formats (TIFF, HEIC) are re-encoded from the original. For
-    every other format the preview is the text this task extracted and sent
-    to the model -- one extraction, two uses, so the reviewer sees exactly
-    what DocFlow read, tables included, for every format the worker opens.
+    Image-like formats (TIFF, HEIC) get the image the parse service made from
+    the original. For every other format the preview is the text the service
+    returned and this task sent to the model -- one extraction, two uses, so
+    the reviewer sees exactly what DocFlow read, tables included.
     """
-    name = file_type.name
+    name = file_types.FileTypeName(answer.file_type)
     if not previews.needs_preview(name):
         return None
     if previews.is_image_like(name):
-        return previews.build_preview(content, name)
-    chunks = [part["text"] if part["type"] == "text" else _VISUAL_PART_PLACEHOLDER for part in parts]
+        image = answer.image_preview
+        if image is None:
+            return None
+        return previews.Preview(content=image["content"], media_type=image["media_type"], kind=image["kind"])
+    chunks = [part["text"] if part["type"] == "text" else _VISUAL_PART_PLACEHOLDER for part in answer.parts]
     return previews.text_preview("\n\n".join(chunks))
 
 
-def _store_preview(
-    tenant_id: UUID, document_id: UUID, file_type: file_types.FileType, content: bytes, parts: list[dict]
-) -> None:
+def _store_preview(tenant_id: UUID, document_id: UUID, answer: parse_client.ParseAnswer) -> None:
     """
     Best effort, by design: a preview is a convenience, and a document that
     cannot be previewed still reviews fine against its extracted values --
     the viewer says so. A failure here never touches the document's status.
     """
     try:
-        preview = build_preview(file_type, content, parts)
+        preview = build_preview(answer)
         if preview is None:
             return
         # Fixed key per document (Stage 3b item 4): a retry overwrites it, so
@@ -453,17 +220,49 @@ def _plan_examples(
     return plan
 
 
+class _StartedRuns:
+    """`extract_document`'s on_call_start hook (D-163): commits the started
+    run row, in its own transaction, just before the paid call, and keeps its
+    id for the outcome row."""
+
+    def __init__(self, tenant_id: UUID, document_id: UUID):
+        self.tenant_id = tenant_id
+        self.document_id = document_id
+        self.extraction: UUID | None = None
+
+    def __call__(self, run_kind: str, model_id: str, counted: int | None) -> None:
+        with tenant_session(self.tenant_id) as session:
+            run_id = model_runs.record_started(
+                session, self.tenant_id, self.document_id, run_kind=run_kind, model_id=model_id,
+                counted_input_tokens=counted,
+            )
+        if run_kind == "extraction":
+            self.extraction = run_id
+
+
 def _record_runs(
-    session: Session, tenant_id: UUID, document_id: UUID, plan: ExamplePlan, result: ExtractionResult
+    session: Session,
+    tenant_id: UUID,
+    document_id: UUID,
+    plan: ExamplePlan,
+    result: ExtractionResult,
+    started_run_id: UUID | None = None,
 ) -> UUID:
-    """The extraction call's extraction_runs row (D-142). The routing read,
-    when there was one, is already on record: `example_prompting.plan` writes
-    it the moment it returns (D-163), so a failure after it can't lose it."""
-    return model_runs.record_extraction(session, tenant_id, document_id, result)
+    """The extraction call's outcome row (D-142), pointing at its started row
+    (D-163). The routing read, when there was one, is already on record:
+    `example_prompting.plan` writes it the moment it returns, so a failure
+    after it can't lose it."""
+    return model_runs.record_extraction(
+        session, tenant_id, document_id, result, started_run_id=started_run_id
+    )
 
 
 def _record_unsaved_extraction(
-    tenant_id: UUID, document_id: UUID, plan: ExamplePlan, result: ExtractionResult
+    tenant_id: UUID,
+    document_id: UUID,
+    plan: ExamplePlan,
+    result: ExtractionResult,
+    started_run_id: UUID | None = None,
 ) -> None:
     """A paid answer whose save failed (DOC-021): that transaction held the
     run record too, so it is written again on its own -- every paid call is
@@ -471,7 +270,9 @@ def _record_unsaved_extraction(
     Logged, never raised: the document must still end `failed`."""
     try:
         with tenant_session(tenant_id) as session:
-            model_runs.record_extraction(session, tenant_id, document_id, result)
+            model_runs.record_extraction(
+                session, tenant_id, document_id, result, started_run_id=started_run_id
+            )
             session.execute(
                 text("UPDATE documents SET est_cost_usd = :cost WHERE id = :id"),
                 {"id": str(document_id), "cost": _money(_total_cost(plan, result))},
@@ -525,6 +326,84 @@ def _fail_after_extraction(
             session, document_id, from_statuses=["processing"], to="failed", values=values
         )
     _alert_failure(tenant_id, document_id, code)
+
+
+# Stage 3c: a parse job stopped at a limit (memory, CPU, wall clock, answer
+# size) -- founder-approved wording, Q3.
+STOPPED_CODE = "DOC-029"
+# A job that crashed some other way, or an answer that failed the checks:
+# the customer sees the file as unreadable; the founder gets an alert.
+PARSE_FAULT_CODE = "DOC-005"
+
+
+def _fail_parse_fault(tenant_id: UUID, document_id: UUID, cause: str) -> None:
+    with tenant_session(tenant_id) as session:
+        document_status.transition(
+            session,
+            document_id,
+            from_statuses=["processing"],
+            to="failed",
+            values={
+                "raw_json": {"error_code": PARSE_FAULT_CODE, "detail": f"parse service: {cause}"},
+                "failure_code": PARSE_FAULT_CODE,
+                "processed_at": document_status.NOW,
+            },
+        )
+    _parse_alert(tenant_id, document_id, PARSE_FAULT_CODE, cause, by_cause=True)
+
+
+def _parse_alert(tenant_id: UUID, document_id: UUID, code: str, cause: str, *, by_cause: bool) -> None:
+    """The founder alert for a parse job stopped at a limit (DOC-029, once per
+    tenant per day) or one that crashed / answered badly (DOC-005, once per
+    tenant per cause per day). Its own transaction, after the failed status,
+    so an alert that can't be written never undoes it."""
+    try:
+        with tenant_session(tenant_id) as session:
+            founder_alerts.raise_parse_alert(
+                session, tenant_id=tenant_id, document_id=document_id, error_code=code, cause=cause,
+                by_cause=by_cause,
+            )
+    except Exception:
+        logger.exception("founder_alert_not_raised document_id=%s error_code=%s", document_id, code)
+
+
+def _after_lost_parse(tenant_id: UUID, document_id: UUID, reason: str) -> None:
+    """
+    Item 6a: record the lost try and apply the sweep's own `decide()` at once,
+    so a lost file is retried or failed in seconds, not after the 30-minute
+    sweep. One decision, one place: the sweep calls the same function.
+    """
+    retry = False
+    with tenant_session(tenant_id) as session:
+        state = document_status.record_parse_lost(session, document_id)
+        if state is None:
+            return  # the document left `processing` under us
+        attempts, timeouts, lost = state
+        action, cause = retry_rules.decide(attempts, timeouts, parse_lost_attempts=lost)
+        if action == "retry":
+            retry = document_status.release_claim(session, document_id)
+        else:
+            moved = document_status.transition(
+                session,
+                document_id,
+                from_statuses=["processing"],
+                to="failed",
+                values={"failure_code": retry_rules.STUCK_CODE, "processed_at": document_status.NOW},
+            )
+            if moved:
+                founder_alerts.raise_for_failure(
+                    session,
+                    tenant_id=tenant_id,
+                    error_code=retry_rules.STUCK_CODE,
+                    document_id=document_id,
+                    cause=cause,
+                    detail=retry_rules.failure_detail(attempts, timeouts, lost, last_lost_reason=reason),
+                )
+    if retry:
+        # After the commit: the next job must see the released claim.
+        celery_app.send_task(
+            "docflow.parse_and_extract", args=[str(tenant_id), str(document_id)], queue="interactive"
+        )
 
 
 def _alert_failure(tenant_id: UUID, document_id: UUID, error_code: str | None) -> None:
@@ -635,6 +514,9 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                 "parse_and_extract_not_claimed document_id=%s status=%s", did, row["status"]
             )
             return
+        # D-163: a paid call an earlier, dead attempt started and never
+        # finished goes on the cost record now, as a lower bound.
+        model_runs.close_lost_runs(session, tid, did)
         # One budget for the whole read, counted from the claim (D-163): the
         # stuck-document sweep may take a claim over after
         # STUCK_PROCESSING_TIMEOUT_MIN, and this read must be over by then.
@@ -680,46 +562,56 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
         _mark_failed(tid, did, raw_response={"error_code": "DOC-026", "detail": "hash_mismatch"})
         return
 
-    # Defense in depth (CLAUDE.md Section 7.11): re-validate here too. Never
-    # trust that upload-time validation still holds by the time this task
-    # runs -- the file on disk is the same hostile input either way.
-    validation = file_types.validate_upload(content, original_filename)
-    if not validation.ok:
-        logger.error(
-            "parse_and_extract_revalidation_failed document_id=%s error_code=%s",
-            did,
-            validation.error_code,
-        )
-        _mark_failed(
-            tid, did, raw_response={"error_code": validation.error_code, "detail": validation.detail}
-        )
+    # Stage 3c: the file is opened only by the parse service, in a sandboxed
+    # job of its own; it re-validates the bytes there before anything else.
+    # Outside every broad `except`, so a service failure can never be
+    # relabelled DOC-005.
+    try:
+        answer = parse_client.parse_document(content, original_filename)
+    except parse_client.ParseUnavailable as exc:
+        # Never got in: not the file's fault. The document waits, no try used.
+        logger.error("parse_service_unavailable document_id=%s reason=%s", did, exc.reason)
+        with tenant_session(tid) as session:
+            document_status.release_after_storage_outage(session, did)
+            founder_alerts.raise_parse_service_unavailable(
+                session, tenant_id=tid, where="worker", reason=exc.reason
+            )
+        return
+    except parse_client.ParseLost as exc:
+        # Got in, never came out: a timeout-class try (item 6a), decided now.
+        logger.error("parse_lost document_id=%s reason=%s", did, exc.reason)
+        _after_lost_parse(tid, did, exc.reason)
+        return
+    except parse_client.ParseAnswerInvalid as exc:
+        logger.error("parse_answer_invalid document_id=%s reason=%s", did, exc.reason)
+        _fail_parse_fault(tid, did, f"invalid:{exc.reason}")
         return
 
-    # Tier 2 conversion and .msg/.eml unwrapping happen here, in the isolated
-    # worker, before any parsing (CLAUDE.md Section 7.11). Every converted
-    # artifact is re-validated inside prepare_artifacts; a conversion failure
-    # is a clean, catalog-coded `failed`, never a crash.
-    try:
-        artifacts = prepare_artifacts(validation.file_type, content)
-        parts = _artifact_parts(artifacts)
-        content_blocks = _envelope(parts)
-    except ConversionError as exc:
-        logger.error(
-            "parse_and_extract_conversion_failed document_id=%s error_code=%s",
-            did,
-            exc.error_code,
+    if answer.outcome == "rejected":
+        logger.error("parse_and_extract_rejected document_id=%s error_code=%s", did, answer.code)
+        _mark_failed(
+            tid, did, raw_response={"error_code": answer.code, "detail": "rejected by the parse service"}
         )
-        _mark_failed(tid, did, raw_response={"error_code": exc.error_code, "detail": exc.detail})
         return
-    except Exception:
-        logger.exception("parse_and_extract_parse_error document_id=%s", did)
-        _mark_failed(tid, did, raw_response={"error_code": "DOC-005", "detail": "Parsing failed."})
+    if answer.outcome == "stopped":
+        logger.error("parse_stopped document_id=%s cause=%s", did, answer.cause)
+        _mark_failed(
+            tid, did, raw_response={"error_code": STOPPED_CODE, "detail": f"stopped: {answer.cause}"}
+        )
+        _parse_alert(tid, did, STOPPED_CODE, f"stopped:{answer.cause}", by_cause=False)
         return
+    if answer.outcome == "crashed":
+        logger.error("parse_crashed document_id=%s cause=%s", did, answer.cause)
+        _fail_parse_fault(tid, did, f"crashed:{answer.cause}")
+        return
+
+    parts = answer.parts
+    content_blocks = _envelope(parts)
 
     # Before the model call, so the reviewer can see the original even if
-    # extraction fails. Stays here in the worker: building a preview is
-    # parsing (Section 7.11), and the API only serves what this wrote.
-    _store_preview(tid, did, validation.file_type, content, parts)
+    # extraction fails. Built from what the parse service returned; the API
+    # only serves what this wrote.
+    _store_preview(tid, did, answer)
     _store_extracted_text(tid, did, parts)
 
     settings = get_settings()
@@ -727,11 +619,14 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
     # above is sized with it in mind.
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=2)
     plan = _plan_examples(client, tid, did, sender_email, parts)
-    result = extract_document(client, content_blocks, examples=plan.examples, deadline=read_deadline)
+    started = _StartedRuns(tid, did)
+    result = extract_document(
+        client, content_blocks, examples=plan.examples, deadline=read_deadline, on_call_start=started
+    )
 
     if not result.ok:
         with tenant_session(tid) as session:
-            _record_runs(session, tid, did, plan, result)
+            _record_runs(session, tid, did, plan, result, started.extraction)
             document_status.transition(
                 session,
                 did,
@@ -752,19 +647,21 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
         return
 
     try:
-        _save_extraction(tid, did, plan, result)
+        _save_extraction(tid, did, plan, result, started.extraction)
     except Exception as exc:  # noqa: BLE001 -- the document must not be stranded (M3)
         # Nothing of the answer was written (one transaction). Keep the paid
         # answer on the failed document, with a code, and tell the founder.
         logger.error("extraction_save_failed document_id=%s error_type=%s", did, type(exc).__name__)
-        _record_unsaved_extraction(tid, did, plan, result)
+        _record_unsaved_extraction(tid, did, plan, result, started.extraction)
         _fail_after_extraction(tid, did, "DOC-021", raw_response=result.raw_response)
         return
 
     _finish(tid, did)
 
 
-def _save_extraction(tid: UUID, did: UUID, plan: ExamplePlan, result: ExtractionResult) -> None:
+def _save_extraction(
+    tid: UUID, did: UUID, plan: ExamplePlan, result: ExtractionResult, started_run_id: UUID | None = None
+) -> None:
     """The model's answer, the header, the lines and the run record, in one
     transaction. The status stays `processing`: nothing is reviewable yet."""
     header = result.header
@@ -774,7 +671,7 @@ def _save_extraction(tid: UUID, did: UUID, plan: ExamplePlan, result: Extraction
         # document, so a later change never makes its numbers unexplainable.
         schema = field_schema.current(session, tid)
         overall_confidence = _overall_confidence(result.header_confidence, schema)
-        run_id = _record_runs(session, tid, did, plan, result)
+        run_id = _record_runs(session, tid, did, plan, result, started_run_id)
         session.execute(
             text(
                 """

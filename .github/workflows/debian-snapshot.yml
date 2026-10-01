@@ -1,0 +1,65 @@
+name: Debian snapshot (weekly)
+
+# The parse image reads Debian from a dated snapshot (apps/parse/Dockerfile,
+# DEBIAN_SNAPSHOT), so it only changes when that date moves. Once a week this
+# moves it to today and runs the whole CI workflow on the new image: unit
+# tests, the image build, E1/E4/E3, the self-tests in the real sandbox, the
+# worker and API suites against it, and the audits. D-183.
+#
+# Green: it pushes a branch with the new date (deps/debian-snapshot-<date>)
+# and leaves a notice with the PR link. The founder opens the PR; its own CI
+# run is the one that counts, and RUNBOOK 8.1 (Fly staging) comes before
+# production, as for any parser upgrade (RUNBOOK 8.5).
+# Red: nothing is pushed, and GitHub emails the failure (scheduled runs
+# notify whoever last changed the schedule).
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  date:
+    runs-on: ubuntu-latest
+    outputs:
+      snapshot: ${{ steps.today.outputs.snapshot }}
+    steps:
+      - id: today
+        run: echo "snapshot=$(date -u +%Y%m%dT000000Z)" >> "$GITHUB_OUTPUT"
+
+  suite:
+    needs: date
+    uses: ./.github/workflows/ci.yml
+    with:
+      debian_snapshot: ${{ needs.date.outputs.snapshot }}
+
+  move-the-date:
+    needs: [date, suite]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      SNAPSHOT: ${{ needs.date.outputs.snapshot }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set DEBIAN_SNAPSHOT in the Dockerfiles
+        # The parse image (tested by the suite above) and the worker and API
+        # images on Fly, which use the same base and snapshot.
+        run: |
+          for file in apps/parse/Dockerfile apps/worker/Dockerfile apps/api/Dockerfile; do
+            sed -i "s/^ARG DEBIAN_SNAPSHOT=.*/ARG DEBIAN_SNAPSHOT=${SNAPSHOT}/" "$file"
+            grep -q "^ARG DEBIAN_SNAPSHOT=${SNAPSHOT}$" "$file"
+          done
+      - name: Push the branch
+        run: |
+          if git diff --quiet; then
+            echo "::notice title=Debian snapshot::already ${SNAPSHOT}; nothing to move"
+            exit 0
+          fi
+          branch="deps/debian-snapshot-${SNAPSHOT:0:8}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -am "Parse image: Debian snapshot ${SNAPSHOT} (weekly job, full CI passed)"
+          git push origin "$branch"
+          echo "::notice title=Debian snapshot moved::CI passed on ${SNAPSHOT}. Open the PR: https://github.com/${GITHUB_REPOSITORY}/pull/new/${branch}"

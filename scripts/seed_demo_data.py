@@ -46,7 +46,7 @@ from uuid import UUID, uuid4
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import po_formats
-from docflow_core import file_types, previews
+from docflow_core import file_types, parse_client, previews
 from docflow_core.db import platform_session, tenant_session
 from docflow_core.matching import match_document_lines
 from docflow_core.storage import save_derived, save_file
@@ -375,19 +375,36 @@ def _build_order(index: int, rng: random.Random) -> dict:
     }
 
 
+def _preview_from_parse_service(content: bytes, filename: str, name) -> previews.Preview | None:
+    """The worker's preview rule (app.tasks.parse_and_extract.build_preview),
+    from the parse service's answer."""
+    try:
+        answer = parse_client.parse_document(content, filename)
+    except (parse_client.ParseUnavailable, parse_client.ParseLost, parse_client.ParseAnswerInvalid) as exc:
+        print(f"  no preview for {filename}: the parse service answered nothing usable ({exc.reason})")
+        return None
+    if answer.outcome != "ok":
+        return None
+    if previews.is_image_like(name):
+        image = answer.image_preview
+        return previews.Preview(image["content"], image["media_type"], image["kind"]) if image else None
+    texts = [p["text"] for p in answer.parts if p["type"] == "text"]
+    return previews.text_preview("\n\n".join(texts))
+
+
 def _insert(tenant_id: UUID, order: dict, *, content_sha: str | None = None) -> UUID:
     content = order["content"]
     storage_path = save_file(tenant_id, order["filename"], content)
     document_id = uuid4()
 
-    # A viewable rendering for the formats no browser shows (D-092). Built
-    # HERE, in a script, never in the web process -- Section 7.11 keeps
-    # parsing out of the API, and decoding a TIFF or reading a DOCX is
-    # parsing. The worker does the same thing for real intake.
+    # A viewable rendering for the formats no browser shows (D-092). Since
+    # Stage 3c it comes from the parse service, the only place a file is
+    # opened -- start the dev service first (SETUP.md). If it isn't running,
+    # the order is seeded without a preview, and the script says so.
     preview_path = preview_media_type = preview_kind = None
     detected = file_types.detect_file_type(content, _ext(order["filename"]))
     if detected is not None and previews.needs_preview(detected.name):
-        preview = previews.build_preview(content, detected.name)
+        preview = _preview_from_parse_service(content, order["filename"], detected.name)
         if preview is not None:
             # The same fixed key the worker writes (Stage 3b item 4).
             preview_path = save_derived(

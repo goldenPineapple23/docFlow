@@ -1,4 +1,5 @@
 import logging
+import sys
 import traceback
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -28,6 +29,32 @@ from app.routers import (
 )
 
 logger = logging.getLogger("docflow.api")
+
+
+def parse_token_startup_refusal() -> str | None:
+    """
+    Why the API must not start, or None (founder, 2026-10-01, Q12). Only the
+    worker talks to the parse service, so the API never holds its token; on
+    Fly (FLY_APP_NAME is set) a token here means a secret was put on the
+    wrong app. A secrets list is a human control; this makes it a property
+    of the code, as the parse service refusing to start without isolation
+    does. Checked when this module is imported, before the app exists, so
+    the server never opens its port.
+    """
+    settings = get_settings()
+    if settings.fly_app_name and settings.parse_service_token:
+        return (
+            "PARSE_SERVICE_TOKEN is set on this API machine. The API never holds the parse "
+            "service's token; only the worker talks to the parse service. Remove the secret "
+            "from this Fly app (RUNBOOK 8.2)."
+        )
+    return None
+
+
+_refusal = parse_token_startup_refusal()
+if _refusal is not None:
+    print(f"DocFlow API refused to start: {_refusal}", file=sys.stderr, flush=True)
+    raise SystemExit(1)
 
 
 def console_mfa_startup_check() -> bool:

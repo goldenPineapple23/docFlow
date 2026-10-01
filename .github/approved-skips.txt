@@ -4,7 +4,7 @@
 # founder's approval and a reason, and a matching entry in DECISIONS.md.
 #
 # Format:  <suite> <classname>::<name>  # reason
-#   suite = core | api | worker
+#   suite = core | api | worker | parse
 #
 # Not listed because they are not skips: the `live_api` tests (the golden
 # fixture and the contamination test against the real model) are DESELECTED

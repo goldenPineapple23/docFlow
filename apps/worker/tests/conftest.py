@@ -85,3 +85,102 @@ requires_timeout_schema = pytest.mark.skipif(
         "to this database yet."
     ),
 )
+
+
+def stage3c_schema_available() -> bool:
+    """True once supabase/migrations/0034_parse_lost_and_started_runs.sql has
+    been applied (documents.parse_lost_attempts, extraction_runs.run_state).
+    Applied by hand on staging like every migration (D-013); CI applies it
+    itself, so these tests never skip there."""
+    if not database_available():
+        return False
+    from docflow_core.db import get_engine
+    from sqlalchemy import text
+
+    try:
+        with get_engine().connect() as conn:
+            conn.execute(text("SELECT parse_lost_attempts FROM documents LIMIT 0"))
+            conn.execute(text("SELECT run_state, started_run_id FROM extraction_runs LIMIT 0"))
+        return True
+    except Exception:
+        return False
+
+
+requires_stage3c_schema = pytest.mark.skipif(
+    not stage3c_schema_available(),
+    reason=(
+        "supabase/migrations/0034_parse_lost_and_started_runs.sql has not been applied to this database yet."
+    ),
+)
+
+
+# ── Stage 3c: the parse service every document test reads through ──────────
+import os  # noqa: E402
+import socket  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
+import urllib.request  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+PARSE_DIR = Path(__file__).resolve().parents[2] / "parse"
+PARSE_FIXTURES = PARSE_DIR / "tests" / "fixtures"
+DEV_PARSE_TOKEN = "worker-tests-dev-parse-token"
+
+
+def fixture_bytes(relative: str) -> bytes:
+    """One of the parse service's committed fixtures (real files, fixed hashes)."""
+    return (PARSE_FIXTURES / relative).read_bytes()
+
+
+def _parse_python() -> str:
+    for candidate in (PARSE_DIR / ".venv" / "Scripts" / "python.exe", PARSE_DIR / ".venv" / "bin" / "python"):
+        if candidate.exists():
+            return str(candidate)
+    raise RuntimeError(
+        "No parse service to test against: set PARSE_SERVICE_URL (CI: the real image) or create "
+        "apps/parse/.venv (SETUP.md) so the dev service can be started."
+    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def parse_service():
+    """
+    The parse service the task under test calls (Stage 3c). CI points
+    PARSE_SERVICE_URL at the real image (isolation on); otherwise the dev
+    service is started here from apps/parse/.venv (isolation off: the same
+    code, without the sandbox -- logic only, never proof of isolation).
+    """
+    if os.environ.get("PARSE_SERVICE_URL"):
+        get_settings.cache_clear()
+        yield os.environ["PARSE_SERVICE_URL"]
+        return
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    env = {k: v for k, v in os.environ.items() if not k.startswith("FLY_")}
+    env.update(
+        PARSE_ISOLATION="off", PARSE_SERVICE_TOKEN=DEV_PARSE_TOKEN, PORT=str(port), DOCFLOW_ENV="development"
+    )
+    proc = subprocess.Popen([_parse_python(), "-m", "parse_service.server"], env=env, cwd=str(PARSE_DIR))
+    url = f"http://127.0.0.1:{port}"
+    for _ in range(150):
+        try:
+            with urllib.request.urlopen(f"{url}/health", timeout=1):
+                break
+        except OSError:
+            time.sleep(0.1)
+    os.environ["PARSE_SERVICE_URL"] = url
+    os.environ["PARSE_SERVICE_TOKEN"] = DEV_PARSE_TOKEN
+    get_settings.cache_clear()
+    try:
+        yield url
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        os.environ.pop("PARSE_SERVICE_URL", None)
+        os.environ.pop("PARSE_SERVICE_TOKEN", None)
+        get_settings.cache_clear()
+

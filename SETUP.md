@@ -107,7 +107,25 @@ winget install TheDocumentFoundation.LibreOffice
 
 **If you skip this:** everything else keeps working. A buyer who sends a legacy `.doc` gets a clear message ("We couldn't convert this older file — re-save it as .docx or PDF and send it again"), and the document is marked failed rather than silently mis-read. Nothing is faked and nothing is lost. But that's a purchase order your customer has to key in by hand, which is the exact thing DocFlow exists to prevent — so install it before go-live.
 
-**Ongoing duty (this one is real, not a one-off).** Every file-parsing library in the worker — including LibreOffice — reads files sent by people we have no relationship with, so they are the largest attack surface in the system. `CLAUDE.md` Section 7.11 requires them to be kept patched: pinned versions in `apps/worker/requirements.lock.txt`, a dependency audit in CI, and a deliberate upgrade whenever a CVE lands in one of them (`pdfplumber`, `python-docx`, `openpyxl`, `Pillow`, `pillow-heif`, `olefile`, `xlrd`, `defusedxml`, and LibreOffice itself). This belongs in `RUNBOOK.md` once that file exists.
+**Ongoing duty (this one is real, not a one-off).** Every file-parsing library — including LibreOffice — reads files sent by people we have no relationship with, so they are the largest attack surface in the system. `CLAUDE.md` Section 7.11 requires them to be kept patched: since Stage 3c they live only in the parse service (`apps/parse`), pinned in `apps/parse/requirements.lock.txt` and, in its image, by exact Debian version; a dependency audit runs in CI, and a CVE in one of them (`pdfplumber`, `python-docx`, `Pillow`, `pillow-heif`, `olefile`, `xlrd`, `defusedxml`, `openpyxl`, and LibreOffice itself) means a deliberate upgrade (RUNBOOK section 8).
+
+### 7a. Run the parse service (Stage 3c)
+
+Since Stage 3c the worker never opens a file itself: it sends each one to the parse service, which reads it in a sandboxed job of its own. On this Windows machine the service runs in **dev mode** — the same code, one process per file, the same time limit, but without the Linux sandbox (namespaces, cgroups, seccomp), which Windows doesn't have. Dev mode is refused on Fly. Set it up once, from `apps/parse`:
+
+```powershell
+py -3.13 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.lock.txt -r requirements-dev.txt
+.venv\Scripts\python.exe -m pip install --no-deps -e ..\..\packages\core -e .
+```
+
+Start it (leave it running while the worker runs):
+
+```powershell
+$env:PARSE_ISOLATION = "off"; .venv\Scripts\python.exe -m parse_service.server
+```
+
+The worker finds it at `PARSE_SERVICE_URL` (default `http://127.0.0.1:8100`). The worker's own test suite starts one for itself. The demo seed script asks it for previews; if it isn't running, orders are seeded without one, and the script says so.
 
 ---
 

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docflow-parse-service"
+version = "0.1.0"
+description = "DocFlow's parse service: every hostile file is opened here, one sandboxed job per file (Stage 3c)."
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+include = ["parse_service*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "linux_isolation: needs the real sandbox (Linux, root, the production image); skipped elsewhere",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.mypy]
+ignore_missing_imports = true
+# The service runs on Linux only (its sandbox is Linux namespaces, cgroups
+# and seccomp); check it as Linux code even from a Windows dev machine.
+platform = "linux"

@@ -20,7 +20,7 @@ from docflow_core import catalog_import
 from docflow_core.db import platform_session
 from sqlalchemy import text
 
-from tests.conftest import requires_console_schema
+from tests.conftest import as_the_worker, requires_console_schema
 from tests.test_console_api import (  # noqa: F401 -- fixtures
     _Console,
     _environment,
@@ -77,7 +77,8 @@ def _import(client, console, tenant_id, content: bytes, name="catalog.csv", kind
     response = _upload(client, console, tenant_id, content, name, kind)
     assert response.status_code == 202, response.text
     import_id = response.json()["import_id"]
-    catalog_import.run_parse(UUID(tenant_id), UUID(import_id))
+    with as_the_worker():
+        catalog_import.run_parse(UUID(tenant_id), UUID(import_id))
     return _preview(client, console, tenant_id, import_id)
 
 
@@ -397,7 +398,8 @@ def test_a_catalog_can_come_straight_from_the_tenants_intake(client, stripe):
         )
         assert response.status_code == 202, response.text
         import_id = response.json()["import_id"]
-        catalog_import.run_parse(UUID(tenant_id), UUID(import_id))
+        with as_the_worker():
+            catalog_import.run_parse(UUID(tenant_id), UUID(import_id))
         assert _preview(client, console, tenant_id, import_id)["diff"]["insert"] == 3
 
 

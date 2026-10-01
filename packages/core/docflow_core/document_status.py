@@ -215,6 +215,52 @@ def record_timeout(session: Session, document_id: UUID) -> bool:
     return bool(rowcount(result))
 
 
+def record_parse_lost(session: Session, document_id: UUID) -> tuple[int, list[int], list[int]] | None:
+    """
+    Stage 3c (item 6a): this attempt's parse request got in and never came
+    out. Append the attempt number to `parse_lost_attempts` (migration 0034),
+    idempotent per attempt like `record_timeout`, and return what `decide()`
+    needs: (processing_attempts, timeout_attempts, parse_lost_attempts).
+    None when the document is no longer `processing`.
+    """
+    row = session.execute(
+        text(
+            """
+            UPDATE documents
+               SET parse_lost_attempts = CASE
+                     WHEN processing_attempts = ANY(parse_lost_attempts) THEN parse_lost_attempts
+                     ELSE array_append(parse_lost_attempts, processing_attempts)
+                   END
+             WHERE id = :id AND status = 'processing' AND deleted_at IS NULL
+            RETURNING processing_attempts, timeout_attempts, parse_lost_attempts
+            """
+        ),
+        {"id": str(document_id)},
+    ).first()
+    if row is None:
+        return None
+    return int(row[0]), [int(n) for n in (row[1] or [])], [int(n) for n in (row[2] or [])]
+
+
+def release_claim(session: Session, document_id: UUID) -> bool:
+    """
+    Stage 3c (item 6a): a lost parse try that `decide()` says to retry. The
+    attempt stays counted (it was a real try); only the claim's stamp is
+    cleared, so the very next job's `claim_for_processing` takes it over at
+    once instead of after STUCK_PROCESSING_TIMEOUT_MIN.
+    """
+    result = session.execute(
+        text(
+            """
+            UPDATE documents SET processing_started_at = NULL
+             WHERE id = :id AND status = 'processing' AND deleted_at IS NULL
+            """
+        ),
+        {"id": str(document_id)},
+    )
+    return bool(rowcount(result))
+
+
 def claim_for_processing(
     session: Session, document_id: UUID, *, stale_after_min: int = STUCK_PROCESSING_TIMEOUT_MIN
 ) -> bool:
@@ -247,7 +293,9 @@ def claim_for_processing(
 def release_after_storage_outage(session: Session, document_id: UUID) -> bool:
     """
     Stage 3b (Q3): the worker couldn't read the original because Storage was
-    unreachable. That is not the document's fault and must never use up one
+    unreachable. Stage 3c uses it too, for a parse request that never got in
+    (the parse service unreachable or busy past the client's patience).
+    That is not the document's fault and must never use up one
     of its MAX_PROCESSING_ATTEMPTS, or an outage longer than about 90 minutes
     would end in DOC-022.
 

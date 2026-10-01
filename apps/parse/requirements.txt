@@ -1,0 +1,18 @@
+# The parse service (Stage 3c). Every library here opens files a stranger
+# sent, so they live in this image only -- never in apps/api or apps/worker
+# (the dependency-graph tests enforce it). Exact pins in requirements.lock.txt,
+# the same versions the worker had before the move; upgraded deliberately
+# when a CVE lands (RUNBOOK section 8).
+#
+# docflow_core is installed separately with --no-deps: the service imports
+# only its standard-library modules (file_types).
+pdfplumber>=0.11
+python-docx>=1.1
+openpyxl>=3.1
+Pillow>=10.4
+pillow-heif>=1.0      # .heic/.heif phone photos of paper POs
+olefile>=0.47         # .msg -- pure-Python reader of the OLE container's streams
+xlrd>=2.0.1           # .xls -- pure-Python BIFF reader
+defusedxml>=0.7.1     # .odt/.ods XML, with DTD + external entities disabled
+# .doc needs LibreOffice, from the image's Debian packages (pinned in the
+# Dockerfile). The seccomp binding is Debian's python3-seccomp, likewise.

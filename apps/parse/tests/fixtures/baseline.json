@@ -1,0 +1,573 @@
+{
+  "documents": {
+    "positive/po-scanned.pdf": {
+      "outcome": "ok",
+      "file_type": "pdf",
+      "parts": [
+        {
+          "type": "document",
+          "media_type": "application/pdf",
+          "length": 50385,
+          "sha256": "9694c6446d5a020b79d39bf91145b40791fe7b4ad2d8c151882cd6f3217259c5"
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.csv": {
+      "outcome": "ok",
+      "file_type": "txt",
+      "parts": [
+        {
+          "type": "text",
+          "text": "PURCHASE ORDER\nPO Number: BCH-2291\nOrder Date: 2026-03-14\nBuyer: Acme's Test Coffee House\nContact: orders@acmetestcoffee.example\nPayment Terms: Net 30\n\nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.50, 570.00\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62.00, 372.00\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198.00\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54.00, 216.00\n\nOrder Total: 1356.00\n"
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.doc": {
+      "outcome": "ok",
+      "file_type": "doc",
+      "parts": [
+        {
+          "type": "text",
+          "text": "PURCHASE ORDER\nPO Number: BCH-2291\nBuyer: Acme's Test Coffee House\nSKUDescriptionQtyUnitUnit PriceLine TotalCF-1001Colombian Whole Bean 5lb12CS47.5570.0CF-2210Ethiopian Yirgacheffe 5lb6CS62.0372.0SY-0045Vanilla Syrup 750ml24EA8.25198.0CUP-1212oz Paper Cups (1000ct)4BOX54.0216.0Order Total1356.0"
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.docx": {
+      "outcome": "ok",
+      "file_type": "docx",
+      "parts": [
+        {
+          "type": "text",
+          "text": "PURCHASE ORDER\nPO Number: BCH-2291\nBuyer: Acme's Test Coffee House\nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.5, 570.0\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62.0, 372.0\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198.0\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54.0, 216.0\nOrder Total, , , , , 1356.0"
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.eml": {
+      "outcome": "ok",
+      "file_type": "eml",
+      "parts": [
+        {
+          "type": "text",
+          "text": "Subject: PO BCH-2291\nFrom: orders@acmetestcoffee.example\nDate: Sat, 14 Mar 2026 09:00:00 -0700\n\nPURCHASE ORDER\nPO Number: BCH-2291\nOrder Date: 2026-03-14\nBuyer: Acme's Test Coffee House\nContact: orders@acmetestcoffee.example\nPayment Terms: Net 30\n\nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.50, 570.00\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62.00, 372.00\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198.00\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54.00, 216.00\n\nOrder Total: 1356.00"
+        },
+        {
+          "type": "text",
+          "text": "PURCHASE ORDER, , , , , \nPO Number, BCH-2291, , , , \nBuyer, Acme's Test Coffee House, , , , \nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.5, 570\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62, 372\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54, 216\nOrder Total, , , , , 1356"
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.gif": {
+      "outcome": "ok",
+      "file_type": "gif",
+      "parts": [
+        {
+          "type": "image",
+          "media_type": "image/gif",
+          "length": 6224,
+          "sha256": "081c7d3e2c315127eb35f96c4c90fd19ecc7ddbfc07f3e1476b3240ec98512aa",
+          "size": [
+            900,
+            500
+          ]
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.heic": {
+      "outcome": "ok",
+      "file_type": "heic",
+      "parts": [
+        {
+          "type": "image",
+          "media_type": "image/jpeg",
+          "length": 25248,
+          "sha256": "0a98e6537bf47fe8af7a8b5ee13ccdb623bebb67a5ad9a6c4f1e662de8f45b28",
+          "size": [
+            600,
+            400
+          ]
+        }
+      ],
+      "image_preview": {
+        "kind": "converted_image",
+        "media_type": "image/png",
+        "length": 34272,
+        "sha256": "a8468ef24e656a94822d2f17179bbcae15ddf9f1a83eb1a402f5267b195037ad",
+        "size": [
+          600,
+          400
+        ]
+      }
+    },
+    "positive/po.html": {
+      "outcome": "ok",
+      "file_type": "txt",
+      "parts": [
+        {
+          "type": "text",
+          "text": "<html><body><pre>PURCHASE ORDER\nPO Number: BCH-2291\nOrder Date: 2026-03-14\nBuyer: Acme's Test Coffee House\nContact: orders@acmetestcoffee.example\nPayment Terms: Net 30\n\nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.50, 570.00\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62.00, 372.00\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198.00\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54.00, 216.00\n\nOrder Total: 1356.00\n</pre></body></html>"
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.jpg": {
+      "outcome": "ok",
+      "file_type": "jpeg",
+      "parts": [
+        {
+          "type": "image",
+          "media_type": "image/jpeg",
+          "length": 28810,
+          "sha256": "9ebfad0ab96834a0b9fbda1b8afb2ce08ed3cdfda3bd546ef39fa98500413ae7",
+          "size": [
+            900,
+            500
+          ]
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.md": {
+      "outcome": "ok",
+      "file_type": "txt",
+      "parts": [
+        {
+          "type": "text",
+          "text": "PURCHASE ORDER\nPO Number: BCH-2291\nOrder Date: 2026-03-14\nBuyer: Acme's Test Coffee House\nContact: orders@acmetestcoffee.example\nPayment Terms: Net 30\n\nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.50, 570.00\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62.00, 372.00\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198.00\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54.00, 216.00\n\nOrder Total: 1356.00\n"
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.msg": {
+      "outcome": "ok",
+      "file_type": "msg",
+      "parts": [
+        {
+          "type": "text",
+          "text": "Subject: PO BCH-2291 from Acme's Test Coffee House\nFrom: orders@acmetestcoffee.example\n\nPURCHASE ORDER\nPO Number: BCH-2291\nOrder Date: 2026-03-14\nBuyer: Acme's Test Coffee House\nContact: orders@acmetestcoffee.example\nPayment Terms: Net 30\n\nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.50, 570.00\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62.00, 372.00\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198.00\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54.00, 216.00\n\nOrder Total: 1356.00"
+        },
+        {
+          "type": "text",
+          "text": "PURCHASE ORDER PO Number: BCH-2291 Order Date: 2026-03-14 Buyer: Acme’s Test Coffee House Contact: orders@acmetestcoffee.example Payment Terms: Net 30 SKU, Description, Qty, Unit, Unit Price, Line Total CF-1001, Colombian Whole Bean 5lb, 12, CS, 47.50, 570.00 CF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62.00, 372.00 SY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198.00 CUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54.00, 216.00 Order Total: 1356.00"
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.ods": {
+      "outcome": "ok",
+      "file_type": "ods",
+      "parts": [
+        {
+          "type": "text",
+          "text": "PURCHASE ORDER\nPO Number: BCH-2291\nBuyer: Acme's Test Coffee House\nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.50, 570.00\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62.00, 372.00\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198.00\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54.00, 216.00\nOrder Total, , , , , 1356.00"
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.odt": {
+      "outcome": "ok",
+      "file_type": "odt",
+      "parts": [
+        {
+          "type": "text",
+          "text": "PURCHASE ORDER\nPO Number: BCH-2291\nBuyer: Acme's Test Coffee House\nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.50, 570.00\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62.00, 372.00\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198.00\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54.00, 216.00\nOrder Total, , , , , 1356.00"
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.pdf": {
+      "outcome": "ok",
+      "file_type": "pdf",
+      "parts": [
+        {
+          "type": "text",
+          "text": "PURCHASE ORDER PO Number: BCH-2291 Order Date: 2026-03-14 Buyer: Acme’s Test Coffee House Contact: orders@acmetestcoffee.example Payment Terms: Net 30 SKU, Description, Qty, Unit, Unit Price, Line Total CF-1001, Colombian Whole Bean 5lb, 12, CS, 47.50, 570.00 CF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62.00, 372.00 SY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198.00 CUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54.00, 216.00 Order Total: 1356.00"
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.png": {
+      "outcome": "ok",
+      "file_type": "png",
+      "parts": [
+        {
+          "type": "image",
+          "media_type": "image/png",
+          "length": 20869,
+          "sha256": "4e13c79e5c063a9ed6eb8641bf97f47bd634c3edb6e056f5abb1203f7c7369d6",
+          "size": [
+            900,
+            500
+          ]
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.rtf": {
+      "outcome": "ok",
+      "file_type": "rtf",
+      "parts": [
+        {
+          "type": "text",
+          "text": "PURCHASE ORDER\nPO Number: BCH-2291\nOrder Date: 2026-03-14\nBuyer: Acme's Test Coffee House\nContact: orders@acmetestcoffee.example\nPayment Terms: Net 30\nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.50, 570.00\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62.00, 372.00\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198.00\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54.00, 216.00\nOrder Total: 1356.00"
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.tif": {
+      "outcome": "ok",
+      "file_type": "tiff",
+      "parts": [
+        {
+          "type": "image",
+          "media_type": "image/jpeg",
+          "length": 25314,
+          "sha256": "5475d7eaa7b77c3cb680e5c4ebd095a9c61109bfbdfecd10180fcc7a71c08f74",
+          "size": [
+            600,
+            400
+          ]
+        },
+        {
+          "type": "image",
+          "media_type": "image/jpeg",
+          "length": 25314,
+          "sha256": "5475d7eaa7b77c3cb680e5c4ebd095a9c61109bfbdfecd10180fcc7a71c08f74",
+          "size": [
+            600,
+            400
+          ]
+        }
+      ],
+      "image_preview": {
+        "kind": "converted_image",
+        "media_type": "image/png",
+        "length": 14912,
+        "sha256": "d3a8507d3a68171d192c4238bd379d5e8609ef51d4f372e78805d8a4008f608f",
+        "size": [
+          600,
+          400
+        ]
+      }
+    },
+    "positive/po.txt": {
+      "outcome": "ok",
+      "file_type": "txt",
+      "parts": [
+        {
+          "type": "text",
+          "text": "PURCHASE ORDER\nPO Number: BCH-2291\nOrder Date: 2026-03-14\nBuyer: Acme's Test Coffee House\nContact: orders@acmetestcoffee.example\nPayment Terms: Net 30\n\nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.50, 570.00\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62.00, 372.00\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198.00\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54.00, 216.00\n\nOrder Total: 1356.00\n"
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.webp": {
+      "outcome": "ok",
+      "file_type": "webp",
+      "parts": [
+        {
+          "type": "image",
+          "media_type": "image/webp",
+          "length": 13444,
+          "sha256": "2ccaa24501fa616d46f3867a09dbb49c26630e70cf01054ea754024531cb7075",
+          "size": [
+            900,
+            500
+          ]
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.xls": {
+      "outcome": "ok",
+      "file_type": "xls",
+      "parts": [
+        {
+          "type": "text",
+          "text": "PURCHASE ORDER, , , , , \nPO Number, BCH-2291, , , , \nBuyer, Acme's Test Coffee House, , , , \nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.5, 570\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62, 372\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54, 216\nOrder Total, , , , , 1356"
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.xlsm": {
+      "outcome": "ok",
+      "file_type": "xlsx",
+      "parts": [
+        {
+          "type": "text",
+          "text": "PURCHASE ORDER, , , , , \nPO Number, BCH-2291, , , , \nBuyer, Acme's Test Coffee House, , , , \nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.5, 570\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62, 372\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54, 216\nOrder Total, , , , , 1356"
+        }
+      ],
+      "image_preview": null
+    },
+    "positive/po.xlsx": {
+      "outcome": "ok",
+      "file_type": "xlsx",
+      "parts": [
+        {
+          "type": "text",
+          "text": "PURCHASE ORDER, , , , , \nPO Number, BCH-2291, , , , \nBuyer, Acme's Test Coffee House, , , , \nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.5, 570\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62, 372\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54, 216\nOrder Total, , , , , 1356"
+        }
+      ],
+      "image_preview": null
+    },
+    "hostile/bomb-entries.docx": {
+      "outcome": "rejected",
+      "code": "DOC-003"
+    },
+    "hostile/bomb-ratio.docx": {
+      "outcome": "rejected",
+      "code": "DOC-003"
+    },
+    "hostile/exe-renamed.pdf": {
+      "outcome": "rejected",
+      "code": "DOC-014"
+    },
+    "hostile/malformed.doc": {
+      "outcome": "rejected",
+      "code": "DOC-005"
+    },
+    "hostile/malformed.heic": {
+      "outcome": "rejected",
+      "code": "DOC-017",
+      "file_type": "heic"
+    },
+    "hostile/malformed.msg": {
+      "outcome": "rejected",
+      "code": "DOC-005"
+    },
+    "hostile/malformed.ods": {
+      "outcome": "rejected",
+      "code": "DOC-005"
+    },
+    "hostile/malformed.odt": {
+      "outcome": "rejected",
+      "code": "DOC-005"
+    },
+    "hostile/malformed.tif": {
+      "outcome": "rejected",
+      "code": "DOC-017",
+      "file_type": "tiff"
+    },
+    "hostile/malformed.xls": {
+      "outcome": "rejected",
+      "code": "DOC-005"
+    },
+    "hostile/oversized.tif": {
+      "outcome": "rejected",
+      "code": "DOC-018",
+      "file_type": "tiff"
+    },
+    "hostile/pages-500.pdf": {
+      "outcome": "rejected",
+      "code": "DOC-016",
+      "file_type": "pdf"
+    },
+    "hostile/password.pdf": {
+      "outcome": "rejected",
+      "code": "DOC-001"
+    },
+    "hostile/po-in-zip.zip": {
+      "outcome": "rejected",
+      "code": "DOC-010"
+    },
+    "hostile/xxe.docx": {
+      "outcome": "rejected",
+      "code": "DOC-015"
+    }
+  },
+  "tables": {
+    "tables/catalog.csv": {
+      "outcome": "ok",
+      "columns": [
+        "SKU",
+        "Description",
+        "UOM",
+        "Price"
+      ],
+      "rows": [
+        [
+          "CF-1001",
+          "Colombian Whole Bean 5lb",
+          "CS",
+          "47.5"
+        ],
+        [
+          "CF-2210",
+          "Ethiopian Yirgacheffe 5lb",
+          "CS",
+          "62"
+        ],
+        [
+          "SY-0045",
+          "Vanilla Syrup 750ml",
+          "EA",
+          "8.25"
+        ],
+        [
+          "CUP-12",
+          "12oz Paper Cups (1000ct)",
+          "BOX",
+          "54"
+        ]
+      ],
+      "header_row_number": 1
+    },
+    "tables/catalog.txt": {
+      "outcome": "ok",
+      "columns": [
+        "SKU",
+        "Description",
+        "UOM",
+        "Price"
+      ],
+      "rows": [
+        [
+          "CF-1001",
+          "Colombian Whole Bean 5lb",
+          "CS",
+          "47.5"
+        ],
+        [
+          "CF-2210",
+          "Ethiopian Yirgacheffe 5lb",
+          "CS",
+          "62"
+        ],
+        [
+          "SY-0045",
+          "Vanilla Syrup 750ml",
+          "EA",
+          "8.25"
+        ],
+        [
+          "CUP-12",
+          "12oz Paper Cups (1000ct)",
+          "BOX",
+          "54"
+        ]
+      ],
+      "header_row_number": 1
+    },
+    "tables/catalog.xls": {
+      "outcome": "ok",
+      "columns": [
+        "SKU",
+        "Description",
+        "UOM",
+        "Price"
+      ],
+      "rows": [
+        [
+          "CF-1001",
+          "Colombian Whole Bean 5lb",
+          "CS",
+          "47.5"
+        ],
+        [
+          "CF-2210",
+          "Ethiopian Yirgacheffe 5lb",
+          "CS",
+          "62"
+        ],
+        [
+          "SY-0045",
+          "Vanilla Syrup 750ml",
+          "EA",
+          "8.25"
+        ],
+        [
+          "CUP-12",
+          "12oz Paper Cups (1000ct)",
+          "BOX",
+          "54"
+        ]
+      ],
+      "header_row_number": 1
+    },
+    "tables/catalog.xlsx": {
+      "outcome": "ok",
+      "columns": [
+        "SKU",
+        "Description",
+        "UOM",
+        "Price"
+      ],
+      "rows": [
+        [
+          "CF-1001",
+          "Colombian Whole Bean 5lb",
+          "CS",
+          "47.5"
+        ],
+        [
+          "CF-2210",
+          "Ethiopian Yirgacheffe 5lb",
+          "CS",
+          "62"
+        ],
+        [
+          "SY-0045",
+          "Vanilla Syrup 750ml",
+          "EA",
+          "8.25"
+        ],
+        [
+          "CUP-12",
+          "12oz Paper Cups (1000ct)",
+          "BOX",
+          "54"
+        ]
+      ],
+      "header_row_number": 1
+    }
+  },
+  "inputs": {
+    "positive/po-scanned.pdf": "9694c6446d5a020b79d39bf91145b40791fe7b4ad2d8c151882cd6f3217259c5",
+    "positive/po.csv": "c4388cdee066b874b75ca346c40197b0c63039d67d9a388a4c8383790e6790ed",
+    "positive/po.doc": "3e266a030d00e35d0a232004192275f3a2e86d949b1123253e50e0a20c7adfa5",
+    "positive/po.docx": "ca4d9233b83ab8702b3d9b6cd7743a113e0b4468a567ad39309e8f4652e78253",
+    "positive/po.eml": "3bd6f417b2367c314d89b0212375c1c7aae46ddec2df7e99128c1044290cbbeb",
+    "positive/po.gif": "081c7d3e2c315127eb35f96c4c90fd19ecc7ddbfc07f3e1476b3240ec98512aa",
+    "positive/po.heic": "090eacf15dfc97e311993fdc936dbea0ed07ffd020bafce23595a6e5205153ec",
+    "positive/po.html": "080b3dc1bd9ac43e5eb0f8a33325f5221579d402f933b23c2f37c927a52c78cb",
+    "positive/po.jpg": "9ebfad0ab96834a0b9fbda1b8afb2ce08ed3cdfda3bd546ef39fa98500413ae7",
+    "positive/po.md": "c4388cdee066b874b75ca346c40197b0c63039d67d9a388a4c8383790e6790ed",
+    "positive/po.msg": "c9c51c9645917e543c856db17973e59afae4102834b0fb6cc68c647b0688c8e0",
+    "positive/po.ods": "ffe063e9e7043ea08ff423fc2171ea557bdc25fc3a75cea143ed1562933db76f",
+    "positive/po.odt": "e36bebae916a53147c6c0fe6428c39e83918fd07246db9e4d8413abad2ad7bf3",
+    "positive/po.pdf": "45eec48116fe4c9245b925c0db5475f382599ae2af242d6a8bc1bb4ed19baf77",
+    "positive/po.png": "4e13c79e5c063a9ed6eb8641bf97f47bd634c3edb6e056f5abb1203f7c7369d6",
+    "positive/po.rtf": "03db812d10e838e3ee40f6589feb85bc417ca3eb614d46482f51287f9f95733d",
+    "positive/po.tif": "a3c06bcab10e8886ed96f5333137ed38874824fd45dd5e1c67b9eea55b6cb12e",
+    "positive/po.txt": "c4388cdee066b874b75ca346c40197b0c63039d67d9a388a4c8383790e6790ed",
+    "positive/po.webp": "2ccaa24501fa616d46f3867a09dbb49c26630e70cf01054ea754024531cb7075",
+    "positive/po.xls": "eecbd77106565b167a545cc71cf1e3677546ba921aeaf8435dfdaff877f81b9c",
+    "positive/po.xlsm": "beeb44c6a72954338ddd3b0de66ee5e2cee8da5d2f66e643e7854d5c1ae026ca",
+    "positive/po.xlsx": "33d5b017676e240baa930afea789c89b37ecc0f5b12566e167e6c5b954c6b99c",
+    "hostile/bomb-entries.docx": "2808df5683220e37c0119a713df0d32409c3e1116514b054edd21bef31d79855",
+    "hostile/bomb-ratio.docx": "e25686cb176193fc0ae0d17cb519eb11a37bc13e3d600f5ac395e468239e5c69",
+    "hostile/exe-renamed.pdf": "557e5058a56985afaed80d60f6be1eeabac305812ef893d6d5f5c202d979f186",
+    "hostile/malformed.doc": "b7de4db8166a533a993beaad38c2d8b38c994458ef27cb8341a59b876355bc58",
+    "hostile/malformed.heic": "d59bc099ab25757a456cb4f87895e326404e643e09dccf00777148f747c7472a",
+    "hostile/malformed.msg": "b7de4db8166a533a993beaad38c2d8b38c994458ef27cb8341a59b876355bc58",
+    "hostile/malformed.ods": "fc40112ec1785bed98c05a5ce18724fcd890db6d55c92ba64a05a9f30075497d",
+    "hostile/malformed.odt": "fc40112ec1785bed98c05a5ce18724fcd890db6d55c92ba64a05a9f30075497d",
+    "hostile/malformed.tif": "709f871ec28f27ae624497e41c1314a13f660d825e24a7fa7ad97c7a2355705a",
+    "hostile/malformed.xls": "b7de4db8166a533a993beaad38c2d8b38c994458ef27cb8341a59b876355bc58",
+    "hostile/oversized.tif": "8584f334e77692bcd35b8fb8ff7d423576bbdf7a4d2445379052f5625f8ff4b7",
+    "hostile/pages-500.pdf": "fa52aa3f97a59725e5c05affac1eb70f74917d161956ade37b3d1ba280bebdac",
+    "hostile/password.pdf": "9bba6591b2bc4df62e52027b96fbe474c4f9132b78b2e2d51d9f71fbc0bb37f0",
+    "hostile/po-in-zip.zip": "edc96de91d10e377febe08758f3346321fc75347e12d8c881250bf56ed2ddd43",
+    "hostile/xxe.docx": "a993023a9d9559e2e6b0745231b36607bd5b6cca6c71c0611b21625d3144aea7",
+    "tables/catalog.csv": "6f216d4cfb96fa7d7fb72206b48d1277adfbd1f4900c98ee54c48de342a899c3",
+    "tables/catalog.txt": "7176ce59bc231a6b687b5189ecd8da569a7624fa7dcf66c1ff952e5aa37345f1",
+    "tables/catalog.xls": "8b9f44cbd629339e14bbd14671cad0f9b4feb879243a3e3aed40a68af0b9794f",
+    "tables/catalog.xlsx": "a39ebc70927c4b24f6995f4bb499cda7d1285fa0e61452ae10003c5e3442a555"
+  }
+}

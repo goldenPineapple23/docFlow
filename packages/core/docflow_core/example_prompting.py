@@ -361,11 +361,24 @@ def plan(
     if from_sender is not None:
         buyer_id, identified_by = from_sender
     elif worth_routing:
-        routing = read_buyer_header(client, routing_content(parts))
+        started: dict[str, UUID] = {}
+
+        def on_call_start(run_kind: str, model_id: str, counted: int | None) -> None:
+            # Committed before the call (D-163, migration 0034): a worker that
+            # dies during it still leaves the call on the cost record.
+            with session_factory(tenant_id) as session:
+                started[run_kind] = model_runs.record_started(
+                    session, tenant_id, document_id, run_kind=run_kind, model_id=model_id,
+                    counted_input_tokens=counted,
+                )
+
+        routing = read_buyer_header(client, routing_content(parts), on_call_start=on_call_start)
         # Paid for: on the cost record now, in its own transaction, whatever
         # happens to the rest of the plan (founder, 2026-09-26; D-163).
         with session_factory(tenant_id) as session:
-            model_runs.record_routing(session, tenant_id, document_id, routing)
+            model_runs.record_routing(
+                session, tenant_id, document_id, routing, started_run_id=started.get("buyer_routing")
+            )
         with session_factory(tenant_id) as session:
             buyer_id = buyer_from_routing(session, tenant_id, routing)
         identified_by = "header_read" if buyer_id is not None else None
@@ -442,6 +455,7 @@ def month_usage(session: Session, tenant_id: UUID) -> dict[str, Any]:
                 AS routing_cost_usd
             FROM extraction_runs
             WHERE tenant_id = :t AND created_at >= date_trunc('month', now())
+              AND run_state = 'finished'  -- outcome rows only (D-163, 0034)
             """
         ),
         {"t": str(tenant_id)},

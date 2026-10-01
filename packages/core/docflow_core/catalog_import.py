@@ -5,8 +5,9 @@ DECISIONS.md D-108; migration 0012).
 "Same upload component, parser, and validator as any catalog upload -- there
 is only one." This is the one. The flow:
 
-  upload -> parse (worker: `catalog_parsing`, the only code that opens the
-  file) -> column mapping (auto-detected, adjustable, remembered per tenant)
+  upload -> parse (the worker sends the file to the parse service, whose
+  table reader is the only code that opens it, Stage 3c) -> column mapping
+  (auto-detected, adjustable, remembered per tenant)
   -> validation report -> inline fixes -> diff -> commit.
 
 Everything after parsing is here, on the stored text table, so the API can
@@ -42,15 +43,16 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from docflow_core import file_types
 from docflow_core.buyers import find_near_duplicate_candidates, normalize_buyer_name
 from docflow_core.db import rowcount
 
 KINDS = ("catalog", "buyers")
 
-# Formats a catalog or customer list may arrive in. Anything else on the
-# intake allowlist (a PDF, an image) is refused with IMP-001: a catalog has to
-# be a table. One list, used by the API's upload check and the worker's parser.
-TABLE_FORMATS = frozenset({"csv", "xlsx", "xlsm", "xls", "txt"})
+# Formats a catalog or customer list may arrive in: defined in file_types
+# (standard library only) so the parse service's table reader uses the same
+# list without importing this module (Stage 3c).
+TABLE_FORMATS = file_types.TABLE_FORMATS
 PREVIEW_ROWS = 20
 MAX_REPORTED_ROWS = 50
 
@@ -918,16 +920,14 @@ def commit_import(
 
 def run_parse(tenant_id: UUID, import_id: UUID) -> str:
     """
-    Read the stored file into the text table. Worker only: it imports the
-    file reader lazily, so importing this module stays safe for the API
-    (Section 7.11) -- the same arrangement as `export_jobs.run_export`.
-    Re-validates the bytes first; never trusts that the upload-time check
-    still describes what is on disk. Safe to run twice.
+    Read the stored file into the text table. Worker only. The file is
+    opened by the parse service (Stage 3c), which re-validates the bytes
+    first: the upload-time check is never trusted to still describe what is
+    on disk. Safe to run twice.
     """
     import logging
 
-    from docflow_core import file_types
-    from docflow_core.catalog_parsing import ImportParseError, parse_table
+    from docflow_core import parse_client
     from docflow_core.db import tenant_session
     from docflow_core.storage import (
         StorageError,
@@ -975,28 +975,54 @@ def run_parse(tenant_id: UUID, import_id: UUID) -> str:
         with tenant_session(tenant_id) as session:
             record_parse_failure(session, import_id, "IMP-009")
         return "failed"
-    validation = file_types.validate_upload(content, row["original_filename"])
+    # Stage 3c: the file is opened only by the parse service, which
+    # re-validates it first (item 6's table, catalog column).
+    code: str | None = None
     try:
-        if not validation.ok or validation.file_type is None:
-            raise ImportParseError("IMP-004", f"revalidation failed: {validation.error_code}")
-        table = parse_table(content, validation.file_type.name.value)
-    except ImportParseError as exc:
+        answer = parse_client.parse_table(content, row["original_filename"])
+    except parse_client.ParseUnavailable as exc:
+        from docflow_core import founder_alerts
+
+        logger.error("import_parse_service_unavailable import_id=%s reason=%s", import_id, exc.reason)
+        founder_alerts.alert_parse_service_unavailable(tenant_id, where="catalog_import", reason=exc.reason)
+        code = "IMP-009"
+    except parse_client.ParseLost as exc:
+        logger.error("import_parse_lost import_id=%s reason=%s", import_id, exc.reason)
+        code = "IMP-009"
+    except parse_client.ParseAnswerInvalid as exc:
+        logger.error("import_parse_answer_invalid import_id=%s reason=%s", import_id, exc.reason)
+        code = "IMP-004"
+    else:
+        if answer.outcome == "rejected":
+            code = answer.code or "IMP-004"
+        elif answer.outcome in ("stopped", "crashed"):
+            code = "IMP-004"
+            if answer.outcome == "crashed" and answer.cause == "signal_31":
+                # Every seccomp kill alerts, here as in the worker (founder).
+                from docflow_core import founder_alerts
+
+                founder_alerts.alert_seccomp_kill(
+                    tenant_id, where="catalog_import", ref_id=import_id, error_code="IMP-004"
+                )
+    if code is not None:
         # Codes and counts only -- never cell text (Section 7.10).
-        logger.info("import_parse_failed import_id=%s code=%s reason=%s", import_id, exc.code, exc.detail)
+        logger.info("import_parse_failed import_id=%s code=%s", import_id, code)
         with tenant_session(tenant_id) as session:
-            record_parse_failure(session, import_id, exc.code)
+            record_parse_failure(session, import_id, code)
         return "failed"
 
+    # An ok table answer always has its header row (parse_client checks it).
+    assert answer.header_row_number is not None
     with tenant_session(tenant_id) as session:
         record_parsed(
             session,
             import_id,
-            columns=table.columns,
-            rows=table.rows,
-            header_row_number=table.header_row_number,
+            columns=answer.columns,
+            rows=answer.rows,
+            header_row_number=answer.header_row_number,
             kind=row["kind"],
         )
     logger.info(
-        "import_parsed import_id=%s rows=%d columns=%d", import_id, len(table.rows), len(table.columns)
+        "import_parsed import_id=%s rows=%d columns=%d", import_id, len(answer.rows), len(answer.columns)
     )
     return "parsed"

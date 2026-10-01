@@ -1,0 +1,3 @@
+Connecting to fdaa:cb:76d5:a7b:897:fcd5:fb36:2...
+Thu Oct  1 00:13:28 UTC 2026
+controllers=[]nmemory	8	5	1

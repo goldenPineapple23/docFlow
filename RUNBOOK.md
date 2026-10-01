@@ -95,9 +95,15 @@ select n.nspname as backup, string_agg(c.relname, ', ' order by c.relname) as ta
  where n.nspname like 'backup%' group by n.nspname order by n.nspname;
 ```
 
-**On `docflow-staging`: none since 2026-09-30.** The founder dropped
-`backup_0026` to `backup_0032` that day, after the PR for `0032` (the card
-billing follow-up, PR #29) merged.
+**On `docflow-staging`:** the founder dropped `backup_0026` to
+`backup_0032` on 2026-09-30, after the PR for `0032` (the card billing
+follow-up, PR #29) merged. Since then:
+- `backup_3b` (the 3b cutover's restore point), unless the founder has
+  dropped it;
+- **`backup_0034`** (documents 105, extraction_runs 17; live = backup),
+  taken 2026-10-01 before `0034`. The founder keeps it until 3c has merged
+  and run cleanly on staging for a few days; then it is dropped and recorded
+  here.
 
 `docflow-prod` doesn't exist yet (Phase 6), so it has no backups.
 
@@ -796,3 +802,180 @@ A `document_failed` alert with **DOC-026** is different: the stored original
 is missing or isn't the file that was received. That is never an outage. Ask
 the customer to upload the file again, and look for how the object went
 missing.
+
+## 8. The parse service (Stage 3c)
+
+The parse service opens every file a stranger sends, inside a per-file
+sandbox (BUILD-STATUS "3c detailed design"). More of this section is
+written as 3c is built: running it, deploying it, reading the canary's
+startup log, the parser-upgrade process, and the
+`parse_service_unavailable` alert.
+
+### 8.1 Gate: the Fly self-tests pass before a merge or a production deploy that touches it (founder, 2026-10-01)
+
+CI runs on cgroup v2. Fly machines run cgroup v1, the path production
+uses, and **only a Fly run proves that path**. So the self-tests must pass
+**on Fly staging** before a change that touches the parse service merges to
+`main`, and again before any production deploy of it, not only at the 3c
+checkpoint (founder, 2026-10-01: `main` is what every later stage builds on,
+so it must not carry a sandbox whose production path is unproven): all of them, `python -m
+parse_service.selftest all` (the canary, A, S and B; BUILD-STATUS "3c test
+table", B1-B16 and A15 included). **IPv6 isolation is proven only there:**
+CI's runner has no IPv6, so A-net IPv6 is NOT-RUN in CI (D-183).
+
+"Touches the parse service" means any change to:
+- its code (`apps/parse/`), its Dockerfile, base image or packages
+  (LibreOffice and `python3-seccomp` included), or its lock file;
+- its `fly.toml`;
+- the worker's `parse_client`.
+
+**Setting secrets on Fly (founder, 2026-10-01):** start a new PowerShell
+window and run `Set-PSReadLineOption -HistorySaveStyle SaveNothing` before
+typing anything else. Values typed literally (a database URL, S3 keys, an
+API key) are otherwise saved in plain text in PowerShell's history file. It
+applies to that window only; close it when done. Never paste a value into
+chat. Each app gets only the secrets its process reads, and its own
+database login (F-1): never `docflow_app` shared between apps, never
+`postgres` or the service role.
+
+The procedure:
+1. Deploy the change to Fly staging first.
+2. Check the canary's startup log: every line PASS.
+3. Run the self-tests on Fly staging (every line PASS; A-net IPv6 must be
+   PASS there, not NOT-RUN), and keep the output in
+   `docs/spikes/3c-fly-staging/` with the date and the image digest.
+4. Only then merge, and later deploy to production (after its own Fly
+   staging run of the merged code).
+
+If any self-test fails on Fly, nothing merges and nothing goes to
+production: stop and report (1.7).
+
+**What gates the 3c merge, and what waits (founder, 2026-10-01).** The
+worker and the API are not on Fly until F-1's own logins exist (Stage 3e),
+so the 3c merge gate is the parse app alone, every item on the Fly machine:
+- the canary (8.3), every line PASS;
+- every A, S and B self-test PASS, A-net IPv6 PASS (not NOT-RUN);
+- **A4 against a stand-in:** a TCP listener on the private network, in a
+  throwaway app, passed with `--targets`. The control (reached from outside
+  the sandbox on the parse machine) runs first and must succeed; inside a
+  job the same address must be blocked. NOT-RUN fails the gate;
+- **N1:** `fly ips list` shows one private IPv6 and nothing else;
+- **N2:** from outside Fly, the app's public name resolves to no public
+  address and nothing answers;
+- **N3:** with the parse machine stopped, a client machine in a throwaway
+  app calls `http://docflow-parse-staging.flycast/...` with no token. A
+  401 proves the request started the machine and the token is enforced.
+
+The throwaway app is destroyed afterwards; its name, machine IDs and times
+go in the evidence.
+
+**These gate the first worker/API deploy, not the 3c merge:** G (end to end
+through the queue and the parse service), and A4 again against the real
+staging API and worker. At that deploy, generate a fresh
+`PARSE_SERVICE_TOKEN` and set it on the parse app and the worker together;
+the 3c token is not carried over.
+
+### 8.2 Running it
+
+- **Dev (this Windows machine):** SETUP.md Step 7a. `PARSE_ISOLATION=off`,
+  one process per file and the same time limit, no sandbox. Refused in
+  production mode.
+- **CI:** the `parse` job builds `apps/parse/Dockerfile` and runs it with
+  `--privileged` (the closest a GitHub runner gets to root in a Fly VM).
+  Its self-test, E1, E4 and canary results are annotations on the run's
+  summary page.
+- **Fly:** the same image. Production mode is on (Fly sets `FLY_APP_NAME`):
+  isolation must be on, `PARSE_SERVICE_TOKEN` must be set, and any
+  `PARSE_TEST_ONLY_*` setting makes it refuse to start. Private only, over
+  Flycast (`fly ips list` must show one private IPv6 address and nothing
+  else, after every deploy). Staging deploys with `--ha=false` (one
+  machine). **That is staging only:** production's machine count is a
+  Phase 6 decision and does not carry over by default (founder,
+  2026-10-01).
+- **Secrets:** `PARSE_SERVICE_TOKEN` goes on the worker's app and the parse
+  service's app, never the API's. If it is set on the API, the API refuses
+  to start ("DocFlow API refused to start: PARSE_SERVICE_TOKEN is set ...")
+  and Fly keeps restarting it: `fly secrets unset PARSE_SERVICE_TOKEN -a
+  <api app>`.
+
+### 8.3 Reading the startup log (the canary)
+
+Before it opens its port the service runs its canary through the real
+sandbox and prints one line per check:
+
+```
+canary: cgroup v1
+RESULT canary:network PASS -- {...}
+RESULT canary:view PASS -- {...}
+RESULT canary:seccomp PASS -- {...}
+RESULT canary:memory-cap-kills PASS -- {...}
+RESULT canary:cpu-quota-set-and-budget-kills PASS -- {...}
+canary: PASS
+parse service listening on port 8100
+```
+
+Any FAIL, or "refused to start", means the machine cannot isolate a file:
+the service exits, Fly restarts it, it fails again, and the worker gets
+"unavailable" -- documents wait, nothing is parsed unsandboxed, and the
+`parse_service_unavailable` alert fires. **Stop and report (1.7); never
+switch isolation off to get it running.**
+
+### 8.4 When the founder gets a `parse_service_unavailable` alert
+
+At most once an hour for the whole platform. The payload's `reason`:
+- `no_connection` / `http_503`: the service is down,
+  overloaded, or its canary is failing. Check the app's machines and its
+  startup log (8.3). Documents wait and retry by themselves; nothing is
+  failed for waiting.
+- `unauthorized`: the worker's and the service's `PARSE_SERVICE_TOKEN`
+  differ. Set the same value on both apps.
+- `http_4xx`: a request the service refused (a DocFlow bug, never the
+  file's fault). Report it.
+
+A **DOC-022** alert whose detail has `last_lost_reason` (`http_502`,
+`http_504`, or a read error such as `ReadTimeout`) means the parse requests
+got in and never came out: a 502/504 is Fly's proxy (the machine died or
+didn't start), not a parser crash, which arrives as a `crashed` answer and
+DOC-005.
+
+**A `parse_seccomp_kill` alert** (founder, 2026-10-01: every one, never
+rate-limited) means a parse job was killed by the seccomp filter (SIGSYS).
+The filter kills only a system call from a foreign architecture (x32 or
+32-bit), which no parser makes by accident: treat the file as an attack.
+The alert has no syscall number (the kill reports none; only the kernel's
+audit log on the parse machine has it, in `fly logs` if the kernel printed
+it). The document failed with DOC-005 (an import with IMP-004); nothing
+else needs doing in DocFlow. Keep the file's hash from the alert's
+document for any follow-up.
+
+### 8.5 Upgrading a parser (an ongoing duty, CLAUDE.md 7.11)
+
+Every library in the image reads files strangers send. When a CVE lands in
+one (pdfplumber, python-docx, openpyxl, Pillow, pillow-heif, olefile, xlrd,
+defusedxml, LibreOffice, libseccomp, or the base image):
+1. Move the pin: `apps/parse/requirements.lock.txt` for a Python package;
+   `DEBIAN_SNAPSHOT` in `apps/parse/Dockerfile` for LibreOffice, libseccomp
+   or any other Debian package (a snapshot.debian.org date, e.g.
+   `20261008T000000Z`: every Debian package in the image comes from the
+   archive as it was then); the digest for the base image.
+2. CI must pass in full: the unit tests, D2 parity (every fixture's text
+   must stay the same), and the self-tests in the real sandbox.
+3. Then 8.1: deploy to Fly staging, check the canary log, run all the
+   self-tests there.
+4. Only then merge (the weekly job's PR included), and deploy to
+   production.
+
+**The weekly Debian move (D-183).** Every Monday at 06:00 UTC
+`.github/workflows/debian-snapshot.yml` runs the whole CI workflow with the
+image built from that day's snapshot. Green: it pushes
+`deps/debian-snapshot-<date>` with the new date, and the run's summary page
+has the PR link. Open the PR, let its own CI run pass, merge, then 8.1.
+Red: nothing is pushed and GitHub emails the failure; read the run's
+annotations (D2 parity and the self-tests name what changed) and treat it
+as step 2 failing. Run it by hand any time from the Actions tab ("Run
+workflow"), for example the day a LibreOffice CVE is announced, rather than
+waiting for Monday.
+
+A build never changes by itself: until the date moves, a rebuild installs
+exactly what the last one did. If snapshot.debian.org is down, the build
+fails; it never falls back to the live archive.

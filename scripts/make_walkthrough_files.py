@@ -21,14 +21,15 @@ through the real web page and watch what happens.
   onboarding/  a small fictional customer list for onboarding Step 5.
 
 Everything is built by the same builders the tests use
-(apps/worker/tests/fixture_builders.py, scripts/po_formats.py). All content is
+(apps/parse/tests/fixture_builders.py, scripts/po_formats.py). All content is
 fictional: the golden fixture's "Acme's Test Coffee House" (CLAUDE.md Section 0
 rule 4).
 
-Run with the WORKER's venv (it has LibreOffice access for .doc, pillow_heif
-for .heic, xlwt for .xls), from the repo root:
+Run with the PARSE SERVICE's venv (since Stage 3c the only one with the file
+libraries: LibreOffice access for .doc, pillow_heif for .heic, xlwt for .xls),
+from the repo root:
 
-    apps/worker/.venv/Scripts/python.exe scripts/make_walkthrough_files.py [out-dir]
+    apps/parse/.venv/Scripts/python.exe scripts/make_walkthrough_files.py [out-dir]
 
 The default out-dir is ../walkthrough-files, beside catalog-samples, outside
 the repository, because hostile/too-big.pdf is 26 MB.
@@ -44,8 +45,8 @@ from io import BytesIO
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "apps" / "worker"))
-sys.path.insert(0, str(REPO_ROOT / "apps" / "worker" / "tests"))
+sys.path.insert(0, str(REPO_ROOT / "apps" / "parse"))
+sys.path.insert(0, str(REPO_ROOT / "apps" / "parse" / "tests"))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import fixture_builders as fb
@@ -120,7 +121,7 @@ def _csv(text: str) -> bytes:
 
 
 def good_files() -> list[tuple[str, bytes]]:
-    from app import conversion
+    from parse_service.parsing import conversion
 
     makers = [
         ("pdf (text)", "po-text.pdf", lambda t, p: fb.build_pdf([t])),

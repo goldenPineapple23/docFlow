@@ -1,0 +1,5 @@
+SKU	Description	UOM	Price
+CF-1001	Colombian Whole Bean 5lb	CS	47.5
+CF-2210	Ethiopian Yirgacheffe 5lb	CS	62
+SY-0045	Vanilla Syrup 750ml	EA	8.25
+CUP-12	12oz Paper Cups (1000ct)	BOX	54

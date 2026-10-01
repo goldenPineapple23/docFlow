@@ -1,0 +1,38 @@
+== fly deploy (--ha=false --remote-only), from 28ca444 3c: API staging suite full re-run recorded (579 passed, 1 skipped)
+#15 pushing manifest for registry.fly.io/docflow-parse-staging:deployment-01M3WJEM7HHKYS19Y3KH4E7AZP@sha256:acc99434e849b2c0da55dfda9c33176310c1d380b7101c9d4aef326891706ec1 0.1s done
+image: registry.fly.io/docflow-parse-staging:deployment-01M3WJEM7HHKYS19Y3KH4E7AZP
+> Machine 863662ce743978 reached stopped state
+✔ Machine 863662ce743978 is now in a good state
+deploy exit=0
+
+== fly machine start; boot log, fly ips list (N1), machine image
+2026-10-01T20:28:48Z runner[863662ce743978] iad [info]Pulling container image registry.fly.io/docflow-parse-staging@sha256:acc99434e849b2c0da55dfda9c33176310c1d380b7101c9d4aef326891706ec1
+2026-10-01T20:30:02Z app[863662ce743978] iad [info] INFO Preparing to run: `/opt/parse/venv/bin/python -m parse_service.server` as root
+2026-10-01T20:30:02Z app[863662ce743978] iad [info] INFO [fly api proxy] listening at /.fly/api
+2026-10-01T20:30:02Z app[863662ce743978] iad [info]2026/10/01 20:30:02 INFO SSH listening listen_address=[fdaa:cb:76d5:a7b:579:9ce4:c6c8:2]:22
+2026-10-01T20:30:02Z runner[863662ce743978] iad [info]Machine started in 870ms
+2026-10-01T20:30:02Z app[863662ce743978] iad [info]canary: cgroup v1
+2026-10-01T20:30:02Z app[863662ce743978] iad [info]RESULT canary:network PASS -- {"tcp": {"internet-ipv4": "blocked: ENETUNREACH", "internet-ipv6": "blocked: EADDRNOTAVAIL", "fly-dns": "blocked: EADDRNOTAVAIL", "fly-machines-api": "blocked: EADDRNOTAVAIL"}, "dns": {"example.com": "blocked: gaierror"}, "interfaces": ["lo(down)"]}
+2026-10-01T20:30:02Z app[863662ce743978] iad [info]RESULT canary:view PASS -- {"uid": 10001, "CapEff": "0000000000000000", "NoNewPrivs": "1", "Seccomp": "2", "fly_dir": [], "sys_dir": [], "writes": {"/": "EROFS", "/usr": "EROFS", "/etc": "EROFS", "/tmp": "writable", "/var/tmp": "writable", "/opt": "EROFS", "/work": "writable", "/lohome": "writable"}}
+2026-10-01T20:30:02Z health[863662ce743978] iad [error]Health check 'servicecheck-00-http-8100' on port 8100 has failed. Your app is not responding properly. Services exposed on ports [80, 443] will have intermittent failures until the health check passes.
+2026-10-01T20:30:02Z app[863662ce743978] iad [info]RESULT canary:seccomp PASS -- {"unshare(NEWUSER)": "EPERM", "mount": "EPERM", "keyctl": "EPERM", "io_uring_setup": "EPERM", "userfaultfd": "EPERM"}
+2026-10-01T20:30:02Z app[863662ce743978] iad [info][    1.508061] Memory cgroup out of memory: Killed process 702 (python) total-vm:145524kB, anon-rss:52480kB, file-rss:5848kB, shmem-rss:0kB, UID:10001 pgtables:172kB oom_score_adj:0
+2026-10-01T20:30:02Z app[863662ce743978] iad [info]RESULT canary:memory-cap-kills PASS -- {"outcome": "stopped", "cause": "memory", "swap": {"memory": "67108864", "memory_swap": "67108864", "machine_has_active_swap": false}, "cgroup_version": 1}
+2026-10-01T20:30:04Z app[863662ce743978] iad [info]RESULT canary:cpu-quota-set-and-budget-kills PASS -- {"outcome": "stopped", "cause": "cpu", "quota": "100000 100000"}
+2026-10-01T20:30:04Z app[863662ce743978] iad [info]canary: PASS
+2026-10-01T20:30:04Z app[863662ce743978] iad [info]parse service listening on port 8100
+2026-10-01T20:30:04Z app[863662ce743978] iad [info]2026-10-01 20:30:04,537 INFO parse_service http "GET /health HTTP/1.1" 200 -
+2026-10-01T20:30:04Z health[863662ce743978] iad [info]Health check 'servicecheck-00-http-8100' on port 8100 is now passing.
+== fly ips list
+ VERSION │ IP                  │ TYPE            │ REGION │ NETWORK │ CREATED AT 
+ v6      │ fdaa:cb:76d5:0:1::3 │ private ingress │ global │ default │ 45m5s ago  
+
+== machine image
+State: started
+ State         │ started                                                     
+ Image         │ docflow-parse-staging:deployment-01M3WJEM7HHKYS19Y3KH4E7AZP 
+
+Connecting to fdaa:cb:76d5:a7b:579:9ce4:c6c8:2...
+== 20:30:53Z the live server and any zombie:
+  PID  PPID STAT USER         ELAPSED COMMAND
+  643     1 Sl   root           00:51 /opt/parse/venv/bin/python -m parse_service.server

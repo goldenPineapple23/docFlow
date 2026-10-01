@@ -342,10 +342,14 @@ def dashboard(*, platform_admin_user_id: UUID, days: int = 30) -> dict[str, Any]
                         (SELECT count(*) FROM documents
                           WHERE status = 'needs_review' AND deleted_at IS NULL
                             AND NOT is_test_batch) AS needs_review,
-                        (SELECT count(*) FROM extraction_runs
-                          WHERE created_at >= now() - interval '1 hour') AS model_calls_hour,
+                        -- Outcome rows only: since 0034 a call is a
+                        -- started row and an outcome row (D-163).
                         (SELECT count(*) FROM extraction_runs
                           WHERE created_at >= now() - interval '1 hour'
+                            AND run_state = 'finished') AS model_calls_hour,
+                        (SELECT count(*) FROM extraction_runs
+                          WHERE created_at >= now() - interval '1 hour'
+                            AND run_state = 'finished'
                             AND NOT succeeded) AS model_failures_hour,
                         -- Exports the stuck sweep gave up on today (EXP-009,
                         -- Stage 3a): they carry no alert of their own.

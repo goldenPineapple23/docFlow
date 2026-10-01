@@ -3,9 +3,8 @@ Reading an uploaded catalog or customer list (CLAUDE.md Section 7.15.2
 Steps 4-5; DECISIONS.md D-108).
 
 A thin wrapper: the work is `docflow_core.catalog_import.run_parse`, so the
-tests that prove it do not need a queue. It runs here because it opens the
-file (`docflow_core.catalog_parsing`), and only the isolated worker ever does
-that (Section 7.11).
+tests that prove it do not need a queue. Since Stage 3c the file itself is
+opened only by the parse service, in a sandboxed job (Section 7.11).
 """
 
 from __future__ import annotations

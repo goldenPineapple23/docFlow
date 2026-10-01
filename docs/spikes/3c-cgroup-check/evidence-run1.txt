@@ -1,0 +1,126 @@
+fly.exe : Connecting to fdaa:cb:76d5:a7b:897:fcd5:fb36:2...
+At line:1 char:397
++ ... oup-ekqxmh; & $fly ssh console --app docflow-spike-cgroup-ekqxmh -C " ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Connecting to f...:fcd5:fb36:2...:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+### 0. The machine
+RESULT arch: INFO -- x86_64
+RESULT kernel: INFO -- 6.12.105-fly
+RESULT pid1: INFO -- init
+/fly/init
+RESULT memtotal: INFO -- MemTotal:         985220 kB
+RESULT swap: INFO -- Filename				Type		Size		Used		Priority
+RESULT cgroup-filesystems: INFO -- nodev	cgroup
+nodev	cgroup2
+RESULT cgroup-mounts: INFO -- tmpfs /sys/fs/cgroup tmpfs rw,nosuid,nodev,noexec,relatime,mode=755 0 0
+cgroup2 /sys/fs/cgroup/unified cgroup2 rw,nosuid,nodev,noexec,relatime,nsdelegate 0 0
+cgroup /sys/fs/cgroup/net_cls,net_prio cgroup rw,nosuid,nodev,noexec,relatime,net_cls,net_prio 0 0
+cgroup /sys/fs/cgroup/hugetlb cgroup rw,nosuid,nodev,noexec,relatime,hugetlb 0 0
+cgroup /sys/fs/cgroup/pids cgroup rw,nosuid,nodev,noexec,relatime,pids 0 0
+cgroup /sys/fs/cgroup/freezer cgroup rw,nosuid,nodev,noexec,relatime,freezer 0 0
+cgroup /sys/fs/cgroup/cpu,cpuacct cgroup rw,nosuid,nodev,noexec,relatime,cpu,cpuacct 0 0
+cgroup /sys/fs/cgroup/devices cgroup rw,nosuid,nodev,noexec,relatime,devices 0 0
+cgroup /sys/fs/cgroup/blkio cgroup rw,nosuid,nodev,noexec,relatime,blkio 0 0
+cgroup /sys/fs/cgroup/memory cgroup rw,nosuid,nodev,noexec,relatime,memory 0 0
+cgroup /sys/fs/cgroup/perf_event cgroup rw,nosuid,nodev,noexec,relatime,perf_event 0 0
+cgroup /sys/fs/cgroup/cpuset cgroup rw,nosuid,nodev,noexec,relatime,cpuset 0 0
+RESULT own-cgroup: INFO -- 10:cpuset:/
+9:perf_event:/
+8:memory:/
+7:blkio:/
+6:devices:/
+5:cpu,cpuacct:/
+4:freezer:/
+3:pids:/
+2:hugetlb:/
+1:net_cls,net_prio:/
+0::/
+RESULT seccomp-status: INFO -- NoNewPrivs:	0
+Seccomp:	0
+Seccomp_filters:	0
+RESULT user-namespaces: INFO -- 3716
+RESULT block-devices-in-/dev: INFO -- brw------- 1 root root   7,   0 Oct  1 00:10 loop0
+brw------- 1 root root   7,   1 Oct  1 00:10 loop1
+brw------- 1 root root   7,   2 Oct  1 00:10 loop2
+brw------- 1 root root   7,   3 Oct  1 00:10 loop3
+brw------- 1 root root   7,   4 Oct  1 00:10 loop4
+brw------- 1 root root   7,   5 Oct  1 00:10 loop5
+brw------- 1 root root   7,   6 Oct  1 00:10 loop6
+brw------- 1 root root   7,   7 Oct  1 00:10 loop7
+brw------- 1 root root  43,   0 Oct  1 00:10 nbd0
+brw------- 1 root root  43,  32 Oct  1 00:10 nbd1
+brw------- 1 root root  43, 320 Oct  1 00:10 nbd10
+brw------- 1 root root  43, 352 Oct  1 00:10 nbd11
+brw------- 1 root root  43, 384 Oct  1 00:10 nbd12
+brw------- 1 root root  43, 416 Oct  1 00:10 nbd13
+brw------- 1 root root  43, 448 Oct  1 00:10 nbd14
+brw------- 1 root root  43, 480 Oct  1 00:10 nbd15
+brw------- 1 root root  43,  64 Oct  1 00:10 nbd2
+brw------- 1 root root  43,  96 Oct  1 00:10 nbd3
+brw------- 1 root root  43, 128 Oct  1 00:10 nbd4
+brw------- 1 root root  43, 160 Oct  1 00:10 nbd5
+brw------- 1 root root  43, 192 Oct  1 00:10 nbd6
+brw------- 1 root root  43, 224 Oct  1 00:10 nbd7
+brw------- 1 root root  43, 256 Oct  1 00:10 nbd8
+brw------- 1 root root  43, 288 Oct  1 00:10 nbd9
+brw------- 1 root root 254,   0 Oct  1 00:10 vda
+brw------- 1 root root 254,  16 Oct  1 00:10 vdb
+brw------- 1 root root 254,  32 Oct  1 00:10 vdc
+
+### 1. cgroup v2: create, limit, and does it bound the whole job?
+RESULT 1a cgroup2-mounted-at-/sys/fs/cgroup: FAIL -- fstype=tmpfs
+RESULT 1a' cgroup2-mountable-by-root: PASS -- mount at /mnt/cg: cgroup2fs
+RESULT 1b memory-controller-available: FAIL -- cgroup.controllers=''
+RESULT 1c enable-memory-for-children-at-root: FAIL -- memory error=FileNotFoundError errno=2 (ENOENT) pids error=FileNotFoundError errno=2 (ENOENT) subtree_control=''
+RESULT 1d delegate-memory-to-a-job-level: FAIL -- memory error=FileNotFoundError errno=2 (ENOENT) pids error=FileNotFoundError errno=2 (ENOENT) parent subtree_control=''
+RESULT 1f control: 400MiB with no limit survives: PASS -- rc=0 out='ALLOC_OK'
+RESULT 1e create-job-cgroup job1: FAIL -- memory.max=<FileNotFoundError: No such file or directory> (err PermissionError errno=13 (EACCES)); swap.max err no file; pids.max=<FileNotFoundError: No such file or directory> (err PermissionError errno=13 (EACCES)); oom.group err no file; memory.peak exists=False
+RESULT 1g one process over the cgroup limit is OOM-killed: FAIL -- rc=0 out='ALLOC_OK' oom_kill -1->-1 memory.peak=<FileNotFoundError: No such file or directory>
+RESULT 1h rlimit only: 4 x 120MiB each under RLIMIT_AS=256MiB -- all survive (the cap multiplies): PASS -- rc=0 out='ALLOC_OK\nFAMILY_SURVIVORS=4/4'
+RESULT 1e create-job-cgroup job2: FAIL -- memory.max=<FileNotFoundError: No such file or directory> (err PermissionError errno=13 (EACCES)); swap.max err no file; pids.max=<FileNotFoundError: No such file or directory> (err PermissionError errno=13 (EACCES)); oom.group err no file; memory.peak exists=False
+RESULT 1i cgroup: the same family in a 256MiB job is stopped (the cap holds for the whole job): FAIL -- rc=0 out='ALLOC_OK\nFAMILY_SURVIVORS=4/4' oom_kill -1->-1 procs left in job='' (memory.oom.group=1 should leave none)
+RESULT 1e create-job-cgroup ctrl: FAIL -- memory.max=<FileNotFoundError: No such file or directory> (err PermissionError errno=13 (EACCES)); swap.max err no file; pids.max=<FileNotFoundError: No such file or directory> (err PermissionError errno=13 (EACCES)); oom.group err no file; memory.peak exists=False
+RESULT 1j control: sandboxed 400MiB in an unlimited job cgroup survives: PASS -- rc=0 out='ALLOC_OK' err=''
+RESULT 1e create-job-cgroup job3: FAIL -- memory.max=<FileNotFoundError: No such file or directory> (err PermissionError errno=13 (EACCES)); swap.max err no file; pids.max=<FileNotFoundError: No such file or directory> (err PermissionError errno=13 (EACCES)); oom.group err no file; memory.peak exists=False
+RESULT 1k sandboxed (namespaces + uid 10001 + no caps) 400MiB in a 256MiB job is killed: FAIL -- rc=0 out='ALLOC_OK' oom_kill -1->-1
+RESULT 1e create-job-cgroup job4: FAIL -- memory.max=<FileNotFoundError: No such file or directory> (err PermissionError errno=13 (EACCES)); swap.max err no file; pids.max=<FileNotFoundError: No such file or directory> (err PermissionError errno=13 (EACCES)); oom.group err no file; memory.peak exists=False
+RESULT 1l the sandboxed job can't raise its limit or move out (/sys still visible): PASS -- RAISE_LIMIT EACCES | LEAVE_CGROUP EACCES | ROOT_CGROUP EACCES memory.max now=<FileNotFoundError: No such file or directory>
+RESULT 1m with /sys hidden by tmpfs (the design), the cgroup files aren't even there: FAIL -- RAISE_LIMIT EACCES | LEAVE_CGROUP EACCES | ROOT_CGROUP EACCES err=''
+RESULT 1n control: root (the supervisor) can change the job's limit: FAIL -- error=PermissionError errno=13 (EACCES) memory.max=<FileNotFoundError: No such file or directory>
+RESULT 1o empty job cgroups are removable: PASS -- job1,job2,ctrl,job3,job4
+
+### 2. seccomp
+RESULT 2a control (root, no filter): what each call does without the filter: INFO -- seccomp mode=0 {'unshare(NEWNET)': 'ok(0)', 'unshare(NEWUSER)': 'ok(0)', 'setns(own uts)': 'EPERM', 'mount(tmpfs)': 'EPERM', 'umount2(/nonexistent)': 'ENOENT', 'ptrace(ATTACH, no such pid)': 'ESRCH', 'bpf(0,NULL,0)': 'EINVAL', 'keyctl(GET_KEYRING_ID)': 'ok(723744304)', 'perf_event_open(NULL)': 'EFAULT', 'init_module(NULL)': 'EPERM', 'finit_module(-1)': 'EPERM', 'delete_module(nonexistent)': 'EPERM', 'kexec_load(bad arch)': 'ENOSYS', 'kexec_file_load(-1)': 'EPERM', 'clone3(NULL)': 'EINVAL', 'clone(NEWNET)': 'ok(child)', 'normal thread': 'thread-ran', 'normal fork': 'fork-ran'} 
+RESULT 2b root with the filter: every listed call answered by the filter: PASS -- seccomp mode=2 {'unshare(NEWNET)': 'SENTINEL', 'unshare(NEWUSER)': 'SENTINEL', 'setns(own uts)': 'SENTINEL', 'mount(tmpfs)': 'SENTINEL', 'umount2(/nonexistent)': 'SENTINEL', 'ptrace(ATTACH, no such pid)': 'SENTINEL', 'bpf(0,NULL,0)': 'SENTINEL', 'keyctl(GET_KEYRING_ID)': 'SENTINEL', 'perf_event_open(NULL)': 'SENTINEL', 'init_module(NULL)': 'SENTINEL', 'finit_module(-1)': 'SENTINEL', 'delete_module(nonexistent)': 'SENTINEL', 'kexec_load(bad arch)': 'SENTINEL', 'kexec_file_load(-1)': 'SENTINEL', 'clone3(NULL)': 'ENOSYS', 'clone(NEWNET)': 'SENTINEL', 'normal thread': 'thread-ran', 'normal fork': 'fork-ran'} 
+RESULT 2c clone3 refused with ENOSYS; a normal thread and fork still work: PASS -- clone3=ENOSYS thread=thread-ran fork=fork-ran
+RESULT 2d control (uid 10001, no caps, no filter): what the job could do without seccomp: INFO -- seccomp mode=0 {'unshare(NEWNET)': 'EPERM', 'unshare(NEWUSER)': 'ok(0)', 'setns(own uts)': 'EPERM', 'mount(tmpfs)': 'EPERM', 'umount2(/nonexistent)': 'ENOENT', 'ptrace(ATTACH, no such pid)': 'ESRCH', 'bpf(0,NULL,0)': 'EINVAL', 'keyctl(GET_KEYRING_ID)': 'ok(897320371)', 'perf_event_open(NULL)': 'EFAULT', 'init_module(NULL)': 'EPERM', 'finit_module(-1)': 'EPERM', 'delete_module(nonexistent)': 'EPERM', 'kexec_load(bad arch)': 'ENOSYS', 'kexec_file_load(-1)': 'EPERM', 'clone3(NULL)': 'EINVAL', 'clone(NEWNET)': 'ok(child)', 'normal thread': 'thread-ran', 'normal fork': 'fork-ran'} 
+RESULT 2e uid 10001 loads the filter under no_new_privs: every listed call answered by it: PASS -- seccomp mode=2 {'unshare(NEWNET)': 'SENTINEL', 'unshare(NEWUSER)': 'SENTINEL', 'setns(own uts)': 'SENTINEL', 'mount(tmpfs)': 'SENTINEL', 'umount2(/nonexistent)': 'SENTINEL', 'ptrace(ATTACH, no such pid)': 'SENTINEL', 'bpf(0,NULL,0)': 'SENTINEL', 'keyctl(GET_KEYRING_ID)': 'SENTINEL', 'perf_event_open(NULL)': 'SENTINEL', 'init_module(NULL)': 'SENTINEL', 'finit_module(-1)': 'SENTINEL', 'delete_module(nonexistent)': 'SENTINEL', 'kexec_load(bad arch)': 'SENTINEL', 'kexec_file_load(-1)': 'SENTINEL', 'clone3(NULL)': 'ENOSYS', 'clone(NEWNET)': 'SENTINEL', 'normal thread': 'thread-ran', 'normal fork': 'fork-ran'} 
+
+### Summary
+FAIL  1a cgroup2-mounted-at-/sys/fs/cgroup
+PASS  1a' cgroup2-mountable-by-root
+FAIL  1b memory-controller-available
+FAIL  1c enable-memory-for-children-at-root
+FAIL  1d delegate-memory-to-a-job-level
+PASS  1f control: 400MiB with no limit survives
+FAIL  1e create-job-cgroup job1
+FAIL  1g one process over the cgroup limit is OOM-killed
+PASS  1h rlimit only: 4 x 120MiB each under RLIMIT_AS=256MiB -- all survive (the cap multiplies)
+FAIL  1e create-job-cgroup job2
+FAIL  1i cgroup: the same family in a 256MiB job is stopped (the cap holds for the whole job)
+FAIL  1e create-job-cgroup ctrl
+PASS  1j control: sandboxed 400MiB in an unlimited job cgroup survives
+FAIL  1e create-job-cgroup job3
+FAIL  1k sandboxed (namespaces + uid 10001 + no caps) 400MiB in a 256MiB job is killed
+FAIL  1e create-job-cgroup job4
+PASS  1l the sandboxed job can't raise its limit or move out (/sys still visible)
+FAIL  1m with /sys hidden by tmpfs (the design), the cgroup files aren't even there
+FAIL  1n control: root (the supervisor) can change the job's limit
+PASS  1o empty job cgroups are removable
+PASS  2b root with the filter: every listed call answered by the filter
+PASS  2c clone3 refused with ENOSYS; a normal thread and fork still work
+PASS  2e uid 10001 loads the filter under no_new_privs: every listed call answered by it
+Error: ssh shell: Process exited with status 1

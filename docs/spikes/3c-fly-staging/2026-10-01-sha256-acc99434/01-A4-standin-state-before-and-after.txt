@@ -1,0 +1,22 @@
+== run 2 setup (2026-10-01T20:27:44Z)
+New app created: docflow-3c-probe
+ Machine ID: 28744540b15958
+  fdaa:cb:76d5:a7b:24b:9696:5573:2
+
+== stand-in before the self-tests (20:31:09Z)
+State: started
+ Created       │ 2026-10-01T20:27:46Z                                                                                                                                                                                                                                                                                                           
+ Updated       │ 2026-10-01T20:28:06Z                                                                                                                                                                                                                                                                                                           
+2026-10-01T20:28:06Z app[28744540b15958] iad [info] INFO Starting init (commit: 8b221cb)...
+2026-10-01T20:28:06Z app[28744540b15958] iad [info]print("standin listening [::]:9000",flush=True)
+2026-10-01T20:28:06Z app[28744540b15958] iad [info]    print("standin connection from",a[0],flush=True)
+2026-10-01T20:28:06Z app[28744540b15958] iad [info]standin listening [::]:9000
+== stand-in after the self-tests (20:32:37Z)
+State: started
+ Created       │ 2026-10-01T20:27:46Z                                                                                                                                                                                                                                                                                                           
+ Updated       │ 2026-10-01T20:28:06Z                                                                                                                                                                                                                                                                                                           
+2026-10-01T20:28:06Z app[28744540b15958] iad [info] INFO Starting init (commit: 8b221cb)...
+2026-10-01T20:28:06Z app[28744540b15958] iad [info]print("standin listening [::]:9000",flush=True)
+2026-10-01T20:28:06Z app[28744540b15958] iad [info]    print("standin connection from",a[0],flush=True)
+2026-10-01T20:28:06Z app[28744540b15958] iad [info]standin listening [::]:9000
+2026-10-01T20:31:18Z app[28744540b15958] iad [info]standin connection from fdaa:cb:76d5:a7b:579:9ce4:c6c8:2

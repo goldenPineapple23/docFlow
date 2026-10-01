@@ -1,0 +1,28 @@
+== N2 from outside Fly (2026-10-01T20:33:04Z); this machine: a residential address outside Fly (redacted)
+-- DNS over HTTPS, control first
+fly.io A via https://cloudflare-dns.com/dns-query: Status 0 answers ['37.16.18.81']
+fly.io A via https://dns.google/resolve: Status 0 answers ['37.16.18.81']
+fly.io AAAA via https://cloudflare-dns.com/dns-query: Status 0 answers ['2a09:8280:1::a:791']
+fly.io AAAA via https://dns.google/resolve: Status 0 answers ['2a09:8280:1::a:791']
+docflow-parse-staging.fly.dev A via https://cloudflare-dns.com/dns-query: Status 0 answers []
+docflow-parse-staging.fly.dev A via https://dns.google/resolve: Status 0 answers []
+docflow-parse-staging.fly.dev AAAA via https://cloudflare-dns.com/dns-query: Status 0 answers []
+docflow-parse-staging.fly.dev AAAA via https://dns.google/resolve: Status 0 answers []
+-- curl https://docflow-parse-staging.fly.dev/health
+curl: (6) Could not resolve host: docflow-parse-staging.fly.dev
+http_code=000
+-- curl http://docflow-parse-staging.fly.dev/health
+curl: (6) Could not resolve host: docflow-parse-staging.fly.dev
+http_code=000
+-- the private ingress and the machine's private address, directly
+curl: (7) Failed to connect to fdaa:cb:76d5:0:1::3:80 after 0 ms: Could not connect to server
+http_code=000
+curl: (7) Failed to connect to fdaa:cb:76d5:a7b:579:9ce4:c6c8:2:8100 after 0 ms: Could not connect to server
+http_code=000
+-- Fly's public edge with the name forced (37.16.18.81 serves fly.io)
+curl: (35) schannel: failed to receive handshake, SSL/TLS connection failed
+https http_code=000
+http Host docflow-parse-staging.fly.dev: 301 -> https://docflow-parse-staging.fly.dev/health
+http Host no-such-app-3c-probe-7f2a.fly.dev (control): 301 -> https://no-such-app-3c-probe-7f2a.fly.dev/health
+-- parse app requests other than the keep-awake /health polls since the self-tests:
+(end)

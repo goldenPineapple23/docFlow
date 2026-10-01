@@ -1,0 +1,7 @@
+# The build context is the repository root; the image needs only these.
+*
+!packages/core/pyproject.toml
+!packages/core/docflow_core
+!apps/worker/requirements.lock.txt
+!apps/worker/app
+**/__pycache__

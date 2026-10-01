@@ -1,0 +1,23 @@
+# The worker on Fly staging (Stage 3c; BUILD-STATUS "3c detailed design",
+# item 12). No services, no IP: it only pulls work from the staging Upstash
+# queue and calls the parse service over Flycast. Stopped between test
+# sessions (founder's Q6, option B): `fly scale count 0` / `1`.
+#
+# Deploy from the repository root:
+#
+#     fly deploy --config apps/worker/fly.toml --dockerfile apps/worker/Dockerfile \
+#         --ignorefile apps/worker/Dockerfile.dockerignore --no-public-ips .
+#
+# Secrets (set by the founder): PARSE_SERVICE_TOKEN, DATABASE_URL, REDIS_URL,
+# STORAGE_S3_*, ANTHROPIC_API_KEY and the rest listed in BUILD-STATUS item 12.
+
+app = "docflow-worker-staging"
+primary_region = "iad"
+
+[env]
+  DOCFLOW_ENV = "staging"
+  PARSE_SERVICE_URL = "http://docflow-parse-staging.flycast"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

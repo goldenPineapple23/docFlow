@@ -179,6 +179,35 @@ def test_the_xlsx_carries_no_timestamp_from_when_it_was_made():
     assert b"2000-01-01T00:00:00Z" in core
 
 
+def test_the_xlsx_read_back_gets_only_the_bytes_just_rendered(monkeypatch):
+    """parse_xlsx is the one openpyxl workbook read the XML guard allows
+    (apps/worker/tests/test_parsing_boundary.py, founder Q11). At runtime:
+    build_export hands it the very bytes render() just returned in this
+    process, and it refuses anything that isn't bytes, such as a path."""
+    rendered: list[bytes] = []
+    handed: list[object] = []
+    real_render, real_parse = exports.render, exports.PARSERS["xlsx"]
+
+    def recording_render(*args, **kwargs):
+        rendered.append(real_render(*args, **kwargs))
+        return rendered[-1]
+
+    def recording_parse(content):
+        handed.append(content)
+        return real_parse(content)
+
+    monkeypatch.setattr(exports, "render", recording_render)
+    monkeypatch.setitem(exports.PARSERS, "xlsx", recording_parse)
+    build_export(_snapshot(), SNAPSHOT_HASH, "xlsx")
+
+    assert len(handed) == 1 and len(rendered) == 2  # rendered twice (determinism), read once
+    assert handed[0] is rendered[0]
+    assert isinstance(handed[0], bytes)
+
+    with pytest.raises(TypeError):
+        real_parse("/etc/passwd")
+
+
 # ── Structure the formats promise ───────────────────────────────────────────
 
 
