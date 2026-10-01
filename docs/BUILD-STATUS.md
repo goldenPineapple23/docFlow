@@ -2063,8 +2063,31 @@ changed, built in the next commit:**
   snapshot job now moves all three dates. All three images built on Fly's
   remote builder (build only).
 - Waiting on the founder: the secrets (`Desktop/3c-fly-secrets.txt`, the
-  design's list), and whether the API also gets `DOCUMENT_URL_SIGNING_SECRET`
-  (it reads it for signed links; not on the design's list, so asked first).
+  design's list). **`DOCUMENT_URL_SIGNING_SECRET`** (API only; not on the
+  design's list, so asked first): **Fly staging gets its own newly generated
+  value** (`secrets.token_urlsafe(48)`), not the root .env's or Supabase
+  staging's, and production another, so a link signed in one environment
+  never works in another; the founder generates and sets it and never
+  pastes it (founder, 2026-10-01).
+- **Database logins (founder, 2026-10-01): the worker and the API on Fly
+  each get their own login from F-1, never `docflow_app` shared, never
+  `postgres` or the service role.** F-1 (3e: `docflow_worker`,
+  `docflow_api`) isn't built, so those logins don't exist on staging; the
+  local `.env` connects as `docflow_app` (NOBYPASSRLS, no CREATE) through
+  Supabase's transaction pooler. So for now only the parse app gets its
+  secret (`PARSE_SERVICE_TOKEN`), which is all the RUNBOOK 8.1 merge gate
+  needs; the worker and the API (the N2, N3 and G rows) wait for their
+  logins. **Founder's call:** move N2, N3 and G to after 3e, or build F-1
+  before 3c merges.
+- Secrets are typed in a PowerShell window with history saving off
+  (`Set-PSReadLineOption -HistorySaveStyle SaveNothing`; RUNBOOK 8.1).
+- **Core on staging: `701 passed, 1 skipped`** -- the skip is
+  `test_a_customers_own_signed_in_token_reaches_no_file`
+  (`test_storage_bucket_live.py`): it mints a token with the project's JWT
+  secret, which is blank on this machine (D-174); CI sets a throwaway one,
+  so it runs there. **Worker on staging: `130 passed, 3 skipped`** -- the two
+  prefork tests (Linux only) and F5 (needs CI's container); all three run in
+  CI.
 
 **Tenth run (`0be5422`): GREEN.** core 700 tests, 0 failed; api 580, 0 failed; worker 132, 0 failed (F5 included); parse unit 122, 0 failed; parse HTTP 56, 0 failed (D1 parity on every fixture, `po.doc` included); web and web-live passed; dependency audits clean. Self-tests in the real sandbox: canary 5 of 5, A 13 of 13 PASS with A-net IPv6 NOT-RUN, S 5 of 5, B 17 of 17; E1, E3 and E4 as designed. Recorded in D-183. Next: the
 founder backs up and applies `0034` on staging (the PR text leads with it:

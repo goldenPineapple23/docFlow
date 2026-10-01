@@ -829,6 +829,15 @@ CI's runner has no IPv6, so A-net IPv6 is NOT-RUN in CI (D-183).
 - its `fly.toml`;
 - the worker's `parse_client`.
 
+**Setting secrets on Fly (founder, 2026-10-01):** start a new PowerShell
+window and run `Set-PSReadLineOption -HistorySaveStyle SaveNothing` before
+typing anything else. Values typed literally (a database URL, S3 keys, an
+API key) are otherwise saved in plain text in PowerShell's history file. It
+applies to that window only; close it when done. Never paste a value into
+chat. Each app gets only the secrets its process reads, and its own
+database login (F-1): never `docflow_app` shared between apps, never
+`postgres` or the service role.
+
 The procedure:
 1. Deploy the change to Fly staging first.
 2. Check the canary's startup log: every line PASS.
