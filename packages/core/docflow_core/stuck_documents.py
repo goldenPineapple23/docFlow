@@ -61,29 +61,42 @@ CAUSE_WORKER_STOPPED = "worker_stopped"
 
 
 def decide(
-    processing_attempts: int, timeout_attempts: list[int], *, max_attempts: int = MAX_PROCESSING_ATTEMPTS
+    processing_attempts: int,
+    timeout_attempts: list[int],
+    *,
+    max_attempts: int = MAX_PROCESSING_ATTEMPTS,
+    parse_lost_attempts: list[int] | tuple[int, ...] = (),
 ) -> tuple[str, str | None]:
     """
-    What to do with a document stuck in `processing`: ("retry", None) or
-    ("fail", cause). Agreed with the founder before building (Stage 3a):
+    What to do with a document stuck in `processing`, or whose parse request
+    was lost: ("retry", None) or ("fail", cause). One decision, used by the
+    sweep and by the worker, in this order (Stage 3c, item 6a; founder Q9,
+    2026-10-01):
 
-    | State                                          | Outcome              |
-    |------------------------------------------------|----------------------|
-    | its first timeout was on the latest attempt    | retry once           |
-    | a try has already run since its first timeout  | fail, cause timeout  |
-    | no timeout, max_attempts used                  | fail, worker_stopped |
-    | otherwise                                      | retry                |
+    | State                                                   | Outcome                     |
+    |---------------------------------------------------------|-----------------------------|
+    | max_attempts tries used                                 | fail: `timeout` if any try  |
+    |                                                         | was timeout-class, else     |
+    |                                                         | `worker_stopped`            |
+    | a timeout-class try, and a try has run since the first  | fail, cause timeout         |
+    | otherwise                                               | retry                       |
 
-    A timeout gets at most one retry: a file that hangs a parser will hang
-    it again. Pure, so the table is tested without a database.
+    A timeout-class try is one that hit the document task's hard time limit
+    (`timeout_attempts`, Stage 3a) or whose parse request got in and never
+    came out (`parse_lost_attempts`, Stage 3c): either way the file is the
+    suspect, and a file that hangs or kills a parser will do it again.
+
+    The guarantee, whatever the mix: at most `max_attempts` tries in all, and
+    at most one try after the first timeout-class try. Before 3c, a timeout's
+    one retry was allowed past the cap (crash, crash, timeout got a 4th try);
+    the founder reversed that (Q9). Pure, so the table is tested without a
+    database.
     """
-    if timeout_attempts:
-        first_timeout = min(timeout_attempts)
-        if processing_attempts > first_timeout:
-            return ("fail", CAUSE_TIMEOUT)
-        return ("retry", None)
+    timeout_class = set(timeout_attempts) | set(parse_lost_attempts)
     if processing_attempts >= max_attempts:
-        return ("fail", CAUSE_WORKER_STOPPED)
+        return ("fail", CAUSE_TIMEOUT if timeout_class else CAUSE_WORKER_STOPPED)
+    if timeout_class and processing_attempts > min(timeout_class):
+        return ("fail", CAUSE_TIMEOUT)
     return ("retry", None)
 
 
