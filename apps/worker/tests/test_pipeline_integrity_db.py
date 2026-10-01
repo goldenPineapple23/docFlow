@@ -34,7 +34,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from tests.app_clock import skew_app_clock
-from tests.conftest import requires_documents_schema
+from tests.conftest import requires_documents_schema, requires_stage3d_schema
 from tests.db_helpers import FakeAnthropic, WorkerTestTenant, model_payload, run_extraction
 
 CLEAN = model_payload(
@@ -48,8 +48,7 @@ def _document(document_id: UUID) -> dict:
     with platform_session() as session:
         row = session.execute(
             text(
-                "SELECT status, failure_code, pipeline_issues, processing_attempts, "
-                "current_extraction_run_id FROM documents WHERE id = :id"
+                "SELECT * FROM documents WHERE id = :id"
             ),
             {"id": str(document_id)},
         ).mappings().one()
@@ -333,24 +332,44 @@ def test_H3_a_document_left_processing_is_requeued_then_failed_with_a_code():
         assert _alerts(tenant, "document_stuck") == 1
 
 
+def _dispatched_long_ago(document_id: UUID) -> None:
+    """Sent to the queue two hours ago and never claimed: a lost job (3d)."""
+    with platform_session() as session:
+        session.execute(
+            text("UPDATE documents SET dispatched_at = now() - interval '2 hours' WHERE id = :id"),
+            {"id": str(document_id)},
+        )
+
+
 @requires_documents_schema
-def test_H3_a_document_waiting_in_pending_is_requeued_and_reported_never_failed():
+@requires_stage3d_schema
+def test_H3_a_waiting_document_is_left_to_the_dispatcher_and_a_lost_job_goes_back_to_waiting():
+    """Stage 3d (interplay points 1-2): the sweep never puts a `pending`
+    document on the queue -- that would bypass the dispatcher's turn-taking --
+    and a document merely waiting its turn, however long, never alerts. A
+    document dispatched and never claimed is a lost job: back to waiting
+    (the dispatcher re-sends it within the cap), with one warning a day."""
     with WorkerTestTenant("Acme Test Waiting") as tenant:
         waiting = tenant.create_pending_document()
-        fresh = tenant.create_pending_document()
+        lost = tenant.create_pending_document()
         _backdate(waiting, status="pending", attempts=0)
+        _backdate(lost, status="pending", attempts=0)
+        _dispatched_long_ago(lost)
 
         queued: list[UUID] = []
-        stuck_documents.sweep_tenant(tenant.tenant_id, lambda _t, d: queued.append(d))
-        stuck_documents.sweep_tenant(tenant.tenant_id, lambda _t, d: queued.append(d))
+        first = stuck_documents.sweep_tenant(tenant.tenant_id, lambda _t, d: queued.append(d))
+        second = stuck_documents.sweep_tenant(tenant.tenant_id, lambda _t, d: queued.append(d))
 
-        assert queued == [waiting, waiting]
-        assert fresh not in queued
-        assert _document(waiting)["status"] == "pending"
-        assert _alerts(tenant, "document_stuck") == 1  # one per tenant per day
+        assert queued == []
+        assert (first.lost_jobs, second.lost_jobs) == ([lost], [])
+        for document_id in (waiting, lost):
+            row = _document(document_id)
+            assert row["status"] == "pending" and row["dispatched_at"] is None
+        assert _alerts(tenant, "document_stuck") == 1  # the lost job, once a day
 
 
 @requires_documents_schema
+@requires_stage3d_schema
 @pytest.mark.parametrize(
     "skew", [timedelta(days=1), -timedelta(days=1)], ids=["app-clock-ahead", "app-clock-behind"]
 )
@@ -361,9 +380,10 @@ def test_the_once_a_day_alert_keys_take_the_databases_date(monkeypatch, skew):
     the INSERT; the app clock here is a whole day out, so the old way always
     disagrees with created_at."""
     with WorkerTestTenant("Acme Test Clock") as tenant:
-        waiting = tenant.create_pending_document()
+        lost = tenant.create_pending_document()
         give_up = tenant.create_pending_document()
-        _backdate(waiting, status="pending", attempts=0)  # stuck_documents' own daily alert
+        _backdate(lost, status="pending", attempts=0)
+        _dispatched_long_ago(lost)  # stuck_documents' own daily alert (a lost job)
         _backdate(give_up, status="processing", attempts=3)  # founder_alerts.raise_for_failure
 
         skew_app_clock(monkeypatch, stuck_documents, by=skew)

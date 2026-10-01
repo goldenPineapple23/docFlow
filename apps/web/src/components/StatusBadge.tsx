@@ -23,6 +23,9 @@ const STATUS: Record<string, { label: string; className: string }> = {
   rejected: { label: "Rejected", className: "bg-rose-100 text-rose-800" },
   failed: { label: "Couldn't be read", className: "bg-rose-100 text-rose-800" },
   quarantined: { label: "Held for review", className: "bg-violet-100 text-violet-800" },
+  // Stage 3d: not a database status. A `pending` order waiting on the model
+  // provider while it is down (DOC-023) -- a delay, never an error.
+  delayed: { label: "Delayed", className: "bg-amber-100 text-amber-800" },
 };
 
 export function statusLabel(status: string): string {

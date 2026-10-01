@@ -141,7 +141,7 @@ def test_upload_accepts_valid_file_and_enqueues(client, monkeypatch):
     monkeypatch.setenv("SUPABASE_JWT_SECRET", JWT_SECRET)
     get_settings.cache_clear()
     fake_celery = _FakeCeleryClient()
-    monkeypatch.setattr("app.routers.documents.celery_client", fake_celery)
+    monkeypatch.setattr("app.celery_client.celery_client", fake_celery)
     try:
         with _TestTenant("Acme Test Distributor", "owner-valid@example.test") as tenant:
             content = b"PO Number: TEST-0001\nBuyer: Acme Test Distributor\n"
@@ -156,21 +156,56 @@ def test_upload_accepts_valid_file_and_enqueues(client, monkeypatch):
             assert "document_id" in body
             assert "possible_duplicate_of" not in body
 
-            assert len(fake_celery.sent) == 1
-            sent = fake_celery.sent[0]
-            assert sent["name"] == "docflow.parse_and_extract"
-            assert sent["queue"] == "interactive"
-            assert sent["args"] == [str(tenant.tenant_id), body["document_id"]]
+            # Stage 3d: the API never sends the document task. The document
+            # waits as `pending`, and the dispatcher is nudged to take it.
+            assert fake_celery.sent == [{"name": "docflow.dispatch", "args": None, "queue": "interactive"}]
 
             with platform_session() as session:
                 row = session.execute(
-                    text("SELECT status, source, tenant_id FROM documents WHERE id = :id"),
+                    text(
+                        "SELECT status, source, tenant_id, dispatch_lane, dispatched_at "
+                        "FROM documents WHERE id = :id"
+                    ),
                     {"id": body["document_id"]},
                 ).mappings().first()
             assert row is not None
             assert row["status"] == "pending"
             assert row["source"] == "upload"
             assert str(row["tenant_id"]) == str(tenant.tenant_id)
+            # One file chosen: the interactive lane, waiting (not dispatched).
+            assert row["dispatch_lane"] == "interactive"
+            assert row["dispatched_at"] is None
+    finally:
+        get_settings.cache_clear()
+
+
+@requires_documents_schema
+def test_a_large_batch_goes_in_the_bulk_lane_and_a_small_one_in_interactive(client, monkeypatch):
+    """Stage 3d (Q3): the page sends how many files the person chose. Up to
+    INTERACTIVE_BATCH_MAX is the tenant's interactive lane; more is bulk."""
+    from docflow_core.constants import INTERACTIVE_BATCH_MAX
+
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", JWT_SECRET)
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.celery_client.celery_client", _FakeCeleryClient())
+    try:
+        with _TestTenant("Acme Test Distributor", "owner-lanes@example.test") as tenant:
+            lanes = {}
+            for size in (INTERACTIVE_BATCH_MAX, INTERACTIVE_BATCH_MAX + 1):
+                response = client.post(
+                    "/documents/upload",
+                    headers={"Authorization": f"Bearer {tenant.token()}"},
+                    files={"file": ("po.txt", f"PO TEST-{size}
+".encode(), "text/plain")},
+                    data={"batch_size": str(size)},
+                )
+                assert response.status_code == 200, response.text
+                with platform_session() as session:
+                    lanes[size] = session.execute(
+                        text("SELECT dispatch_lane FROM documents WHERE id = :id"),
+                        {"id": response.json()["document_id"]},
+                    ).scalar_one()
+            assert lanes == {INTERACTIVE_BATCH_MAX: "interactive", INTERACTIVE_BATCH_MAX + 1: "bulk"}
     finally:
         get_settings.cache_clear()
 
@@ -180,7 +215,7 @@ def test_duplicate_detection_does_not_cross_tenant_boundary(client, monkeypatch)
     monkeypatch.setenv("SUPABASE_JWT_SECRET", JWT_SECRET)
     get_settings.cache_clear()
     fake_celery = _FakeCeleryClient()
-    monkeypatch.setattr("app.routers.documents.celery_client", fake_celery)
+    monkeypatch.setattr("app.celery_client.celery_client", fake_celery)
     try:
         with _TestTenant("Acme Test Distributor A", "owner-dup-a@example.test") as tenant_a, _TestTenant(
             "Acme Test Distributor B", "owner-dup-b@example.test"
@@ -221,7 +256,7 @@ def test_upload_accepts_a_tier2_file_and_enqueues_it_unconverted(client, monkeyp
     monkeypatch.setenv("SUPABASE_JWT_SECRET", JWT_SECRET)
     get_settings.cache_clear()
     fake_celery = _FakeCeleryClient()
-    monkeypatch.setattr("app.routers.documents.celery_client", fake_celery)
+    monkeypatch.setattr("app.celery_client.celery_client", fake_celery)
     try:
         with _TestTenant("Acme Test Distributor", "owner-tier2@example.test") as tenant:
             # A TIFF header: enough for the allowlist, and deliberately not a

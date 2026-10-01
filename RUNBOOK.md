@@ -805,10 +805,11 @@ test runs). They are left where they are.
 At most one an hour for the whole platform; it names the first tenant that
 hit it. While Storage is down: uploads answer DOC-025 and nothing is
 received; Postmark gets a 503 and sends the mail again later; documents
-already received wait in Processing without using up their tries. Check the
-Supabase status page and the project's Storage logs. Nothing needs doing
-once Storage is back: the waiting documents are picked up by the stuck sweep
-within `STUCK_PROCESSING_TIMEOUT_MIN`.
+already received go back to waiting (Stage 3d: `pending`, `wait_cause =
+storage`) without using up their tries. Check the Supabase status page and
+the project's Storage logs. Nothing needs doing once Storage is back: the
+dispatcher sends each waiting document again every
+`STORAGE_WAIT_RETRY_MINUTES` (5), with no maximum.
 
 A `document_failed` alert with **DOC-026** is different: the stored original
 is missing or isn't the file that was received. That is never an outage. Ask
@@ -937,8 +938,9 @@ switch isolation off to get it running.**
 At most once an hour for the whole platform. The payload's `reason`:
 - `no_connection` / `http_503`: the service is down,
   overloaded, or its canary is failing. Check the app's machines and its
-  startup log (8.3). Documents wait and retry by themselves; nothing is
-  failed for waiting.
+  startup log (8.3). Documents wait (`wait_cause = parse_service`) and the
+  dispatcher sends them again every `PARSE_SERVICE_WAIT_RETRY_MINUTES` (2);
+  nothing is failed for waiting (Stage 3d).
 - `unauthorized`: the worker's and the service's `PARSE_SERVICE_TOKEN`
   differ. Set the same value on both apps.
 - `http_4xx`: a request the service refused (a DocFlow bug, never the
@@ -991,3 +993,122 @@ waiting for Monday.
 A build never changes by itself: until the date moves, a rebuild installs
 exactly what the last one did. If snapshot.debian.org is down, the build
 fails; it never falls back to the live archive.
+
+## 9. The dispatcher and waiting documents (Stage 3d)
+
+Since 3d nothing sends a document straight to the queue. A new, released or
+test-batch document waits as `pending`, and the dispatcher
+(`docflow_core/dispatch.py`, in the worker) sends the next ones, taking turns
+between tenants: fewest in flight first, then the tenant served least
+recently. At most `TENANT_IN_FLIGHT_CAP` (2) per tenant while another tenant
+has something ready, and never more than `DISPATCH_IN_FLIGHT_TARGET` in
+flight across all tenants. A dispatch pass runs after every intake, at the
+end of every document task, and from beat every 30 seconds.
+
+### 9.1 Cutover order (the 3d rollout, and any fresh environment)
+
+1. Back up and apply `0035` (section 1; `backup_0035`: documents,
+   founder_alerts, email_outbox).
+2. Deploy the worker with its `beat` process (9.3).
+3. Then deploy the API, which stops sending the document task.
+
+An API running without a dispatcher behind it leaves every new document
+waiting. `dispatcher_stopped` says so within `DISPATCHER_STALE_MIN` (10
+minutes), and `/healthz` shows `"stale": true`.
+
+### 9.2 Adding worker capacity
+
+`DISPATCH_IN_FLIGHT_TARGET` (a setting, staging 1) is the worker's document
+slots. The worker's Celery concurrency is set from it, plus one process the
+dispatcher never fills (so the dispatch pass and the sweeps run during a long
+order). With one worker machine:
+1. Set `DISPATCH_IN_FLIGHT_TARGET` to the new number of slots, on the worker
+   app AND the API app (the API doesn't use it today, but keep them equal).
+2. Size the machine for slots + 1 processes (each document process may reach
+   `WORKER_MAX_MEMORY_PER_CHILD_KIB` before it is replaced).
+3. Deploy the worker.
+
+More than one worker machine is a Phase 6 decision. Until then,
+`DISPATCH_IN_FLIGHT_TARGET` must equal one machine's slots. The dispatcher
+would otherwise keep more documents in flight than any worker can take.
+
+### 9.3 Beat: exactly one, never two at once
+
+Beat is its own process, never `celery worker -B`. Locally it is the
+README's second terminal. On Fly it is the worker app's `beat` process group
+(`apps/worker/fly.toml`):
+- **Never scale `beat` above 1:** `fly scale count worker=1 beat=1`.
+- **Never deploy the worker app with `--strategy canary` or `bluegreen`.**
+  Both start a new machine beside the old one, which means two beats for a
+  while. `fly.toml` pins `strategy = "rolling"`, which updates the machine in
+  place.
+- **Run only one stack (local or Fly) against staging at a time.** Two
+  dispatchers on one database would share the in-flight count but send to
+  two different queues.
+
+If two beats ever do run, nothing breaks. Every beat task is safe to run
+twice (the table in BUILD-STATUS "3d -- APPROVED WITH CHANGES", change C):
+scheduled jobs are claimed with `SKIP LOCKED`, the rollup upserts, the
+lifecycle sweep holds a row lock across Stripe, the stuck sweep is
+compare-and-set, and dispatch passes take an advisory lock.
+
+### 9.4 The external uptime monitor (from Phase 6)
+
+The dispatcher and its own stale check run in the worker, so a dead worker
+machine can't alert anyone itself. Point an uptime monitor at the API's
+`GET /healthz` (no sign-in) and alert when the body does **not** contain
+`"stale": false`. The response is always HTTP 200, so the monitor must match
+the body, not the status. The Console's health strip shows the same
+heartbeat, red past `DISPATCHER_STALE_MIN`.
+
+### 9.5 When the founder gets one of these alerts
+
+- **`model_api_failure`** (high, no tenant): the model provider is marked
+  down. Nothing is failed and nothing is sent except one probe every
+  `PROVIDER_PROBE_MINUTES` (2). Customers see **Delayed** (DOC-023). Its
+  `cause`:
+  - `our_configuration`: the API key, the account, the credit or the model.
+    Its `last_error` names it: `http_401` key, `http_402` billing or credit,
+    `http_403` access, `http_404` the model retired or renamed,
+    `http_400_own_spend_limit` our own spend limit in the Console,
+    `http_429_spend_cap` the tier's monthly cap. Fix it in the Anthropic
+    Console. A retired model needs a code change (the model IDs are still
+    constants, review M10). The next probe after the fix recovers.
+  - `5xx`, `overloaded`, `rate_limited`, `network`: the provider's side.
+    Check status.anthropic.com. Nothing to do: it recovers on the first
+    probe that succeeds.
+  Documents still waiting after `PROVIDER_MAX_WAIT_HOURS` (6) fail with
+  **DOC-024** (a `document_failed` alert per tenant per day). The customer is
+  told to upload again or enter the order by hand.
+- **`model_api_recovered`** (info): the first success after an outage. It
+  shows how long it lasted, how many documents waited and how many reached
+  the 6-hour limit. The backlog goes out at once, in turns. Acknowledge
+  the `model_api_failure` alert yourself; recovery doesn't.
+- **`dispatcher_stopped`** (high, at most one an hour): documents are
+  waiting and no dispatch pass has run for `DISPATCHER_STALE_MIN`. Check
+  that the worker and the `beat` process are running (`fly status --app
+  docflow-worker-staging`), and the Upstash queue. Documents resume by
+  themselves once both run.
+- **`routing_model_failure`** (warning, once a UTC day): the cheaper routing
+  model refused DocFlow (same causes as `our_configuration` above).
+  Documents are still read, but without approved examples.
+  `documents_without_examples` on the Console's alert counts them since the
+  day's first failure (the email has the count when it was raised).
+- **`document_stuck` with `lost_jobs_returned`**: documents were sent to the
+  queue and never claimed (a queue or broker problem). They are back to
+  waiting and go out again by themselves.
+
+### 9.6 The constants (`packages/core/docflow_core/constants.py`)
+
+| Constant | Value | What it does |
+|---|---|---|
+| `TENANT_IN_FLIGHT_CAP` | 2 | Most in flight for one tenant while another has something ready |
+| `INTERACTIVE_BATCH_MAX` | 10 | An upload or release of up to this many goes in the interactive lane |
+| `DISPATCH_INTERVAL_SECONDS` | 30 | Beat's backstop pass |
+| `DISPATCHER_STALE_MIN` | 10 | Heartbeat age that means stopped |
+| `PROVIDER_RETRY_MINUTES` | 1, 2, 4, 8, 15 | Provider wait backoff (then every 15) |
+| `PROVIDER_MAX_WAIT_HOURS` | 6 | Then DOC-024 |
+| `PROVIDER_DOWN_FAILURES` / `PROVIDER_DOWN_WINDOW_MIN` | 3 / 5 | Marked down (our own configuration: at the first) |
+| `PROVIDER_PROBE_MINUTES` | 2 | One probe while down |
+| `STORAGE_WAIT_RETRY_MINUTES` | 5 | Storage wait, no maximum |
+| `PARSE_SERVICE_WAIT_RETRY_MINUTES` | 2 | Parse-service wait, no maximum |

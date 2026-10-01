@@ -45,6 +45,16 @@ function minutes(value: string | null): string {
   return h < 24 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d`;
 }
 
+function heartbeat(ageSeconds: number | null): string {
+  if (ageSeconds === null) return "never";
+  if (ageSeconds < 120) return `${ageSeconds}s ago`;
+  return `${minutes(String(ageSeconds / 60))} ago`;
+}
+
+export function dispatcherStale(ageSeconds: number | null, staleMin: number): boolean {
+  return ageSeconds === null || ageSeconds > staleMin * 60;
+}
+
 function usd(value: string | null | undefined): string {
   if (value === null || value === undefined) return "—";
   return `$${Number(value).toFixed(2)}`;
@@ -82,13 +92,33 @@ export function HealthStrip({ data, onRecomputed }: { data: Dashboard; onRecompu
           value={`${health.pending + health.processing}`}
           tone={health.pending + health.processing > 50 ? "warn" : undefined}
         />
+        {/* Stage 3d: waiting = not yet dispatched, so a backfill reads as a
+            backlog taking its turn, not as stuck. */}
         <Stat
-          label="Oldest waiting"
+          label="Oldest not yet dispatched"
           value={minutes(health.oldest_waiting_minutes)}
           tone={Number(health.oldest_waiting_minutes ?? 0) > 60 ? "warn" : undefined}
         />
         <Stat label="Queue (now / bulk)" value={`${queues.interactive ?? "—"} / ${queues.bulk ?? "—"}`} />
         <Stat label="Worker" value={data.worker ? "answering" : "silent"} tone={data.worker ? undefined : "bad"} />
+        {/* Stage 3d (gap 1): red past DISPATCHER_STALE_MIN, whatever is waiting. */}
+        <Stat
+          label="Dispatcher heartbeat"
+          value={heartbeat(health.dispatcher_heartbeat_age_seconds)}
+          tone={dispatcherStale(health.dispatcher_heartbeat_age_seconds, data.dispatcher_stale_min) ? "bad" : undefined}
+          testId="dispatcher-heartbeat"
+        />
+        <Stat
+          label="Model provider"
+          value={health.model_provider_status === "down" ? "down — holding" : health.model_provider_status ?? "—"}
+          tone={health.model_provider_status === "down" ? "bad" : undefined}
+          testId="model-provider"
+        />
+        <Stat
+          label="Waiting on an outage"
+          value={`${health.waiting_on_outage}`}
+          tone={health.waiting_on_outage > 0 ? "warn" : undefined}
+        />
         <Stat label="Read today" value={`${health.documents_today}`} />
         <Stat label="Awaiting review" value={`${health.needs_review}`} />
         <Stat

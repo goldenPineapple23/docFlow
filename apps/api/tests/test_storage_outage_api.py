@@ -70,7 +70,7 @@ def test_an_upload_during_an_outage_is_doc_025_and_nothing_is_received(client, m
     monkeypatch.setenv("SUPABASE_JWT_SECRET", JWT_SECRET)
     get_settings.cache_clear()
     fake_celery = _FakeCeleryClient()
-    monkeypatch.setattr("app.routers.documents.celery_client", fake_celery)
+    monkeypatch.setattr("app.celery_client.celery_client", fake_celery)
     fake = _fake_storage()
     fake.fail_with = "unavailable"
     try:
@@ -102,7 +102,7 @@ def test_an_upload_during_an_outage_is_doc_025_and_nothing_is_received(client, m
 def test_one_outage_is_one_alert_an_hour_for_the_whole_platform(client, monkeypatch):
     monkeypatch.setenv("SUPABASE_JWT_SECRET", JWT_SECRET)
     get_settings.cache_clear()
-    monkeypatch.setattr("app.routers.documents.celery_client", _FakeCeleryClient())
+    monkeypatch.setattr("app.celery_client.celery_client", _FakeCeleryClient())
     fake = _fake_storage()
     fake.fail_with = "unavailable"
     before = _open_storage_alerts_this_hour()

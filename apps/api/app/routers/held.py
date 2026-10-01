@@ -26,14 +26,11 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from app.celery_client import celery_client
+from app.celery_client import nudge_dispatcher
 from app.deps import AuthenticatedIdentity, get_current_identity, require_tenant_member
 from app.errors import catalog_error
 
 router = APIRouter(tags=["held"])
-
-# A big release goes to the bulk queue so it can't crowd interactive work.
-_INTERACTIVE_RELEASE_LIMIT = 10
 
 
 def _entry(entry) -> dict[str, str]:
@@ -108,12 +105,11 @@ def release_held(body: ReleaseBody, identity: AuthenticatedIdentity = Depends(ge
             )
         except quarantine.QuarantineError as exc:
             raise catalog_error(exc.code, status_code=403 if exc.code == "QUA-001" else 409) from exc
-    # Enqueued only after the transaction commits, oldest first: received order.
-    queue = "interactive" if len(result.released) <= _INTERACTIVE_RELEASE_LIMIT else "bulk"
-    for document_id in result.released:
-        celery_client.send_task(
-            "docflow.parse_and_extract", args=[str(tenant_id), str(document_id)], queue=queue
-        )
+    # Stage 3d: released documents wait as `pending` in the lane the release
+    # set (quarantine.release); the dispatcher sends them in received order.
+    # Nudged after the transaction commits.
+    if result.released:
+        nudge_dispatcher()
     return {
         "released": [str(i) for i in result.released],
         "skipped": [str(i) for i in result.skipped],

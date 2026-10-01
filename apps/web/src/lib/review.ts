@@ -23,6 +23,9 @@ export type QueueDocument = {
   id: string;
   original_filename: string;
   status: string;
+  // Stage 3d: waiting on the model provider while it is down -- shown as
+  // "Delayed" (DOC-023).
+  delayed: boolean;
   source: string;
   created_at: string | null;
   approved_at: string | null;
@@ -132,6 +135,9 @@ export type DocumentDetail = {
     // Why DocFlow couldn't read it, as its catalog entry (D-145). Only set
     // when the status is `failed`.
     failure: CatalogError | null;
+    // Stage 3d: why it is still waiting, as its catalog entry (DOC-023).
+    // Only set while it waits on a model provider that is down.
+    delay: CatalogError | null;
   };
   header: DocumentHeader;
   lines: DocumentLine[];

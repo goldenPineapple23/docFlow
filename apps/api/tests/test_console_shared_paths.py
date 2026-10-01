@@ -75,13 +75,18 @@ def test_the_console_uses_example_prompting_only_for_its_switch():
     assert used == {"overview", "set_enabled", "ExamplePromptingError"}, sorted(used)
 
 
-def test_the_console_sends_documents_to_extraction_only_through_the_tenant_surfaces_task():
-    console_tasks = _tasks(ADMIN_ROUTER) & PIPELINE_TASKS
-    assert console_tasks == {"docflow.parse_and_extract"}  # the scan finds it at all
-    tenant_tasks = _tasks(APP_DIR / "routers" / "documents.py") | _tasks(
-        REPO_ROOT / "packages" / "core" / "docflow_core" / "email_intake.py"
-    )
-    assert console_tasks <= tenant_tasks
+def test_the_console_sends_documents_to_extraction_only_through_the_tenant_surfaces_path():
+    """Stage 3d: nothing in the API -- Console or tenant surface -- or email
+    intake sends the document task. Every one of them leaves the document
+    `pending` and nudges the dispatcher through the one `nudge_dispatcher`,
+    and only the dispatcher (in the worker) puts documents on the queue."""
+    api_files = [*APP_DIR.rglob("*.py"), REPO_ROOT / "packages" / "core" / "docflow_core" / "email_intake.py"]
+    senders = sorted(str(p.relative_to(REPO_ROOT)) for p in api_files if _tasks(p) & PIPELINE_TASKS)
+    assert senders == []
+    for path in (ADMIN_ROUTER, APP_DIR / "routers" / "documents.py", APP_DIR / "routers" / "held.py"):
+        assert "nudge_dispatcher()" in path.read_text(encoding="utf-8"), path.name
+    email_intake = REPO_ROOT / "packages" / "core" / "docflow_core" / "email_intake.py"
+    assert _tasks(email_intake) == {"docflow.dispatch"}
 
 
 def test_the_console_test_batch_upload_is_the_tenant_upload_handler():

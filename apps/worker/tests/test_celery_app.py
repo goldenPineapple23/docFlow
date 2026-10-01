@@ -82,3 +82,37 @@ def test_a_redelivery_waits_longer_than_any_job_should_run():
 
     timeout = celery_app.conf.broker_transport_options["visibility_timeout"]
     assert timeout > STUCK_PROCESSING_TIMEOUT_MIN * 60
+
+
+def test_beat_sends_the_dispatchers_backstop_pass():
+    """Stage 3d (Q4): beat every DISPATCH_INTERVAL_SECONDS, on the queue the
+    worker reads, expiring rather than piling up behind a long document."""
+    from docflow_core.constants import DISPATCH_INTERVAL_SECONDS
+
+    entry = celery_app.conf.beat_schedule["dispatch-waiting-documents"]
+    assert entry["task"] == "docflow.dispatch"
+    assert entry["schedule"] == DISPATCH_INTERVAL_SECONDS == 30
+    assert entry["options"] == {"queue": "interactive", "expires": DISPATCH_INTERVAL_SECONDS}
+
+
+def test_the_worker_has_one_process_more_than_the_dispatchers_target():
+    """Stage 3d (Q2, gap 1): the document slots are the in-flight target, from
+    the one setting, and one more process -- never filled by the dispatcher --
+    keeps the dispatch pass and the sweeps running during a long order."""
+    from docflow_core.config import get_settings
+
+    assert celery_app.conf.worker_concurrency == get_settings().dispatch_in_flight_target + 1
+
+
+def test_the_fly_worker_runs_exactly_one_beat_and_never_starts_a_second_in_a_deploy():
+    """Stage 3d, change C (founder's conditions): beat is its own process
+    group; the deploy strategy is rolling, which updates machines in place --
+    canary and blue-green start a new machine beside the old one."""
+    import tomllib
+    from pathlib import Path
+
+    config = tomllib.loads((Path(__file__).resolve().parents[1] / "fly.toml").read_text(encoding="utf-8"))
+    assert set(config["processes"]) == {"worker", "beat"}
+    assert config["processes"]["beat"].startswith("celery -A app.celery_app beat")
+    assert " -B" not in config["processes"]["worker"] and "--beat" not in config["processes"]["worker"]
+    assert config["deploy"]["strategy"] == "rolling"

@@ -15,11 +15,20 @@ sure there IS a later job, and that trying stops somewhere:
   its hard time limit (recorded by `document_status.record_timeout`, Stage 3a), otherwise
   `worker_stopped`. One alert per tenant per cause per day, so a timeout is
   never hidden inside a dead-worker alert from the same day.
-* `pending` past the timeout: its job may have been lost before any worker
-  saw it (D-095), so it is enqueued again -- a duplicate is harmless, the
-  claim makes it a no-op -- and the founder gets one `document_stuck` alert
-  per tenant per day saying how many are waiting. A pending document is not
-  failed for waiting: a 500-document backfill legitimately waits.
+* Stage 3d: a `pending` document is put on the queue only by the dispatcher
+  (docflow_core.dispatch), never here -- a backfill legitimately waits its
+  turn, and enqueueing it would undo the per-tenant fairness. What this
+  sweep still finds among `pending` documents:
+  - *dispatched* (sent to the queue) and unclaimed past the timeout: the
+    job was lost (D-095). `dispatched_at` is cleared, so it is waiting again
+    and the dispatcher re-sends it within the cap, and the founder gets one
+    `document_stuck` warning per tenant per day saying how many;
+  - waiting on the model provider for PROVIDER_MAX_WAIT_HOURS: failed with
+    DOC-024 and the `document_failed` alert its catalog text promises. While
+    the provider is down the dispatcher sends only its probe, so a waiting
+    document is never claimed to reach that limit itself.
+  A document merely *waiting* never alerts on its own. `sweep_all` instead
+  checks the dispatcher's heartbeat (`dispatch.check_stopped`).
 * Exports still `pending`, and imports still `parsing`, STUCK_PROCESSING_
   TIMEOUT_MIN after they were created are failed: EXP-009 / IMP-009 (Stage
   3a). Their jobs are short (5-minute hard limits), so by then the job was
@@ -43,10 +52,11 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from docflow_core import document_status, founder_alerts, model_runs
+from docflow_core import dispatch, document_status, founder_alerts, model_runs
 from docflow_core.constants import (
     EXPORTS_NOT_FINISHED_ALERT_PER_DAY,
     MAX_PROCESSING_ATTEMPTS,
+    PROVIDER_MAX_WAIT_HOURS,
     STUCK_PROCESSING_TIMEOUT_MIN,
 )
 from docflow_core.db import pipeline_sweep_session, tenant_session
@@ -65,6 +75,8 @@ from docflow_core.retry_rules import (  # noqa: F401 -- re-exported for callers 
 logger = logging.getLogger(__name__)
 
 EXPORT_NOT_FINISHED_CODE = "EXP-009"
+# Stage 3d: waited the whole PROVIDER_MAX_WAIT_HOURS on the model provider.
+PROVIDER_WAIT_LIMIT_CODE = "DOC-024"
 IMPORT_NOT_FINISHED_CODE = "IMP-009"
 
 
@@ -72,7 +84,10 @@ IMPORT_NOT_FINISHED_CODE = "IMP-009"
 class SweepResult:
     requeued: list[UUID] = field(default_factory=list)
     failed: list[UUID] = field(default_factory=list)
-    waiting: list[UUID] = field(default_factory=list)
+    # Stage 3d: dispatched, never claimed -- returned to waiting.
+    lost_jobs: list[UUID] = field(default_factory=list)
+    # Stage 3d: waited PROVIDER_MAX_WAIT_HOURS on the provider -- DOC-024.
+    wait_limit_failed: list[UUID] = field(default_factory=list)
     exports_failed: list[UUID] = field(default_factory=list)
     imports_failed: list[UUID] = field(default_factory=list)
 
@@ -96,8 +111,7 @@ def sweep_tenant(
                     (status = 'processing'
                      AND (processing_started_at IS NULL
                           OR processing_started_at < now() - make_interval(mins => :t)))
-                    OR (status = 'pending' AND created_at < now() - make_interval(mins => :t)
-                        AND coalesce(released_at, created_at) < now() - make_interval(mins => :t))
+                    OR (status = 'pending' AND dispatched_at < now() - make_interval(mins => :t))
                   )
                 ORDER BY created_at, id
                 """
@@ -108,7 +122,8 @@ def sweep_tenant(
         for row in stale:
             document_id = UUID(str(row["id"]))
             if row["status"] != "processing":
-                result.waiting.append(document_id)
+                if _return_to_waiting(session, document_id):
+                    result.lost_jobs.append(document_id)
                 continue
             # D-163: a call the dead attempt started and never finished goes
             # on the cost record before anything else, whatever is decided.
@@ -141,34 +156,75 @@ def sweep_tenant(
                     detail=failure_detail(attempts, timeout_attempts, lost_attempts),
                 )
 
-        if result.waiting:
+        if result.lost_jobs:
             founder_alerts.raise_alert(
                 session,
                 alert_type="document_stuck",
                 severity="warning",
                 tenant_id=tenant_id,
-                payload={"waiting": len(result.waiting), "timeout_min": timeout_min},
+                payload={"lost_jobs_returned": len(result.lost_jobs), "timeout_min": timeout_min},
                 dedupe_key=f"document_stuck:waiting:{tenant_id}",
                 dedupe_per_utc_day=True,
             )
 
+        _fail_past_the_wait_limit(session, tenant_id, result)
+
         _fail_unfinished_exports_and_imports(session, tenant_id, result, timeout_min)
 
     # After the commit: a job must never run against a state it can't see.
-    for document_id in [*result.requeued, *result.waiting]:
+    # Only `processing` retries: they are already counted in flight, so the
+    # dispatcher's cap and target still hold (BUILD-STATUS 3d, settled while
+    # building).
+    for document_id in result.requeued:
         enqueue(tenant_id, document_id)
     # Ids and counts only (Section 7.10).
-    if result.requeued or result.failed or result.waiting or result.exports_failed or result.imports_failed:
+    if (
+        result.requeued
+        or result.failed
+        or result.lost_jobs
+        or result.wait_limit_failed
+        or result.exports_failed
+        or result.imports_failed
+    ):
         logger.info(
-            "stuck_sweep tenant_id=%s requeued=%d failed=%d waiting=%d exports_failed=%d imports_failed=%d",
+            "stuck_sweep tenant_id=%s requeued=%d failed=%d lost_jobs=%d wait_limit_failed=%d "
+            "exports_failed=%d imports_failed=%d",
             tenant_id,
             len(result.requeued),
             len(result.failed),
-            len(result.waiting),
+            len(result.lost_jobs),
+            len(result.wait_limit_failed),
             len(result.exports_failed),
             len(result.imports_failed),
         )
     return result
+
+
+def _return_to_waiting(session: Session, document_id: UUID) -> bool:
+    """A dispatched job nobody claimed: waiting again, for the dispatcher to
+    re-send within the cap. Compare-and-set, so a claim that lands meanwhile
+    wins."""
+    row = session.execute(
+        text(
+            "UPDATE documents SET dispatched_at = NULL "
+            "WHERE id = :id AND status = 'pending' AND dispatched_at IS NOT NULL RETURNING id"
+        ),
+        {"id": str(document_id)},
+    ).first()
+    return row is not None
+
+
+def _fail_past_the_wait_limit(session: Session, tenant_id: UUID, result: SweepResult) -> None:
+    """DOC-024 for every document that has waited PROVIDER_MAX_WAIT_HOURS on
+    the model provider (`pending -> failed`), with the alert its catalog text
+    promises."""
+    for document_id in document_status.fail_provider_waits_past(
+        session, hours=PROVIDER_MAX_WAIT_HOURS, failure_code=PROVIDER_WAIT_LIMIT_CODE
+    ):
+        result.wait_limit_failed.append(document_id)
+        founder_alerts.raise_for_failure(
+            session, tenant_id=tenant_id, error_code=PROVIDER_WAIT_LIMIT_CODE, document_id=document_id
+        )
 
 
 def _fail_unfinished_exports_and_imports(
@@ -244,4 +300,6 @@ def sweep_all(enqueue: Callable[[UUID, UUID], None]) -> dict[UUID, SweepResult]:
             results[tenant_id] = sweep_tenant(tenant_id, enqueue)
         except Exception as exc:  # noqa: BLE001 -- one tenant never stops the sweep
             logger.error("stuck_sweep_failed tenant_id=%s error_type=%s", tenant_id, type(exc).__name__)
+    # Stage 3d (item 3): documents waiting and a dispatcher that hasn't run.
+    dispatch.check_stopped()
     return results

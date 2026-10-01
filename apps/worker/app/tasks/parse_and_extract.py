@@ -30,11 +30,13 @@ from uuid import UUID, uuid4
 
 import anthropic
 from docflow_core import (
+    dispatch,
     document_status,
     example_prompting,
     field_schema,
     file_types,
     founder_alerts,
+    model_provider,
     model_runs,
     parse_client,
     previews,
@@ -43,7 +45,12 @@ from docflow_core import (
 )
 from docflow_core.buyers import identify_and_link_buyer
 from docflow_core.config import get_settings
-from docflow_core.constants import DOCUMENT_TASK_TIME_LIMIT_SECONDS
+from docflow_core.constants import (
+    DOCUMENT_TASK_TIME_LIMIT_SECONDS,
+    PARSE_SERVICE_WAIT_RETRY_MINUTES,
+    PROVIDER_MAX_WAIT_HOURS,
+    STORAGE_WAIT_RETRY_MINUTES,
+)
 from docflow_core.db import tenant_session
 from docflow_core.duplicates import detect_document_relationships
 from docflow_core.example_prompting import ExamplePlan
@@ -334,6 +341,9 @@ STOPPED_CODE = "DOC-029"
 # A job that crashed some other way, or an answer that failed the checks:
 # the customer sees the file as unreadable; the founder gets an alert.
 PARSE_FAULT_CODE = "DOC-005"
+# Stage 3d: waited PROVIDER_MAX_WAIT_HOURS on the model provider (the stuck
+# sweep uses the same code for a document that reached it while held).
+PROVIDER_WAIT_LIMIT_CODE = "DOC-024"
 
 
 def _fail_parse_fault(tenant_id: UUID, document_id: UUID, cause: str) -> None:
@@ -404,6 +414,68 @@ def _after_lost_parse(tenant_id: UUID, document_id: UUID, reason: str) -> None:
         celery_app.send_task(
             "docflow.parse_and_extract", args=[str(tenant_id), str(document_id)], queue="interactive"
         )
+
+
+def _wait_for_provider(
+    tid: UUID, did: UUID, plan: ExamplePlan, result: ExtractionResult, started_run_id: UUID | None
+) -> None:
+    """
+    Stage 3d: the model provider didn't answer (5xx, overloaded, rate
+    limited, the network) or refused us for a reason on our side (a wrong
+    key, no credit, a retired model -- founder, 2026-10-01). Never the
+    customer's fault, so the document waits instead of failing:
+
+    - the failed call stays on the cost record (D-163), as before;
+    - `processing -> pending` with the next retry 1, 2, 4, 8 then every 15
+      minutes after the first wait (a 429's Retry-After is a floor);
+    - after PROVIDER_MAX_WAIT_HOURS of waiting it is failed with DOC-024,
+      which blames the provider, not the file, and alerts the founder;
+    - the failure counts towards marking the provider down
+      (model_provider.record_failure), which holds the dispatcher.
+    """
+    error = result.provider_error
+    assert error is not None
+    failed_at_limit = False
+    with tenant_session(tid) as session:
+        _record_runs(session, tid, did, plan, result, started_run_id)
+        waited = document_status.waited_seconds(session, did, "model_provider")
+        if waited is not None and waited >= PROVIDER_MAX_WAIT_HOURS * 3600:
+            failed_at_limit = document_status.transition(
+                session,
+                did,
+                from_statuses=["processing"],
+                to="failed",
+                values={
+                    "model_id": result.model_id,
+                    "prompt_hash": result.prompt_hash,
+                    "schema_version": result.schema_version,
+                    "raw_json": result.raw_response,
+                    "failure_code": PROVIDER_WAIT_LIMIT_CODE,
+                    "processed_at": document_status.NOW,
+                    "last_wait_error": error.label,
+                    "retry_at": None,
+                },
+            )
+        else:
+            document_status.to_waiting(
+                session,
+                did,
+                cause="model_provider",
+                retry_after_seconds=model_provider.retry_delay_seconds(waited, error.retry_after_seconds),
+                error_label=error.label,
+            )
+    # Labels and ids only (Section 7.10).
+    logger.error(
+        "provider_wait document_id=%s cause=%s label=%s waited_seconds=%s failed_at_limit=%s",
+        did,
+        error.cause,
+        error.label,
+        waited,
+        failed_at_limit,
+    )
+    if failed_at_limit:
+        _alert_failure(tid, did, PROVIDER_WAIT_LIMIT_CODE)
+    model_provider.record_failure(error)
 
 
 def _alert_failure(tenant_id: UUID, document_id: UUID, error_code: str | None) -> None:
@@ -490,9 +562,34 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
       committed in the SAME transaction as the move to `needs_review`. If
       validation itself fails, the document is `failed` with DOC-021 and the
       founder is alerted: never in review with zero warnings.
+    * **Then a dispatch pass** (Stage 3d, Q4): this process has just freed a
+      slot, so the next waiting document goes now, not at the next beat.
     """
-    tid = UUID(tenant_id)
-    did = UUID(document_id)
+    try:
+        _parse_and_extract(UUID(tenant_id), UUID(document_id))
+    finally:
+        dispatch_after_task()
+
+
+def dispatch_after_task() -> None:
+    """The dispatch pass at the end of every document task. Never raises: the
+    beat backstop runs another within DISPATCH_INTERVAL_SECONDS."""
+    try:
+        dispatch.run_pass(send_document)
+    except Exception as exc:  # noqa: BLE001 -- see the docstring
+        logger.error("dispatch_after_task_failed error_type=%s", type(exc).__name__)
+
+
+def send_document(tenant_id: UUID, document_id: UUID) -> None:
+    """How the dispatcher puts a document task on the queue: always the
+    interactive queue -- every choice between tenants and lanes has already
+    been made, so the queue only ever holds what the worker can take next."""
+    celery_app.send_task(
+        "docflow.parse_and_extract", args=[str(tenant_id), str(document_id)], queue="interactive"
+    )
+
+
+def _parse_and_extract(tid: UUID, did: UUID) -> None:
 
     with tenant_session(tid) as session:
         row = session.execute(
@@ -539,10 +636,18 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
     try:
         content = read_file(tid, storage_path)
     except StorageUnavailableError:
-        # An outage: the document waits it out without using an attempt.
+        # An outage: the document waits it out without using an attempt
+        # (Stage 3d: a real `processing -> pending` wait, retried by the
+        # dispatcher every STORAGE_WAIT_RETRY_MINUTES, no maximum).
         logger.error("storage_read_failed document_id=%s", did)
         with tenant_session(tid) as session:
-            document_status.release_after_storage_outage(session, did)
+            document_status.to_waiting(
+                session,
+                did,
+                cause="storage",
+                retry_after_seconds=STORAGE_WAIT_RETRY_MINUTES * 60,
+                error_label="storage_unavailable",
+            )
             founder_alerts.raise_storage_unavailable(session, tenant_id=tid, where="worker")
         return
     except StorageObjectMissingError:
@@ -569,10 +674,18 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
     try:
         answer = parse_client.parse_document(content, original_filename)
     except parse_client.ParseUnavailable as exc:
-        # Never got in: not the file's fault. The document waits, no try used.
+        # Never got in: not the file's fault. The document waits, no try used
+        # (founder, Q6: only "never got in" waits; "got in, never came out"
+        # below still uses up tries, so a poisoned file can't wait forever).
         logger.error("parse_service_unavailable document_id=%s reason=%s", did, exc.reason)
         with tenant_session(tid) as session:
-            document_status.release_after_storage_outage(session, did)
+            document_status.to_waiting(
+                session,
+                did,
+                cause="parse_service",
+                retry_after_seconds=PARSE_SERVICE_WAIT_RETRY_MINUTES * 60,
+                error_label=f"parse_service:{exc.reason}",
+            )
             founder_alerts.raise_parse_service_unavailable(
                 session, tenant_id=tid, where="worker", reason=exc.reason
             )
@@ -619,10 +732,23 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
     # above is sized with it in mind.
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=2)
     plan = _plan_examples(client, tid, did, sender_email, parts)
+    routing_error = plan.routing.provider_error if plan.routing is not None else None
+    if routing_error is not None and routing_error.is_our_configuration:
+        # The routing model refused us (founder: alert, don't hold). This
+        # document goes on without examples, as any failed routing call does.
+        model_provider.alert_routing_failure(routing_error)
     started = _StartedRuns(tid, did)
     result = extract_document(
         client, content_blocks, examples=plan.examples, deadline=read_deadline, on_call_start=started
     )
+
+    if result.provider_error is None:
+        # The provider answered (whatever the answer): it is up. Marks it up
+        # again after an outage, which releases everything waiting on it.
+        model_provider.record_success()
+    elif result.provider_error.is_wait:
+        _wait_for_provider(tid, did, plan, result, started.extraction)
+        return
 
     if not result.ok:
         with tenant_session(tid) as session:
@@ -640,6 +766,7 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
                     "est_cost_usd": _money(_total_cost(plan, result)),
                     "failure_code": result.error_code or "DOC-008",
                     "processed_at": document_status.NOW,
+                    **document_status.WAIT_CLEARED,
                 },
             )
         # DOC-008 / DOC-009 / DOC-020 tell the reader DocFlow has been alerted (D-145).
@@ -858,7 +985,11 @@ def _finish(tid: UUID, did: UUID) -> None:
                 did,
                 from_statuses=["processing"],
                 to="needs_review",
-                values={"processed_at": document_status.NOW, "failure_code": document_status.NULL},
+                values={
+                    "processed_at": document_status.NOW,
+                    "failure_code": document_status.NULL,
+                    **document_status.WAIT_CLEARED,
+                },
             )
             if not moved:
                 # Someone else moved it while we worked (the stuck sweep gave

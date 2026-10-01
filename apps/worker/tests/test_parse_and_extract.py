@@ -837,3 +837,104 @@ def test_a_second_lost_try_fails_doc_022_naming_the_lost_parse(monkeypatch):
     assert name == "raise_for_failure" and kw["error_code"] == "DOC-022" and kw["cause"] == "timeout"
     assert kw["detail"]["cause_detail"] == "parse_lost"
     assert kw["detail"]["parse_lost_attempts"] == [1, 2]
+
+
+# ── Stage 3d: what the task does with each provider answer ──────────────────
+
+
+def _drive_with_provider(monkeypatch, request, *, extraction_error=None, routing_error=None):
+    """Run the task over a real fixture with the model's answer replaced: an
+    extraction that failed with `extraction_error` (a ProviderError), and a
+    routing call that failed with `routing_error`. Returns the fake session
+    and the stubbed dispatcher/provider calls (conftest)."""
+    from decimal import Decimal  # noqa: F401 -- kept local like the tests above
+    from uuid import uuid4
+
+    from docflow_core.example_prompting import ExamplePlan
+    from docflow_core.extraction import ExtractionResult, RoutingResult
+
+    import app.tasks.parse_and_extract as mod
+
+    routing = None
+    if routing_error is not None:
+        routing = RoutingResult(
+            ok=False, model_id="r", prompt_hash="r", schema_version="r", raw_response={},
+            error_code="DOC-008", provider_error=routing_error,
+        )
+    failed = ExtractionResult(
+        ok=False, model_id="m", prompt_hash="h", schema_version="s", raw_response={},
+        error_code="DOC-008", provider_error=extraction_error,
+    )
+    session, _ = _drive_task_over(
+        monkeypatch, "po.docx", fixture_bytes("positive/po.docx"), save_derived=_fixed_derived_key
+    )
+    session.statements.clear()
+    request.node.dispatch_calls.clear()
+    monkeypatch.setattr(mod.example_prompting, "plan", lambda *a, **k: ExamplePlan(routing=routing))
+    monkeypatch.setattr(mod, "extract_document", lambda client, blocks, **kwargs: failed)
+    # The first wait: nothing waited yet (the fake session can't answer the
+    # read; test_dispatch_db.py runs the real one).
+    monkeypatch.setattr(mod.document_status, "waited_seconds", lambda session, did, cause: None)
+    mod.parse_and_extract(str(uuid4()), str(uuid4()))
+    return session, request.node.dispatch_calls
+
+
+def test_a_provider_wait_goes_back_to_pending_and_never_fails(monkeypatch, request):
+    from docflow_core.provider_errors import ProviderError
+
+    overloaded = ProviderError("wait", "overloaded", "http_529")
+    session, calls = _drive_with_provider(monkeypatch, request, extraction_error=overloaded)
+    assert not _to(session, "failed")
+    waits = [params for sql, params in session.statements if "SET status = 'pending'" in sql]
+    assert len(waits) == 1
+    assert (waits[0]["cause"], waits[0]["error_label"], waits[0]["retry_after"]) == (
+        "model_provider", "http_529", 60
+    )
+    # The failure counts towards "down"; the run ends with a dispatch pass.
+    assert [c[0] for c in calls] == ["failure", "dispatch"]
+    assert calls[0][1] is overloaded
+
+
+def test_a_request_the_document_made_impossible_still_fails_at_once(monkeypatch, request):
+    from docflow_core.provider_errors import ProviderError
+
+    bad = ProviderError("fail", None, "http_400")
+    session, calls = _drive_with_provider(monkeypatch, request, extraction_error=bad)
+    assert _to(session, "failed")[-1]["v_failure_code"] == "DOC-008"
+    assert not [sql for sql, _ in session.statements if "SET status = 'pending'" in sql]
+    assert [c[0] for c in calls] == ["dispatch"]
+
+
+def test_our_own_configuration_waits_too(monkeypatch, request):
+    """Founder, 2026-10-01: a wrong key never fails a customer's order."""
+    from docflow_core.provider_errors import ProviderError
+
+    key = ProviderError("wait", "our_configuration", "http_401")
+    session, calls = _drive_with_provider(monkeypatch, request, extraction_error=key)
+    assert not _to(session, "failed")
+    assert [c[0] for c in calls] == ["failure", "dispatch"]
+
+
+def test_a_routing_model_refusal_alerts_and_extraction_goes_ahead(monkeypatch, request):
+    """Founder: alert, don't hold -- the document is read without examples."""
+    from docflow_core.provider_errors import ProviderError
+
+    retired = ProviderError("wait", "our_configuration", "http_404")
+    _session, calls = _drive_with_provider(monkeypatch, request, routing_error=retired)
+    assert ("routing_failure", retired) in calls
+    assert calls[-1] == ("dispatch",)
+
+
+def test_every_document_task_ends_with_a_dispatch_pass_even_when_it_raises(monkeypatch, request):
+    from uuid import uuid4
+
+    import app.tasks.parse_and_extract as mod
+
+    def boom(tid, did):
+        raise RuntimeError("anything")
+
+    monkeypatch.setattr(mod, "_parse_and_extract", boom)
+    request.node.dispatch_calls.clear()
+    with pytest.raises(RuntimeError):
+        mod.parse_and_extract(str(uuid4()), str(uuid4()))
+    assert request.node.dispatch_calls == [("dispatch",)]

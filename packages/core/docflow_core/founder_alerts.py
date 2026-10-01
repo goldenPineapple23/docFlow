@@ -86,6 +86,15 @@ ALERT_TYPES: dict[str, str] = {
     # filter kills only a call from a foreign architecture, which no parser
     # makes by accident.
     "parse_seccomp_kill": "A parse job was killed by the seccomp filter",
+    # The nightly rollup has not finished for ROLLUP_STALE_HOURS (7.15.3).
+    # Raised since slice 5.4 but never registered, so raising it crashed the
+    # rollup (review M6); registered with Stage 3d's every-type test.
+    "rollup_stale": "The nightly metrics rollup hasn't run",
+    # Stage 3d (founder, 2026-10-01). Tenant-less, under 0035's dispatcher flag.
+    "model_api_failure": "The model provider is down; documents are waiting",
+    "model_api_recovered": "The model provider is back; waiting documents are going out",
+    "dispatcher_stopped": "The dispatcher has stopped; documents are waiting",
+    "routing_model_failure": "The routing model refused DocFlow; documents go without examples",
 }
 
 # Why a seccomp kill's alert has no syscall number (founder: say so when it
@@ -114,6 +123,8 @@ FAILURE_ALERTS: dict[str, str] = {
     "DOC-022": "document_stuck",
     # Stage 3b: the stored original is missing or its hash doesn't match.
     "DOC-026": "document_failed",
+    # Stage 3d: waited the whole PROVIDER_MAX_WAIT_HOURS on the model provider.
+    "DOC-024": "document_failed",
     "DOC-015": "unsafe_file_refused",
     "INT-004": "unverified_sender_held",
 }

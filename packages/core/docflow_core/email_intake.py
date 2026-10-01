@@ -860,12 +860,12 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
             attachment_count=num_attachments,
         )
 
-    # Enqueued only once the transaction above has committed (tenant_session's
-    # __exit__), so a task never races a document row that isn't visible yet
-    # -- mirrors apps/api/app/routers/documents.py's upload endpoint exactly.
-    for document_id in pending_enqueues:
-        celery_client.send_task(
-            "docflow.parse_and_extract", args=[str(tenant_id), str(document_id)], queue="interactive"
-        )
+    # Stage 3d: the documents wait as `pending` (interactive lane, the column's
+    # default) and only the dispatcher puts them on the queue, taking turns
+    # between tenants. Nudged once, after the transaction above has committed
+    # (tenant_session's __exit__), so the pass sees them -- mirrors
+    # apps/api/app/routers/documents.py's upload endpoint.
+    if pending_enqueues:
+        celery_client.send_task("docflow.dispatch", queue="interactive")
 
     return ProcessResult(outcome=result_outcome, raw_email_id=raw_email_id, attachments=attachment_outcomes)

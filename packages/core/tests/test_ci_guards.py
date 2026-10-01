@@ -72,6 +72,22 @@ def test_every_approved_skip_has_a_reason():
             "(text, text, timestamptz, text, text, timestamptz, text)",
         ),
         ("record_stripe_card_event", "0031_card_billing.sql", "(text, text, text, text, bigint)"),
+        # Stage 3d (0035): the dispatcher's and the provider's functions.
+        ("dispatch_candidates", "0035_dispatcher_and_waits.sql", "(integer)"),
+        ("probe_candidate", "0035_dispatcher_and_waits.sql", "()"),
+        ("mark_dispatched", "0035_dispatcher_and_waits.sql", "(uuid)"),
+        ("clear_dispatched", "0035_dispatcher_and_waits.sql", "(uuid)"),
+        ("dispatcher_heartbeat", "0035_dispatcher_and_waits.sql", "()"),
+        ("dispatcher_status", "0035_dispatcher_and_waits.sql", "()"),
+        ("provider_state", "0035_dispatcher_and_waits.sql", "(text)"),
+        (
+            "provider_record_failure",
+            "0035_dispatcher_and_waits.sql",
+            "(text, text, text, boolean, integer, integer)",
+        ),
+        ("provider_record_success", "0035_dispatcher_and_waits.sql", "(text)"),
+        ("provider_take_probe", "0035_dispatcher_and_waits.sql", "(text, integer)"),
+        ("count_routing_model_failure", "0035_dispatcher_and_waits.sql", "()"),
     ],
 )
 def test_each_stripe_event_function_is_granted_the_same_way_in_the_migration_and_in_ci(

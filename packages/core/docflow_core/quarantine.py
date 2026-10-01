@@ -31,7 +31,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from docflow_core import allowance, document_status
-from docflow_core.constants import QUARANTINE_TTL_DAYS
+from docflow_core.constants import INTERACTIVE_BATCH_MAX, QUARANTINE_TTL_DAYS
 from docflow_core.errors import ErrorCatalogEntry, get_error
 
 # Holds the tenant may release themselves.
@@ -242,6 +242,10 @@ def release(
                 "released_at": document_status.NOW,
                 "released_by_user_id": str(actor_user_id),
                 "released_acting_as_tenant_id": str(acting_as_tenant_id) if acting_as_tenant_id else None,
+                # Stage 3d (Q3): a release of up to INTERACTIVE_BATCH_MAX goes
+                # in the tenant's interactive lane, a larger one in bulk. The
+                # dispatcher sends them in received order (created_at).
+                "dispatch_lane": "interactive" if len(candidates) <= INTERACTIVE_BATCH_MAX else "bulk",
             },
         )
     )

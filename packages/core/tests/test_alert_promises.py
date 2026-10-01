@@ -35,6 +35,9 @@ ALERTED_ELSEWHERE = {
     "EXP-010": "storage_unavailable",
     # The review viewer during an outage (apps/api/app/routers/review.py).
     "DOC-028": "storage_unavailable",
+    # Stage 3d: shown only while the provider is marked down, which is when
+    # model_provider.record_failure raised this alert.
+    "DOC-023": "model_api_failure",
 }
 
 PROMISE = re.compile(r"(has|have) (already )?been alerted", re.IGNORECASE)

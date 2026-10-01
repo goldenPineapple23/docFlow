@@ -16,14 +16,15 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from docflow_core import allowance, file_types, founder_alerts, intake_gate, quarantine
+from docflow_core.constants import INTERACTIVE_BATCH_MAX
 from docflow_core.db import tenant_session
 from docflow_core.duplicates import find_content_duplicate_at_ingest
 from docflow_core.errors import get_error
 from docflow_core.storage import StorageUnavailableError, save_file
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from sqlalchemy import text
 
-from app.celery_client import celery_client
+from app.celery_client import nudge_dispatcher
 from app.deps import AuthenticatedIdentity, get_current_identity, require_reviewer
 from app.errors import catalog_error
 
@@ -53,11 +54,17 @@ def _require_tenant(identity: AuthenticatedIdentity) -> UUID:
 @router.post("/upload")
 async def upload_document(
     file: UploadFile,
+    # Stage 3d (Q3): how many files the person chose at once; the page sends
+    # one request per file. Up to INTERACTIVE_BATCH_MAX is the tenant's
+    # interactive lane, more is bulk. The lane only orders this tenant's own
+    # documents, so a client that misstates it reorders only its own queue.
+    batch_size: int = Form(1, ge=1),
     identity: AuthenticatedIdentity = Depends(get_current_identity),
 ) -> dict:
     tenant_id = _require_tenant(identity)
     content = await file.read()
-    return ingest_upload(tenant_id, file.filename or "upload", content)
+    lane = "interactive" if batch_size <= INTERACTIVE_BATCH_MAX else "bulk"
+    return ingest_upload(tenant_id, file.filename or "upload", content, lane=lane)
 
 
 def ingest_upload(
@@ -66,6 +73,7 @@ def ingest_upload(
     content: bytes,
     *,
     is_test_batch: bool = False,
+    lane: str = "interactive",
 ) -> dict:
     """
     The one upload path (Section 10: no second upload handler for the
@@ -197,11 +205,11 @@ def ingest_upload(
                     INSERT INTO documents
                         (id, tenant_id, original_filename, storage_path,
                          source, status, content_sha256, is_test_batch, is_possible_duplicate,
-                         duplicate_of_document_id, created_at)
+                         duplicate_of_document_id, dispatch_lane, created_at)
                     VALUES
                         (:id, :tenant_id, :original_filename, :storage_path,
                          'upload', :status, :content_sha256, :is_test_batch, :is_possible_duplicate,
-                         :duplicate_of_document_id, now())
+                         :duplicate_of_document_id, :dispatch_lane, now())
                     """
                 ),
                 {
@@ -214,6 +222,7 @@ def ingest_upload(
                     "is_test_batch": is_test_batch,
                     "is_possible_duplicate": existing is not None,
                     "duplicate_of_document_id": str(existing) if existing else None,
+                    "dispatch_lane": lane,
                 },
             )
             if hold:
@@ -232,14 +241,10 @@ def ingest_upload(
         raise catalog_error("DOC-025", status_code=503) from exc
 
     if not is_test_batch and not hold:
-        # Enqueued after the transaction commits, so the task never races a
-        # document row that isn't visible yet. Interactive priority (Section
-        # 5.1): a single upload a user is waiting on, never the bulk queue.
-        celery_client.send_task(
-            "docflow.parse_and_extract",
-            args=[str(tenant_id), str(document_id)],
-            queue="interactive",
-        )
+        # Stage 3d: the document waits as `pending` in its lane, and only the
+        # dispatcher puts it on the queue, taking turns between tenants. The
+        # nudge goes after the transaction commits, so the pass sees the row.
+        nudge_dispatcher()
 
     response: dict[str, Any] = {"document_id": str(document_id), "status": status}
     if hold:

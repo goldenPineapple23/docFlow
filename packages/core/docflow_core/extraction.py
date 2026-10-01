@@ -33,6 +33,7 @@ import anthropic
 import httpx2
 
 from docflow_core.numbers import parse_document_number
+from docflow_core.provider_errors import ProviderError, classify
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +257,9 @@ class ExtractionResult:
     # it, so the circuit breaker counts example tokens.
     examples_used: list[str] = dataclass_field(default_factory=list)
     example_input_tokens: int | None = None
+    # Stage 3d: set when the call itself failed (DOC-008) -- whether the
+    # document waits or fails, and why (docflow_core.provider_errors).
+    provider_error: ProviderError | None = None
 
 
 def system_prompt_for(examples: list[PromptExample] | None = None) -> str:
@@ -556,11 +560,19 @@ def extract_document(
     except (anthropic.APIError, httpx2.TransportError) as exc:
         # httpx2.TransportError: a connection dropped or gone silent in the
         # middle of the stream surfaces from the transport, not as an APIError.
-        logger.error("extraction_api_error model_id=%s error_type=%s", EXTRACTION_MODEL, type(exc).__name__)
+        provider_error = classify(exc)
+        logger.error(
+            "extraction_api_error model_id=%s error_type=%s label=%s group=%s",
+            EXTRACTION_MODEL,
+            type(exc).__name__,
+            provider_error.label,
+            provider_error.group,
+        )
         # If the answer had started, its input was billed: record what is
         # known (the output written so far is only reported at the end).
         partial = _usage_so_far(stream_ref)
         return ExtractionResult(
+            provider_error=provider_error,
             ok=False,
             model_id=EXTRACTION_MODEL,
             prompt_hash=p_hash,
@@ -717,6 +729,10 @@ class RoutingResult:
     est_cost_usd: Decimal | None = None
     latency_ms: int | None = None
     error_code: str | None = None
+    # Stage 3d: set when the call itself failed. Only an `our_configuration`
+    # answer is acted on (the routing_model_failure alert); the document goes
+    # ahead without examples either way.
+    provider_error: ProviderError | None = None
 
 
 def routing_input_cost(input_tokens: int) -> Decimal:
@@ -757,8 +773,15 @@ def read_buyer_header(
             timeout=ROUTING_TIMEOUT_SECONDS,
         )  # type: ignore[call-overload]  # content blocks are plain dicts, not the SDK TypedDicts
     except anthropic.APIError as exc:
-        logger.error("routing_api_error model_id=%s error_type=%s", ROUTING_MODEL, type(exc).__name__)
+        provider_error = classify(exc)
+        logger.error(
+            "routing_api_error model_id=%s error_type=%s label=%s",
+            ROUTING_MODEL,
+            type(exc).__name__,
+            provider_error.label,
+        )
         return RoutingResult(
+            provider_error=provider_error,
             ok=False,
             model_id=ROUTING_MODEL,
             prompt_hash=p_hash,

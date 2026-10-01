@@ -2,19 +2,23 @@
 The isolated parsing/extraction worker (CLAUDE.md Section 7.11): this
 process is deliberately separate from the FastAPI web app (apps/api), on
 its own deploy, so a crash here takes one document to `failed`, never the
-web app down. Actual parsing/extraction tasks are added in Phase 1.
+web app down.
 
-Two queues from day one, per the Section 5.1 scale envelope:
-  - "interactive": single-document uploads and re-runs a reviewer is
-    waiting on. Always drained first.
-  - "bulk": large backfills (e.g. a 500-document onboarding test batch or a
-    tenant's history import). Never allowed to starve "interactive".
+Two queues:
+  - "interactive": every document task, sent only by the dispatcher
+    (docflow_core.dispatch), plus the dispatch task itself and exports.
+  - "bulk": scheduled sweeps and other background work.
+Celery's Redis transport takes turns between the queues a worker reads
+(kombu's round-robin queue order); it does NOT drain "interactive" first.
+Until Stage 3d this docstring claimed it did (a doc/code contradiction found
+2026-10-01). Since 3d it no longer matters for documents: per-tenant
+fairness and "interactive before bulk" within a tenant are decided by the
+dispatcher, which keeps the queue no longer than the worker's document
+slots (DISPATCH_IN_FLIGHT_TARGET), so the queue's own order decides nothing.
 
-Per-tenant fairness (one tenant's 500-document dump must not starve another
-tenant's normal traffic) is a Phase 1 concern, implemented via Celery's
-routing + worker concurrency/rate-limit primitives once real tasks exist --
-this file only establishes the two-queue shape so that work lands in the
-right place from the start.
+Celery beat runs as its own process (README locally; the `beat` process
+group on Fly, exactly one -- BUILD-STATUS "3d -- APPROVED WITH CHANGES",
+change C). Every beat task is safe if two beats ever fire it.
 """
 
 from __future__ import annotations
@@ -23,7 +27,7 @@ from celery import Celery
 from celery.schedules import crontab
 from celery.signals import worker_process_init
 from docflow_core.config import get_settings
-from docflow_core.constants import WORKER_MAX_MEMORY_PER_CHILD_KIB
+from docflow_core.constants import DISPATCH_INTERVAL_SECONDS, WORKER_MAX_MEMORY_PER_CHILD_KIB
 
 settings = get_settings()
 
@@ -42,6 +46,7 @@ celery_app = Celery(
         "app.tasks.scheduled_jobs",
         "app.tasks.lifecycle_sweep",
         "app.tasks.stuck_sweep",
+        "app.tasks.dispatch",
     ],
 )
 
@@ -75,6 +80,14 @@ celery_app.conf.update(
     },
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    # Stage 3d (founder, Q2): the worker's document slots ARE the
+    # dispatcher's in-flight target, set from the one setting so the two
+    # can't drift -- plus ONE process the dispatcher never fills, because it
+    # never puts more than the target in flight. That one is always free for
+    # the dispatch pass, the sweeps and exports, so a 15-minute order can't
+    # hold up the heartbeat and make /healthz read "stale" (gap 1). One
+    # worker machine; RUNBOOK 9.2 when adding workers.
+    worker_concurrency=settings.dispatch_in_flight_target + 1,
     # Stage 3a (review H5): a worker process is replaced after the task that
     # took it past this much memory. Time limits are per task, on each task's
     # decorator (hard only; see docflow_core.constants), and both need
@@ -102,6 +115,13 @@ celery_app.conf.update(
             "task": "docflow.sweep_stuck_documents",
             "schedule": STUCK_SWEEP_SECONDS,
             "options": {"queue": "bulk"},
+        },
+        # Stage 3d: the dispatcher's backstop (Q4). Expires rather than piling
+        # up behind a busy worker: a later beat sends a fresh one.
+        "dispatch-waiting-documents": {
+            "task": "docflow.dispatch",
+            "schedule": DISPATCH_INTERVAL_SECONDS,
+            "options": {"queue": "interactive", "expires": DISPATCH_INTERVAL_SECONDS},
         },
     },
 )

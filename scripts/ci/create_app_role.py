@@ -51,6 +51,19 @@ def main() -> int:
             # Migration 0031's card-event function, the same way (D-181).
             "GRANT EXECUTE ON FUNCTION record_stripe_card_event"
             "(text, text, text, text, bigint) TO docflow_app",
+            # Migration 0035's dispatcher and provider functions (Stage 3d).
+            "grant execute on function dispatch_candidates(integer) to docflow_app",
+            "grant execute on function probe_candidate() to docflow_app",
+            "grant execute on function mark_dispatched(uuid) to docflow_app",
+            "grant execute on function clear_dispatched(uuid) to docflow_app",
+            "grant execute on function dispatcher_heartbeat() to docflow_app",
+            "grant execute on function dispatcher_status() to docflow_app",
+            "grant execute on function provider_state(text) to docflow_app",
+            "grant execute on function provider_record_failure"
+            "(text, text, text, boolean, integer, integer) to docflow_app",
+            "grant execute on function provider_record_success(text) to docflow_app",
+            "grant execute on function provider_take_probe(text, integer) to docflow_app",
+            "grant execute on function count_routing_model_failure() to docflow_app",
         ):
             conn.execute(statement)
 

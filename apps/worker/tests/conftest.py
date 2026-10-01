@@ -114,6 +114,66 @@ requires_stage3c_schema = pytest.mark.skipif(
 )
 
 
+def stage3d_schema_available() -> bool:
+    """True once supabase/migrations/0035_dispatcher_and_waits.sql has been
+    applied (documents.dispatched_at, the dispatcher and provider functions).
+    Applied by hand on staging like every migration (D-013); CI applies it
+    itself, so these tests never skip there."""
+    if not database_available():
+        return False
+    from docflow_core.db import get_engine
+    from sqlalchemy import text
+
+    try:
+        with get_engine().connect() as conn:
+            conn.execute(text("SELECT dispatched_at, dispatch_lane, wait_cause FROM documents LIMIT 0"))
+            conn.execute(text("SELECT * FROM public.dispatcher_status()"))
+        return True
+    except Exception:
+        return False
+
+
+requires_stage3d_schema = pytest.mark.skipif(
+    not stage3d_schema_available(),
+    reason="supabase/migrations/0035_dispatcher_and_waits.sql has not been applied to this database yet.",
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_dispatch_or_provider_state(request, monkeypatch):
+    """
+    Stage 3d: the document task ends with a dispatch pass and records the
+    model provider's state -- both real, global writes. A test that drives the
+    task must never mark the shared database's provider down, or dispatch
+    other tests' documents, by accident. So by default they are stubbed, and
+    the calls are recorded on `request.node.dispatch_calls`; a test that
+    proves the real thing says so with @pytest.mark.real_dispatch and calls
+    it directly.
+    """
+    if request.node.get_closest_marker("real_dispatch"):
+        return
+    calls: list[tuple] = []
+    request.node.dispatch_calls = calls
+    from docflow_core import model_provider
+
+    import app.tasks.parse_and_extract as task
+
+    monkeypatch.setattr(task, "dispatch_after_task", lambda: calls.append(("dispatch",)))
+    monkeypatch.setattr(model_provider, "record_success", lambda: calls.append(("success",)) or False)
+    monkeypatch.setattr(
+        model_provider, "record_failure", lambda error: calls.append(("failure", error)) or False
+    )
+    monkeypatch.setattr(
+        model_provider, "alert_routing_failure", lambda error: calls.append(("routing_failure", error))
+    )
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "real_dispatch: the test drives the real dispatcher and provider state (Stage 3d)"
+    )
+
+
 # ── Stage 3c: the parse service every document test reads through ──────────
 import os  # noqa: E402
 import socket  # noqa: E402

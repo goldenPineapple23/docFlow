@@ -46,6 +46,8 @@ ALLOWED: frozenset[tuple[str, str]] = frozenset(
         ("pending", "failed"),
         ("staged", "pending"),
         ("quarantined", "pending"),
+        # Stage 3d (0035): waits out a provider, Storage or parse-service outage.
+        ("processing", "pending"),
         ("processing", "needs_review"),
         ("processing", "failed"),
         ("needs_review", "approved"),
@@ -85,8 +87,26 @@ _SETTABLE: frozenset[str] = frozenset(
         "processing_started_at",
         "failure_code",
         "pipeline_issues",
+        # Stage 3d: a document leaving the wait loop (for review or failure)
+        # clears what its waits recorded.
+        "waiting_since",
+        "wait_cause",
+        "retry_at",
+        "last_wait_error",
+        # Stage 3d (Q3): set when a release or test-batch run makes a document
+        # `pending`.
+        "dispatch_lane",
     }
 )
+
+# Stage 3d: what a move out of the wait loop sets, so a reviewed or failed
+# document never still reads as waiting.
+WAIT_CLEARED: dict[str, Any] = {
+    "waiting_since": None,
+    "wait_cause": None,
+    "retry_at": None,
+    "last_wait_error": None,
+}
 # Values that are SQL, not bound parameters.
 NOW = object()
 NULL = object()
@@ -267,7 +287,11 @@ def claim_for_processing(
     """The worker's claim (H3). Takes a `pending` document, or one left in
     `processing` longer than the stuck timeout by a worker that died. Anything
     else -- already being processed, already in review, approved, exported --
-    is not touched, so a redelivered or duplicated job is a no-op."""
+    is not touched, so a redelivered or duplicated job is a no-op.
+
+    Stage 3d: a `pending` document still inside a wait's backoff (`retry_at`
+    ahead) is not taken either, so a stray duplicate job can't retry it
+    early; the dispatcher clears `retry_at` when it sends a document."""
     row = session.execute(
         text(
             """
@@ -277,7 +301,7 @@ def claim_for_processing(
                    processing_attempts = processing_attempts + 1
              WHERE id = :id
                AND deleted_at IS NULL
-               AND (status = 'pending'
+               AND ((status = 'pending' AND (retry_at IS NULL OR retry_at <= now()))
                     OR (status = 'processing'
                         -- NULL: claimed before migration 0027 stamped claims.
                         AND (processing_started_at IS NULL
@@ -290,31 +314,99 @@ def claim_for_processing(
     return row is not None
 
 
-def release_after_storage_outage(session: Session, document_id: UUID) -> bool:
-    """
-    Stage 3b (Q3): the worker couldn't read the original because Storage was
-    unreachable. Stage 3c uses it too, for a parse request that never got in
-    (the parse service unreachable or busy past the client's patience).
-    That is not the document's fault and must never use up one
-    of its MAX_PROCESSING_ATTEMPTS, or an outage longer than about 90 minutes
-    would end in DOC-022.
+WAIT_CAUSES = ("model_provider", "storage", "parse_service")
 
-    The document stays `processing` (0027's trigger has no `processing ->
-    pending`; 3d adds that wait with its own migration), its attempt is given
-    back, and its claim is re-stamped. The stuck sweep takes it over again
-    after STUCK_PROCESSING_TIMEOUT_MIN and `decide()` always says retry, so it
-    waits out the outage however long it lasts, and the hourly
-    storage_unavailable alert tells the founder.
+
+def to_waiting(
+    session: Session,
+    document_id: UUID,
+    *,
+    cause: str,
+    retry_after_seconds: int,
+    error_label: str,
+) -> bool:
     """
+    Stage 3d (item 4): the worker couldn't finish this attempt because
+    something DocFlow depends on was down -- the model provider, Storage, or
+    the parse service (a request that never got in). That is never the
+    document's fault, so it waits instead of failing.
+
+    `processing -> pending` (migration 0035), in one compare-and-set:
+    - the attempt is given back, so waiting never uses up
+      MAX_PROCESSING_ATTEMPTS or looks like a timeout (DOC-022, 3a);
+    - `dispatched_at` and the claim stamp are cleared: it is waiting again,
+      not a lost job, and only the dispatcher sends it on;
+    - `waiting_since` is kept from the first wait of the same cause (the
+      6-hour maximum counts from there) and restarts when the cause changes;
+    - `retry_at` is when the dispatcher may send it again;
+    - `last_wait_error` is a status code or fixed label (Section 7.10).
+    Returns False if the document had already left `processing`.
+    """
+    if cause not in WAIT_CAUSES:
+        raise ValueError(f"unknown wait cause {cause!r}")
     result = session.execute(
         text(
             """
             UPDATE documents
-               SET processing_attempts = GREATEST(processing_attempts - 1, 0),
-                   processing_started_at = now()
+               SET status = 'pending',
+                   processing_attempts = GREATEST(processing_attempts - 1, 0),
+                   processing_started_at = NULL,
+                   dispatched_at = NULL,
+                   waiting_since = CASE WHEN wait_cause = :cause
+                                        THEN coalesce(waiting_since, now()) ELSE now() END,
+                   wait_cause = :cause,
+                   retry_at = now() + make_interval(secs => :retry_after),
+                   last_wait_error = :error_label
              WHERE id = :id AND status = 'processing' AND deleted_at IS NULL
             """
         ),
-        {"id": str(document_id)},
+        {
+            "id": str(document_id),
+            "cause": cause,
+            "retry_after": int(retry_after_seconds),
+            "error_label": error_label[:120],
+        },
     )
     return bool(rowcount(result))
+
+
+def fail_provider_waits_past(session: Session, *, hours: int, failure_code: str) -> list[UUID]:
+    """
+    Stage 3d: every document in the session's tenant that has waited `hours`
+    on the model provider, failed with `failure_code` (DOC-024) --
+    `pending -> failed`, compare-and-set on the status. While the provider is
+    down the dispatcher sends only its probe, so these are never claimed to
+    reach the limit themselves; the stuck sweep calls this. Returns the ids.
+    """
+    rows = session.execute(
+        text(
+            """
+            UPDATE documents
+               SET status = 'failed', failure_code = :code, processed_at = now(),
+                   retry_at = NULL, dispatched_at = NULL
+             WHERE status = 'pending' AND deleted_at IS NULL
+               AND wait_cause = 'model_provider'
+               AND waiting_since < now() - make_interval(hours => :hours)
+            RETURNING id
+            """
+        ),
+        {"code": failure_code, "hours": hours},
+    ).all()
+    return [UUID(str(row[0])) for row in rows]
+
+
+def waited_seconds(session: Session, document_id: UUID, cause: str) -> int | None:
+    """How long the document has been waiting on `cause`, counted from its
+    first wait (None if it isn't waiting on it). Read before `to_waiting` to
+    choose the backoff step and to apply the maximum."""
+    row = session.execute(
+        text(
+            """
+            SELECT floor(extract(epoch FROM now() - waiting_since))::integer
+              FROM documents
+             WHERE id = :id AND wait_cause = :cause AND waiting_since IS NOT NULL
+            """
+        ),
+        {"id": str(document_id), "cause": cause},
+    ).first()
+    return None if row is None else int(row[0])
