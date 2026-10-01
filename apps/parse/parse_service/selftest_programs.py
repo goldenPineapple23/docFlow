@@ -159,6 +159,13 @@ def _try_write(path: str) -> str:
         return errno.errorcode.get(exc.errno or 0, str(exc.errno))
 
 
+def _same_filesystem(path: str, other: str) -> bool | str:
+    try:
+        return os.stat(path).st_dev == os.stat(other).st_dev
+    except OSError as exc:
+        return errno.errorcode.get(exc.errno or 0, str(exc.errno))
+
+
 def probe_view(args: dict) -> dict:
     """A8, A9, A11, A12, A13, A14."""
     status = _status()
@@ -189,7 +196,10 @@ def probe_view(args: dict) -> dict:
         "fly_dir": sorted(os.listdir("/.fly")) if os.path.isdir("/.fly") else "absent",
         "sys_dir": sorted(os.listdir("/sys")) if os.path.isdir("/sys") else "absent",
         "dev": dev,
-        "writes": {p: _try_write(p) for p in ("/", "/usr", "/etc", "/tmp", "/opt", "/work", "/lohome")},
+        "writes": {p: _try_write(p) for p in ("/", "/usr", "/etc", "/tmp", "/var/tmp", "/opt", "/work", "/lohome")},
+        # Q14: /tmp and /var/tmp are this job's /work tmpfs, nothing else.
+        "tmp_on_work": {p: _same_filesystem(p, "/work") for p in ("/tmp", "/var/tmp")},
+        "tmp_listing": sorted(os.listdir("/tmp")) if os.path.isdir("/tmp") else "absent",
         "processes_visible": sorted(int(p) for p in os.listdir("/proc") if p.isdigit()),
         "pid": os.getpid(),
         "env_names": sorted(os.environ),
@@ -398,7 +408,7 @@ def disk(args: dict) -> dict:
     out = {}
     budget = int(args.get("max_mib", 1024)) << 20
     chunk = bytes(1 << 20)  # 1 MiB of zeros
-    for place in ("/work", "/lohome", "/dev/shm"):
+    for place in ("/work", "/lohome", "/dev/shm", "/tmp"):
         written, stopped_by = 0, None
         files: list[str] = []
         try:
@@ -418,6 +428,30 @@ def disk(args: dict) -> dict:
                 os.unlink(path)
             except OSError:
                 pass
+    # Q14: /tmp is /work's tmpfs, so with 128 MiB kept in /work, /tmp runs out
+    # at what /work has left, not at a cap of its own.
+    kept = "/work/kept"
+    with open(kept, "wb") as handle:
+        for _ in range(128):
+            handle.write(chunk)
+    written, stopped_by, files = 0, None, []
+    try:
+        while written < budget and stopped_by is None:
+            path = f"/tmp/fill-{len(files)}"
+            files.append(path)
+            with open(path, "wb") as handle:
+                for _ in range(32):
+                    handle.write(chunk)
+                    handle.flush()
+                    written += len(chunk)
+    except OSError as exc:
+        stopped_by = errno.errorcode.get(exc.errno or 0, str(exc.errno))
+    out["/tmp_with_128_mib_in_work"] = {"written_mib": written >> 20, "stopped_by": stopped_by}
+    for path in [*files, kept]:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
     return out
 
 
@@ -499,50 +533,25 @@ def _libreoffice_once(binary: str, work: str, label: str, extra_args: list[str],
     }
 
 
-SOFFICE_BIN = "/usr/lib/libreoffice/program/soffice.bin"
-
-
-def _soffice_bin(work: str, socket_dir: str) -> dict:
-    if not os.path.exists(SOFFICE_BIN):
-        return {"binary": None}
-    first = _libreoffice_once(SOFFICE_BIN, work, "bin", [], {"OSL_SOCKET_PATH": socket_dir})
-    if first.get("exit_status") != 81:
-        return {"first": first}
-    # The same profile again, as oosplash's restart would use it.
-    again = _libreoffice_once(SOFFICE_BIN, work, "bin", [], {"OSL_SOCKET_PATH": socket_dir})
-    return {"first": first, "after_restart": again}
-
-
 def libreoffice(args: dict) -> dict:
-    """B13: LibreOffice converts a file inside the real sandbox, run the way
-    parsing/conversion.py runs it (same flags, throwaway profile, the Word 97
-    import filter, docx target), on the committed po.doc in the image.
-    `as_conversion_py` decides the check. The rest is evidence for the
-    founder's decision, not a change (founder, 2026-10-01: any limit or
-    filesystem change comes to them first): whether LibreOffice's usual pipe
-    directories are writable here, and whether pointing its pipe at the
-    already-writable work directory (OSL_SOCKET_PATH, as an environment
-    variable or as -env:) is enough."""
+    """B13: LibreOffice converts the committed po.doc inside the real sandbox,
+    run the way parsing/conversion.py runs it (same flags, throwaway profile,
+    the Word 97 import filter, docx target), and reports whether its pipe
+    directories are writable here: since Q14 (founder, 2026-10-01) /tmp and
+    /var/tmp are the job's /work tmpfs. (The variants that answered Q14 --
+    OSL_SOCKET_PATH, soffice.bin directly -- are in BUILD-STATUS "3c build".)"""
     from parse_service.parsing.conversion import find_libreoffice
 
     binary = find_libreoffice()
     if binary is None or not os.path.exists(SELFTEST_DOC):
         return {"binary": binary, "selftest_doc": os.path.exists(SELFTEST_DOC)}
     work = os.path.join(os.environ.get("TMPDIR", "/tmp"), "b13")
-    socket_dir = os.path.join(work, "sockets")
-    os.makedirs(socket_dir, exist_ok=True)
+    os.makedirs(work, exist_ok=True)
     return {
         "binary": binary,
         "pipe_dirs_writable": {d: _try_write(d) for d in ("/tmp", "/var/tmp")},
         "tmpdir": os.environ.get("TMPDIR"),
         "as_conversion_py": _libreoffice_once(binary, work, "plain", [], {}),
-        "OSL_SOCKET_PATH_env": _libreoffice_once(binary, work, "env", [], {"OSL_SOCKET_PATH": socket_dir}),
-        "OSL_SOCKET_PATH_arg": _libreoffice_once(binary, work, "arg", [f"-env:OSL_SOCKET_PATH={socket_dir}"], {}),
-        # The soffice launcher (oosplash) checks only /tmp and /var/tmp for its
-        # pipe and exits before the office starts; the office itself
-        # (soffice.bin) honours OSL_SOCKET_PATH. Run it directly; it may ask
-        # for one restart (exit 81) on a fresh profile, which oosplash would do.
-        "soffice_bin_OSL_SOCKET_PATH": _soffice_bin(work, socket_dir),
     }
 
 
@@ -553,7 +562,11 @@ def exit_with(args: dict) -> dict:
 
 
 def sleep(args: dict) -> dict:
-    """A11: stays alive a little so a second job can look for it."""
+    """A11: stays alive a little so a second job can look for it, leaving a
+    marker in /tmp (`touch`) that the second job must not see."""
+    if args.get("touch"):
+        with open(os.path.join("/tmp", os.path.basename(str(args["touch"]))), "wb") as handle:
+            handle.write(b"x")
     time.sleep(float(args.get("seconds", 2)))
     return {"pid": os.getpid()}
 

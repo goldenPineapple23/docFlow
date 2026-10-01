@@ -175,11 +175,11 @@ def serve() -> int:
     cgroups = None
     if settings.isolation:
         from parse_service.cgroups import CgroupError, Cgroups
-        from parse_service.launcher import become_subreaper
+        from parse_service.launcher import start_reaper
         from parse_service.selftest import Runner
 
         try:
-            become_subreaper()  # killed jobs' orphans come here to be reaped (B5/B11)
+            start_reaper()  # killed jobs' orphans come here and are reaped on SIGCHLD (B5/B11)
             cgroups = Cgroups.detect()
             cgroups.setup()
         except (CgroupError, OSError) as exc:

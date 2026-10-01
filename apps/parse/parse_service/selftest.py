@@ -40,9 +40,9 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from parse_service import config, selftest_programs
+from parse_service import config, launcher, selftest_programs
 from parse_service.cgroups import Cgroups, active_swap
-from parse_service.launcher import JobResult, Limits, become_subreaper, process_facts, run_job
+from parse_service.launcher import JobResult, Limits, process_facts, run_job, start_reaper
 
 # The committed fake purchase order copied into the image (Dockerfile) for
 # S4 and B13 and B11: a real legacy Word file, on CI and on Fly.
@@ -70,8 +70,9 @@ DOCFLOW_SETTING_NAMES = (
     "DOCUMENT_URL_SIGNING_SECRET",
     "SESSION_SECRET",
 )
-EROFS_PLACES = ("/", "/usr", "/etc", "/tmp", "/opt")
-WRITABLE_PLACES = ("/work", "/lohome")
+# /tmp and /var/tmp are not here: they are each job's /work tmpfs (Q14).
+EROFS_PLACES = ("/", "/usr", "/etc", "/opt")
+WRITABLE_PLACES = ("/work", "/lohome", "/tmp", "/var/tmp")
 
 
 @dataclass
@@ -218,12 +219,14 @@ class Runner:
         writes = inside.get("writes", {})
         ro_ok = all(writes.get(p) == "EROFS" for p in EROFS_PLACES)
         rw_ok = all(writes.get(p) == "writable" for p in WRITABLE_PLACES)
+        tmp_on_work = inside.get("tmp_on_work", {})
+        tmp_ok = bool(tmp_on_work) and all(v is True for v in tmp_on_work.values())
         outside_writes = outside.get("writes", {})
         self.add(
             Check(
                 "A14:read-only-root",
-                _verdict(ro_ok and rw_ok, outside_writes.get("/opt") == "writable"),
-                {"outside": outside_writes, "inside": writes},
+                _verdict(ro_ok and rw_ok and tmp_ok, outside_writes.get("/opt") == "writable"),
+                {"outside": outside_writes, "inside": writes, "tmp_and_var_tmp_are_the_work_tmpfs": tmp_on_work},
             )
         )
 
@@ -253,8 +256,10 @@ class Runner:
     def concurrent(self) -> None:
         first = {}
 
+        marker = f"a11-marker-{time.time_ns()}"
+
         def hold() -> None:
-            first["job"] = self.job("sleep", {"seconds": 4}, slot=0)
+            first["job"] = self.job("sleep", {"seconds": 4, "touch": marker}, slot=0)
 
         thread = threading.Thread(target=hold)
         thread.start()
@@ -266,6 +271,7 @@ class Runner:
             second.get("uid") == config.SLOT_UID_BASE + 1
             and len(visible) <= 3
             and second.get("work_listing") == ["tmp"]
+            and second.get("tmp_listing") == []  # not the first job's /tmp marker
         )
         self.add(
             Check(
@@ -274,6 +280,8 @@ class Runner:
                 {
                     "second_job_sees_processes": visible,
                     "second_job_work": second.get("work_listing"),
+                    "first_job_left_in_its_tmp": marker,
+                    "second_job_tmp": second.get("tmp_listing"),
                     "first": _outcome(first.get("job")),
                 },
             )
@@ -480,7 +488,7 @@ class Runner:
 
     def wall_clock(self) -> None:
         job = self.job("stubborn", limits=Limits().lowered(wall_seconds=5))
-        left = _processes_of(config.SLOT_UID_BASE)
+        left, settled = _settle(config.SLOT_UID_BASE)
         self.add(
             Check(
                 "B5:wall-clock-kills-everything",
@@ -495,7 +503,9 @@ class Runner:
                     "cause": job.cause,
                     "seconds": job.seconds,
                     "slot_user_processes_after": left,
+                    "seconds_until_none_left": settled,
                     "left_details": _describe(left),
+                    "recently_reaped_on_sigchld": list(launcher.RECENT_REAPS)[-3:],
                     "pid1": _pid1(),
                     "supervisor_pid_ns": _supervisor_pid_ns(),
                     **job.evidence,
@@ -535,11 +545,17 @@ class Runner:
             "/work": config.WORK_TMPFS_BYTES,
             "/lohome": config.HOME_TMPFS_BYTES,
             "/dev/shm": config.SHM_TMPFS_BYTES,
+            "/tmp": config.WORK_TMPFS_BYTES,  # /work's tmpfs (Q14)
         }
         ok = job.outcome == "selftest" and all(
             result.get(p, {}).get("stopped_by") == "ENOSPC" and (result[p]["written_mib"] << 20) <= size
             for p, size in sizes.items()
         )
+        # /tmp counts against /work's cap: with 128 MiB kept in /work, /tmp
+        # stops at what /work has left.
+        shared = result.get("/tmp_with_128_mib_in_work", {})
+        ok = ok and shared.get("stopped_by") == "ENOSPC"
+        ok = ok and (shared.get("written_mib", 999) << 20) <= config.WORK_TMPFS_BYTES - 128 * config.MIB
         counted = self.job("disk", {"max_mib": 1024}, limits=Limits().lowered(memory_bytes=160 * config.MIB))
         counted_result = self.result(counted)
         counted_ok = (counted.outcome == "stopped" and counted.cause == "memory") or (
@@ -632,6 +648,7 @@ class Runner:
         cgroup and no slot-user process may be left."""
         from parse_service.server import Handler, Service, _Server
 
+        backstop_before = len(launcher.BACKSTOP_FOUND)
         service = Service(self.settings, self.cgroups)
         Handler.service = service
         service.healthy = True
@@ -696,7 +713,11 @@ class Runner:
 
         leftover = self.cgroups.job_dirs()
         left = _processes_of(config.SLOT_UID_BASE) + _processes_of(config.SLOT_UID_BASE + 1)
-        pid1_is_the_reaper = bool(pid1_seen) and all("parse_service.sandbox_init" in c for c in pid1_seen)
+        backstop_found = launcher.BACKSTOP_FOUND[backstop_before:]
+        # A PID 1 caught at the instant it exits has no command line; it is
+        # reported, and every live one must be the reaper.
+        live_pid1 = [c for c in pid1_seen if not c.startswith("<exiting")]
+        pid1_is_the_reaper = bool(live_pid1) and all("parse_service.sandbox_init" in c for c in live_pid1)
         saw_a_running_job = any("parse_service.job" in c for c in pid2_seen)
         self.add(
             Check(
@@ -708,6 +729,7 @@ class Runner:
                     and not left
                     and pid1_is_the_reaper
                     and saw_a_running_job
+                    and not backstop_found
                 ),
                 {
                     "http_statuses": statuses,
@@ -717,6 +739,7 @@ class Runner:
                     "job_cgroups_left": leftover,
                     "slot_user_processes_left": left,
                     "left_details": _describe(left),
+                    "orphans_found_by_the_after_job_backstop": backstop_found,
                     "pid1": _pid1(),
                     "supervisor_pid_ns": _supervisor_pid_ns(),
                 },
@@ -834,6 +857,7 @@ class Runner:
             and view.get("sys_dir") == []
             and "block" not in view.get("dev", {}).values()
             and all(view.get("writes", {}).get(p) == "EROFS" for p in EROFS_PLACES)
+            and all(v is True for v in view.get("tmp_on_work", {"none": False}).values())
             and view.get("uid") == config.SLOT_UID_BASE
             and int(view.get("CapEff", "1"), 16) == 0
             and view.get("NoNewPrivs") == "1"
@@ -910,7 +934,9 @@ def _describe(pids: list[int]) -> list[dict]:
 
 def _namespaced_processes() -> list[tuple[int, int, str]]:
     """(pid, pid inside its own namespace, command line) for every process
-    in a child PID namespace -- that is, every process of a running job."""
+    in a child PID namespace -- that is, every process of a running job. A
+    process caught while exiting has released its memory and shows an empty
+    command line; it is named "<exiting: State>" so B11 reports it apart."""
     out = []
     for entry in Path("/proc").iterdir():
         if not entry.name.isdigit():
@@ -920,12 +946,27 @@ def _namespaced_processes() -> list[tuple[int, int, str]]:
             cmdline = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
         except OSError:
             continue
+        fields: list[str] = []
+        state = "?"
         for line in status.splitlines():
             if line.startswith("NSpid:"):
                 fields = line.split()[1:]
-                if len(fields) >= 2:
-                    out.append((int(entry.name), int(fields[-1]), cmdline))
+            elif line.startswith("State:"):
+                state = line.split(":", 1)[1].strip()
+        if len(fields) >= 2:
+            out.append((int(entry.name), int(fields[-1]), cmdline or f"<exiting: {state}>"))
     return out
+
+
+def _settle(uid: int, limit_seconds: float = 30.0) -> tuple[list[int], float]:
+    """B5: how long until a killed job's processes are gone (the reaper acts
+    on SIGCHLD; this only bounds how long the test waits, and reports it)."""
+    started = time.monotonic()
+    left = _processes_of(uid)
+    while left and time.monotonic() - started < limit_seconds:
+        time.sleep(0.05)
+        left = _processes_of(uid)
+    return left, round(time.monotonic() - started, 2)
 
 
 def _supervisor_pid_ns() -> str:
@@ -1047,7 +1088,7 @@ def main(argv: list[str] | None = None) -> int:
     if not settings.isolation:
         print("self-tests need isolation on")
         return 2
-    become_subreaper()  # as the service does: killed jobs' orphans are reaped (B5/B11)
+    start_reaper()  # as the service does: killed jobs' orphans are reaped on SIGCHLD (B5/B11)
     cgroups = Cgroups.detect()
     cgroups.setup()
     print(f"cgroup v{cgroups.version}; machine has active swap: {active_swap()}", flush=True)

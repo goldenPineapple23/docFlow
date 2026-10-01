@@ -53,6 +53,8 @@ BUSY_RETRY_AFTER_SECONDS = 5
 # Inside the job's mount namespace.
 WORK_DIR = "/work"
 HOME_DIR = "/lohome"
+# Bind-mounted from WORK_DIR/tmp inside every job (sandbox_init._tmp_is_work, Q14).
+TMP_DIRS = ("/tmp", "/var/tmp")
 
 TEST_ONLY_PREFIX = "PARSE_TEST_ONLY_"
 

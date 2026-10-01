@@ -1557,10 +1557,10 @@ failure means stop and report.
 | A8 | `/.fly` empty (the socket isn't there, not just refused); `/sys` empty; the only interface is `lo`, down | present outside | | yes (`/sys`) | yes (both) |
 | A9 | Identity: the slot's user, `CapEff` 0, empty bounding set, `NoNewPrivs` 1, no supplementary groups | root outside | | yes | yes |
 | A10 | No way out: `nsenter` into the machine's namespaces, bringing up an interface, `mount` -- all refused | work as root outside | | yes | yes |
-| A11 | The job sees only its own processes; two jobs running at once can't see each other's files or processes | -- | | yes | yes |
+| A11 | The job sees only its own processes; two jobs running at once can't see each other's files or processes, **including `/tmp`: a marker the first job leaves in its `/tmp` is not in the second's (Q14)** | -- | | yes | yes |
 | A12 | The job's environment holds none of DocFlow's setting names (database, Storage, Anthropic, Supabase, Stripe, Postmark, the parse token); on Fly, the parse app's secret list is the token alone | the supervisor's own environment has the token | | yes | yes |
 | A13 | **`/dev` (founder's item 3):** no block device at all, and only `null`, `zero`, `full`, `random`, `urandom` and `shm` | block devices listed outside (CI: the runner's; Fly: `vda`-`vdc`, `loop`, `nbd`) | | yes | yes |
-| A14 | **Read-only root (Q7):** writing to `/`, `/usr`, `/app`, `/etc` or `/tmp` fails (EROFS); `/work` and LibreOffice's home are writable up to their caps | the same writes as root outside succeed (into a throwaway path) | | yes | yes |
+| A14 | **Read-only root (Q7):** writing to `/`, `/usr`, `/app`, `/etc` or `/opt` fails (EROFS); `/work` and LibreOffice's home are writable up to their caps; **`/tmp` and `/var/tmp` are writable only as the job's `/work` tmpfs (same filesystem; Q14, 2026-10-01)** | the same writes as root outside succeed (into a throwaway path) | | yes | yes |
 | **S. seccomp (founder's item 1)** | | | | | |
 | S1 | **The shipped rule set, with a test-only errno in place of EPERM, inside the real sandbox:** every refused call returns that errno, so the filter (not a missing privilege) answered: `unshare`, `clone` with each new-namespace flag, `setns`, `mount`, `umount2`, the newer mount calls, `ptrace`, `process_vm_readv/writev`, `bpf`, `keyctl`, `add_key`, `request_key`, `perf_event_open`, `init_module`, `finit_module`, `delete_module`, `kexec_load`, `kexec_file_load`, **`io_uring_setup`, `io_uring_enter`, `io_uring_register`, `userfaultfd`** | -- | | yes | yes |
 | S2 | **The filter as shipped (EPERM), inside the real sandbox:** every call in S1 fails, io_uring and `userfaultfd` included; `/proc/self/status` shows `Seccomp: 2` and `NoNewPrivs: 1` | -- | | yes | yes |
@@ -1575,10 +1575,10 @@ failure means stop and report.
 | B5 | Wall clock: a program that ignores SIGTERM and starts children is killed at the limit, **and no process of that job user is left** | -- | | yes | yes |
 | B6 | Fork bomb: stopped at the job's `pids` cap; the machine stays healthy | -- | | yes | yes |
 | B7 | Answer flood: the supervisor stops reading at the cap and kills the job | -- | | yes | yes |
-| B8 | Disk: `/work`, LibreOffice's home and `/dev/shm` each stop at their size, and their pages count against the job's memory | -- | | yes | yes |
+| B8 | Disk: `/work`, LibreOffice's home and `/dev/shm` each stop at their size, and their pages count against the job's memory; **`/tmp` counts against `/work`'s cap (with 128 MiB kept in `/work`, `/tmp` stops at what is left; Q14)** | -- | | yes | yes |
 | B9 | One process per file: two jobs in a row have different processes and namespaces, and nothing of the first is left in `/work` or the home | -- | yes (process only) | yes | yes |
 | B10 | The job can't raise its own limit or leave its cgroup (the files are hidden; and refused even if visible) | root can change it | | yes | yes |
-| B11 | **No leak, through the real request path** (founder, 2026-10-01): the service's own Service and Handler on a loopback port, 100 real POSTs (a text order, a catalog table, the committed `po.doc`), two at a time; all answer 200, none stopped or crashed; afterwards every job cgroup is gone and the slot users own no process. **While they run, every job's namespace PID 1 is sampled from outside and must be the reaper (`sandbox_init`), never the parser or LibreOffice,** and a running job must be seen as its PID 2 | -- | | yes | yes |
+| B11 | **No leak, through the real request path** (and nothing found by the after-job backstop) (founder, 2026-10-01): the service's own Service and Handler on a loopback port, 100 real POSTs (a text order, a catalog table, the committed `po.doc`), two at a time; all answer 200, none stopped or crashed; afterwards every job cgroup is gone and the slot users own no process. **While they run, every job's namespace PID 1 is sampled from outside and must be the reaper (`sandbox_init`), never the parser or LibreOffice,** and a running job must be seen as its PID 2 | -- | | yes | yes |
 | B12 | **CPU quota (slows):** a job spinning on every core gets at most one CPU's worth of time over a timed window, and the cgroup reports throttling; the other slot's job still finishes | the same program with no quota uses more than one CPU | | yes | yes |
 | B13 | **LibreOffice runs in the sandbox** (added 2026-10-01 after `po.doc` gave DOC-017 in the real image): the committed `po.doc`, converted inside a real job with `conversion.py`'s flags and Word 97 filter, exits 0 and produces a file; reports its exit status and stderr tail, whether `/tmp` and `/var/tmp` are writable, and the same run with LibreOffice's pipe pointed at the work directory (evidence) | -- | | yes | yes |
 | B14 | **A parser's own exit code is never read as a kill** (founder, 2026-10-01): a job that exits 137 by itself, in the real sandbox, is `crashed: exit_137`, with no OOM kill and the reaper's record `{"exited": 137}`; unit tests cover every combination (`apps/parse/tests/test_classify.py`) | -- | | yes | yes |
@@ -1740,7 +1740,56 @@ record: `bbc0932` core 699/0, api 575/0, worker 131/20 (the F5 cascade);
      tmpfs as `/work`, under `/work`'s existing cap (B8 would add a line
      showing writes to `/tmp` count against it). It is a change to the
      sandbox's filesystem view.
-  My recommendation waits for the next run's evidence on option 1.
+  **Founder's decision (2026-10-01): option 2, decided without waiting**:
+  option 1 ties DocFlow to LibreOffice internals (the binary's path, the
+  exit-81 restart) that the weekly Debian snapshot can change; option 2
+  runs LibreOffice as shipped, and each job's `/tmp` is its own, under
+  `/work`'s cap.
+
+**Sixth run (`974ad9e`).** core 700, 0 failed; api 580, 0 failed; worker
+132, 2 failed (`po.doc`); web and web-live passed; parse unit 116, 0
+failed; parse HTTP 56, 1 failed (`po.doc`). Self-tests: canary 5 of 5;
+**S 5 of 5, including `S4:real-doc-under-the-filter-alone`** (the real
+`po.doc` converts under the seccomp filter alone in 0.9 s, PO number found:
+the filter is not the cause, the filesystem is); A all PASS, IPv6 NOT-RUN;
+B: B5 PASS (nothing left after the wall-clock kill), B14 PASS
+(`crashed: exit_137`, no OOM kill, record `{"exited": 137}`); B13 and B11
+failed:
+- **B13:** the three redirects fail as before; `soffice.bin` run directly
+  with `OSL_SOCKET_PATH` asked for its restart (exit 81) and then converted
+  the file (`input.docx`). That confirms the diagnosis; option 2 was chosen
+  regardless.
+- **B11: a sampling artifact, not a leak.** 100 requests, all 200 (txt and
+  csv `ok`; `.doc` rejected, the known cause); no job cgroup, no slot-user
+  process left. Every live namespace PID 1 sampled was `sandbox_init`; the
+  parser was PID 2. But 6 PID 1 samples had an empty command line: a
+  process caught at the instant it exits (its memory released). Fixed: the
+  sampler records each one's state and names those `<exiting: State>`,
+  reported, not judged.
+
+**Built after the sixth run (founder, 2026-10-01):**
+- **Q14 option 2:** `sandbox_init` bind-mounts the job's `/work/tmp` over
+  `/tmp` and `/var/tmp` (`config.TMP_DIRS`), `nosuid,nodev` like `/work`,
+  after the rest of the root is read-only. Tests: A14 (`/tmp` and
+  `/var/tmp` writable and the same filesystem as `/work`; `/`, `/usr`,
+  `/etc`, `/opt` still EROFS; the canary checks the same); B8 (`/tmp` runs
+  out at `/work`'s cap, and with 128 MiB kept in `/work` at what is left);
+  A11 (a concurrent job doesn't see the first job's `/tmp` marker); D1 and
+  the worker's `po.doc` tests should now pass. B13 keeps only the run as
+  `conversion.py` does it.
+- **The reaper is event-driven (no timing window):** SIGCHLD wakes a reaper
+  thread (through Python's wakeup fd, written at C level whichever thread
+  takes the signal, so it never waits on a blocked main thread), which
+  waits by pid for every zombie child in a job cgroup that is not a live
+  job's own process. **Not `waitpid(-1)` literally:** that would also take
+  the exit status of the supervisor's legitimate children (the jobs' Popen
+  processes, the self-test's other subprocesses), and Python then reports a
+  crashed child as exit 0. The 5-second window is gone. **The backstop:**
+  after every job that ended normally (which leaves no orphans), that job's
+  orphans, if any, are reaped, counted (`BACKSTOP_FOUND`) and logged; B11
+  fails if any appear during its 100 requests. B5 waits (at most 30 s,
+  reported) until the killed job's processes are gone and shows the latest
+  SIGCHLD reaps.
 
 Done, in the agreed order:
 1. **D2 baseline** (`b819e8b`): 41 committed fixtures under

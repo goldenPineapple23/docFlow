@@ -17,7 +17,8 @@ The view (founder's item 3, Q7, D-150 spike findings):
 - a /dev of its own: null, zero, full, random, urandom, a size-capped
   /dev/shm, and nothing else -- no block device;
 - the only writable places: /work (TMPDIR) and /lohome (HOME, LibreOffice's
-  profile), each a size-capped tmpfs owned by the slot's user.
+  profile), each a size-capped tmpfs owned by the slot's user; /tmp and
+  /var/tmp are /work/tmp bind-mounted (Q14), so the same tmpfs and cap.
 
 Any failure exits with status 70 before the job starts: the supervisor
 answers that as the service failing to isolate, never as a verdict on the
@@ -127,6 +128,17 @@ def _minimal_dev() -> None:
     _mount("none", "/dev", None, MS_REMOUNT | MS_RDONLY | MS_NOSUID | MS_NOEXEC)
 
 
+def _tmp_is_work() -> None:
+    """/tmp and /var/tmp become the job's own /work/tmp (founder, 2026-10-01,
+    Q14 option 2). LibreOffice's launcher insists on one of them for its pipe
+    and exits otherwise. A bind mount, not a new tmpfs: the same /work tmpfs
+    under its existing cap (B8), seen only in this job's mount namespace
+    (A11); the rest of the root stays read-only (A14)."""
+    for target in config.TMP_DIRS:
+        _mount(f"{config.WORK_DIR}/tmp", target, None, MS_BIND)
+        _mount("none", target, None, MS_REMOUNT | MS_BIND | MS_NOSUID | MS_NODEV)
+
+
 def _limits() -> None:
     for which, value in (
         (resource.RLIMIT_AS, config.RLIMIT_AS_BYTES),
@@ -160,6 +172,7 @@ def main(argv: list[str]) -> int:
         _tmpfs(config.HOME_DIR, config.HOME_TMPFS_BYTES, "0700", MS_NOSUID | MS_NODEV, owner=uid)
         os.mkdir(f"{config.WORK_DIR}/tmp", 0o700)
         os.chown(f"{config.WORK_DIR}/tmp", uid, uid)
+        _tmp_is_work()
         _limits()
     except Exception as exc:  # noqa: BLE001 -- any failure here is the service's, not the file's
         print(f"sandbox_init failed: {type(exc).__name__}: {exc}", file=sys.stderr)

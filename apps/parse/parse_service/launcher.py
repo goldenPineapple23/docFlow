@@ -38,10 +38,11 @@ import sys
 import threading
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 
 from parse_service import config
-from parse_service.cgroups import CgroupError, Cgroups, JobCgroup
+from parse_service.cgroups import JOBS_PARENT, CgroupError, Cgroups, JobCgroup
 
 logger = logging.getLogger("parse_service.launcher")
 
@@ -283,14 +284,11 @@ def run_job(
             limits=job_cg.limits(),
             swap_limited=job_cg.swap_limited,
         )
-    if isolation and sys.platform.startswith("linux"):
-        # After any limit stop, wait for the killed sandbox's processes.
-        reaped, unreaped = _reap_orphans(wait=killed or cause is not None)
-        if reaped:
-            evidence["reaped"] = reaped
-        if unreaped:
-            evidence["not_reaped"] = unreaped
-            logger.error("job_orphans_not_reaped pids=%s", unreaped)
+    if job_cg is not None and _reaper_started and not killed and cause is None:
+        # The backstop: a job that ended normally leaves no orphans.
+        found = _backstop(job_cg.name)
+        if found:
+            evidence["backstop_found"] = found
     if job_cg is not None:
         evidence["cgroup_removed"] = job_cg.remove()
     stderr_tail = bytes(err[-2000:]).decode("utf-8", errors="replace")
@@ -318,25 +316,35 @@ class _NoCgroup:
 # ── Orphans of killed jobs (BUILD-STATUS 3c, B5/B11) ─────────────────────────
 #
 # Killing a job's cgroup kills `unshare` and its child, the sandbox's own
-# PID 1, together. The child is then reparented to this process (PID 1 in
-# the container, or the subreaper below on Fly) and nothing waits for it, so
-# it stays a zombie for the life of the service: B5 and B11 found one per
-# killed job. After every job the launcher reaps each orphan that is now its
-# child, recording its state, cgroup and PID namespace just before.
+# PID 1, together; the child is reparented to this process (the subreaper)
+# and would stay a zombie for the life of the service. So this process reaps
+# them the moment they end (founder, 2026-10-01: no timing window): SIGCHLD
+# wakes the reaper thread, which waits for every zombie child of ours that
+# belongs to a job cgroup and is not a live job's own Popen child.
 #
-# Only processes that are this process's children can be reaped (waitpid
-# refuses anything else), and a pid that belongs to a live job's own Popen
-# child is never touched: `_children_lock` is held while a job is started and
-# while the reaper waits, so a reused pid is always registered first.
+# Not waitpid(-1): that would also take the exit status of this process's
+# legitimate children (the jobs' Popen processes, a self-test's other
+# subprocesses), and Python's subprocess then reports a crashed child as
+# exit 0. Each orphan is waited for by pid instead, the moment it is a
+# zombie. The SIGCHLD wakeup goes through Python's wakeup fd, written at C
+# level whichever thread takes the signal, so the reaper never waits on the
+# main thread (which may be blocked for minutes).
+#
+# A backstop runs after every job that ended normally: such a job leaves no
+# orphans (its sandbox's PID 1 reaps inside and unshare reaps that), so any
+# found is counted (BACKSTOP_FOUND; B11 fails on it) and logged.
 _children_lock = threading.Lock()
 _live_children: set[int] = set()
 PR_SET_CHILD_SUBREAPER = 36
-REAP_SECONDS = 5.0
+JOB_CGROUP_MARKER = f"/{JOBS_PARENT}/"
+RECENT_REAPS: deque = deque(maxlen=64)  # evidence for the self-tests (B5)
+BACKSTOP_FOUND: list[dict] = []
+_reaper_started = False
 
 
 def become_subreaper() -> None:
     """Orphans of our jobs come to this process instead of the machine's init
-    (which on Fly is not us), so the launcher can reap them. Linux only."""
+    (which on Fly is not us), so the reaper can wait for them. Linux only."""
     if not sys.platform.startswith("linux"):
         return
     import ctypes
@@ -346,18 +354,47 @@ def become_subreaper() -> None:
         raise OSError(ctypes.get_errno(), "prctl(PR_SET_CHILD_SUBREAPER) failed")
 
 
+def start_reaper() -> None:
+    """Become the subreaper and start reaping on SIGCHLD. Call once, from the
+    main thread (signal handlers and the wakeup fd can only be set there)."""
+    global _reaper_started
+    if not sys.platform.startswith("linux") or _reaper_started:
+        return
+    become_subreaper()
+    wake_r, wake_w = os.pipe()
+    os.set_blocking(wake_w, False)
+    # A handler must be installed for the wakeup fd to be written; it does
+    # nothing itself (SIGCHLD's default would ignore the signal).
+    signal.signal(signal.SIGCHLD, lambda _signum, _frame: None)
+    signal.set_wakeup_fd(wake_w, warn_on_full_buffer=False)
+    threading.Thread(target=_reaper_loop, args=(wake_r,), daemon=True, name="orphan-reaper").start()
+    _reaper_started = True
+
+
+def _reaper_loop(wake_r: int) -> None:
+    while True:
+        try:
+            os.read(wake_r, 4096)  # blocks until at least one SIGCHLD
+        except InterruptedError:
+            continue
+        with _children_lock:
+            RECENT_REAPS.extend(_reap_zombie_orphans(JOB_CGROUP_MARKER))
+
+
 def process_facts(pid: int) -> dict:
     """Name, state, parent, cgroup and PID namespace of one process."""
     facts: dict = {"pid": pid}
     try:
-        for line in open(f"/proc/{pid}/status").read().splitlines():
-            key, _, value = line.partition(":")
-            if key in ("Name", "State", "PPid"):
-                facts[key.lower()] = value.strip()
+        with open(f"/proc/{pid}/status") as handle:
+            for line in handle:
+                key, _, value = line.partition(":")
+                if key in ("Name", "State", "PPid"):
+                    facts[key.lower()] = value.strip()
     except OSError as exc:
         facts["status_error"] = type(exc).__name__
     try:
-        facts["cgroup"] = open(f"/proc/{pid}/cgroup").read().strip().splitlines()
+        with open(f"/proc/{pid}/cgroup") as handle:
+            facts["cgroup"] = handle.read().strip().splitlines()
     except OSError as exc:
         facts["cgroup"] = type(exc).__name__
     try:
@@ -367,53 +404,51 @@ def process_facts(pid: int) -> dict:
     return facts
 
 
-def _our_orphans() -> list[int]:
-    """Every process whose parent is this one and that no live job owns.
-    Our only legitimate children are the jobs' Popen children (registered
-    in _live_children under _children_lock), so anything else is an orphan
-    of a finished job that was reparented here."""
+def _orphans_in(marker: str) -> list[dict]:
+    """Facts for every child of this process whose cgroup path contains
+    `marker` and that no live job owns. Call with _children_lock held."""
     me = str(os.getpid())
     found = []
     for entry in os.listdir("/proc"):
-        if not entry.isdigit():
+        if not entry.isdigit() or int(entry) in _live_children:
             continue
-        try:
-            with open(f"/proc/{entry}/status") as handle:
-                ppid = next((line.split()[1] for line in handle if line.startswith("PPid:")), None)
-        except OSError:
+        facts = process_facts(int(entry))
+        if facts.get("ppid") != me or not isinstance(facts.get("cgroup"), list):
             continue
-        if ppid == me and int(entry) not in _live_children:
-            found.append(int(entry))
+        if any(marker in line for line in facts["cgroup"]):
+            found.append(facts)
     return found
 
 
-def _reap_orphans(*, wait: bool) -> tuple[list[dict], list[int]]:
-    """Reap every orphan that is now our child, recording each one's facts
-    just before. After a killed job (`wait`), keep looking for up to
-    REAP_SECONDS, since a killed sandbox's PID 1 becomes a zombie only once
-    its namespace is torn down. A first version reaped only the pids in the
-    job's cgroup when it was killed; the OOM killer's victims had already
-    left cgroup.procs by then and stayed zombies (third CI run, B5/B11).
-    Returns what was reaped and the orphans still alive at the end."""
-    reaped: list[dict] = []
-    deadline = time.monotonic() + (REAP_SECONDS if wait else 0.0)
-    while True:
-        with _children_lock:  # no job can start (and register a child) meanwhile
-            alive = []
-            for pid in _our_orphans():
-                facts = process_facts(pid)
-                try:
-                    done, status = os.waitpid(pid, os.WNOHANG)
-                except ChildProcessError:
-                    continue
-                if done:
-                    facts["wait_status"] = status
-                    reaped.append(facts)
-                else:
-                    alive.append(pid)
-        if not alive or time.monotonic() > deadline:
-            return reaped[:20], alive
-        time.sleep(0.05)
+def _reap_zombie_orphans(marker: str) -> list[dict]:
+    """Wait for each zombie orphan in `marker`'s cgroups. Lock held."""
+    reaped = []
+    for facts in _orphans_in(marker):
+        if not str(facts.get("state", "")).startswith("Z"):
+            continue
+        try:
+            done, status = os.waitpid(facts["pid"], os.WNOHANG)
+        except ChildProcessError:
+            continue
+        if done:
+            facts["wait_status"] = status
+            reaped.append(facts)
+    return reaped
+
+
+def _backstop(job_cg_name: str) -> list[dict]:
+    """After a job that ended normally: its orphans, if any (there should be
+    none). Zombies among them are reaped; all are counted and logged."""
+    marker = f"{JOB_CGROUP_MARKER}{job_cg_name}"
+    with _children_lock:
+        found = _orphans_in(marker)
+        reaped = {f["pid"] for f in _reap_zombie_orphans(marker)}
+    for facts in found:
+        facts["reaped_by_backstop"] = facts["pid"] in reaped
+    if found:
+        BACKSTOP_FOUND.extend(found)
+        logger.error("job_orphans_found_by_backstop count=%s", len(found))
+    return found
 
 
 def _kill(proc: subprocess.Popen, job_cg: JobCgroup | None) -> None:
