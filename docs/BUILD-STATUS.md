@@ -2106,8 +2106,11 @@ changed, built in the next commit:**
   `live_api` tests, excluded from every default run. That run is context
   only: the local dev parse service hit its 30-minute background limit
   partway through and was restarted (no test failed). **Founder: re-run the
-  whole suite once with the service up; that run's line is the record**
-  (below, when it finishes).
+  whole suite once with the service up; that run's line is the record.**
+  **The record (full re-run, dev parse service up throughout): `579
+  passed, 1 skipped, 3 deselected, 653 warnings in 2498.67s (0:41:38)`**,
+  exit 0; the same skip (`test_a_request_carrying_the_api_settings_is_refused`)
+  and the 3 `live_api` deselections.
 
 **Fly staging run 1 (2026-10-01, image `sha256:f9719965`, machine
 `863662ce743978`, kernel 6.12.105-fly, cgroup v1): merge gate NOT met.**
