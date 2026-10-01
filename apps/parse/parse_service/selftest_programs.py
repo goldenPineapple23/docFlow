@@ -451,20 +451,13 @@ def cgroup_escape(args: dict) -> dict:
     return out
 
 
-def libreoffice(args: dict) -> dict:
-    """B13: LibreOffice converts a file inside the real sandbox, run the way
-    parsing/conversion.py runs it (same flags, throwaway profile, the .doc
-    path's docx target), on a small text file this program writes itself.
-    Reports the converter's exit status and the tail of its own stderr, so a
-    failure in CI says why (the parse service's answer carries only DOC-017)."""
-    from parse_service.parsing.conversion import LIBREOFFICE_TIMEOUT_SECONDS, find_libreoffice
+def _libreoffice_once(binary: str, work: str, label: str, extra_args: list[str], extra_env: dict) -> dict:
+    from parse_service.parsing.conversion import LIBREOFFICE_TIMEOUT_SECONDS
 
-    binary = find_libreoffice()
-    if binary is None:
-        return {"binary": None}
-    work = os.path.join(os.environ.get("TMPDIR", "/tmp"), "b13")
-    os.makedirs(os.path.join(work, "out"), exist_ok=True)
-    source = os.path.join(work, "input.txt")
+    base = os.path.join(work, label)
+    out = os.path.join(base, "out")
+    os.makedirs(out, exist_ok=True)
+    source = os.path.join(base, "input.txt")
     with open(source, "w", encoding="utf-8") as handle:
         handle.write("Acme Test Distributor\nPO TEST-0013\n")
     command = [
@@ -475,27 +468,58 @@ def libreoffice(args: dict) -> dict:
         "--nolockcheck",
         "--nodefault",
         "--nofirststartwizard",
-        f"-env:UserInstallation=file://{work}/profile",
+        f"-env:UserInstallation=file://{base}/profile",
+        *extra_args,
         "--convert-to",
         "docx",
         "--outdir",
-        os.path.join(work, "out"),
+        out,
         source,
     ]
     started = time.monotonic()
     try:
         done = subprocess.run(
-            command, stdin=subprocess.DEVNULL, capture_output=True, timeout=LIBREOFFICE_TIMEOUT_SECONDS
+            command,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=LIBREOFFICE_TIMEOUT_SECONDS,
+            env={**os.environ, **extra_env},
         )
     except subprocess.TimeoutExpired:
-        return {"binary": binary, "timed_out": True, "seconds": round(time.monotonic() - started, 1)}
+        return {"timed_out": True, "seconds": round(time.monotonic() - started, 1)}
     return {
-        "binary": binary,
         "exit_status": done.returncode,
         "seconds": round(time.monotonic() - started, 1),
-        "produced": sorted(os.listdir(os.path.join(work, "out"))),
-        "stderr_tail": done.stderr.decode("utf-8", errors="replace")[-800:],
-        "stdout_tail": done.stdout.decode("utf-8", errors="replace")[-300:],
+        "produced": sorted(os.listdir(out)),
+        "stderr_tail": done.stderr.decode("utf-8", errors="replace")[-600:],
+    }
+
+
+def libreoffice(args: dict) -> dict:
+    """B13: LibreOffice converts a file inside the real sandbox, run the way
+    parsing/conversion.py runs it (same flags, throwaway profile, the .doc
+    path's docx target), on a small text file this program writes itself.
+    `as_conversion_py` decides the check. The rest is evidence for the
+    founder's decision, not a change (founder, 2026-10-01: any limit or
+    filesystem change comes to them first): whether LibreOffice's usual pipe
+    directories are writable here, and whether pointing its pipe at the
+    already-writable work directory (OSL_SOCKET_PATH, as an environment
+    variable or as -env:) is enough."""
+    from parse_service.parsing.conversion import find_libreoffice
+
+    binary = find_libreoffice()
+    if binary is None:
+        return {"binary": None}
+    work = os.path.join(os.environ.get("TMPDIR", "/tmp"), "b13")
+    socket_dir = os.path.join(work, "sockets")
+    os.makedirs(socket_dir, exist_ok=True)
+    return {
+        "binary": binary,
+        "pipe_dirs_writable": {d: _try_write(d) for d in ("/tmp", "/var/tmp")},
+        "tmpdir": os.environ.get("TMPDIR"),
+        "as_conversion_py": _libreoffice_once(binary, work, "plain", [], {}),
+        "OSL_SOCKET_PATH_env": _libreoffice_once(binary, work, "env", [], {"OSL_SOCKET_PATH": socket_dir}),
+        "OSL_SOCKET_PATH_arg": _libreoffice_once(binary, work, "arg", [f"-env:OSL_SOCKET_PATH={socket_dir}"], {}),
     }
 
 

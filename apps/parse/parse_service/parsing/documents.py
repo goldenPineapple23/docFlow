@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import io
 import re
+import sys
 from io import BytesIO
 
 from docflow_core import file_types
@@ -303,10 +304,14 @@ def parse(content: bytes, filename: str) -> dict:
     try:
         parts = artifact_parts(prepare_artifacts(file_type, content))
     except ConversionError as exc:
+        # The reason (for LibreOffice, its own stderr) reaches the service log
+        # through the job's stderr; the answer carries the catalog code only.
+        print(f"rejected code={exc.error_code} reason={exc.detail}", file=sys.stderr)
         return {"outcome": "rejected", "code": exc.error_code, "file_type": file_type.name.value}
     except MemoryError:
         raise  # a limit, not the file's content: the supervisor answers `stopped`
-    except Exception:  # noqa: BLE001 -- any library failure on a hostile file, as before 3c
+    except Exception as exc:  # noqa: BLE001 -- any library failure on a hostile file, as before 3c
+        print(f"rejected code=DOC-005 reason={type(exc).__name__}", file=sys.stderr)
         return {"outcome": "rejected", "code": "DOC-005", "file_type": file_type.name.value}
     preview = image_preview(content) if file_type.name in _IMAGE_LIKE else None
     return {

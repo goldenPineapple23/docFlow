@@ -1671,6 +1671,36 @@ E1 and E4 refused to start as they should. Failures:
    service (`release_after_storage_outage`). F5 now restarts the container
    in a `finally`. Their real result is the next run's.
 
+**Third and fourth runs (`bbc0932`, `fb8e538`).** With F5 restarting the
+container, worker 131 tests, 2 failed, both `po.doc` (the preview test and
+F5's kill window); the 18 database tests pass. The evidence:
+- **B5/B11: zombies.** Every survivor (6 in B5, 8 in B11) is
+  `State: Z (zombie)`, named `python` (a sandbox's PID 1), parent PID 1,
+  and PID 1 is `python -m parse_service.selftest all`. Cause: killing a
+  job's cgroup kills `unshare` and its child together; the child is
+  reparented to PID 1, which never waits for it. **Fix (founder: reaping in
+  the supervisor):** the service and the self-test make themselves the
+  child subreaper (`prctl(PR_SET_CHILD_SUBREAPER)`), so on Fly, where they
+  aren't PID 1, the orphans still come to them; after a killed job the
+  launcher reaps what was in the job's cgroup, recording each one's state,
+  cgroup and PID namespace in `evidence["reaped"]` just before. Only our own
+  children can be reaped, and a live job's own child never is (a lock covers
+  starting a job and reaping). B5 and B11 are unchanged: still any process
+  owned by a slot user after the job fails them. The founder's cgroup /
+  namespace question is answered by the next run's `reaped` evidence: a
+  process outside the job's cgroup or PID namespace there is a B10 failure,
+  and I stop and report it.
+- **B13: `ERROR: no valid pipe path found.`**, exit 1 in 0.0 s. That is
+  LibreOffice failing to find a writable directory for its IPC pipe; it
+  tries `/tmp`, then `/var/tmp`, and the sandbox's root is read-only (the
+  canary shows `/tmp: EROFS`). **Correction to the founder's reading:** S4
+  as built doesn't convert a `.doc`; its row says "(with D1)", and D1 is
+  the failing parity test. S4 checks `clone3`, a thread and a fork. So S4
+  doesn't rule out the filter; B13's error is what points at the pipe
+  directory. B13's variants (above) test that next run. **No fix is made:**
+  whichever it is (a pipe path inside `/work`, or a writable `/tmp`) comes
+  to the founder first.
+
 Done, in the agreed order:
 1. **D2 baseline** (`b819e8b`): 41 committed fixtures under
    `apps/parse/tests/fixtures/` (22 positive, 4 catalog tables, 15 hostile)
@@ -1762,11 +1792,21 @@ reviews each before the merge:**
   `uno`/`unohelper`), and adds **the XML guard**: any direct lxml import
   (including `importlib.import_module("lxml...")`) or any
   `openpyxl.load_workbook` use, in any form, in `apps/api/app` or
-  `apps/worker/app` fails CI, with a test that each form is caught. **Open
-  (Q11):** core's `exports.py` calls `load_workbook` to read back the .xlsx
-  it just wrote, which is the round-trip check Section 7.4 requires (EXP-004
-  at runtime). It runs in the worker but lives in `packages/core`, so the
-  guard as you worded it doesn't scan it.
+  `apps/worker/app` fails CI, with a test that each form is caught. **Q11
+  (founder): the guard covers `packages/core` too, with one exception named
+  by file and function:** `exports.py::parse_xlsx`, which reads back the
+  .xlsx `build_export` rendered a moment before (Section 7.4's round trip,
+  EXP-004). The guard requires exactly its two uses there (the import and
+  one `load_workbook(...)` call) and none anywhere else, so a second call
+  fails the build (checked by planting one: both tests failed; file
+  restored). What it is handed is checked twice: statically
+  (`test_parse_xlsx_reads_only_the_bytes_just_rendered`: `load_workbook`
+  gets `io.BytesIO(content)`, `content` is `render(...)`'s result in the
+  same function, `PARSERS[fmt](content)` is the only call, and nothing
+  outside exports.py names `parse_xlsx` or `PARSERS`) and at runtime
+  (core's `test_the_xlsx_read_back_gets_only_the_bytes_just_rendered`: it
+  receives the very bytes object `render()` returned, and a path string is
+  a TypeError).
 - **The parse token in CI (founder, 2026-10-01):** the API process never
   holds `PARSE_SERVICE_TOKEN`. In `5a00275` the API job did put it in the
   test step's environment, so the API's settings had it in that run. Now
@@ -1777,14 +1817,37 @@ reviews each before the merge:**
   the API's settings is refused by the real service as `unauthorized`, and
   the same request with the worker's token gets in (the control). Checked
   locally against a tokened dev service, and both tests fail when the API
-  is given the token. **Open (Q12):** nothing stops the API *starting* with
-  a token on Fly; that is the secrets list (RUNBOOK). Should the API refuse
-  to start in production when `PARSE_SERVICE_TOKEN` is set?
-- **Self-test additions:** B5 and B11 now report each leftover process's
-  name, state and parent, and what PID 1 is. **B13** runs LibreOffice once
-  inside the real sandbox, the way `conversion.py` does, and reports its
-  exit status and its own stderr tail, because the service's answer for
-  `po.doc` carries only DOC-017.
+  is given the token. **Q12 (founder): on Fly the API refuses to start
+  holding the token**, as the parse service refuses to start without
+  isolation: `parse_token_startup_refusal()` runs when `app.main` is
+  imported, before the app exists, so uvicorn never opens its port.
+  `fly_app_name` is a new settings field (Fly sets `FLY_APP_NAME`; never in
+  .env). Tests: the rule in all four combinations, and a real `uvicorn`
+  start with `FLY_APP_NAME` and the token exits non-zero, prints the refusal
+  and never accepts a connection; the control (no token) opens its port.
+- **Self-test additions:** B5 and B11 report each leftover process's name,
+  state, parent, cgroup and PID namespace, PID 1 and the supervisor's own
+  PID namespace. **B13** runs LibreOffice once inside the real sandbox, the
+  way `conversion.py` does (that run decides the check), plus evidence:
+  whether `/tmp` and `/var/tmp` are writable there, and the same run with
+  LibreOffice's pipe pointed at the work directory (`OSL_SOCKET_PATH` as an
+  environment variable, and as `-env:`). Evidence only: no limit or
+  filesystem changed.
+- **NOT-RUN, not NO-CONTROL (founder, 2026-10-01):** a check whose control
+  didn't hold is reported as `NOT-RUN` ("proved nothing on this machine"),
+  never as a pass, in the self-test output and its annotations ("parse
+  self-tests: NOT RUN (no control)"). A-net IPv6 on CI is NOT-RUN: **IPv6
+  isolation is unproven until the Fly run (8.1) passes it**, where the
+  machine has IPv6. The startup canary's IPv6 line shows "blocked" on the
+  runner too, but there it proves the same nothing; the canary is a gate,
+  not proof.
+- **The orphan reaper (B5/B11; founder: fix by reaping, never by filtering
+  the check):** see the third run below.
+- **The service log gets LibreOffice's real error (founder):** a rejected
+  conversion's reason, with the last 300 characters of LibreOffice's own
+  stderr, goes to the job's stderr and from there to the service's log
+  (`job_rejected kind=... code=... detail=...`). The answer to the worker,
+  and so everything a tenant sees, still carries DOC-017 alone.
 - **The seed script and the walkthrough file maker** now use the parse
   service (dev) and the parse venv.
 

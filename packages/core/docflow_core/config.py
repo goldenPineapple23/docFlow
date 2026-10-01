@@ -125,6 +125,11 @@ class Settings(BaseSettings):
     # Fly: http://docflow-parse-<env>.flycast (private, over Flycast).
     parse_service_url: str = "http://127.0.0.1:8100"
     parse_service_token: str = ""
+    # Set by Fly on every machine it runs (never in .env). The API uses it to
+    # know it is deployed: on Fly it refuses to start holding the parse token
+    # (apps/api/app/main.py, founder Q12), as the parse service refuses to
+    # start without isolation.
+    fly_app_name: str = ""
 
     # Supabase Storage through its S3-compatible endpoint (Stage 3b, Q1): an
     # access key that reaches Storage and nothing else, never the service

@@ -12,11 +12,13 @@ probe outside the sandbox, or the same program without the cap, so a pass
 can't come from a probe that would have failed anyway. Each line reports
 its own evidence:
 
-    RESULT <id> PASS|FAIL|NO-CONTROL|INFO -- <evidence>
+    RESULT <id> PASS|FAIL|NOT-RUN|INFO -- <evidence>
 
-NO-CONTROL means the control itself didn't hold (for example, no IPv6 on a
-CI runner), so the check proves nothing there; it is listed, never counted
-as a pass. The exit status is 1 if any check FAILed.
+NOT-RUN means the control itself didn't hold (for example, no IPv6 outside
+the sandbox on a CI runner), so the check proved nothing on this machine: it
+did not run as a test, and it is never counted or reported as a pass
+(founder, 2026-10-01). IPv6 isolation is proven only by the Fly run (RUNBOOK
+8.1), where the machine has IPv6. The exit status is 1 if any check FAILed.
 
 `canary()` is the subset the service runs at startup before it opens its
 port (item 4).
@@ -37,7 +39,7 @@ from pathlib import Path
 
 from parse_service import config, selftest_programs
 from parse_service.cgroups import Cgroups, active_swap
-from parse_service.launcher import JobResult, Limits, run_job
+from parse_service.launcher import JobResult, Limits, become_subreaper, process_facts, run_job
 
 EXPECTED_DEV = {"null", "zero", "full", "random", "urandom", "shm", "fd", "stdin", "stdout", "stderr"}
 ALLOWED_JOB_ENV = {"PATH", "HOME", "TMPDIR", "LANG", "PARSE_ISOLATION", "LIBREOFFICE_PATH", "LC_CTYPE"}
@@ -69,7 +71,7 @@ WRITABLE_PLACES = ("/work", "/lohome")
 @dataclass
 class Check:
     id: str
-    verdict: str  # PASS | FAIL | NO-CONTROL | INFO
+    verdict: str  # PASS | FAIL | NOT-RUN | INFO
     detail: object
 
     def line(self) -> str:
@@ -78,7 +80,7 @@ class Check:
 
 def _verdict(ok: bool, control_ok: bool = True) -> str:
     if not control_ok:
-        return "NO-CONTROL"
+        return "NOT-RUN"
     return "PASS" if ok else "FAIL"
 
 
@@ -489,6 +491,7 @@ class Runner:
                     "slot_user_processes_after": left,
                     "left_details": _describe(left),
                     "pid1": _pid1(),
+                    "supervisor_pid_ns": _supervisor_pid_ns(),
                     **job.evidence,
                 },
             )
@@ -629,6 +632,7 @@ class Runner:
                     "slot_user_processes_left": left,
                     "left_details": _describe(left),
                     "pid1": _pid1(),
+                    "supervisor_pid_ns": _supervisor_pid_ns(),
                 },
             )
         )
@@ -639,7 +643,11 @@ class Runner:
         self.add(
             Check(
                 "B13:libreoffice-converts-in-the-sandbox",
-                _verdict(job.outcome == "selftest" and result.get("exit_status") == 0 and bool(result.get("produced"))),
+                _verdict(
+                    job.outcome == "selftest"
+                    and result.get("as_conversion_py", {}).get("exit_status") == 0
+                    and bool(result.get("as_conversion_py", {}).get("produced"))
+                ),
                 {"outcome": job.outcome, "cause": job.cause, "result": result, **job.evidence},
             )
         )
@@ -730,19 +738,18 @@ def _processes_of(uid: int) -> list[int]:
 
 
 def _describe(pids: list[int]) -> list[dict]:
-    """Name, state and parent of each process, so a leak says what it is."""
-    out = []
-    for pid in pids:
-        fields: dict[str, int | str] = {"pid": pid}
-        try:
-            for line in Path(f"/proc/{pid}/status").read_text().splitlines():
-                key, _, value = line.partition(":")
-                if key in ("Name", "State", "PPid"):
-                    fields[key.lower()] = value.strip()
-        except OSError as exc:
-            fields["error"] = type(exc).__name__
-        out.append(fields)
-    return out
+    """Name, state, parent, cgroup and PID namespace of each process, so a
+    leak says what it is and where it lives (founder, 2026-10-01): one still
+    in a job's cgroup or PID namespace is a cleanup bug; one outside both
+    escaped (a B10 failure)."""
+    return [process_facts(pid) for pid in pids]
+
+
+def _supervisor_pid_ns() -> str:
+    try:
+        return os.readlink("/proc/self/ns/pid")
+    except OSError as exc:
+        return type(exc).__name__
 
 
 def _pid1() -> str:
@@ -855,6 +862,7 @@ def main(argv: list[str] | None = None) -> int:
     if not settings.isolation:
         print("self-tests need isolation on")
         return 2
+    become_subreaper()  # as the service does: killed jobs' orphans are reaped (B5/B11)
     cgroups = Cgroups.detect()
     cgroups.setup()
     print(f"cgroup v{cgroups.version}; machine has active swap: {active_swap()}", flush=True)

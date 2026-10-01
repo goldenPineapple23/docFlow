@@ -194,15 +194,17 @@ def run_job(
     out, err = bytearray(), bytearray()
     overflow, err_overflow = threading.Event(), threading.Event()
     try:
-        proc = subprocess.Popen(
-            argv,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=_chain_env(settings, isolation=isolation, seccomp=seccomp),
-            close_fds=True,
-            start_new_session=(os.name != "nt"),
-        )
+        with _children_lock:  # registered before the reaper can see its pid
+            proc = subprocess.Popen(
+                argv,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=_chain_env(settings, isolation=isolation, seccomp=seccomp),
+                close_fds=True,
+                start_new_session=(os.name != "nt"),
+            )
+            _live_children.add(proc.pid)
     except OSError as exc:
         if job_cg is not None:
             job_cg.remove()
@@ -218,6 +220,7 @@ def run_job(
         thread.start()
 
     oom_before = job_cg.oom_kills() if job_cg else 0
+    killed_members: list[int] = []
     cause: str | None = None
     peak_cpu = 0.0
     while True:
@@ -235,6 +238,7 @@ def run_job(
         if cause is None and elapsed > limits.wall_seconds:
             cause = "wall_clock"
         if cause is not None:
+            killed_members = job_cg.processes() if job_cg is not None else []
             _kill(proc, job_cg)
             break
         time.sleep(config.WATCH_INTERVAL_SECONDS)
@@ -242,12 +246,21 @@ def run_job(
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
+        killed_members = killed_members or (job_cg.processes() if job_cg is not None else [])
         _kill(proc, job_cg)
         proc.wait(timeout=10)
     for thread in threads:
         thread.join(timeout=5)
 
     evidence: dict = {"exit_status": proc.returncode}
+    if killed_members:
+        reaped, unreaped = _reap_orphans(killed_members, proc.pid)
+        evidence["reaped"] = reaped
+        if unreaped:
+            evidence["not_reaped"] = unreaped
+            logger.error("job_orphans_not_reaped pids=%s", unreaped)
+    with _children_lock:
+        _live_children.discard(proc.pid)
     if job_cg is not None:
         if cause is None and job_cg.oom_kills() > oom_before:
             cause = "memory"
@@ -264,15 +277,97 @@ def run_job(
     result = _classify(proc.returncode, cause, bytes(out))
     result.seconds = round(time.monotonic() - started, 3)
     result.evidence = evidence
-    if result.outcome in ("crashed", "isolation_failed"):
-        # The tail of the job's own stderr: our messages, never file content
-        # (the parsers print nothing about a file's contents).
+    if result.outcome in ("crashed", "isolation_failed", "rejected"):
+        # The tail of the job's own stderr: our messages and, for a failed
+        # conversion, LibreOffice's own (the parsers print nothing about a
+        # file's contents). For the service log only; never in the answer.
         evidence["stderr_tail"] = stderr_tail[-500:]
     return result
 
 
 class _NoCgroup:
     procs_files: list = []
+
+
+# ── Orphans of killed jobs (BUILD-STATUS 3c, B5/B11) ─────────────────────────
+#
+# Killing a job's cgroup kills `unshare` and its child, the sandbox's own
+# PID 1, together. The child is then reparented to this process (PID 1 in
+# the container, or the subreaper below on Fly) and nothing waits for it, so
+# it stays a zombie for the life of the service: B5 and B11 found one per
+# killed job. After a kill, the launcher reaps what was in the job's cgroup,
+# recording each process's state, cgroup and PID namespace just before.
+#
+# Only processes that are this process's children can be reaped (waitpid
+# refuses anything else), and a pid that belongs to a live job's own Popen
+# child is never touched: `_children_lock` is held while a job is started and
+# while the reaper waits, so a reused pid is always registered first.
+_children_lock = threading.Lock()
+_live_children: set[int] = set()
+PR_SET_CHILD_SUBREAPER = 36
+REAP_SECONDS = 5.0
+
+
+def become_subreaper() -> None:
+    """Orphans of our jobs come to this process instead of the machine's init
+    (which on Fly is not us), so the launcher can reap them. Linux only."""
+    if not sys.platform.startswith("linux"):
+        return
+    import ctypes
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), "prctl(PR_SET_CHILD_SUBREAPER) failed")
+
+
+def process_facts(pid: int) -> dict:
+    """Name, state, parent, cgroup and PID namespace of one process."""
+    facts: dict = {"pid": pid}
+    try:
+        for line in open(f"/proc/{pid}/status").read().splitlines():
+            key, _, value = line.partition(":")
+            if key in ("Name", "State", "PPid"):
+                facts[key.lower()] = value.strip()
+    except OSError as exc:
+        facts["status_error"] = type(exc).__name__
+    try:
+        facts["cgroup"] = open(f"/proc/{pid}/cgroup").read().strip().splitlines()
+    except OSError as exc:
+        facts["cgroup"] = type(exc).__name__
+    try:
+        facts["pid_ns"] = os.readlink(f"/proc/{pid}/ns/pid")
+    except OSError as exc:
+        facts["pid_ns"] = type(exc).__name__
+    return facts
+
+
+def _reap_orphans(members: list[int], own_child: int) -> tuple[list[dict], list[int]]:
+    """Wait for every member of a killed job's cgroup that is now our child.
+    Returns what was reaped (with its facts) and what was still ours and
+    unreaped when REAP_SECONDS ran out."""
+    pending = [pid for pid in members if pid != own_child]
+    reaped: list[dict] = []
+    deadline = time.monotonic() + REAP_SECONDS
+    while pending:
+        for pid in list(pending):
+            with _children_lock:
+                if pid in _live_children:  # a live job's own child: not ours to reap
+                    pending.remove(pid)
+                    continue
+                facts = process_facts(pid)
+                try:
+                    done, status = os.waitpid(pid, os.WNOHANG)
+                except ChildProcessError:  # not our child: its own parent reaps it
+                    pending.remove(pid)
+                    continue
+            if done:
+                facts["wait_status"] = status
+                reaped.append(facts)
+                pending.remove(pid)
+        if not pending or time.monotonic() > deadline:
+            break
+        time.sleep(0.05)
+    return reaped[:20], pending
 
 
 def _kill(proc: subprocess.Popen, job_cg: JobCgroup | None) -> None:

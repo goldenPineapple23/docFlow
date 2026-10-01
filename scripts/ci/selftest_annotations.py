@@ -6,8 +6,10 @@ the suite reports its own evidence).
 
   python scripts/ci/selftest_annotations.py parse-selftest.txt
 
-- every FAIL or NO-CONTROL line: an ::error:: or ::warning:: annotation with
-  its evidence (grouped, since GitHub shows at most 10 of each per step);
+- every FAIL or NOT-RUN line: an ::error:: or ::warning:: annotation with
+  its evidence (grouped, since GitHub shows at most 10 of each per step). A
+  NOT-RUN check's control didn't hold, so it proved nothing here; it is
+  reported as not run, never as a pass;
 - one ::notice:: per group (canary, A, S, B) listing what passed, and the
   cgroup layout the run used.
 """
@@ -18,7 +20,7 @@ import re
 import sys
 from collections import defaultdict
 
-LINE = re.compile(r"^RESULT (\S+) (PASS|FAIL|NO-CONTROL|INFO) -- (.*)$")
+LINE = re.compile(r"^RESULT (\S+) (PASS|FAIL|NOT-RUN|INFO) -- (.*)$")
 LIMIT = 3800  # annotation messages are truncated around 4 KB
 
 
@@ -41,11 +43,12 @@ def main(path: str) -> int:
     if not by_group:
         emit("error", "parse self-tests", "no RESULT lines found -- the self-tests did not run")
         return 1
-    bad = [(g, c, v, e) for g, rows in by_group.items() for c, v, e in rows if v in ("FAIL", "NO-CONTROL")]
+    bad = [(g, c, v, e) for g, rows in by_group.items() for c, v, e in rows if v in ("FAIL", "NOT-RUN")]
     for index in range(0, len(bad), max(1, -(-len(bad) // 9))):
         chunk = bad[index : index + max(1, -(-len(bad) // 9))]
         kind = "error" if any(v == "FAIL" for _, _, v, _ in chunk) else "warning"
-        emit(kind, "parse self-tests: not passed", "\n".join(f"{v} {c}: {e}" for _, c, v, e in chunk))
+        title = "parse self-tests: failed" if kind == "error" else "parse self-tests: NOT RUN (no control)"
+        emit(kind, title, "\n".join(f"{v} {c}: {e}" for _, c, v, e in chunk))
     for group, rows in sorted(by_group.items()):
         counts = defaultdict(int)
         for _, verdict, _ in rows:

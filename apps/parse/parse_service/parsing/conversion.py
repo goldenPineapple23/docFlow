@@ -418,12 +418,21 @@ def convert_with_libreoffice(
 
         produced = sorted(p for p in outdir.iterdir() if p.is_file())
         if completed.returncode != 0 or not produced:
-            # Never surface the converter's own stderr to a tenant
-            # (Section 7.16.5): the exit code is all that is recorded here.
+            # The converter's own words go to the service log only (the job
+            # prints this detail to its stderr); the answer, and so the
+            # tenant, gets DOC-017 alone (Section 7.16.5).
             raise ConversionError(
-                "DOC-017", f"Converter exited with status {completed.returncode} and no output file."
+                "DOC-017",
+                f"Converter exited with status {completed.returncode} and no output file; "
+                f"its stderr: {_stderr_tail(completed.stderr)}",
             )
         return produced[0].read_bytes()
+
+
+def _stderr_tail(raw: bytes) -> str:
+    """The converter's last words, on one line, for the service log."""
+    text = " | ".join(line.strip() for line in raw.decode("utf-8", errors="replace").splitlines() if line.strip())
+    return text[-300:] or "(empty)"
 
 
 # LibreOffice's import filter for Word 97-2003 binary documents.
