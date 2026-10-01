@@ -2653,6 +2653,134 @@ test).
   every tenant's documents? *Recommend the functions:* they return ids,
   counts and times only, and 3e moves one grant.
 
+**3d -- APPROVED WITH CHANGES (founder, 2026-10-01); building.** The
+founder's answers, then the changes, then what the build settled.
+
+*Answers.* Q1 cap 2: approved. Q2 global target = worker slots from one
+setting: approved, with a RUNBOOK step for raising it with workers. Q3 lanes
+by intake: approved. Q4 all three triggers: approved. Q5 10 minutes and
+`dispatcher_stopped`: approved, with gap 1 below. Q6: approved. Only "never
+got in" (`ParseUnavailable`) is a wait; "got in, no answer" (`ParseLost`)
+still uses up tries per 3c, so a poisoned file can't wait forever. Q8:
+approved; both functions (and every other function 0035 adds) set a fixed
+`search_path` and name everything fully, with a test. Q7: approved except
+our-side errors (change A).
+
+*A. Our own errors never fail a customer's document* (founder). Checked
+against Anthropic's error reference and rate-limits page, read 2026-10-01,
+and the installed SDK (anthropic 1.6.0):
+
+| The provider answers | Group | Cause |
+|---|---|---|
+| 500-599 (incl. 504 `timeout_error`), 529 | wait | `5xx` / `overloaded` |
+| 429 with `retry-after` | wait, at least `retry-after` | `rate_limited` |
+| connect, read or silent-stream timeout; a connection dropped mid-stream | wait | `network` |
+| 401, 402 (`billing_error`: the documented code for credit and billing), 403, 404 (model retired or renamed) | wait | `our_configuration` |
+| 400 whose message begins "You have reached your specified" (our own organisation or workspace spend limit; documented as a 400) | wait | `our_configuration` |
+| 429 with `error.details.error_code = enforced_spend_limit_reached` (the tier's monthly spend cap; no `retry-after`) | wait | `our_configuration` |
+| every other 400, 413 and other 4xx; a malformed answer (DOC-009); the read deadline (DOC-020) | fail at once, as today | -- |
+
+- `our_configuration` marks the provider down at its **first** occurrence (no
+  3-in-5 threshold) and raises `model_api_failure` at once, severity high.
+  Dispatch is held and probed, with the same 6-hour maximum and the same
+  DOC-023/DOC-024 for the customer.
+- **Found while checking (no decision needed, recorded):** an `error` event
+  in the middle of a streamed answer reaches the SDK after HTTP 200 and is
+  raised with `status_code` 200 (`anthropic/_streaming.py`). Classified by
+  status alone, an overloaded mid-stream answer would fail at once. So a
+  status of 200 is classified by the error's `type`, mapped to the status
+  the reference gives that type (`overloaded_error` -> 529, `api_error` ->
+  500, ...). An unknown type mid-stream counts as the provider's side
+  (wait), since the request itself was already accepted.
+- Each row is tested through the local stand-in HTTP server and the real SDK.
+
+*B. Gap 1 -- worker death is visible from outside the worker* (founder).
+- `GET /healthz` (no auth) adds `dispatcher: {heartbeat_age_seconds,
+  stale}`: the age only, read through a SECURITY DEFINER function that
+  returns nothing else.
+- It stays HTTP 200 either way. It is the API's liveness answer, and a 503
+  would get a healthy API restarted if a platform check is ever pointed at
+  it. The external monitor matches `"stale": false`.
+- The Console health strip shows the heartbeat age, red past
+  `DISPATCHER_STALE_MIN`. RUNBOOK: an external uptime monitor checks it from
+  Phase 6. Test: a stale heartbeat makes health show stale.
+
+*C. Gap 2 -- where beat runs* (founder, with two conditions).
+- **Beat is its own process, never embedded with `-B`.** Locally it stays
+  the README's second terminal. The stuck sweep already runs on beat, every
+  5 minutes; the dispatcher's 30-second backstop joins it.
+- **On Fly**, the worker app gets two process groups, `worker` and `beat`,
+  with `beat` scaled to exactly 1. This ends 3c's "no beat on Fly"
+  (founder's choice). RUNBOOK: run only one stack, local or Fly, against
+  staging at a time.
+- **Condition 1: every beat task is safe if two beats fire it.** No new
+  guard is needed:
+
+  | Task | If two copies run at once |
+  |---|---|
+  | `run_scheduled_jobs` (5 min) | Jobs are claimed with `FOR UPDATE SKIP LOCKED`, so each job runs once. |
+  | `run_daily_rollup` (03:15 UTC) | Each tenant-day is an upsert (`ON CONFLICT (tenant_id, day) DO UPDATE`) of the same numbers. Only `rollup_runs` gets two rows, which is harmless because the dashboard reads the latest. `rollup_stale` is deduped. |
+  | `run_lifecycle_sweep` (5 min) | Suspension is a compare-and-set claim. The Stripe cancel holds the tenant row lock across its calls, so the second copy waits and then sees nothing owed. The ready-to-delete and quarantine alerts are deduped. |
+  | `sweep_stuck_documents` (5 min) | Every status change is a compare-and-set. Lost-call outcomes are `ON CONFLICT DO NOTHING`, and alerts are deduped. Returning a lost job to waiting is a compare-and-set on `dispatched_at`. |
+  | `dispatch` (30 s, new) | A transaction-level advisory lock: the second pass returns at once. |
+
+- **Condition 2: a deploy never runs two beats.** Fly's canary and
+  blue-green strategies start a new machine beside the old one; rolling and
+  immediate update machines in place. `apps/worker/fly.toml` pins
+  `[deploy] strategy = "rolling"`, and RUNBOOK forbids `--strategy
+  canary|bluegreen` and scaling `beat` above 1 for this app. Condition 1 is
+  the backstop if it happens anyway.
+
+*D. Gap 3 -- the cap rule counts only documents that can go now* (founder).
+"Another tenant has a document waiting" means one whose `retry_at` is NULL
+or past. Test: a capped tenant uses idle slots while another tenant's only
+waiting document has a future `retry_at`.
+
+*E. `routing_model_failure`* (founder: "alert, don't hold", with two
+conditions).
+- When the routing call (the cheaper model) fails with an `our_configuration`
+  answer, a tenant-less **warning** alert is raised, once per UTC day.
+  Dispatch is not held and extraction goes ahead without examples.
+- Payload: the cause, the first failure's time, and
+  `documents_without_examples`, which counts every later failure that day.
+  The count is kept on the open alert by a SECURITY DEFINER function, so the
+  email carries the count at the time it was raised and the Console row
+  shows the running count.
+- **Condition 1:** the type is registered in `ALERT_TYPES`, and a test
+  raises it end to end through the real code path. One test also raises
+  **every** registered type, and a guard fails the build if any
+  `alert_type="..."` in the code is not registered. That test fails on
+  `rollup_stale` today, so 3d also registers it: **review finding M6 is
+  fixed here**.
+- **Condition 2:** the count above.
+- Not folded in (founder): fixing a retired model still needs a code deploy
+  until M10 (model IDs from settings) is done. That is a separate decision.
+
+*Settled while building (inside the approved design; listed so nothing is a
+surprise):*
+- `waiting_since` is kept through each wait-and-retry cycle, so the 6-hour
+  maximum counts from the first wait. It restarts when the cause changes and
+  is cleared when the document leaves for review or failure. The backoff
+  step comes from the time since `waiting_since`, so no counter column is
+  needed.
+- While the provider is down, waiting documents aren't claimed, so the stuck
+  sweep fails the ones past 6 hours with DOC-024 (`pending -> failed`, an
+  existing transition).
+- A `processing` document the sweep retries is still sent straight to the
+  queue, as today: it is already counted in flight, so the cap and target
+  hold. The same goes for 3c's immediate retry of a lost parse. Only
+  `pending` documents go through the dispatcher.
+- The lane comes from a `batch_size` field that the upload page sends with
+  each file: 10 or fewer files is interactive, more is bulk. Email,
+  test-batch runs and releases of 10 or fewer are interactive.
+- The tenant-less alerts (`model_api_failure`, `model_api_recovered`,
+  `dispatcher_stopped`, `routing_model_failure`) are written under one flag
+  policy, `app.dispatcher`, through `dispatcher_session()`: insert only,
+  those four types, `tenant_id` NULL. 3e moves this to the worker's login.
+- `worker_concurrency` is set from `DISPATCH_IN_FLIGHT_TARGET`, so the two
+  can't drift. That holds for one worker machine. The machine count is
+  Phase 6.
+
 **Before the first pilot: measure the cost of the documents that cost the
 most** (founder, 2026-09-29). The 18 documents in the Stage 2 checkpoint's
 cost figures are all short, one-page text orders. On staging, measure cost
