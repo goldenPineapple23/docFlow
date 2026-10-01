@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-09-30** (latest: security PR #30 and 3b (#31) merged; the 3c design proposed, below). Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
+commit as the slice. Statuses below are as of **2026-10-01** (latest: **3c merged, PR #32, main `085a2a5`**; the 3d design proposed, below). Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -186,9 +186,9 @@ are D-149 – D-153.
 | 0 | Safety net: push, CI green, `main` protected (done before 5.5 began); **CI database and the unapproved-skip check** (H7 part 2); core type-checked and pinned in CI | DONE (PR #3, merged 2026-09-25) | D-148 |
 | 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents. **Plus the two defects the founder's walkthrough found on the real stack (2026-09-27): the review screen said nothing when an edit raised a check (D-166), and a session token one second ahead of this clock was refused as "signed out" (D-167).** | **CHECKPOINT DONE 2026-09-26, awaiting "go"** (`CHECKPOINTS.md`: C1, H1, H3, M1, M3, H2, M4, M5 all closed). 1a DONE (PR #4, D-156); 1b DONE (PR #6, migration `0027`, D-158 – D-160); 1c DONE (PR #7: golden rename, M1 streaming measured, H2/M4/M5, one read budget, every paid call costed, Audit tab on one clock; D-159, D-161 – D-164); named system actors DONE (PR #8, migration `0028` applied and verified on staging 2026-09-26: 3 system actors, no blank lifecycle actor, idle-transaction cap 5 min; D-165); Stage 1 checkpoint run on `b04f16d`; walkthrough fixes DONE (D-166 the review screen, D-167 clock skew, D-169 the line table marking the rows and numbers a check is about, and the live end-to-end suite that catches this class of defect) | D-149, D-154 – D-169 |
 | 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events (record the event in the same transaction as its effect; ignore an event older than the state already saved; **an event in the same second as the saved state can't be ordered by `created` (one-second resolution), so it re-fetches the subscription from Stripe and saves that, never guesses** -- a webhook-side fetch, not a page-load one, so within 7.15.3 (founder, 2026-09-26); the Phase 6 plan-change reconcile reuses this guard). **Plus two clock items folded in from the D-170 sweep:** `first_past_due_at` written from Stripe's event time rather than the app clock, and tests that a stale and a future-dated Stripe webhook signature are both refused (the 300 s tolerance is real but untested today). **Also carries 2a's deferred `intake_webhook_refused` alert** and the `founder_alerts` insert policy it needs (the `rollup_raise` pattern from 0017), since `0029` is the migration already planned (D-171). **2a (H8) DONE (PR #14):** the inbound webhook now authenticates the provider with Postmark's HTTP Basic credentials, checked before the payload is parsed and before the token is resolved; the per-tenant token identifies the tenant and no longer authenticates the request. A blank credential refuses all inbound mail on purpose (D-171), so RUNBOOK 2.1's cutover order is a requirement: credentials set and deployed, *then* Postmark pointed at the URL carrying them. A refusal logs which reason it was, and **raises a high-severity `intake_webhook_refused` alert in 2c, not 2a** -- a tenant-less alert needs its own RLS insert policy, which needs a migration, and 2c already has `0029`; `test_rls_flags.py` caught the attempt to raise it from the router and located the right home (D-171). **Blocking condition (founder, 2026-09-27): credential enforcement must not go live on an address real customers send to until 2c's alert lands.** A refused request is, from outside, either a misconfigured cutover or an attacker, and the first means no mail arrives at all -- so until the alert exists, the only signal is a log line nobody is watching. Staging and a test address are fine; the RUNBOOK 2.1 cutover on a production intake address waits for 2c. The IP allowlist is log-only with no enforcing branch (D-155); RUNBOOK 2.3 is the confirm-then-enforce procedure and 2.2 the rotation procedure. 12 tests; 10 of them fail with the credential check disabled **2b (H10) DONE (PR #15):** a suspended or pending-deletion tenant can no longer upload -- refused with a new `INT-010` before the file is validated or stored, so it costs nothing; read and export stay open, asserted against `/home`, the order history, one order in full and its export history, in both blocked states (7.14). `cancelling` deliberately does not block. One predicate, `intake_gate.blocks_new_intake`, is shared by both intake channels so the lifecycle answer cannot drift -- which is how the defect existed. Two departures from the review's proposed fix, reasoned in D-172: a new catalog entry rather than reusing INT-006 (whose reader is a buyer whose mail bounced, not the tenant's own user), and the gate reads lifecycle status rather than `intake_address_active` (which is also false before go-live). The refused attempt is recorded in `intake_rejections` (the file is not), so a customer who keeps trying is visible -- a retention signal, not only an audit one. Three drift tests beyond the shared predicate: both real endpoints asserted to agree across four states, a structural test forbidding the status pair inside any condition, and the invariant that the suspend transition sets `status` and clears `intake_address_active` together (they are different columns and only the transition keeps them in step). 14 tests; 3 fail with the gate disabled **2c (H11, clock items #3 and #6, 2a's deferred alert) BUILT, migration `0029` not yet applied to staging:** Stripe events go through `record_stripe_subscription_event()`, a SECURITY DEFINER function called inside the tenant's own session, which records the event id in the same transaction as the status write, applies the ordering guard (older events recorded, not applied; a NULL saved time applies), and cross-checks the customer against the session's tenant. A same-second event fetches Stripe's state with no transaction open and re-checks the guard before saving. `first_past_due_at` is Stripe's event time and `unpaid` no longer resets it. No session can write `stripe_webhook_events` any more; EXECUTE is revoked from PUBLIC **and from Supabase's `anon`/`authenticated`** (which get it by default -- found while building, D-175). A refused inbound webhook now raises a high-severity `intake_webhook_refused` alert, one per reason, never changing the 401 -- **which satisfies 2a's blocking condition once 0029 is applied** (RUNBOOK 2.1). Stripe's clock against ours has one named tolerance, `STRIPE_CLOCK_TOLERANCE_SECONDS` (300 s), enforced at the signature and, on the database's clock, at the event time: an event stamped beyond it is not applied and alerts the founder (D-176). 29 new API tests (22 webhook, 7 refusal alert) plus 5 static core tests | 2a, 2b DONE; **2c DONE** (PR #18; `0029` applied to staging 2026-09-28; on `b540433`: API 477 passed / 3 deselected, core 547 passed, worker 107 passed; CI green); **2d (H9) DONE** (PR #20; lost-device drill passed on staging 2026-09-28, D-177): the Console needs an aal2 session (AUTH-006); seven destructive actions -- hard delete, clear quarantine, cancel, address rotation, buyer merge, go live, tier change -- need a TOTP challenge under 5 min old (AUTH-007, 30 s GoTrue allowance); a wrong code is AUTH-008, mirrored in the web app and kept in step by a test; `CONSOLE_MFA_ENFORCED` ships off, with a startup warning, a Console banner and a founder alert while off; enrol and add a backup at /admin/security; RUNBOOK section 4. No migration. 24 API tests (11 fail with the checks disabled), 4 Vitest, 4 e2e. **Founder enrolled 2026-09-28: two authenticators, both verified** (checked through the Supabase admin API). The backup first failed: Supabase refuses a second factor with the same name (422), and both were named after the date -- fixed in PR #21 (each new authenticator gets a name not already taken; 2 Vitest). A failed enrolment now shows its own catalog entry, **`AUTH-009`** (PR #22), mirrored in the web app and drift-tested like AUTH-008, instead of the generic "We couldn't reach DocFlow" (founder, 2026-09-28, who also set its next-step wording; 2 e2e). **The e2e suite now fails any test whose browser reaches a host other than this machine** (`apps/web/e2e/networkGuard.ts`, every spec imports it and a check fails the suite if one doesn't) -- one AUTH-009 test draft had reached real staging; shown failing with a test pointed at staging. **Second lost-device drill with enforcement on PASSED 2026-09-28 (D-178)**: backup-only sign-in, stale step-up refused, fresh one accepted, dashboard removal leaving only enrolment, re-enrol; drill admin revoked and deleted. **`CONSOLE_MFA_ENFORCED` is on** for the local API (`.env` and the running process agree). A CI timing race in `test_console_mfa.py` was found and fixed (D-178) | D-151, D-170, D-171, D-172, D-173, D-175, D-176, D-177 |
-| 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation (**host settled, D-150: Fly.io, each parse process in its own network namespace; proof spike PASSED 2026-09-28. Carried in from the spike: hide `/.fly` and `/sys` in a mount namespace, and re-run the probe against the real Upstash and API**), H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) -- **including a login for the Stripe webhook that holds EXECUTE on 2c's event function, with EXECUTE then revoked from `docflow_app`**, which closes the residual risk D-173 names. **Also moves with it (founder, 2026-09-28): 0029's `platform_admin_read` policy on `stripe_webhook_events`** -- a flag policy on `app.is_platform_admin`, so it goes to real login separation with D-173's function grant; likewise 0029's `app.intake_refusal` policies (D-175 §8). **H6 note: signed URLs become cross-clock** -- minted and verified on the app clock today (`signed_urls.py`), one clock because one service does both; on Supabase Storage the expiry is Supabase's clock, so D-170 applies (a named tolerance and a test, or the expiry decided in one place) -- **settled 2026-09-29: the expiry is decided in one place, our own signed links with the API streaming from Storage.** **Also carried from the Stage 1 checkpoint (D-163):** a run row before the model call, so a worker killed mid-call still records the call's cost | **IN PROGRESS** -- design agreed 2026-09-29 ("Stage 3 -- agreed with the founder before building", below); order 3a -> 3e. **3b MERGED 2026-09-30 (PR #31, main `5810a54`, D-182). 3c: design approved 2026-10-01 (Q1-Q10); BUILT and CI GREEN 2026-10-01 on `0be5422` (D-183; founder's Q11-Q14 decided during the build); migration `0034` awaiting staging; the Fly staging run (RUNBOOK 8.1) owed; see "3c build".** **3a BUILT** (D-179; branch `phase55/stage3a-task-limits`, migration `0030`), including reactivation option C (**3a MERGED, PR #26**). **Card billing, between 3a and 3b: BUILT** (D-181; branch `phase55/card-billing`, migration `0031` waiting on staging; see "Card billing with a 7-day trial"). **Also (founder, 2026-09-29): a second test run against the same database refuses to start** -- an advisory lock in the API and worker suites (D-180, RUNBOOK 1.4). `0030` applied to staging 2026-09-29 after the founder's backup (`backup_0030`: documents, tenants, RLS on). Staging suites on `621141f`: worker 134 passed / 2 skipped (the two prefork tests, Linux only; they pass in CI), API 518 passed / 1 failed / 3 deselected, core 564 passed. The one API failure, `test_a_failed_tenant_creation_rolls_back_everything_including_the_file_move`, counts every tenant on staging and saw the count fall from 20 to 19 during the test -- something else was writing to staging at that moment; a failed creation cannot remove a tenant. Rerun alone: the file 13 passed, the test 3 of 3 passed. D-163 moved to 3c | D-003, D-150, D-159, D-163, D-170, D-173 |
+| 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation (**host settled, D-150: Fly.io, each parse process in its own network namespace; proof spike PASSED 2026-09-28. Carried in from the spike: hide `/.fly` and `/sys` in a mount namespace, and re-run the probe against the real Upstash and API**), H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) -- **including a login for the Stripe webhook that holds EXECUTE on 2c's event function, with EXECUTE then revoked from `docflow_app`**, which closes the residual risk D-173 names. **Also moves with it (founder, 2026-09-28): 0029's `platform_admin_read` policy on `stripe_webhook_events`** -- a flag policy on `app.is_platform_admin`, so it goes to real login separation with D-173's function grant; likewise 0029's `app.intake_refusal` policies (D-175 §8). **H6 note: signed URLs become cross-clock** -- minted and verified on the app clock today (`signed_urls.py`), one clock because one service does both; on Supabase Storage the expiry is Supabase's clock, so D-170 applies (a named tolerance and a test, or the expiry decided in one place) -- **settled 2026-09-29: the expiry is decided in one place, our own signed links with the API streaming from Storage.** **Also carried from the Stage 1 checkpoint (D-163):** a run row before the model call, so a worker killed mid-call still records the call's cost | **IN PROGRESS** -- design agreed 2026-09-29 ("Stage 3 -- agreed with the founder before building", below); order 3a -> 3e. **3b MERGED 2026-09-30 (PR #31, main `5810a54`, D-182). **3c MERGED 2026-10-01 (PR #32, main `085a2a5`; Fly staging run 2 passed every item, D-183).** 3d: design proposed 2026-10-01, below, awaiting the founder. Earlier: 3c design approved 2026-10-01 (Q1-Q10); BUILT and CI GREEN 2026-10-01 on `0be5422` (D-183; founder's Q11-Q14 decided during the build); migration `0034` awaiting staging; the Fly staging run (RUNBOOK 8.1) owed; see "3c build".** **3a BUILT** (D-179; branch `phase55/stage3a-task-limits`, migration `0030`), including reactivation option C (**3a MERGED, PR #26**). **Card billing, between 3a and 3b: BUILT** (D-181; branch `phase55/card-billing`, migration `0031` waiting on staging; see "Card billing with a 7-day trial"). **Also (founder, 2026-09-29): a second test run against the same database refuses to start** -- an advisory lock in the API and worker suites (D-180, RUNBOOK 1.4). `0030` applied to staging 2026-09-29 after the founder's backup (`backup_0030`: documents, tenants, RLS on). Staging suites on `621141f`: worker 134 passed / 2 skipped (the two prefork tests, Linux only; they pass in CI), API 518 passed / 1 failed / 3 deselected, core 564 passed. The one API failure, `test_a_failed_tenant_creation_rolls_back_everything_including_the_file_move`, counts every tenant on staging and saw the count fall from 20 to 19 during the test -- something else was writing to staging at that moment; a failed creation cannot remove a tenant. Rerun alone: the file 13 passed, the test 3 of 3 passed. D-163 moved to 3c | D-003, D-150, D-159, D-163, D-170, D-173 |
 | 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items. **Also (founder, 2026-09-29): audit the ~23 broad `except` blocks on the document path.** Each one turns *any* exception into a data outcome -- DOC-005 (parsing, conversion), DOC-021 (saving, validation) or VAL-016 (buyer identification, matching, duplicate detection) -- so a real bug in our code can be shown as a problem with the customer's file. After the audit only the exceptions each block expects get a catalog code; anything else fails loudly as our error. Found while designing 3a's timeouts, not in 3a's scope | PLANNED | D-152 |
-| 5 | Remaining findings, doc/code contradictions, proposed CLAUDE.md additions; **audit every test that counts a whole table** (the `deal7` pattern) and move each one to data only that test can see, after which staging suites may run concurrently again (RUNBOOK 1.4); **robust test cleanup** (every test that creates data cleans it up in a fixture or `finally`, so a failing test still leaves nothing); **a staging sweep script** that lists tenants named "Acme Test ..." older than a day, with what each holds, and deletes one only on the founder's per-action OK (a stopped run always strands something); **triage the API suite's warnings** (425 on the 2026-09-26 run): list each kind, say which are harmless library deprecations and which point at a real problem in our code -- listed, not fixed (triage done 2026-09-26, D-163: all 439 are test-only; 438 are PyJWT's `InsecureKeyLengthWarning` from short test signing keys); **use a test JWT secret of at least 32 bytes** to clear that noise (founder); **a test that expects the database to refuse a write** must run in a transaction that is always rolled back, or on data it owns, so it can't leave a row behind when the refusal doesn't happen (D-165 incident); **two audit-trail findings from the second lost-device drill (D-178; founder: fixed before any pilot, with tests; design settled 2026-09-28)** -- (1) refused Console and step-up attempts are recorded server-side (AUTH-006/007); AUTH-008 is never browser-reported, and Supabase's database audit log was checked and records nothing on this project, so that gap is documented and Supabase's rate limit covers wrong-code guessing (its behaviour measured with the test account at build time); 5 refusals in 15 min for one account raise one high-severity founder alert per window, set only after measuring what a normal sign-in and step-up produce; (2) the outcome is a second, append-only `admin_actions` row referencing the intent row (succeeded, or failed with its code; no migration), and an intent with no outcome is shown in the Console as crashed midway, never as done; *low priority, not a blocker:* **count rows in spreadsheet and CSV orders for free before extraction** (no model call needed), so an oversized order is caught before a paid read (founder, D-163) | PLANNED | D-160, D-163, D-165, D-178 |
+| 5 | Remaining findings (**review findings still open for Stage 5, counted 2026-10-01: Critical 0, High 0, Medium 4 -- M6 the `rollup_stale` alert type missing from `ALERT_TYPES`, so the alert raises `ValueError` inside the rollup (still so on `main`); M7 the three missing Phase 5 alerts (D-155); M10 nine settings never read, the model IDs hardcoded; M11 SETUP.md and a migration ledger -- Low 0**: Lows are fixed only when their file is touched, D-155; the review put M8, M9, M12, M13, M15, L2 and L8 in Phase 6 and deferred L1, L3-L7 and L9), doc/code contradictions (**plus one found 2026-10-01: `celery_app.py` says interactive is always drained first, but kombu's Redis transport takes turns between queues**), proposed CLAUDE.md additions; **audit every test that counts a whole table** (the `deal7` pattern) and move each one to data only that test can see, after which staging suites may run concurrently again (RUNBOOK 1.4); **robust test cleanup** (every test that creates data cleans it up in a fixture or `finally`, so a failing test still leaves nothing); **a staging sweep script** that lists tenants named "Acme Test ..." older than a day, with what each holds, and deletes one only on the founder's per-action OK (a stopped run always strands something); **triage the API suite's warnings** (425 on the 2026-09-26 run): list each kind, say which are harmless library deprecations and which point at a real problem in our code -- listed, not fixed (triage done 2026-09-26, D-163: all 439 are test-only; 438 are PyJWT's `InsecureKeyLengthWarning` from short test signing keys); **use a test JWT secret of at least 32 bytes** to clear that noise (founder); **a test that expects the database to refuse a write** must run in a transaction that is always rolled back, or on data it owns, so it can't leave a row behind when the refusal doesn't happen (D-165 incident); **two audit-trail findings from the second lost-device drill (D-178; founder: fixed before any pilot, with tests; design settled 2026-09-28)** -- (1) refused Console and step-up attempts are recorded server-side (AUTH-006/007); AUTH-008 is never browser-reported, and Supabase's database audit log was checked and records nothing on this project, so that gap is documented and Supabase's rate limit covers wrong-code guessing (its behaviour measured with the test account at build time); 5 refusals in 15 min for one account raise one high-severity founder alert per window, set only after measuring what a normal sign-in and step-up produce; (2) the outcome is a second, append-only `admin_actions` row referencing the intent row (succeeded, or failed with its code; no migration), and an intent with no outcome is shown in the Console as crashed midway, never as done; *low priority, not a blocker:* **count rows in spreadsheet and CSV orders for free before extraction** (no model call needed), so an oversized order is caught before a paid read (founder, D-163) | PLANNED | D-160, D-163, D-165, D-178 |
 
 ### Stage 3 -- agreed with the founder before building (2026-09-29)
 
@@ -2030,7 +2030,13 @@ with the exiting rule.
 documents 105, extraction_runs 17; after: documents 105, extraction_runs 17;
 live and backup match on both. `backup_0034` stays until 3c has merged and
 run cleanly on staging for a few days, then it is dropped and recorded
-(RUNBOOK 1.3).
+(RUNBOOK 1.3). **Founder, 2026-10-01: drop it after 3c has run cleanly on
+staging for 3 days** -- 3c merged 2026-10-01 20:53 UTC, so not before
+**2026-10-04 20:53 UTC**. "Cleanly" is checked then and reported: the
+staging suites green on `main`, and no `document_failed`, `document_stuck`,
+`parse_service_unavailable` or `parse_seccomp_kill` alert on staging since
+the merge. Then the founder runs the drop (RUNBOOK 1.3) and the date is
+recorded here.
 
 **Departures reviewed (founder, 2026-10-01): 14 approved as written; two
 changed, built in the next commit:**
@@ -2111,6 +2117,11 @@ changed, built in the next commit:**
   passed, 1 skipped, 3 deselected, 653 warnings in 2498.67s (0:41:38)`**,
   exit 0; the same skip (`test_a_request_carrying_the_api_settings_is_refused`)
   and the 3 `live_api` deselections.
+  **The 1 skip, and why:** `test_parse_token_boundary.py::test_a_request_carrying_the_api_settings_is_refused`
+  sends a request with the API's own settings to a parse service that holds
+  a token and expects it refused; the local dev parse service runs without a
+  token, so the test skips here and runs in CI's API job (which starts the
+  real image with a token).
 
 **Fly staging run 1 (2026-10-01, image `sha256:f9719965`, machine
 `863662ce743978`, kernel 6.12.105-fly, cgroup v1): merge gate NOT met.**
@@ -2168,6 +2179,14 @@ Evidence: `docs/spikes/3c-fly-staging/2026-10-01-sha256-f9719965/`.
    is a guess. Run 2 records the stand-in's state and log right before and
    after the self-tests. Run 1's NOT-RUN stays in its evidence; the gate is
    every item passing in one run.
+   **Run 2: no retries.** The probe makes exactly one connect per target,
+   with no retry loop; run 2's control reached the stand-in on that single
+   attempt (the stand-in logged one connection, at 20:31:18, five seconds
+   after the run began, the canary running first).
+   **OPEN: the cause of run 1's A4 control timeout** (3 s, stand-in up and
+   never stopped). Not explained; the new-machine-route guess is unproven.
+   Watch for it in every later Fly run (the 10 s control would show it as a
+   slow "reached", not a NOT-RUN).
 - `--ha=false` is staging only; production's machine count is a Phase 6
   decision (RUNBOOK 8.2). A7 against the real port 8100 is preferred.
 
@@ -2386,6 +2405,253 @@ incident, which failed the Stage 2 golden run at 10:18.
   documents into `pending`, and from there they follow the same path.
 - **Needs a migration:** the transition, the three columns, the global table
   and the alert policy. Backup first, deletes nothing.
+
+**3d detailed design -- PROPOSED 2026-10-01; nothing is built until the
+founder approves.** It builds on the two agreed outlines above (fairness
+with its sweep interplay, and "documents wait when the model provider is
+down") and answers the points they left open. Everything marked
+*proposed* is mine; Q1-Q8 at the end are the decisions needed.
+
+*Where things stand today* (read from the code on `main`, `085a2a5`):
+- **Seven places put a document straight on the queue**, with no limit per
+  tenant:
+
+  | Where | Queue |
+  |---|---|
+  | upload (`documents.py`; the web page sends one request per file, so a 500-file upload is 500 requests) | `interactive` |
+  | email intake (`email_intake.py`) | `interactive` |
+  | Console "Run extraction" on a test batch (`admin.py`) | `interactive` |
+  | quarantine release, Console and tenant (`admin.py`, `held.py`) | `interactive` up to 10 released, else `bulk` |
+  | the task's own retry after a lost parse try (`parse_and_extract.py`) | `interactive` |
+  | the stuck sweep, `processing` retries and every `pending` past 30 min (`stuck_sweep.py`) | `interactive` |
+
+  So one tenant's 500 files put 500 jobs ahead of every other tenant's
+  next order: Section 5.1's burst row is not met (review H4).
+- **"Interactive is always drained first" is not true today.**
+  `celery_app.py` says so, but Celery's Redis transport takes turns
+  between the queues a worker reads (kombu 5.6.2, `queue_order_strategy =
+  'round_robin'`), so `bulk` gets equal turns. A doc/code contradiction
+  for the Stage 5 list; under the dispatcher it stops mattering for
+  documents (below), and the docstring is corrected in 3d.
+- **Three waits exist, two of them as stopgaps.** A Storage outage (3b)
+  and a parse service that can't be reached (3c) leave the document in
+  `processing` with its attempt given back and its claim re-stamped; the
+  sweep takes it over after 30 minutes, again and again, because 0027 has
+  no `processing -> pending`. The code says 3d adds the real wait. A
+  model-provider error fails the document at once (DOC-008).
+- **The staging worker runs one document at a time:** Celery's default
+  concurrency is the CPU count, and the worker's Fly machine is
+  shared-cpu-1x, 1 GB, with a 700 MiB per-process cap (3a).
+
+**1. `pending` splits into waiting and dispatched** (interplay point 1,
+agreed). A new column `documents.dispatched_at`: NULL is *waiting* (not
+yet sent), set is *dispatched* (sent to the queue, not yet claimed). The
+claim clears nothing; `processing` is already distinct. Every path that
+today sends a document to the queue instead leaves it `pending` with
+`dispatched_at` NULL, and only the dispatcher sends. A document is
+in flight when it is dispatched or `processing`.
+
+**2. The dispatcher.**
+- **Where it runs:** in the worker, as a Celery task `docflow.dispatch`,
+  never in the API. Choosing between tenants means reading every tenant's
+  waiting counts, and a cross-tenant read from the API would be an
+  admin-style path outside the Console (7.15.1).
+- **How it reads across tenants** (*proposed*, Q8): two SECURITY DEFINER
+  functions, so the worker's session gains no new read rights.
+  `dispatch_candidates()` returns, per tenant, the in-flight count and the
+  oldest few waiting documents (ids, lane, arrival time, `retry_at`):
+  ids, counts and times only, never a document's content.
+  `mark_dispatched(document_id)` sets `dispatched_at` by compare-and-set
+  (only if still waiting) and returns whether it did. EXECUTE revoked from
+  PUBLIC **and from `anon` and `authenticated`** (D-175), granted to
+  `docflow_app` now and moved to `docflow_worker` in 3e.
+- **One pass:**
+  1. Take a transaction-level advisory lock; if another pass holds it,
+     return at once (passes never overlap).
+  2. Free slots = the in-flight target minus what is in flight (Q2).
+  3. Fill them one at a time. The next slot goes to the tenant with the
+     **fewest documents in flight**; a tie goes to the tenant whose oldest
+     waiting document arrived first. Within a tenant: interactive lane
+     before bulk (Q3), then oldest first. A document whose `retry_at` is in
+     the future is skipped.
+  4. **A tenant at the per-tenant cap (Q1) is skipped while any other
+     tenant has a document waiting**; when no one else is waiting it may
+     use the free slots, so a lone backfill never leaves workers idle.
+  5. `mark_dispatched`, commit, then send each one to `interactive` (after
+     the commit, as every enqueue today). If a send fails, `dispatched_at`
+     is cleared again so it isn't counted in flight.
+  6. Record the pass's time (the heartbeat, below), holding or not.
+- **What starts a pass** (Q4, *proposed*: all three):
+  - a nudge after every intake commit (upload, email, release, test-batch
+    run): the API sends `docflow.dispatch` instead of the document task;
+  - inline at the end of every document task, in the worker process that
+    has just freed a slot;
+  - celery beat every 30 s (`DISPATCH_INTERVAL_SECONDS`), the backstop.
+  No extra process is needed: the queue never holds more than the target,
+  so a nudge waits at most behind that many documents, and when every slot
+  is busy the next completion dispatches anyway.
+- **What it gives:** a tenant arriving during another tenant's 500-file
+  upload gets the very next free slot; it never waits behind the backlog,
+  only behind documents already being read (at most one document's time
+  per slot). Measured, not assumed: the Phase 6 load test records it, and
+  3d's own tests show it (item 8).
+
+**3. The stuck sweep** (interplay points 1-2, agreed, made concrete):
+- It stops sending `pending` documents to the queue.
+- A document *dispatched* and unclaimed past `STUCK_PROCESSING_TIMEOUT_MIN`
+  is a lost job: the sweep clears `dispatched_at` (back to waiting, the
+  dispatcher re-sends it within the cap) and raises today's
+  `document_stuck` warning, one per tenant per day.
+- A document *waiting* never alerts on its own. Instead, if the
+  dispatcher's heartbeat is older than `DISPATCHER_STALE_MIN` (*proposed*:
+  10 minutes) while anything is waiting, the sweep raises one high-severity
+  tenant-less alert, new type `dispatcher_stopped`, deduped per hour. The
+  heartbeat is written on every pass, including passes that hold because
+  the provider is down, so holding never looks like stopping.
+- `processing` handling is unchanged (retry, DOC-022, 3a's timeout rule).
+
+**4. A real wait: `processing -> pending`** (agreed for the provider;
+*proposed* for Storage and the parse service too, Q6). A new transition in
+0027's state machine. On a waiting error the task moves the document back
+to `pending`, clears `dispatched_at`, gives back the attempt (so waiting
+never uses up `MAX_PROCESSING_ATTEMPTS` or looks like a timeout), and sets:
+- `waiting_since` (the first wait; kept until the document leaves
+  `pending`),
+- `wait_cause`: `model_provider`, `storage` or `parse_service`,
+- `retry_at`: when the dispatcher may send it again,
+- `last_wait_error`: a status code or reason name only (Section 7.10).
+
+These generalise the three provider columns proposed earlier (one set of
+columns for every wait, not one per cause). Per cause:
+
+| Cause | Backoff | Maximum wait | Customer sees | Alert |
+|---|---|---|---|---|
+| `model_provider` | 1, 2, 4, 8, 15, then every 15 min; a 429 waits at least its `Retry-After` | 6 h, then DOC-024 | **Delayed** (DOC-023) | `model_api_failure` / `model_api_recovered` |
+| `storage` | every 5 min | none (as today) | as today | `storage_unavailable`, hourly (as today) |
+| `parse_service` | every 2 min | none (as today) | as today | `parse_service_unavailable`, hourly (as today) |
+
+The provider row is the earlier proposal unchanged; Storage and the parse
+service keep today's behaviour and alerts and only stop being re-claimed
+every 30 minutes. The 3b/3c helper `release_after_storage_outage` goes.
+
+**5. Model provider down.** As proposed above (points 1-7 of "documents
+wait instead of failing"): what waits and what fails, the global
+`model_provider_state` table, down after 3 waiting-class failures in 5
+minutes, one `model_api_failure` alert per outage and a
+`model_api_recovered` notice, the dispatcher holding everything and
+probing with the oldest waiting document every 2 minutes. One addition
+(*proposed*): **on recovery every provider-waiting document's `retry_at`
+is cleared**, so the backlog goes out at once through the normal
+turn-taking instead of each waiting out its own backoff. All of these
+still wait for the founder's answer (Q7).
+
+**6. What people see.**
+- Tenant surface: a provider-waiting document shows **Delayed** with
+  DOC-023 (one badge, reusing `PILL`). A document waiting its turn shows
+  as `pending` does today.
+- Console: the document list shows the same; the health strip's existing
+  queue numbers stay, and "oldest waiting document" becomes "oldest
+  waiting (not yet dispatched)" so a backfill reads as a backlog, not as
+  stuck.
+
+**7. Migration `0035`** (backup first, deletes nothing, changes no
+existing value):
+- `documents`: `dispatched_at`, `dispatch_lane` (`interactive` or `bulk`;
+  existing rows `interactive`), `waiting_since`, `wait_cause`, `retry_at`,
+  `last_wait_error`; a partial index on waiting documents;
+- `processing -> pending` added to `document_status_transition_allowed`
+  (and to `document_status.ALLOWED`, held equal by the existing test);
+- `model_provider_state`, a **genuinely global table** (Section 10), RLS
+  on, readable and writable only through the worker's functions;
+- `dispatcher_state` (one row: the heartbeat), global the same way;
+- `dispatch_candidates()`, `mark_dispatched()`, the provider-state
+  functions, with the grants in item 2;
+- insert policies for the tenant-less alerts `model_api_failure`,
+  `model_api_recovered` and `dispatcher_stopped`: flag policies as
+  `rollup_raise` (0017) and `intake_refusal` (0029) are, moved to
+  `docflow_worker` in 3e.
+- Existing `pending` documents start as waiting (`dispatched_at` NULL), so
+  the dispatcher sends them; any already on the queue are claimed once
+  (the claim makes a duplicate a no-op).
+
+**Cutover order** (RUNBOOK, written with the build): `0035` applied, then
+the worker (with the dispatcher and beat entry), then the API (which stops
+sending the document task). An API without a dispatcher behind it would
+leave every new document waiting, and the `dispatcher_stopped` alert says
+so within 10 minutes.
+
+**8. Tests** (real systems where the thing under test is real; RUNBOOK 1.6
+evidence in each):
+- **Fairness, real database and real queue** (CI worker job: Postgres and
+  Redis services; a real Celery worker): tenant A uploads 500, tenant B 1
+  during it; B's document is claimed before A's next one. A lone tenant
+  fills every slot. The cap holds while others wait. A tenant's
+  interactive upload goes ahead of its own bulk lane. The model call is
+  replaced at the Anthropic boundary here: what is proven is the
+  dispatcher, the queue and the claim, all real.
+- **Passes never double-dispatch:** 20 concurrent passes on the real
+  database; every document dispatched exactly once.
+- **The sweep:** a dispatched-unclaimed document past the timeout goes back
+  to waiting with one alert; a waiting document never alerts; a stale
+  heartbeat raises `dispatcher_stopped`, a holding dispatcher doesn't.
+- **Provider errors, through the real SDK:** a local HTTP server standing in
+  for the provider answers 529, 503, 500, 429 with `Retry-After`, 401, 400,
+  and drops the connection mid-stream; each lands in its group (wait or
+  fail) by status code. Then: down after 3 in 5 minutes, one alert, holding
+  and probing, recovery notice, the backlog released, DOC-024 at 6 hours
+  (time moved in the database, not slept).
+- **Waiting never costs a try:** a document that waits five times, then
+  succeeds, has `processing_attempts` 1 and no `timeout_attempts`.
+- **Staging, at the checkpoint:** the 500 + 1 run end to end against staging
+  with the real parse service and the real model on a few documents (the
+  budget goes to the founder first), plus the Phase 6 load test later.
+
+**Not in 3d:** `pg_trgm` matching (Stage 4); the cost measurement of the
+costliest documents (before the first pilot, its own budget); F-1's logins
+(3e); the worker's machine count and concurrency (Phase 6, with the load
+test).
+
+**Questions for the founder:**
+- **Q1. The per-tenant cap** (`TENANT_IN_FLIGHT_CAP`). *Recommend 2:* with
+  the "may borrow when no one else is waiting" rule in item 2, the cap only
+  decides how much of the worker one tenant keeps while others wait; 2
+  lets a backfill keep moving without holding more than two slots against
+  a newcomer.
+- **Q2. A global in-flight target as well** (an addition to the agreed
+  design). *Recommend yes:* `DISPATCH_IN_FLIGHT_TARGET`, equal to the
+  worker's document slots (Celery concurrency, set explicitly from the
+  same setting so the two can't drift; staging 1). It keeps the queue as
+  short as the worker, so every choice is made by the dispatcher with full
+  knowledge, not by Redis's first-in-first-out. Cost: when workers are
+  added, the setting is raised with them (a RUNBOOK step). Without it, the
+  queue may hold cap x active tenants, and a newcomer waits behind all of
+  it.
+- **Q3. Does an interactive upload skip ahead of its own tenant's
+  backfill?** *Recommend yes,* by lane, decided at intake: a web upload of
+  up to 10 files (the page sends how many the person chose), every email,
+  a release of up to 10 (today's rule) and a test-batch run are
+  interactive; a larger upload or release is bulk. The lane only orders a
+  tenant's own documents, so a client that lies about its batch size can
+  only reorder its own queue. The alternative is first-in-first-out within
+  a tenant, which makes an urgent single order wait behind its own
+  backfill for hours.
+- **Q4. What starts the dispatcher.** *Recommend all three* (item 2): the
+  intake nudge, each completion, beat every 30 s.
+- **Q5. `DISPATCHER_STALE_MIN` = 10 minutes** and the new tenant-less
+  `dispatcher_stopped` alert (item 3)?
+- **Q6. Storage and parse-service waits move onto the same
+  `processing -> pending` wait** (item 4), with today's alerts and display
+  and no maximum? *Recommend yes:* it ends the 30-minute re-claim loop the
+  3b/3c code calls a stopgap.
+- **Q7. The provider proposals** (points 1-7 above, plus "clear `retry_at`
+  on recovery"): approve as written, or change any. Includes 401/403 still
+  failing at once but raising the provider alert as `our_credentials`, the
+  backoff, 6 hours, DOC-023 and DOC-024's wording, the thresholds (3 in 5
+  minutes, a probe every 2 minutes).
+- **Q8. The dispatcher's database access through two SECURITY DEFINER
+  functions** (item 2) rather than a flag policy that lets the worker read
+  every tenant's documents? *Recommend the functions:* they return ids,
+  counts and times only, and 3e moves one grant.
 
 **Before the first pilot: measure the cost of the documents that cost the
 most** (founder, 2026-09-29). The 18 documents in the Stage 2 checkpoint's

@@ -101,9 +101,21 @@ follow-up, PR #29) merged. Since then:
 - `backup_3b` (the 3b cutover's restore point), unless the founder has
   dropped it;
 - **`backup_0034`** (documents 105, extraction_runs 17; live = backup),
-  taken 2026-10-01 before `0034`. The founder keeps it until 3c has merged
-  and run cleanly on staging for a few days; then it is dropped and recorded
-  here.
+  taken 2026-10-01 before `0034`. **Founder, 2026-10-01: dropped after 3c
+  has run cleanly on staging for 3 days** -- 3c merged 2026-10-01 20:53 UTC,
+  so not before 2026-10-04 20:53 UTC, and only after Claude reports the
+  check (staging suites green on `main`; no `document_failed`,
+  `document_stuck`, `parse_service_unavailable` or `parse_seccomp_kill`
+  alert on staging since the merge). The founder runs, in the SQL Editor on
+  `docflow-staging` (no `cascade`, so nothing else can go with it):
+
+  ```sql
+  drop table backup_0034.documents;
+  drop table backup_0034.extraction_runs;
+  drop schema backup_0034;
+  ```
+
+  and the date is recorded here and in BUILD-STATUS.
 
 `docflow-prod` doesn't exist yet (Phase 6), so it has no backups.
 
