@@ -691,13 +691,24 @@ class Runner:
             for i in indexes:
                 post(*requests[i % len(requests)])
 
+        # An exiting PID 1 (no command line any more) is accepted only if
+        # that same pid was earlier sampled live as the reaper (founder):
+        # otherwise it could hide a wrong PID 1.
+        reaper_pids: set[int] = set()
+        unexplained_exiting: list[int] = []
+
         def sample() -> None:
             while not done.is_set():
                 for pid, nspid, cmdline in _namespaced_processes():
                     target = pid1_seen if nspid == 1 else pid2_seen if nspid == 2 else None
-                    if target is not None:
-                        with lock:
-                            target[cmdline] = target.get(cmdline, 0) + 1
+                    if target is None:
+                        continue
+                    with lock:
+                        target[cmdline] = target.get(cmdline, 0) + 1
+                        if nspid == 1 and "parse_service.sandbox_init" in cmdline:
+                            reaper_pids.add(pid)
+                        elif nspid == 1 and cmdline.startswith("<exiting") and pid not in reaper_pids:
+                            unexplained_exiting.append(pid)
                 time.sleep(0.02)
 
         sampler = threading.Thread(target=sample, daemon=True)
@@ -728,6 +739,7 @@ class Runner:
                     and not leftover
                     and not left
                     and pid1_is_the_reaper
+                    and not unexplained_exiting
                     and saw_a_running_job
                     and not backstop_found
                 ),
@@ -735,6 +747,7 @@ class Runner:
                     "http_statuses": statuses,
                     "outcomes": outcomes,
                     "namespace_pid1_seen": pid1_seen,
+                    "exiting_pid1_never_seen_live_as_the_reaper": unexplained_exiting,
                     "namespace_pid2_seen": pid2_seen,
                     "job_cgroups_left": leftover,
                     "slot_user_processes_left": left,
@@ -745,6 +758,67 @@ class Runner:
                 },
             )
         )
+
+    def own_exit_70(self) -> None:
+        """B15 (founder, Q13): after the hardened message, a parser that exits
+        70 -- once the code for "isolation failed" -- is a parser failure."""
+        job = self.job("exit_with", {"code": 70})
+        self.add(
+            Check(
+                "B15:exit-70-after-hardening-is-a-parser-failure",
+                _verdict(
+                    job.outcome == "crashed"
+                    and job.cause == "exit_70"
+                    and job.evidence.get("hardened") == {"hardened": True, "seccomp": True}
+                ),
+                {"outcome": job.outcome, "cause": job.cause, **job.evidence},
+            )
+        )
+
+    def memory_self_report_vs_real(self) -> None:
+        """B16 (founder, Q13): a MemoryError the parser reports itself (exit
+        71) is a parser failure; a real overrun under the job's normal limits
+        reaches the cgroup first (RLIMIT_AS is above it) and is `memory`."""
+        reported = self.job("raise_memory_error")
+        real = self.job("memory", {"processes": 1, "mib": 1200})  # default limits: the cgroup is 768 MiB
+        self.add(
+            Check(
+                "B16:self-reported-memory-error-vs-a-real-overrun",
+                _verdict(
+                    reported.outcome == "crashed"
+                    and reported.cause == "self_reported_memory_error"
+                    and reported.evidence.get("oom_kills") == 0
+                    and real.outcome == "stopped"
+                    and real.cause == "memory"
+                    and real.evidence.get("oom_kills", 0) > 0
+                ),
+                {
+                    "self_reported": {"outcome": reported.outcome, "cause": reported.cause, **reported.evidence},
+                    "real_overrun": {
+                        "outcome": real.outcome,
+                        "cause": real.cause,
+                        "oom_kills": real.evidence.get("oom_kills"),
+                        "limits": real.evidence.get("limits"),
+                    },
+                    "rlimit_as_mib": config.RLIMIT_AS_BYTES // config.MIB,
+                    "job_memory_mib": config.JOB_MEMORY_BYTES // config.MIB,
+                },
+            )
+        )
+
+    def noexec(self) -> None:
+        """A15 (founder, 2026-10-01): /work, /tmp and /var/tmp are noexec."""
+        control_dir = tempfile.mkdtemp(prefix="a15-control-")
+        outside = selftest_programs.noexec({"base": control_dir})
+        inside = self.result(self.job("noexec"))
+        places = ("/work", "/tmp", "/var/tmp")
+        blocked = all(
+            inside.get(p, {}).get("direct") == "EACCES" and inside.get(p, {}).get("via_loader", "exit:0") != "exit:0"
+            for p in places
+        )
+        control = outside.get(control_dir, {})
+        control_ok = control.get("direct") == "ran:0" and control.get("via_loader") in ("exit:0", None)
+        self.add(Check("A15:noexec", _verdict(blocked, control_ok), {"outside": outside, "inside": inside}))
 
     def own_exit_137(self) -> None:
         """B14 (founder, 2026-10-01): a parser that exits 137 by itself, in
@@ -1057,6 +1131,7 @@ def run_all(runner: Runner, groups: str, extra_targets: dict) -> None:
         targets["dns"] = [*targets["dns"], *extra_targets.get("dns", [])]
         runner.network(targets)
         runner.view()
+        runner.noexec()
         runner.escape()
         runner.concurrent()
     if "S" in groups:
@@ -1072,6 +1147,8 @@ def run_all(runner: Runner, groups: str, extra_targets: dict) -> None:
         runner.one_per_file()
         runner.cgroup_escape()
         runner.own_exit_137()
+        runner.own_exit_70()
+        runner.memory_self_report_vs_real()
         runner.libreoffice()
         runner.no_leak()
 

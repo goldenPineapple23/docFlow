@@ -1521,7 +1521,7 @@ this as well). The API needs `SUPABASE_URL` to check sign-in tokens (JWKS)
 for the upload test. It gets no Stripe, Postmark, service-role or
 Anthropic key in 3c.
 
-**3c test table.** 58 tests (55 agreed, plus B13, B14 and S4's second check, 2026-10-01).
+**3c test table.** 61 tests (55 agreed, plus B13-B16, A15 and S4's second check, 2026-10-01).
 
 Where each test runs:
 - **L** = this Windows machine, dev mode. Logic only, never counted as
@@ -1582,6 +1582,9 @@ failure means stop and report.
 | B12 | **CPU quota (slows):** a job spinning on every core gets at most one CPU's worth of time over a timed window, and the cgroup reports throttling; the other slot's job still finishes | the same program with no quota uses more than one CPU | | yes | yes |
 | B13 | **LibreOffice runs in the sandbox** (added 2026-10-01 after `po.doc` gave DOC-017 in the real image): the committed `po.doc`, converted inside a real job with `conversion.py`'s flags and Word 97 filter, exits 0 and produces a file; reports its exit status and stderr tail, whether `/tmp` and `/var/tmp` are writable, and the same run with LibreOffice's pipe pointed at the work directory (evidence) | -- | | yes | yes |
 | B14 | **A parser's own exit code is never read as a kill** (founder, 2026-10-01): a job that exits 137 by itself, in the real sandbox, is `crashed: exit_137`, with no OOM kill and the reaper's record `{"exited": 137}`; unit tests cover every combination (`apps/parse/tests/test_classify.py`) | -- | | yes | yes |
+| B15 | **Exit 70 after the hardened message is a parser failure** (founder, Q13): `crashed: exit_70`, with the confirmation `{"hardened": true, "seccomp": true}` in the evidence | -- | | yes | yes |
+| B16 | **A self-reported memory error vs a real overrun** (Q13): a parser's own MemoryError (exit 71) is `crashed: self_reported_memory_error` with no OOM kill; 1200 MiB under the default 768 MiB cgroup is `stopped: memory` with an OOM kill | -- | | yes | yes |
+| A15 | **noexec** (founder, 2026-10-01): a binary copied into `/work`, `/tmp` and `/var/tmp` can't run, directly (EACCES) or through the dynamic loader | the same copy outside the sandbox runs | | yes | yes |
 | **C. Hostile files** (through `POST /v1/document`, the real path. After each one, a known-good PO parses correctly, so the service is shown healthy) | | | | | |
 | C1 | Zip bomb; XXE payload; oversized image; 500-page PDF; `.exe` renamed `.pdf`; password-protected PDF; a `.zip` holding a valid PO. Each gets the catalog code it gets today | -- | yes | yes | yes |
 | C2 | A malformed file of **each** Tier 2 format (`.doc`, `.xls`, `.tif`, `.heic`, `.msg`, `.odt`, `.ods`) that kills or hangs its converter: a clean `rejected` or `stopped`, never a crash | -- | yes | yes | yes |
@@ -1952,13 +1955,44 @@ reviews each before the merge:**
   it starts; the reaper is non-dumpable, so the job can't reach it through
   `/proc`): `{"exited": n}` or `{"signaled": n}`. No record, or
   `{"sandbox": "failed"}`, is the service failing to isolate. B14 and
-  `test_classify.py`. **Open (Q13):** two exit codes still decide an outcome,
-  both the job's own report: 70 (`job.harden` failed before reading a byte:
-  `isolation_failed`, the document waits) and 71 (Python's `MemoryError`
-  under the RLIMIT_AS backstop: `stopped: memory`, DOC-029). A compromised
-  parser could exit 70 or 71 after reading the file. Under your rule both
-  would become plain parser failures (`crashed`, DOC-005); I haven't changed
-  them without asking.
+  `test_classify.py`. **Q13 (founder, 2026-10-01): no exit code decides an
+  outcome any more.**
+  - **70 is replaced by a positive confirmation.** `sandbox_init`'s forked
+    child does the hardening itself (no supplementary groups; empty
+    bounding, inheritable and ambient capability sets; the slot's uid and
+    gid; no-new-privileges; the seccomp filter), checks every one in
+    `/proc/self/status`, then sends `{"hardened": true, "seccomp": ...}` on
+    the private pipe, closes its copy, and only then `exec`s the parser.
+    The supervisor accepts only that exact first line, for the seccomp
+    setting it asked for (`seccomp` is false only for a self-test control).
+    No confirmation: `isolation_failed` (the document waits; the hourly
+    alert). With it, any exit is the parser's, whatever the code. This
+    **replaces `setpriv`**, which did the same steps but couldn't confirm
+    them before the parser started; the canary and A9 check the result as
+    before. The reaper's later end record only names how a parser failed
+    (`exit_N` or `signal_N`); hardened with no end record is `reaper_lost`
+    (isolation failed).
+  - **71 is a plain parser failure** (`crashed: self_reported_memory_error`,
+    DOC-005, logged as `job_self_reported_memory_error`). Real overruns get
+    DOC-029 from the cgroup: `RLIMIT_AS_BYTES` (2 GiB) is above
+    `JOB_MEMORY_BYTES` (768 MiB), and a unit test keeps it that way. *One
+    case to know:* a parser asking for more than 2 GiB in a single
+    allocation is refused by RLIMIT_AS before touching memory, so it ends as
+    the parser's own MemoryError (DOC-005), not DOC-029.
+  - Tests: `test_classify.py` (12); B15 (a parser exiting 70 after the
+    hardened message is `crashed: exit_70`); B16 (a self-reported
+    MemoryError is `crashed`, no OOM kill; 1200 MiB under the default
+    768 MiB cgroup is `stopped: memory` with an OOM kill).
+- **`noexec` (founder, 2026-10-01)** on `/work` and the `/tmp`, `/var/tmp`
+  bind mounts. A15: `/bin/true` copied into each can't run directly
+  (EACCES) or through the dynamic loader (which must map the file
+  executable); the control, the same copy outside the sandbox, runs.
+  Interpreted code (`python file.py`) is not stopped by noexec. Whether
+  LibreOffice still converts with it: B13, D1 and the worker's `po.doc`
+  tests. `/lohome` (LibreOffice's profile) is not noexec yet; adding it is
+  your call.
+- **B11's exiting samples (founder):** accepted only when that same pid was
+  earlier sampled live as `sandbox_init`; any other is listed and fails B11.
 - **The service log gets LibreOffice's real error (founder):** a rejected
   conversion's reason, with the last 300 characters of LibreOffice's own
   stderr, goes to the job's stderr and from there to the service's log

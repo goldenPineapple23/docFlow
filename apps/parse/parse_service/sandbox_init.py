@@ -28,6 +28,7 @@ file.
 from __future__ import annotations
 
 import ctypes
+import errno
 import json
 import os
 import resource
@@ -39,6 +40,8 @@ from parse_service import config
 EXIT_ISOLATION_FAILED = 70
 PR_SET_NO_NEW_PRIVS = 38
 PR_SET_DUMPABLE = 4
+PR_CAPBSET_DROP = 24
+_LINUX_CAPABILITY_VERSION_3 = 0x20080522
 
 MS_RDONLY = 0x1
 MS_NOSUID = 0x2
@@ -136,7 +139,7 @@ def _tmp_is_work() -> None:
     (A11); the rest of the root stays read-only (A14)."""
     for target in config.TMP_DIRS:
         _mount(f"{config.WORK_DIR}/tmp", target, None, MS_BIND)
-        _mount("none", target, None, MS_REMOUNT | MS_BIND | MS_NOSUID | MS_NODEV)
+        _mount("none", target, None, MS_REMOUNT | MS_BIND | MS_NOSUID | MS_NODEV | MS_NOEXEC)
 
 
 def _limits() -> None:
@@ -168,7 +171,7 @@ def main(argv: list[str]) -> int:
         _hide("/sys")
         _hide("/.fly")
         _minimal_dev()
-        _tmpfs(config.WORK_DIR, config.WORK_TMPFS_BYTES, "0700", MS_NOSUID | MS_NODEV, owner=uid)
+        _tmpfs(config.WORK_DIR, config.WORK_TMPFS_BYTES, "0700", MS_NOSUID | MS_NODEV | MS_NOEXEC, owner=uid)
         _tmpfs(config.HOME_DIR, config.HOME_TMPFS_BYTES, "0700", MS_NOSUID | MS_NODEV, owner=uid)
         os.mkdir(f"{config.WORK_DIR}/tmp", 0o700)
         os.chown(f"{config.WORK_DIR}/tmp", uid, uid)
@@ -179,38 +182,92 @@ def main(argv: list[str]) -> int:
         _report(status_fd, {"sandbox": "failed"})
         return EXIT_ISOLATION_FAILED
 
+    # "off" here only for a self-test control that runs without the filter
+    # (launcher._chain_env); nothing in a request can choose it.
+    with_seccomp = os.environ.get("PARSE_ISOLATION", "on") == "on"
     env = {
         "PATH": "/usr/local/bin:/usr/bin:/bin",
         "HOME": config.HOME_DIR,
         "TMPDIR": f"{config.WORK_DIR}/tmp",
         "LANG": "C.UTF-8",
-        "PARSE_ISOLATION": "on",
+        "PARSE_ISOLATION": "on" if with_seccomp else "off",
         "LIBREOFFICE_PATH": os.environ.get("LIBREOFFICE_PATH", ""),
     }
-    setpriv = [
-        "/usr/bin/setpriv",
-        f"--reuid={uid}",
-        f"--regid={uid}",
-        "--clear-groups",
-        "--inh-caps=-all",
-        "--bounding-set=-all",
-        "--no-new-privs",
-        "--",
-        sys.executable,
-        "-I",
-        "-m",
-        "parse_service.job",
-        kind,
-    ]
+    job_argv = [sys.executable, "-I", "-m", "parse_service.job", kind]
     os.chdir(config.WORK_DIR)
     job = os.fork()
     if job == 0:
         try:
-            os.close(status_fd)  # the job never holds the end-record pipe
-            os.execve(setpriv[0], setpriv, env)
-        finally:
-            os._exit(EXIT_ISOLATION_FAILED)
+            _harden_and_confirm(uid, status_fd, with_seccomp)
+            os.execve(job_argv[0], job_argv, env)
+        except BaseException as exc:  # noqa: BLE001 -- no confirmation was sent: isolation failed
+            print(f"job hardening failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        os._exit(EXIT_ISOLATION_FAILED)
     return _reap_as_init(job, uid, status_fd)
+
+
+def _drop_to(uid: int) -> None:
+    """Root to the slot's user, keeping nothing: no supplementary groups, an
+    empty capability bounding set (dropped while CAP_SETPCAP is still held),
+    then every uid and gid, then empty inheritable capabilities (setresuid
+    has already cleared permitted, effective and ambient)."""
+    os.setgroups([])
+    for cap in range(64):
+        if _libc.prctl(PR_CAPBSET_DROP, cap, 0, 0, 0) != 0:
+            if ctypes.get_errno() == errno.EINVAL:
+                break  # past the last capability this kernel knows
+            raise OSError(ctypes.get_errno(), f"prctl(PR_CAPBSET_DROP, {cap})")
+    os.setresgid(uid, uid, uid)
+    os.setresuid(uid, uid, uid)
+    header = (ctypes.c_uint32 * 2)(_LINUX_CAPABILITY_VERSION_3, 0)
+    data = (ctypes.c_uint32 * 6)(0, 0, 0, 0, 0, 0)
+    if _libc.capset(header, data) != 0:
+        raise OSError(ctypes.get_errno(), "capset")
+
+
+def _proc_status() -> dict[str, str]:
+    with open("/proc/self/status") as handle:
+        return {k.strip(): v.strip() for k, _, v in (line.partition(":") for line in handle)}
+
+
+def _harden_and_confirm(uid: int, status_fd: int, with_seccomp: bool) -> None:
+    """
+    In the forked child, before the parser exists (founder, 2026-10-01,
+    Q13): drop to the slot's user, set no-new-privileges, load the seccomp
+    filter, check all of it in /proc/self/status, and only then send the
+    supervisor one "hardened" message on the private pipe -- and close this
+    process's copy of the pipe, so the parser that replaces it never holds
+    it. The supervisor accepts that first message only. No message means
+    isolation failed (the document waits, the founder is alerted); with it,
+    any later exit is the parser's, whatever the code, so a compromised
+    parser can't fake an isolation failure. (Replaces `setpriv`, which did
+    the same steps but couldn't confirm them before the parser started.)
+    """
+    _drop_to(uid)
+    if _libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), "prctl(PR_SET_NO_NEW_PRIVS)")
+    if with_seccomp:
+        from parse_service import seccomp_filter
+
+        seccomp_filter.load()
+    status = _proc_status()
+    expected = {
+        "Uid": f"{uid}\t{uid}\t{uid}\t{uid}",
+        "Gid": f"{uid}\t{uid}\t{uid}\t{uid}",
+        "Groups": "",
+        "CapInh": "0000000000000000",
+        "CapPrm": "0000000000000000",
+        "CapEff": "0000000000000000",
+        "CapBnd": "0000000000000000",
+        "CapAmb": "0000000000000000",
+        "NoNewPrivs": "1",
+        "Seccomp": "2" if with_seccomp else "0",
+    }
+    wrong = {k: status.get(k) for k, v in expected.items() if status.get(k) != v}
+    if wrong:
+        raise RuntimeError(f"not hardened: {wrong}")
+    os.write(status_fd, (json.dumps({"hardened": True, "seccomp": with_seccomp}) + "\n").encode())
+    os.close(status_fd)
 
 
 def _reap_as_init(job: int, uid: int, status_fd: int) -> int:
@@ -236,9 +293,7 @@ def _reap_as_init(job: int, uid: int, status_fd: int) -> int:
         devnull = os.open("/dev/null", os.O_RDWR)
         os.dup2(devnull, 0)  # the job holds the pipes; this process never reads or writes them
         os.dup2(devnull, 1)
-        os.setgroups([])
-        os.setresgid(uid, uid, uid)
-        os.setresuid(uid, uid, uid)
+        _drop_to(uid)
         if _libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
             raise OSError(ctypes.get_errno(), "prctl(PR_SET_DUMPABLE)")
         if _libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:

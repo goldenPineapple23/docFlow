@@ -293,9 +293,10 @@ def run_job(
         evidence["cgroup_removed"] = job_cg.remove()
     stderr_tail = bytes(err[-2000:]).decode("utf-8", errors="replace")
     if isolation:
-        end_record = _end_record(bytes(end_record_raw))
-        evidence["job_end"] = end_record
-        job_status, isolation_cause = _job_status(end_record)
+        records = _records(bytes(end_record_raw))
+        evidence["hardened"] = records[0] if records else None
+        evidence["job_end"] = records[1] if len(records) > 1 else None
+        job_status, isolation_cause = _job_status(records, seccomp_expected=seccomp)
     else:
         job_status, isolation_cause = proc.returncode, None
     result = _classify(job_status, cause, bytes(out), isolation_cause=isolation_cause)
@@ -463,28 +464,43 @@ def _kill(proc: subprocess.Popen, job_cg: JobCgroup | None) -> None:
         pass
 
 
-def _end_record(raw: bytes) -> dict | None:
-    """The reaper's one record, or None if it wrote nothing readable."""
-    try:
-        record = json.loads(raw.decode("utf-8").strip().splitlines()[0])
-    except (UnicodeDecodeError, json.JSONDecodeError, IndexError):
-        return None
-    return record if isinstance(record, dict) else None
+def _records(raw: bytes) -> list[dict]:
+    """The private pipe's lines, in order: the hardened child's confirmation,
+    then the reaper's record of how the job ended. Anything unreadable ends
+    the list there."""
+    out: list[dict] = []
+    for line in raw.decode("utf-8", errors="replace").splitlines()[:2]:
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            break
+        if not isinstance(record, dict):
+            break
+        out.append(record)
+    return out
 
 
-def _job_status(record: dict | None) -> tuple[int | None, str | None]:
-    """The parser's own end, from the reaper's record: (status, None) with a
-    signal N as -N, as subprocess reports it; or (None, cause) when the
-    sandbox itself failed or left no record."""
-    if record is None:
-        return None, "no_end_record"
-    if record.get("sandbox") == "failed":
+def _job_status(records: list[dict], *, seccomp_expected: bool) -> tuple[int | None, str | None]:
+    """
+    (the parser's own end, None), with a signal N as -N as subprocess
+    reports it; or (None, why isolation failed). Isolation is confirmed only
+    by the first record being exactly the hardened child's message, sent
+    before the parser existed (founder, Q13), for the seccomp setting this
+    launcher asked for. Without it, isolation failed, whatever happened
+    next; with it, the end is the parser's, whatever its exit code.
+    """
+    if not records:
+        return None, "not_hardened"
+    if records[0].get("sandbox") == "failed":
         return None, "sandbox_init"
-    if isinstance(record.get("signaled"), int):
-        return -record["signaled"], None
-    if isinstance(record.get("exited"), int):
-        return record["exited"], None
-    return None, "no_end_record"
+    if records[0] != {"hardened": True, "seccomp": seccomp_expected}:
+        return None, "not_hardened"
+    end = records[1] if len(records) > 1 else None
+    if end is not None and isinstance(end.get("signaled"), int) and not isinstance(end.get("signaled"), bool):
+        return -end["signaled"], None
+    if end is not None and isinstance(end.get("exited"), int) and not isinstance(end.get("exited"), bool):
+        return end["exited"], None
+    return None, "reaper_lost"  # hardened, then no end record: the sandbox's PID 1 failed
 
 
 def _classify(status: int | None, cause: str | None, out: bytes, *, isolation_cause: str | None = None) -> JobResult:
@@ -500,10 +516,13 @@ def _classify(status: int | None, cause: str | None, out: bytes, *, isolation_ca
         return JobResult("stopped", cause=cause, exit_status=status)
     if isolation_cause is not None:
         return JobResult("isolation_failed", cause=isolation_cause, exit_status=status)
-    if status == EXIT_ISOLATION_FAILED:
-        return JobResult("isolation_failed", cause="job_hardening", exit_status=status)
     if status == EXIT_MEMORY:
-        return JobResult("stopped", cause="memory", exit_status=status)
+        # The parser's own MemoryError (the per-process RLIMIT_AS backstop):
+        # a parser failure, never DOC-029 -- a parser could exit 71 by itself
+        # (founder, Q13). A real overrun reaches the job's cgroup first, since
+        # RLIMIT_AS_BYTES >= JOB_MEMORY_BYTES, and `cause` says memory.
+        logger.warning("job_self_reported_memory_error")
+        return JobResult("crashed", cause="self_reported_memory_error", exit_status=status)
     if status != 0:
         name = f"signal_{-status}" if status is not None and status < 0 else f"exit_{status}"
         return JobResult("crashed", cause=name, exit_status=status)

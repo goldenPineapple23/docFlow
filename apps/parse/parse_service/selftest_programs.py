@@ -14,6 +14,7 @@ from __future__ import annotations
 import ctypes
 import errno
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -555,6 +556,41 @@ def libreoffice(args: dict) -> dict:
     }
 
 
+def raise_memory_error(args: dict) -> dict:
+    """B16: the parser reports running out of memory itself (job.py turns a
+    MemoryError into exit 71) without the cgroup being anywhere near full."""
+    raise MemoryError
+
+
+LOADERS = ("/lib64/ld-linux-x86-64.so.2", "/lib/ld-linux-aarch64.so.1")
+
+
+def noexec(args: dict) -> dict:
+    """A15: a binary copied into each writable place can't be run, neither
+    directly nor through the dynamic loader (which needs to map the file
+    executable, and noexec refuses that too). `base`: the control, a
+    directory outside the sandbox."""
+    loader = next((p for p in LOADERS if os.path.exists(p)), None)
+    places = [args["base"]] if args.get("base") else ["/work", "/tmp", "/var/tmp"]
+    out: dict = {"loader": loader}
+    for place in places:
+        path = os.path.join(place, f"a15-true-{os.getpid()}")
+        shutil.copyfile("/bin/true", path)
+        os.chmod(path, 0o755)
+        result: dict = {}
+        try:
+            result["direct"] = f"ran:{subprocess.run([path], capture_output=True).returncode}"
+        except OSError as exc:
+            result["direct"] = errno.errorcode.get(exc.errno or 0, str(exc.errno))
+        if loader:
+            done = subprocess.run([loader, path], capture_output=True)
+            result["via_loader"] = f"exit:{done.returncode}"
+            result["via_loader_stderr"] = done.stderr.decode("utf-8", errors="replace")[-200:]
+        os.unlink(path)
+        out[place] = result
+    return out
+
+
 def exit_with(args: dict) -> dict:
     """B14: the parser ends itself with a chosen exit code (137 looks like a
     SIGKILL to anything that reads exit codes as 128+N)."""
@@ -587,6 +623,8 @@ PROGRAMS = {
     "cgroup_escape": cgroup_escape,
     "sleep": sleep,
     "exit_with": exit_with,
+    "raise_memory_error": raise_memory_error,
+    "noexec": noexec,
     "libreoffice": libreoffice,
 }
 

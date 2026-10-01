@@ -14,9 +14,13 @@ the file's bytes until EOF, and one JSON answer on stdout. The filename is
 built by the supervisor from the extension alone; the sender's own name
 never reaches this process.
 
-Exit statuses: 0 with an answer; 70 isolation failed; 71 out of memory
-inside Python (the per-process backstop). A job killed by the supervisor or
-by the kernel has no status of its own; the supervisor names the cause.
+Exit statuses: 0 with an answer; 70 when this second hardening fails; 71
+out of memory inside Python (the per-process backstop). Since Q13 (founder,
+2026-10-01) neither decides an outcome: isolation is confirmed by
+sandbox_init's "hardened" message before this process exists, so any
+non-zero exit here is a parser failure, logged by name. A job killed by the
+supervisor or by the kernel has no status of its own; the supervisor names
+the cause from its own records.
 """
 
 from __future__ import annotations
