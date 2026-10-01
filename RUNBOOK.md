@@ -828,3 +828,69 @@ The procedure:
 
 If any B test fails on Fly, nothing goes to production: stop and report
 (1.7).
+
+### 8.2 Running it
+
+- **Dev (this Windows machine):** SETUP.md Step 7a. `PARSE_ISOLATION=off`,
+  one process per file and the same time limit, no sandbox. Refused in
+  production mode.
+- **CI:** the `parse` job builds `apps/parse/Dockerfile` and runs it with
+  `--privileged` (the closest a GitHub runner gets to root in a Fly VM).
+  Its self-test, E1, E4 and canary results are annotations on the run's
+  summary page.
+- **Fly:** the same image. Production mode is on (Fly sets `FLY_APP_NAME`):
+  isolation must be on, `PARSE_SERVICE_TOKEN` must be set, and any
+  `PARSE_TEST_ONLY_*` setting makes it refuse to start. Private only, over
+  Flycast (`fly ips list` must show one private IPv6 address and nothing
+  else, after every deploy).
+
+### 8.3 Reading the startup log (the canary)
+
+Before it opens its port the service runs its canary through the real
+sandbox and prints one line per check:
+
+```
+canary: cgroup v1
+RESULT canary:network PASS -- {...}
+RESULT canary:view PASS -- {...}
+RESULT canary:seccomp PASS -- {...}
+RESULT canary:memory-cap-kills PASS -- {...}
+RESULT canary:cpu-quota-set-and-budget-kills PASS -- {...}
+canary: PASS
+parse service listening on port 8100
+```
+
+Any FAIL, or "refused to start", means the machine cannot isolate a file:
+the service exits, Fly restarts it, it fails again, and the worker gets
+"unavailable" -- documents wait, nothing is parsed unsandboxed, and the
+`parse_service_unavailable` alert fires. **Stop and report (1.7); never
+switch isolation off to get it running.**
+
+### 8.4 When the founder gets a `parse_service_unavailable` alert
+
+At most once an hour for the whole platform. The payload's `reason`:
+- `no_connection` / `busy_or_isolation_failed`: the service is down,
+  overloaded, or its canary is failing. Check the app's machines and its
+  startup log (8.3). Documents wait and retry by themselves; nothing is
+  failed for waiting.
+- `unauthorized`: the worker's and the service's `PARSE_SERVICE_TOKEN`
+  differ. Set the same value on both apps.
+- `http_4xx`: a request the service refused (a DocFlow bug, never the
+  file's fault). Report it.
+
+### 8.5 Upgrading a parser (an ongoing duty, CLAUDE.md 7.11)
+
+Every library in the image reads files strangers send. When a CVE lands in
+one (pdfplumber, python-docx, openpyxl, Pillow, pillow-heif, olefile, xlrd,
+defusedxml, LibreOffice, libseccomp, or the base image):
+1. Move the pin: `apps/parse/requirements.lock.txt` for a Python package;
+   the exact Debian version in `apps/parse/Dockerfile` for LibreOffice or
+   libseccomp; the digest for the base image.
+2. CI must pass in full: the unit tests, D2 parity (every fixture's text
+   must stay the same), and the self-tests in the real sandbox.
+3. Then 8.1: deploy to Fly staging, check the canary log, run B1-B12 there.
+4. Only then deploy to production.
+
+A Debian security update can replace a pinned version in the archive, which
+breaks the image build until the pin is moved. That is this procedure
+starting, not a CI fault.
