@@ -807,11 +807,11 @@ class Runner:
         )
 
     def noexec(self) -> None:
-        """A15 (founder, 2026-10-01): /work, /tmp and /var/tmp are noexec."""
+        """A15 (founder, 2026-10-01): /work, /tmp, /var/tmp and /lohome are noexec."""
         control_dir = tempfile.mkdtemp(prefix="a15-control-")
         outside = selftest_programs.noexec({"base": control_dir})
         inside = self.result(self.job("noexec"))
-        places = ("/work", "/tmp", "/var/tmp")
+        places = ("/work", "/tmp", "/var/tmp", "/lohome")
         blocked = all(
             inside.get(p, {}).get("direct") == "EACCES" and inside.get(p, {}).get("via_loader", "exit:0") != "exit:0"
             for p in places

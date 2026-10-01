@@ -1584,7 +1584,7 @@ failure means stop and report.
 | B14 | **A parser's own exit code is never read as a kill** (founder, 2026-10-01): a job that exits 137 by itself, in the real sandbox, is `crashed: exit_137`, with no OOM kill and the reaper's record `{"exited": 137}`; unit tests cover every combination (`apps/parse/tests/test_classify.py`) | -- | | yes | yes |
 | B15 | **Exit 70 after the hardened message is a parser failure** (founder, Q13): `crashed: exit_70`, with the confirmation `{"hardened": true, "seccomp": true}` in the evidence | -- | | yes | yes |
 | B16 | **A self-reported memory error vs a real overrun** (Q13): a parser's own MemoryError (exit 71) is `crashed: self_reported_memory_error` with no OOM kill; 1200 MiB under the default 768 MiB cgroup is `stopped: memory` with an OOM kill | -- | | yes | yes |
-| A15 | **noexec** (founder, 2026-10-01): a binary copied into `/work`, `/tmp` and `/var/tmp` can't run, directly (EACCES) or through the dynamic loader | the same copy outside the sandbox runs | | yes | yes |
+| A15 | **noexec** (founder, 2026-10-01): a binary copied into `/work`, `/tmp`, `/var/tmp` and `/lohome` can't run, directly (EACCES) or through the dynamic loader | the same copy outside the sandbox runs | | yes | yes |
 | **C. Hostile files** (through `POST /v1/document`, the real path. After each one, a known-good PO parses correctly, so the service is shown healthy) | | | | | |
 | C1 | Zip bomb; XXE payload; oversized image; 500-page PDF; `.exe` renamed `.pdf`; password-protected PDF; a `.zip` holding a valid PO. Each gets the catalog code it gets today | -- | yes | yes | yes |
 | C2 | A malformed file of **each** Tier 2 format (`.doc`, `.xls`, `.tif`, `.heic`, `.msg`, `.odt`, `.ods`) that kills or hangs its converter: a clean `rejected` or `stopped`, never a crash | -- | yes | yes | yes |
@@ -1615,7 +1615,7 @@ The live golden run (`pytest -m live_api`, 3 tests) also runs at the 3c
 checkpoint: the content sent to the model is built on a new path, even if
 D2 shows it is unchanged.
 
-**3c build -- CI GREEN 2026-10-01 on `0be5422` (branch `phase55/stage3c-design`); `0034` not yet on staging; Fly staging run owed (RUNBOOK 8.1).**
+**3c build -- CI GREEN 2026-10-01 on `0be5422` (branch `phase55/stage3c-design`); `0034` not yet on staging; Fly staging run owed before the merge (RUNBOOK 8.1).**
 Built and tested on this machine (dev mode; never counted as proof of
 isolation). Nothing is on Fly.
 
@@ -1989,8 +1989,9 @@ reviews each before the merge:**
   executable); the control, the same copy outside the sandbox, runs.
   Interpreted code (`python file.py`) is not stopped by noexec. Whether
   LibreOffice still converts with it: B13, D1 and the worker's `po.doc`
-  tests. `/lohome` (LibreOffice's profile) is not noexec yet; adding it is
-  your call.
+  tests (all PASS on `0be5422`). **`/lohome` too (founder, 2026-10-01):** the
+  profile folder holds settings, not programs; A15 covers it and B13/D1
+  show `po.doc` still converts.
 - **B11's exiting samples (founder):** accepted only when that same pid was
   earlier sampled live as `sandbox_init`; any other is listed and fails B11.
 
@@ -2029,6 +2030,9 @@ founder backs up and applies `0034` on staging (the PR text leads with it:
 `Desktop/PR-stage3c-parse-service.md`), I run the staging suites, the
 founder reviews the departures (above), then the Fly staging run (RUNBOOK
 8.1: all the self-tests; IPv6 and cgroup v1 are proven only there).
+**Founder, 2026-10-01: the Fly run comes before the merge**, not only before
+production (RUNBOOK 8.1 and the PR checklist updated); and `/lohome` is
+noexec too.
 - **The service log gets LibreOffice's real error (founder):** a rejected
   conversion's reason, with the last 300 characters of LibreOffice's own
   stderr, goes to the job's stderr and from there to the service's log

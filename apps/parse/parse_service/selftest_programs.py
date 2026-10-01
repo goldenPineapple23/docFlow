@@ -574,7 +574,7 @@ def noexec(args: dict) -> dict:
     executable, and noexec refuses that too). `base`: the control, a
     directory outside the sandbox."""
     loader = next((p for p in LOADERS if os.path.exists(p)), None)
-    places = [args["base"]] if args.get("base") else ["/work", "/tmp", "/var/tmp"]
+    places = [args["base"]] if args.get("base") else ["/work", "/tmp", "/var/tmp", "/lohome"]
     out: dict = {"loader": loader}
     for place in places:
         path = os.path.join(place, f"a15-true-{os.getpid()}")

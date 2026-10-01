@@ -805,12 +805,14 @@ written as 3c is built: running it, deploying it, reading the canary's
 startup log, the parser-upgrade process, and the
 `parse_service_unavailable` alert.
 
-### 8.1 Gate: the Fly B tests pass before any production deploy that touches it (founder, 2026-10-01)
+### 8.1 Gate: the Fly self-tests pass before a merge or a production deploy that touches it (founder, 2026-10-01)
 
 CI runs on cgroup v2. Fly machines run cgroup v1, the path production
 uses, and **only a Fly run proves that path**. So the self-tests must pass
-**on Fly staging** before any production deploy that touches the parse
-service, not only at the 3c checkpoint: all of them, `python -m
+**on Fly staging** before a change that touches the parse service merges to
+`main`, and again before any production deploy of it, not only at the 3c
+checkpoint (founder, 2026-10-01: `main` is what every later stage builds on,
+so it must not carry a sandbox whose production path is unproven): all of them, `python -m
 parse_service.selftest all` (the canary, A, S and B; BUILD-STATUS "3c test
 table", B1-B16 and A15 included). **IPv6 isolation is proven only there:**
 CI's runner has no IPv6, so A-net IPv6 is NOT-RUN in CI (D-183).
@@ -827,10 +829,11 @@ The procedure:
 3. Run the self-tests on Fly staging (every line PASS; A-net IPv6 must be
    PASS there, not NOT-RUN), and keep the output in
    `docs/spikes/3c-fly-staging/` with the date and the image digest.
-4. Only then deploy to production.
+4. Only then merge, and later deploy to production (after its own Fly
+   staging run of the merged code).
 
-If any self-test fails on Fly, nothing goes to production: stop and report
-(1.7).
+If any self-test fails on Fly, nothing merges and nothing goes to
+production: stop and report (1.7).
 
 ### 8.2 Running it
 
@@ -900,7 +903,8 @@ defusedxml, LibreOffice, libseccomp, or the base image):
    must stay the same), and the self-tests in the real sandbox.
 3. Then 8.1: deploy to Fly staging, check the canary log, run all the
    self-tests there.
-4. Only then deploy to production.
+4. Only then merge (the weekly job's PR included), and deploy to
+   production.
 
 **The weekly Debian move (D-183).** Every Monday at 06:00 UTC
 `.github/workflows/debian-snapshot.yml` runs the whole CI workflow with the

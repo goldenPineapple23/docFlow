@@ -18,7 +18,8 @@ The view (founder's item 3, Q7, D-150 spike findings):
   /dev/shm, and nothing else -- no block device;
 - the only writable places: /work (TMPDIR) and /lohome (HOME, LibreOffice's
   profile), each a size-capped tmpfs owned by the slot's user; /tmp and
-  /var/tmp are /work/tmp bind-mounted (Q14), so the same tmpfs and cap.
+  /var/tmp are /work/tmp bind-mounted (Q14), so the same tmpfs and cap. All
+  of them noexec (founder, 2026-10-01; A15).
 
 Any failure exits with status 70 before the job starts: the supervisor
 answers that as the service failing to isolate, never as a verdict on the
@@ -172,7 +173,7 @@ def main(argv: list[str]) -> int:
         _hide("/.fly")
         _minimal_dev()
         _tmpfs(config.WORK_DIR, config.WORK_TMPFS_BYTES, "0700", MS_NOSUID | MS_NODEV | MS_NOEXEC, owner=uid)
-        _tmpfs(config.HOME_DIR, config.HOME_TMPFS_BYTES, "0700", MS_NOSUID | MS_NODEV, owner=uid)
+        _tmpfs(config.HOME_DIR, config.HOME_TMPFS_BYTES, "0700", MS_NOSUID | MS_NODEV | MS_NOEXEC, owner=uid)
         os.mkdir(f"{config.WORK_DIR}/tmp", 0o700)
         os.chown(f"{config.WORK_DIR}/tmp", uid, uid)
         _tmp_is_work()
