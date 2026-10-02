@@ -53,7 +53,11 @@ runs made with it. **Decided (founder, 2026-10-02, Q1 below).**
 **Order:** the backup checks (2026-10-04 and 2026-10-05), then the cutover
 (RUNBOOK 10.2 steps 0-6), then **the first worker deploy straight after the
 cutover is verified**. It doesn't wait for `docflow_app`'s drop (about
-2026-10-08), so the checkpoint isn't idle. G and A4 run against Stage 3's
+2026-10-08), so the checkpoint isn't idle. **But only if verification
+turned up nothing at all:** anything unexpected, even something that looks
+cosmetic, stops the deploy until it's explained (RUNBOOK 10.2, "Stop
+condition before the first worker deploy"), so a cutover problem and a
+deploy problem never land together. G and A4 run against Stage 3's
 parse service, the image on Fly since run 2. **No Stage 4 parse-service
 change reaches the Fly parse app before G and A4 have passed**, so each
 stage's evidence is about its own code.
@@ -191,7 +195,8 @@ IPv6 isolation is proven on Fly). `[GAP: CI on the checkpoint commit]`
    and A4, Stage 3's real-system proof would run against Stage 4's parse
    code, and neither stage's evidence would be clean. **The worker deploy
    is scheduled straight after the cutover is verified**, not after the
-   `docflow_app` drop.
+   `docflow_app` drop, **and only if verification turned up nothing at
+   all** (founder, 2026-10-02; RUNBOOK 10.2's stop condition).
 2. **The live golden run stays** in the checkpoint's runs: about $0.05 for
    the only end-to-end run against the real model.
 

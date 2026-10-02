@@ -1531,6 +1531,24 @@ The founder's conditions (2026-10-02, Q5) are steps 0, 1 and 6.
    ```
    The date is recorded here and in BUILD-STATUS.
 
+**Stop condition before the first worker deploy** (founder, 2026-10-02).
+The first worker deploy (9.2) is scheduled straight after steps 1-6 are
+verified, without waiting for step 7. **It goes ahead only if verification
+turned up nothing at all.** Anything unexpected in steps 1-6, even if it
+looks cosmetic, stops it until the cause is explained and the founder has
+said go:
+- a snapshot difference;
+- a login that doesn't connect as itself;
+- any failed, skipped or errored test in the step 5 suites, or a count
+  that differs from CI's;
+- a warning that wasn't in CI's run;
+- a `docflow_app` URL found in step 6 that wasn't on the list;
+- a new founder alert on staging since `0036`.
+
+Otherwise a cutover problem and a deploy problem land together, and nobody
+can tell which caused what. This is decided here, not left to judgment on
+the day.
+
 **Going back.** `supabase/reverse/0036_reverse.sql` restores the policies
 and grants exactly as before (CI proves it on every push, against the
 snapshot). First `ALTER ROLE docflow_app WITH LOGIN;` and switch every app
