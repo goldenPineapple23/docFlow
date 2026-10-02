@@ -116,6 +116,26 @@ follow-up, PR #29) merged. Since then:
   ```
 
   and the date is recorded here and in BUILD-STATUS.
+- **`backup_0035`** (documents 105, founder_alerts 15, email_outbox 73;
+  live = backup), taken 2026-10-01 before `0035`. **Founder, 2026-10-01:
+  the same rule as `backup_0034`.** It is dropped after 3d has run cleanly
+  on staging for 3 days, counted from the 3d merge, and only after Claude
+  reports the check:
+  - the staging suites are green on `main`;
+  - no `document_failed`, `document_stuck`, `dispatcher_stopped` or
+    `model_api_failure` alert on staging since the merge (DOC-024 arrives as
+    `document_failed`).
+
+  The founder runs, in the SQL Editor on `docflow-staging`:
+
+  ```sql
+  drop table backup_0035.documents;
+  drop table backup_0035.founder_alerts;
+  drop table backup_0035.email_outbox;
+  drop schema backup_0035;
+  ```
+
+  The date is recorded here and in BUILD-STATUS.
 
 `docflow-prod` doesn't exist yet (Phase 6), so it has no backups.
 
@@ -1121,11 +1141,22 @@ README's second terminal. On Fly it is the worker app's `beat` process group
   dispatchers on one database would share the in-flight count but send to
   two different queues.
 
-If two beats ever do run, nothing breaks. Every beat task is safe to run
-twice (the table in BUILD-STATUS "3d -- APPROVED WITH CHANGES", change C):
-scheduled jobs are claimed with `SKIP LOCKED`, the rollup upserts, the
-lifecycle sweep holds a row lock across Stripe, the stuck sweep is
-compare-and-set, and dispatch passes take an advisory lock.
+If two beats ever do run, nothing breaks: every beat task is safe to run
+twice. The beat schedule is in `apps/worker/app/celery_app.py`
+(`beat_schedule`, five entries), and its design record is BUILD-STATUS "3d
+-- APPROVED WITH CHANGES", change C.
+
+| Beat task (interval) | The guard (code) | The test |
+|---|---|---|
+| `run_scheduled_jobs` (5 min) | Jobs claimed `FOR UPDATE SKIP LOCKED` (`scheduled_jobs.py` line 70) | **Guard only.** `test_scheduled_jobs.py` covers one sweep (a dead worker's job picked up again); no test runs two sweeps at once |
+| `run_daily_rollup` (03:15 UTC) | Upsert `ON CONFLICT (tenant_id, day) DO UPDATE` (`metrics.py` line 155); `rollup_stale` deduped | `test_dashboard_api.py::test_running_a_day_twice_leaves_the_same_row` (one after the other; two at once rely on Postgres's `ON CONFLICT`) |
+| `run_lifecycle_sweep` (5 min) | Compare-and-set claim with the tenant row locked `FOR UPDATE` across the Stripe calls (`lifecycle.claim_for_suspend`) | `test_lifecycle_api.py::test_the_sweep_never_claims_a_tenant_twice` |
+| `sweep_stuck_documents` (5 min) | Every status change compare-and-set (`document_status.transition`); lost-call rows `ON CONFLICT DO NOTHING`; alerts deduped | **Guard only, tested in general.** `test_pipeline_integrity_db.py::test_H3_a_status_change_is_compare_and_set`; no test runs two sweeps at once |
+| `dispatch` (30 s) | Transaction advisory lock `pg_try_advisory_xact_lock(3352026100)` (`dispatch.py`): a second pass returns at once | `test_dispatch_db.py::test_twenty_concurrent_passes_dispatch_every_document_exactly_once` |
+
+Two rows rest on the guard alone, with no test that fires the task twice:
+the scheduled-jobs sweep and the stuck sweep. Adding those two tests is
+proposed to the founder (BUILD-STATUS "3d on staging").
 
 ### 9.4 The external uptime monitor (from the first worker deploy)
 
