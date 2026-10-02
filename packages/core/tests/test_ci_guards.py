@@ -4,7 +4,7 @@ CI keeps its database and its skip check (Phase 5.5 Stage 0, D-148).
 For six days in September 2026, CI reported green while 348 of 391 API tests,
 the tenant-isolation tests among them, silently skipped for want of a database
 (docs/REVIEW-PHASE5.md H7). These tests fail if any Python CI job stops
-starting the database, stops connecting as `docflow_app`, or stops failing on
+starting the database, stops connecting as the four logins (Stage 3e), or stops failing on
 unapproved skips. Removing one is then a deliberate, visible change to this
 file too, not a quiet edit to the workflow.
 """
@@ -20,7 +20,7 @@ WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 PYTHON_JOBS = ("core", "api", "worker")
 REQUIRED_STEPS = (
     "supabase start",
-    "scripts/ci/create_app_role.py",
+    "scripts/ci/create_logins.py",
     "pytest -v --junitxml=junit.xml",
     "scripts/ci/check_skips.py",
 )
@@ -47,9 +47,27 @@ def test_every_python_ci_job_runs_against_a_database_and_fails_on_unapproved_ski
     )
 
 
-def test_ci_connects_as_the_non_bypassing_app_role():
+def test_ci_connects_as_the_four_logins():
+    """Stage 3e (F-1): each session connects as its own login, as on staging.
+    The worker job's own login is docflow_worker, as on Fly."""
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    assert "DATABASE_URL: postgresql://docflow_app:" in workflow
+    for setting, login in (
+        ("DATABASE_URL", "docflow_api"),
+        ("API_DATABASE_URL", "docflow_api"),
+        ("WORKER_DATABASE_URL", "docflow_worker"),
+        ("ADMIN_DATABASE_URL", "docflow_admin"),
+        ("STRIPE_DATABASE_URL", "docflow_stripe"),
+    ):
+        assert f"\n  {setting}: postgresql://{login}:" in workflow, setting
+    assert "      DATABASE_URL: postgresql://docflow_worker:" in _job_block(workflow, "worker")
+    assert "docflow_app" not in workflow
+
+
+def test_the_core_job_runs_the_0036_round_trip_before_the_logins_are_turned_on():
+    """Founder's Q5 condition 2: forward -> reverse -> forward, in CI. The
+    reverse drops the roles, so it must come before their passwords are set."""
+    block = _job_block(WORKFLOW.read_text(encoding="utf-8"), "core")
+    assert block.index("scripts/ci/migration_roundtrip.py") < block.index("scripts/ci/create_logins.py")
 
 
 def test_every_approved_skip_has_a_reason():
@@ -63,54 +81,43 @@ def test_every_approved_skip_has_a_reason():
         assert entry.split()[0] in PYTHON_JOBS, f"unknown suite in {raw!r}"
 
 
-@pytest.mark.parametrize(
-    ("function", "migration_file", "signature"),
-    [
-        (
-            "record_stripe_subscription_event",
-            "0029_stripe_event_function.sql",
-            "(text, text, timestamptz, text, text, timestamptz, text)",
-        ),
-        ("record_stripe_card_event", "0031_card_billing.sql", "(text, text, text, text, bigint)"),
-        # Stage 3d (0035): the dispatcher's and the provider's functions.
-        ("dispatch_candidates", "0035_dispatcher_and_waits.sql", "(integer)"),
-        ("probe_candidate", "0035_dispatcher_and_waits.sql", "()"),
-        ("mark_dispatched", "0035_dispatcher_and_waits.sql", "(uuid)"),
-        ("clear_dispatched", "0035_dispatcher_and_waits.sql", "(uuid)"),
-        ("dispatcher_heartbeat", "0035_dispatcher_and_waits.sql", "()"),
-        ("dispatcher_status", "0035_dispatcher_and_waits.sql", "()"),
-        ("provider_state", "0035_dispatcher_and_waits.sql", "(text)"),
-        (
-            "provider_record_failure",
-            "0035_dispatcher_and_waits.sql",
-            "(text, text, text, boolean, integer, integer)",
-        ),
-        ("provider_record_success", "0035_dispatcher_and_waits.sql", "(text)"),
-        ("provider_take_probe", "0035_dispatcher_and_waits.sql", "(text, integer)"),
-        ("count_routing_model_failure", "0035_dispatcher_and_waits.sql", "()"),
-    ],
-)
-def test_each_stripe_event_function_is_granted_the_same_way_in_the_migration_and_in_ci(
-    function, migration_file, signature
-):
-    """CI creates `docflow_app` after the migrations run, so a migration's
-    guarded grant is skipped there and scripts/ci/create_app_role.py grants it
-    again (D-173, D-181). The two must name the same signature, or CI would
-    test a function the app can't call on staging -- or the reverse."""
+# Who may execute each SECURITY DEFINER function (3e design, A3). The
+# database test (test_logins_db.py) checks the same table against the live
+# grants; this one checks migration 0036 says it, so a reviewer reads one file.
+FUNCTION_GRANTS = {
+    "record_stripe_subscription_event(text, text, timestamptz, text, text, timestamptz, text)": {
+        "docflow_stripe"
+    },
+    "record_stripe_card_event(text, text, text, text, bigint)": {"docflow_stripe"},
+    "dispatch_candidates(integer)": {"docflow_worker"},
+    "probe_candidate()": {"docflow_worker"},
+    "mark_dispatched(uuid)": {"docflow_worker"},
+    "clear_dispatched(uuid)": {"docflow_worker"},
+    "dispatcher_heartbeat()": {"docflow_worker"},
+    "provider_record_failure(text, text, text, boolean, integer, integer)": {"docflow_worker"},
+    "provider_record_success(text)": {"docflow_worker"},
+    "provider_take_probe(text, integer)": {"docflow_worker"},
+    "count_routing_model_failure()": {"docflow_worker"},
+    "record_worker_start(text, text)": {"docflow_worker"},
+    "dispatch_unclaimed_age()": {"docflow_worker"},
+    "dispatcher_status()": {"docflow_api", "docflow_worker", "docflow_admin"},
+    "provider_state(text)": {"docflow_api", "docflow_worker", "docflow_admin"},
+    "worker_starts_last_hour()": {"docflow_api", "docflow_admin"},
+}
 
-    def collapse(source: str) -> str:
-        # Join adjacent string literals and squeeze whitespace, so a statement
-        # split across lines reads as one.
-        return re.sub(r"\s+", " ", re.sub(r"['\"]\s*\n?\s*['\"]", "", source))
 
-    grant = re.compile(
-        rf"grant execute on function {function}\s*(\([^)]*\))\s*to docflow_app",
-        re.IGNORECASE,
-    )
-    migration = REPO / "supabase" / "migrations" / migration_file
-    ci_role = REPO / "scripts" / "ci" / "create_app_role.py"
-    assert grant.findall(collapse(migration.read_text(encoding="utf-8"))) == [signature]
-    assert grant.findall(collapse(ci_role.read_text(encoding="utf-8"))) == [signature]
+def test_migration_0036_grants_each_function_to_exactly_its_logins():
+    source = (REPO / "supabase" / "migrations" / "0036_separate_logins.sql").read_text(encoding="utf-8")
+    found: dict[str, set[str]] = {}
+    for function, grantees in re.findall(
+        r"^grant execute on function (\S+\(.*?\)) to ([\w, ]+);$", source, flags=re.M
+    ):
+        found.setdefault(function, set()).update(g.strip() for g in grantees.split(","))
+    assert found == FUNCTION_GRANTS
+    # Every one is revoked from docflow_app and PUBLIC first, in the same list.
+    revoked = re.search(r"foreach f in array array\[(.*?)\] loop", source, flags=re.S)
+    assert revoked is not None
+    assert set(re.findall(r"'([^']+)'", revoked.group(1))) == set(FUNCTION_GRANTS)
 
 
 def _check_skips():
@@ -129,7 +136,7 @@ def test_the_skip_check_is_told_which_step_failed(job):
     which needs the step ids and CI_STEPS in every Python job."""
     block = _job_block(WORKFLOW.read_text(encoding="utf-8"), job)
     assert "CI_STEPS: ${{ toJSON(steps) }}" in block
-    for step_id in ("supabase", "deps", "core", "app_role", "ruff", "mypy", "test"):
+    for step_id in ("supabase", "deps", "core", "app_role", "ruff", "mypy", "test"):  # + roundtrip in core
         assert f"id: {step_id}\n" in block, f"CI job {job!r} lost the step id {step_id!r}"
 
 

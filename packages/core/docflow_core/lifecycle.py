@@ -505,7 +505,7 @@ def process_pending_cancel(tenant_id: UUID) -> str:
     tenant's live subscription. A reactivation that arrives meanwhile waits
     for the lock. The wait is bounded by the Stripe timeouts (at most three
     calls of TIMEOUT_SECONDS each), well inside the 5-minute idle-transaction
-    cap on docflow_app (0028).
+    cap on every login (0028, and 0036 since Stage 3e).
     """
     from docflow_core.db import tenant_session
     from docflow_core.external_services import (

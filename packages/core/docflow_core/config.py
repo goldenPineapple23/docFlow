@@ -41,7 +41,20 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
+    # Stage 3e (F-1): this process's own database login -- docflow_api on the
+    # API, docflow_worker on the worker (docflow_core.db.use_own_login).
     database_url: str = ""
+    # The other logins, each only where it is used (RUNBOOK 10):
+    # ADMIN_DATABASE_URL (docflow_admin) and STRIPE_DATABASE_URL
+    # (docflow_stripe) on the API only, and ADMIN_DATABASE_URL on the
+    # founder's machine for the scripts. API_DATABASE_URL and
+    # WORKER_DATABASE_URL name those two logins separately where one machine
+    # holds both (the founder's .env, the test suites); deployed, each is
+    # simply that app's DATABASE_URL.
+    admin_database_url: str = ""
+    stripe_database_url: str = ""
+    api_database_url: str = ""
+    worker_database_url: str = ""
     # Supabase issues auth JWTs signed with this secret (Project Settings -> API -> JWT Secret).
     supabase_jwt_secret: str = ""
 
@@ -130,6 +143,10 @@ class Settings(BaseSettings):
     # The worker's Celery concurrency is set from this same value, so the two
     # can't drift (one worker machine; RUNBOOK 9.2 when adding workers).
     dispatch_in_flight_target: int = 1
+    # Stage 3e (founder, Q1): the worker's external heartbeat, a Healthchecks.io
+    # ping URL (https://hc-ping.com/<uuid>), one per environment. A secret: it
+    # is never logged. Blank (locally, in CI) means no ping is ever sent.
+    heartbeat_url: str = ""
     # Set by Fly on every machine it runs (never in .env). The API uses it to
     # know it is deployed: on Fly it refuses to start holding the parse token
     # (apps/api/app/main.py, founder Q12), as the parse service refuses to
