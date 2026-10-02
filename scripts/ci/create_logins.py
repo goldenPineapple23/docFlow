@@ -27,6 +27,22 @@ LOGINS = ("docflow_api", "docflow_admin", "docflow_worker", "docflow_stripe")
 
 
 def main() -> int:
+    """Every problem is printed as a CI annotation, so a failure names its own
+    cause in the run summary (RUNBOOK 1.6); the step log isn't readable
+    without signing in."""
+    try:
+        problems = _turn_on()
+    except Exception as exc:  # noqa: BLE001 -- reported, never swallowed
+        problems = [f"{type(exc).__name__}: {exc}".replace("\n", " ")]
+    for problem in problems:
+        print(f"::error title=create_logins::{problem}")
+    if problems:
+        return 1
+    print(f"logins ready: {', '.join(LOGINS)} (LOGIN, NOBYPASSRLS, no CREATE, docflow_tables only)")
+    return 0
+
+
+def _turn_on() -> list[str]:
     superuser_url = os.environ["SUPERUSER_DATABASE_URL"]
     password = os.environ["APP_ROLE_PASSWORD"]
     problems: list[str] = []
@@ -46,7 +62,10 @@ def main() -> int:
             ).fetchone()
             if bypass or superuser:
                 problems.append(f"{login} must not be BYPASSRLS or SUPERUSER")
-            if conn.execute("SELECT has_schema_privilege(%s, 'public', 'CREATE')", (login,)).scalar():
+            can_create = conn.execute(
+                "SELECT has_schema_privilege(%s, 'public', 'CREATE')", (login,)
+            ).fetchone()
+            if can_create is None or can_create[0]:
                 problems.append(f"{login} must not have CREATE on schema public")
             member_of = sorted(
                 r[0]
@@ -60,12 +79,7 @@ def main() -> int:
             if member_of != ["docflow_tables"]:
                 problems.append(f"{login} must be a member of docflow_tables only, is of {member_of}")
 
-    for problem in problems:
-        print(problem, file=sys.stderr)
-    if problems:
-        return 1
-    print(f"logins ready: {', '.join(LOGINS)} (LOGIN, NOBYPASSRLS, no CREATE, docflow_tables only)")
-    return 0
+    return problems
 
 
 if __name__ == "__main__":

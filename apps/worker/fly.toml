@@ -9,8 +9,11 @@
 #     fly deploy --config apps/worker/fly.toml --dockerfile apps/worker/Dockerfile \
 #         --ignorefile apps/worker/Dockerfile.dockerignore --no-public-ips .
 #
-# Secrets (set by the founder): PARSE_SERVICE_TOKEN, DATABASE_URL, REDIS_URL,
-# STORAGE_S3_*, ANTHROPIC_API_KEY and the rest listed in BUILD-STATUS item 12.
+# Secrets (set by the founder): PARSE_SERVICE_TOKEN, DATABASE_URL (the
+# docflow_worker login, Stage 3e -- never docflow_app, never another login:
+# the launcher refuses ADMIN_/STRIPE_/API_DATABASE_URL), HEARTBEAT_URL,
+# REDIS_URL, STORAGE_S3_*, ANTHROPIC_API_KEY and the rest listed in
+# BUILD-STATUS item 12. RUNBOOK 10.
 
 app = "docflow-worker-staging"
 primary_region = "iad"

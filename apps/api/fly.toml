@@ -9,7 +9,9 @@
 #         --ignorefile apps/api/Dockerfile.dockerignore --no-public-ips .
 #     fly ips allocate-v6 --private --app docflow-api-staging   # once
 #
-# Secrets (set by the founder): DATABASE_URL, REDIS_URL, SUPABASE_*,
+# Secrets (set by the founder): DATABASE_URL (docflow_api), ADMIN_DATABASE_URL
+# (docflow_admin), STRIPE_DATABASE_URL (docflow_stripe) -- Stage 3e, RUNBOOK
+# 10; never WORKER_DATABASE_URL or HEARTBEAT_URL -- REDIS_URL, SUPABASE_*,
 # STORAGE_S3_*, DOCUMENT_URL_SIGNING_SECRET and the rest in BUILD-STATUS item
 # 12. Never PARSE_SERVICE_TOKEN: the API refuses to start with it (Q12).
 

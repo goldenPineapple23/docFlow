@@ -872,8 +872,8 @@ typing anything else. Values typed literally (a database URL, S3 keys, an
 API key) are otherwise saved in plain text in PowerShell's history file. It
 applies to that window only; close it when done. Never paste a value into
 chat. Each app gets only the secrets its process reads, and its own
-database login (F-1): never `docflow_app` shared between apps, never
-`postgres` or the service role.
+database login (F-1, section 10): never `docflow_app` shared between apps,
+never `postgres` or the service role.
 
 The procedure:
 1. Deploy the change to Fly staging first.
@@ -1074,12 +1074,13 @@ the same list as BUILD-STATUS "3d on staging"):
 - 3e's restart record: starts recorded, starts in the last hour on
   `/healthz`, and `worker_restarting` (high) at 3 or more starts in 60
   minutes, raised by the launcher;
-- **the external uptime monitor, set up and tested.** Its approach is
-  undecided: the staging API is private-only, so 3e chooses between polling
-  `/healthz` and a push heartbeat (9.4);
+- **the external heartbeat, set up and tested** (9.4: Healthchecks.io,
+  decided in 3e), with its pass marks met;
 - **the two two-at-once sweep tests** (founder, 2026-10-01): the
   scheduled-jobs sweep and the stuck sweep, each run twice at once against
-  the real database, built in 3e and passing (9.3).
+  the real database, built in 3e and passing (9.3);
+- **the logins cutover done and verified** (section 10), the worker on
+  `docflow_worker` and the API on its three.
 
 **Measuring the worker machine's memory** (founder, 2026-10-01). The worker
 and the API stay off Fly until 3e gives them their own database logins, so
@@ -1152,26 +1153,67 @@ twice. The beat schedule is in `apps/worker/app/celery_app.py`
 
 | Beat task (interval) | The guard (code) | The test |
 |---|---|---|
-| `run_scheduled_jobs` (5 min) | Jobs claimed `FOR UPDATE SKIP LOCKED` (`scheduled_jobs.py` line 70) | **Guard only until 3e.** `test_scheduled_jobs.py` covers one sweep (a dead worker's job picked up again); the two-at-once test is built in 3e |
+| `run_scheduled_jobs` (5 min) | Jobs claimed `FOR UPDATE SKIP LOCKED` (`scheduled_jobs.py` line 70) | `test_sweeps_twice_at_once_db.py::test_two_scheduled_job_sweeps_at_once_run_each_due_job_exactly_once` (3e) |
 | `run_daily_rollup` (03:15 UTC) | Upsert `ON CONFLICT (tenant_id, day) DO UPDATE` (`metrics.py` line 155); `rollup_stale` deduped | `test_dashboard_api.py::test_running_a_day_twice_leaves_the_same_row` (one after the other; two at once rely on Postgres's `ON CONFLICT`) |
 | `run_lifecycle_sweep` (5 min) | Compare-and-set claim with the tenant row locked `FOR UPDATE` across the Stripe calls (`lifecycle.claim_for_suspend`) | `test_lifecycle_api.py::test_the_sweep_never_claims_a_tenant_twice` |
-| `sweep_stuck_documents` (5 min) | Every status change compare-and-set (`document_status.transition`); lost-call rows `ON CONFLICT DO NOTHING`; alerts deduped | **Guard only until 3e, tested in general.** `test_pipeline_integrity_db.py::test_H3_a_status_change_is_compare_and_set`; the two-at-once test is built in 3e |
+| `sweep_stuck_documents` (5 min) | Every status change compare-and-set (`document_status.transition`); lost-call rows `ON CONFLICT DO NOTHING`; alerts deduped | `test_sweeps_twice_at_once_db.py::test_two_stuck_sweeps_at_once_change_and_alert_each_document_once` (3e). A retry may be enqueued by both sweeps (it changes no status); the task's claim runs it once, tested in the same test |
 | `dispatch` (30 s) | Transaction advisory lock `pg_try_advisory_xact_lock(3352026100)` (`dispatch.py`): a second pass returns at once | `test_dispatch_db.py::test_twenty_concurrent_passes_dispatch_every_document_exactly_once` |
 
 Two rows rest on the guard alone, with no test that fires the task twice:
 the scheduled-jobs sweep and the stuck sweep. **Founder, 2026-10-01 (at
-the 3d merge): both tests are built in 3e**, not 3d and not Stage 5. Each
-runs its sweep twice at once against the real database and asserts that
-nothing is done twice. They gate the first worker deploy (9.2).
+the 3d merge): both tests are built in 3e**, not 3d and not Stage 5. **Built
+in 3e** (the table above): each runs its sweep twice at once, in two
+threads released together, against the real database. They gate the first
+worker deploy (9.2): passing in CI and on staging.
 
 ### 9.4 The external uptime monitor (from the first worker deploy)
 
-> **MONITOR APPROACH UNDECIDED, SEE 3e.** Don't set up a monitor from this
-> section. Everything below the keyword is **notes for the 3e design**, not
-> a final setup: the staging API is private-only, so a polled check can't
-> reach it, and 3e decides between polling and a push heartbeat
-> (BUILD-STATUS "3e -- F-1"). The keyword itself is settled and pinned by a
-> test.
+**Decided in 3e (founder, 2026-10-02): a push heartbeat for the worker, on
+Healthchecks.io's free plan** (Q1; BUILD-STATUS "3e detailed design", part
+C). A polled check of `/healthz` is for production's public API only, chosen
+in Phase 6 (the notes further down). Staging's API stays private.
+
+**What it covers.** After a dispatch pass that succeeded, the dispatch
+process pings `HEARTBEAT_URL` (`docflow_core.heartbeat`). The pings stop when
+the worker is down, crash-looping because it can't reach the database, or
+its documents worker has exited (the launcher stops both). And it sends
+`/fail`, which alerts at once, when a document has been dispatched and not
+claimed for `DISPATCH_UNCLAIMED_ALERT_MIN`: a documents worker that is up
+but not taking work. **Not covered here**, each with its own alert: a
+document hanging inside a task (`document_stuck`), the parse service
+(`parse_service_unavailable`), the model provider (`model_api_failure`).
+
+**Setting it up** (once per environment; the founder):
+1. healthchecks.io -> sign up (one account; using several to get round the
+   limits is against its rules) -> **Add Check**: name
+   `docflow-worker-staging`, schedule **Simple**, **Period 5 minutes**,
+   **Grace 5 minutes** (Q7). Integrations: e-mail to the founder address.
+2. Copy the check's ping URL (`https://hc-ping.com/<uuid>`). It is a
+   secret: whoever has it can mark the worker healthy.
+3. `fly secrets set HEARTBEAT_URL=... --app docflow-worker-staging --stage`
+   (typed, history off, as for every secret; RUNBOOK 8). On the worker
+   only, never the API.
+4. Production in Phase 6: its own check (`docflow-worker-prod`) and URL.
+
+**Throttle.** At most one ping per `HEARTBEAT_PING_MIN` (5), so 288 a day;
+Healthchecks.io records at most 5 a minute per check. A change between
+success and `/fail` goes at once. Passes run every 30 s, so pings land 5:00
+to 5:30 apart, inside the grace.
+
+**Pass marks, tested at the first worker deploy (gate list, 9.2):**
+- stop the worker (`fly scale count worker=0 --app docflow-worker-staging`):
+  the Healthchecks.io e-mail within **12 minutes** of the last ping (5 to
+  the expected ping, 5 grace, about 1 for e-mail, 1 of slack, since its docs
+  don't say how often lateness is evaluated). Record the measured time.
+- start it again: the recovery e-mail after the first ping.
+- stop the documents worker taking work with the dispatch process running:
+  the `/fail` e-mail within `DISPATCH_UNCLAIMED_ALERT_MIN` plus one pass.
+- record the largest unclaimed age seen during the 500 + 1 run (founder,
+  Q2), with the rollup and a sweep run during it (Q9).
+
+The rest of this section is about **the polled check for production's API
+(Phase 6)**, written on 2026-10-01 before 3e decided. The keyword itself is
+settled and pinned by a test.
 
 **Needed from the first worker deploy, not Phase 6** (founder, 2026-10-01).
 Once the worker is on Fly, nothing inside DocFlow can report these:
@@ -1286,10 +1328,11 @@ never the one who waits for a cold start.
 `apps/api/fly.toml` gives it no public IP. It is reached over `fly proxy`
 or Flycast from other Fly apps (3c, N1/N2). Better Stack's probes are on the
 public internet, so as configured they can't reach `/healthz` at all.
-**The monitor approach is decided in 3e** (founder, 2026-10-01), before the
-first worker deploy. 3e evaluates a push heartbeat instead of polling
-(BUILD-STATUS "3e -- F-1"). The settings and timing above are for a polled
-check; if 3e chooses push, this section is rewritten with it.
+**3e chose the push heartbeat above** for the worker. Production's API will
+be public (browsers call it, and Postmark's and Stripe's webhooks must reach
+it), so its own polled check is chosen in Phase 6 with these notes. Better
+Stack's free plan is labelled "Free for personal projects" on its pricing
+page (read 2026-10-02), so the tool is re-decided then.
 
 **Not built: a status-code endpoint** (a 503 when stale), suggested by the
 founder as optional. It is less fragile than matching text, but it must
@@ -1336,6 +1379,21 @@ The Console's health strip shows the same heartbeat, red past
 - **`document_stuck` with `lost_jobs_returned`**: documents were sent to the
   queue and never claimed (a queue or broker problem). They are back to
   waiting and go out again by themselves.
+- **`worker_restarting`** (high, at most one an hour; Stage 3e): the worker
+  started 3 or more times in 60 minutes. Its payload names the machine and
+  the count; `/healthz` shows `worker_starts_last_hour`. Look at `fly logs
+  --app docflow-worker-staging` for `run_workers: ... exited; stopping the
+  other` and the line before it (a memory kill, a database or broker
+  error). A deploy is one start; a deploy and one crash is two.
+- **Healthchecks.io: "docflow-worker-... is DOWN"** (e-mail, not a DocFlow
+  alert; 9.4): no ping for period + grace. The worker is down, crash-looping,
+  or can't reach the database. `fly status --app docflow-worker-staging`,
+  then `fly logs`. It says UP again after the first good pass.
+- **Healthchecks.io: the check failed** (`/fail`): a document has been
+  dispatched and not claimed for `DISPATCH_UNCLAIMED_ALERT_MIN`. The
+  dispatch process is fine; the documents worker isn't taking work (hung, or
+  lost its broker connection). Restart the worker machine; the stuck sweep
+  will have returned the document to waiting.
 
 ### 9.6 The constants (`packages/core/docflow_core/constants.py`)
 
@@ -1351,3 +1409,109 @@ The Console's health strip shows the same heartbeat, red past
 | `PROVIDER_PROBE_MINUTES` | 2 | One probe while down |
 | `STORAGE_WAIT_RETRY_MINUTES` | 5 | Storage wait, no maximum |
 | `PARSE_SERVICE_WAIT_RETRY_MINUTES` | 2 | Parse-service wait, no maximum |
+| `WORKER_RESTART_ALERT_STARTS` / `WORKER_RESTART_WINDOW_MIN` | 3 / 60 | `worker_restarting` (3e); the window is also in 0036's functions, a test keeps them equal |
+| `HEARTBEAT_PING_MIN` | 5 | At most one heartbeat ping this often (3e) |
+| `HEARTBEAT_PING_TIMEOUT_SECONDS` | 5 | A ping's own time limit; a failed ping never fails a pass |
+| `DISPATCH_UNCLAIMED_ALERT_MIN` | 10 | Dispatched and unclaimed this long sends `/fail` (Q2; Q9 open: 20 proposed) |
+
+## 10. Database logins (Stage 3e, F-1)
+
+Since migration `0036` DocFlow connects as four logins, never `postgres` and
+no longer `docflow_app` (D-159, D-185). Each is NOBYPASSRLS, has no CREATE,
+and is a member of `docflow_tables` (the table grants) and nothing else.
+Every policy that opens rows on an `app.*` flag applies TO exactly one of
+them, so a flag set on any other login opens nothing.
+
+### 10.1 Which app holds which
+
+| Login | Used for | Held by (setting) |
+|---|---|---|
+| `docflow_api` | tenant requests, the sign-in and intake-token lookups, the refusal alert, `/healthz` | the API (`DATABASE_URL`) |
+| `docflow_admin` | the Console (`admin_data_access`) and every script | the API (`ADMIN_DATABASE_URL`); the founder's machine for scripts |
+| `docflow_stripe` | the Stripe webhook only | the API (`STRIPE_DATABASE_URL`) |
+| `docflow_worker` | every job and sweep, the dispatcher, the restart record | the worker (`DATABASE_URL`) and nothing else |
+
+- **The worker refuses to start** holding `ADMIN_DATABASE_URL`,
+  `STRIPE_DATABASE_URL` or `API_DATABASE_URL` (`app.run_workers`).
+- **Each process refuses to start** if a URL it holds connects as another
+  login (the API checks its three; the worker its own). The message names
+  the setting and the role found, never the URL. An unreachable database
+  is logged, not fatal.
+- **The founder's `.env`** holds all of them (it runs the API, the worker
+  and the scripts): `DATABASE_URL` and `API_DATABASE_URL` = `docflow_api`,
+  `WORKER_DATABASE_URL`, `ADMIN_DATABASE_URL`, `STRIPE_DATABASE_URL`
+  (`.env.example`). Scripts run as `docflow_admin` (founder, Q8).
+- **The pooler:** each login is its own pool. Four logins plus Storage at
+  pool size 5 is at most 25 connections, against about 44 usable on Nano
+  (BUILD-STATUS "3e -- F-1"). Production's pool size is decided in Phase 6.
+
+### 10.2 The cutover on docflow-staging
+
+The founder's conditions (2026-10-02, Q5) are steps 0, 1 and 6.
+
+0. **Not before Claude has reported the `backup_0035` check** (on or after
+   2026-10-05 03:18 UTC; section 1.3) and the founder has confirmed, so 3e
+   can't land inside 3d's 3-day clean-run window.
+1. **The snapshot (the backup).** Claude runs, read-only:
+   `python scripts/ci/policy_snapshot.py "<staging DATABASE_URL>" > policy_snapshot_before_0036.json`
+   and compares it with `supabase/reverse/0036_pre_snapshot.json` (taken
+   2026-10-02). They must be identical: a difference means staging changed
+   since, and the cutover stops until it is explained. The file is kept
+   with the evidence.
+2. **The founder applies `0036`** in the SQL Editor. It changes no rows.
+3. **The founder turns on the four logins**, each with its own generated
+   password (`python -c "import secrets; print(secrets.token_urlsafe(32))"`,
+   typed, never pasted into a chat), in the SQL Editor:
+   ```sql
+   ALTER ROLE docflow_api    WITH LOGIN PASSWORD '...';
+   ALTER ROLE docflow_worker WITH LOGIN PASSWORD '...';
+   ALTER ROLE docflow_admin  WITH LOGIN PASSWORD '...';
+   ALTER ROLE docflow_stripe WITH LOGIN PASSWORD '...';
+   ```
+4. **The founder builds each URL**: the pooled ("transaction mode") string
+   from Project Settings -> Database, with the user `docflow_api.<project
+   ref>` (and so on) and its password, and puts them in `.env` (10.1).
+5. **Claude verifies:** a second snapshot equals CI's forward state; each
+   login connects as itself (`db.verify_logins`); then the staging suites
+   (core, worker, API; RUNBOOK 1.4), reported with their own summary lines.
+6. **Before `docflow_app` is switched off, every place its URL lives is
+   listed** and switched or removed: the local `.env` (and any other `.env*`
+   in the repository, searched by name only), Fly secrets on every app
+   (`fly secrets list --app <app>`: names and digests only), GitHub
+   repository secrets (Settings -> Secrets and variables -> Actions; CI uses
+   none today), and anything else the search finds. Then the founder:
+   `ALTER ROLE docflow_app NOLOGIN;`
+7. **`docflow_app` is dropped** after 3e has run cleanly on staging for 3
+   days, after Claude reports the check (as for the backups, 1.3):
+   ```sql
+   REVOKE ALL ON ALL TABLES IN SCHEMA public FROM docflow_app;
+   REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM docflow_app;
+   ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM docflow_app;
+   ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM docflow_app;
+   REVOKE USAGE ON SCHEMA public FROM docflow_app;
+   DROP ROLE docflow_app;
+   ```
+   The date is recorded here and in BUILD-STATUS.
+
+**Going back.** `supabase/reverse/0036_reverse.sql` restores the policies
+and grants exactly as before (CI proves it on every push, against the
+snapshot). First `ALTER ROLE docflow_app WITH LOGIN;` and switch every app
+back to its URL, since the four logins stop existing. It loses only the
+rows of `worker_starts`.
+
+**Production (Phase 6)** is created straight into this state: `0036` with
+the rest, then 10.2 steps 3-5. It never has `docflow_app`.
+
+### 10.3 Rotating one login's password
+
+1. Generate a new password (as in 10.2 step 3).
+2. `ALTER ROLE docflow_<login> WITH PASSWORD '...';` in the SQL Editor.
+   Existing connections keep working; new ones need the new password.
+3. At once, set the new URL where that login lives (10.1): `fly secrets set
+   ... --app <app>` (this restarts the app) and the founder's `.env`.
+4. Check: `/healthz` answers, and the app's log has no
+   `login_startup_check` or `refused to start` line.
+
+Rotate one at a time. A leaked URL is rotated the same day; the login's
+policies limit what it could reach, but a worker or Stripe URL in the wrong
+hands still writes as that service.
