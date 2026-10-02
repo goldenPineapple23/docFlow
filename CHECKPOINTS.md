@@ -170,8 +170,8 @@ IPv6 isolation is proven on Fly). `[GAP: CI on the checkpoint commit]`
 
 - **Stage 4:** matching speed (`pg_trgm`, measured at 50k items) and the
   broad-`except` audit. Design approved with changes (founder,
-  2026-10-02; Q1-Q15 decided; two PRs, B first; DOC-030's opening still
-  to settle against the catalog's banned-phrase test);
+  2026-10-02; Q1-Q15 decided; two PRs, B first; the new catalog entries
+  final);
   building waits for this checkpoint's "go".
 - **Stage 5:** as listed in BUILD-STATUS (test hygiene, the D-178
   audit-trail findings, the stranded test data, M7, M10, M11).
