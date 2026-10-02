@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-10-02** (latest: **3e MERGED 2026-10-02 17:43 UTC (PR #35, `e99fbb9`, D-185) and the CI runner pin merged 17:48 UTC (PR #36, main `d004186`); open question for the founder: which commit the backup checks' staging suites run on ("3e MERGED"); `0036` not applied to staging before the `backup_0035` check, on or after 2026-10-05 03:18 UTC**. Earlier the same day: 3d merged, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184), recorded in PR #34; the two two-at-once sweep tests go to 3e). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
+commit as the slice. Statuses below are as of **2026-10-02** (latest: **3e MERGED 2026-10-02 17:43 UTC (PR #35, `e99fbb9`, D-185) and the CI runner pin merged 17:48 UTC (PR #36, main `d004186`); the backup checks run the staging suites at `f191e27`, in a separate worktree as `docflow_app` (founder, PR #37; RUNBOOK 1.3); `0036` not applied to staging before the `backup_0035` check, on or after 2026-10-05 03:18 UTC**. Earlier the same day: 3d merged, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184), recorded in PR #34; the two two-at-once sweep tests go to 3e). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -3809,17 +3809,18 @@ runs. One warning, the known IPv6 control (Known open items).
 confirmation. Dates unchanged: `backup_0034` check on or after 2026-10-04
 20:53 UTC, `backup_0035` on or after 2026-10-05 03:18 UTC (RUNBOOK 1.3).
 
-**Open question for the founder, found at this merge: which commit the two
-checks run the staging suites on.** RUNBOOK 1.3 says "the staging suites
-are green on `main`". Main now holds 3e, whose suites connect as the four
-logins and test `0036`'s functions and `worker_starts` -- none of which
-exist on staging until the cutover, and the cutover waits for the
-`backup_0035` check. So main's suites can't pass on staging before the
-cutover. **Proposed:** both checks run the suites at `f191e27`, the last
-main before 3e: it is 3c and 3d exactly as staging's schema (`0035`)
-expects, and the only later changes are 3e (not on staging) and the runner
-pin (CI only). After the cutover, RUNBOOK 10.2 step 5 runs main's suites
-on staging. RUNBOOK 1.3 is unchanged until the founder decides.
+**Decided (founder, 2026-10-02, PR #37): the two checks run the staging
+suites at `f191e27`, not at `main`.** Main now holds 3e, whose suites
+connect as the four logins and test `0036`'s functions and `worker_starts`
+-- none of which exist on staging until the cutover, and the cutover waits
+for the `backup_0035` check, so main's suites can't pass there before it.
+`f191e27` is the last main before 3e and differs from 3d's merge
+(`4a2b907`) only in `RUNBOOK.md` and this file: exactly the code staging's
+`0035` schema expects. **Condition:** the suites run in a separate
+worktree at `f191e27`, connecting as `docflow_app`, never by moving the
+main checkout back, and the report names the commit and the login beside
+the counts. Main's suites run on staging first at RUNBOOK 10.2 step 5.
+RUNBOOK 1.3 ("Which code the checks run") and 10.2 step 5 say so.
 
 ### Stage 2c and 2d -- agreed with the founder before building (2026-09-27)
 
