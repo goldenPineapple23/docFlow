@@ -1536,14 +1536,19 @@ The first worker deploy (9.2) is scheduled straight after steps 1-6 are
 verified, without waiting for step 7. **It goes ahead only if verification
 turned up nothing at all.** Anything unexpected in steps 1-6, even if it
 looks cosmetic, stops it until the cause is explained and the founder has
-said go:
+said go. **The rule is "anything unexpected", and the list below is
+examples, not the full set:** it includes, but is not limited to, the
+following. Something not on it is never fine for that reason alone.
 - a snapshot difference;
 - a login that doesn't connect as itself;
 - any failed, skipped or errored test in the step 5 suites, or a count
   that differs from CI's;
 - a warning that wasn't in CI's run;
 - a `docflow_app` URL found in step 6 that wasn't on the list;
-- a new founder alert on staging since `0036`.
+- a new founder alert on staging since `0036`;
+- **anything else that wasn't expected**: a step slower than usual, a log
+  line not seen before, a number that differs from what this RUNBOOK or
+  CI led us to expect.
 
 Otherwise a cutover problem and a deploy problem land together, and nobody
 can tell which caused what. This is decided here, not left to judgment on
