@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-10-02** (latest: **3d MERGED, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184); the two two-at-once sweep tests go to 3e; 3e design next**). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
+commit as the slice. Statuses below are as of **2026-10-02** (latest: **3e design PROPOSED ("3e detailed design"), Q1-Q8 to the founder; nothing built**. Earlier the same day: 3d merged, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184), recorded in PR #34; the two two-at-once sweep tests go to 3e). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -3315,6 +3315,304 @@ on their guard alone: the scheduled-jobs sweep (`SKIP LOCKED`) and the
 stuck sweep (compare-and-set). 3e adds a test for each that runs the sweep
 twice at once against the real database and asserts nothing is done twice.
 They gate the first worker deploy.
+
+### 3e detailed design -- PROPOSED (2026-10-02); nothing built until the founder approves
+
+Branch `phase55/stage3e-design`, from `main` `f191e27`. Five parts: A the
+four logins, B the restart record, C the external monitor, D the two sweep
+tests, E tests and proof. The questions are at the end (Q1-Q8). The
+founder's go of 2026-10-02 settled two things first:
+- **Production's API is public.** Browsers call it directly (the web app's
+  `NEXT_PUBLIC_API_BASE_URL`, used by client components), and Postmark's
+  inbound webhook and Stripe's webhooks must reach it. Staging's API stays
+  private (no public IP).
+- **Monitor shape: a push heartbeat for the worker, plus a polled
+  `/healthz` check on production only.** The founder asked for two points
+  to be covered: what the heartbeat proves beyond the dispatcher (C2), and
+  throttling the ping (C3).
+
+#### A. F-1: four database logins
+
+**A1. The roles.** Migration `0036` creates `docflow_api`,
+`docflow_admin`, `docflow_worker` and `docflow_stripe` as **NOLOGIN, with no
+password in the file** (D-159). The founder then turns each on in the SQL
+Editor (`ALTER ROLE ... WITH LOGIN PASSWORD '...'`), as for `docflow_app`
+(D-013). All four are NOBYPASSRLS, with no CREATE on `public`, and
+`idle_in_transaction_session_timeout = '5min'` (as 0028 sets for
+`docflow_app`).
+- **Table privileges come from one NOLOGIN group role, `docflow_tables`**:
+  today's `docflow_app` grants (DML on every table and sequence, plus the
+  default privileges). Each login is a member of it and of nothing else.
+  This matters: a policy `TO docflow_admin` also applies to any role that is
+  a member of `docflow_admin`, so no login may ever be a member of another.
+  A test checks it (E1).
+- **Who uses which login:**
+
+  | Login | Used by | Secret held by |
+  |---|---|---|
+  | `docflow_api` | every tenant request; the intake-token lookup, the sign-in lookups (users and `platform_admins`), the refusal alert; `/healthz` | the API (`DATABASE_URL`) |
+  | `docflow_admin` | `admin_data_access` (the Console) and the maintenance and seed scripts | the API (`ADMIN_DATABASE_URL`), and the founder's machine for scripts |
+  | `docflow_worker` | every worker task: tenant sessions for jobs, the rollup, scheduler, lifecycle, stuck sweep, dispatcher | the worker (`DATABASE_URL`) |
+  | `docflow_stripe` | the Stripe webhook only: the customer lookup, then that tenant's update and the two event functions | the API (`STRIPE_DATABASE_URL`) |
+
+**A2. The policies.** `tenant_isolation` stays as it is: keyed on
+`app.tenant_id`, open to every login. Each login serves many tenants, so
+which tenant a request belongs to stays the job of the single data-access
+layer (Section 7.5). Every other flag policy gets a `TO` naming exactly one
+login. The migration files hold 54 such uses (52 counted 2026-09-29, plus
+0035's 2). The build lists the live ones from staging's `pg_policies`, and
+`0036` alters each one by name (`ALTER POLICY ... TO ...`):
+
+| Flag | Policies | `TO` |
+|---|---|---|
+| `app.is_platform_admin` | `platform_admin_access` on every tenant-scoped table, 0029's `platform_admin_read`, the platform tables (0018) | `docflow_admin` |
+| `app.rollup`, `app.scheduler`, `app.lifecycle`, `app.pipeline_sweep`, `app.dispatcher` | `rollup_*` (0017), `scheduler_access` (0013), `lifecycle_read` (0019), `pipeline_sweep_read` (0027), `dispatcher_raise` / `dispatcher_enqueue` (0035) | `docflow_worker` |
+| `app.intake_token`, `app.auth_user_id`, `app.intake_refusal` | `token_lookup` (0003), `self_lookup` on `users` (0001) and on `platform_admins` (0020), `intake_refusal_raise` / `_enqueue` (0029) | `docflow_api` |
+| `app.stripe_webhook` | `stripe_webhook_lookup` (0019) | `docflow_stripe` |
+
+**Proposed: keep the flag condition and add the `TO`** (Q3). The `TO` is
+the database's guarantee: a tenant connection that sets a flag sees nothing
+extra. The flag keeps each narrow session narrow *inside* a login, so a
+worker tenant session can't insert a tenant-less alert by accident.
+
+**A3. The functions** (13 SECURITY DEFINER functions; EXECUTE revoked from
+`docflow_app`):
+
+| Function | Granted to |
+|---|---|
+| `record_stripe_subscription_event`, `record_stripe_card_event` | `docflow_stripe` only. **This closes D-173's residual risk.** |
+| `dispatch_candidates`, `probe_candidate`, `mark_dispatched`, `clear_dispatched`, `dispatcher_heartbeat`, `provider_record_failure`, `provider_record_success`, `provider_take_probe`, `count_routing_model_failure` | `docflow_worker` |
+| `dispatcher_status` | `docflow_api` (`/healthz`), `docflow_worker` (stuck sweep), `docflow_admin` (Console) |
+| `provider_state` | `docflow_api` (review queue's Delayed), `docflow_worker`, `docflow_admin` (Console, onboarding) |
+| new in B: `record_worker_start`, `worker_starts_last_hour` | `docflow_worker`; `docflow_api` and `docflow_admin` |
+
+**A4. The code** (`docflow_core.db`):
+- One engine per login. `DATABASE_URL` is the process's own login: the API's
+  is `docflow_api`, the worker's is `docflow_worker`. `platform_session()`
+  binds to the admin engine. `stripe_webhook_session()` and a new
+  `stripe_tenant_session()` bind to the Stripe engine.
+- **Each process checks its own logins at start-up** and refuses to start
+  if `current_user` isn't the expected one. That catches a pasted wrong URL
+  before it can serve a request. The worker also refuses to start if
+  `ADMIN_DATABASE_URL` or `STRIPE_DATABASE_URL` is set, as the API refuses
+  `PARSE_SERVICE_TOKEN` (3c, Q12).
+- **Import boundaries:** `stripe_tenant_session` may be imported only by
+  `billing_webhooks`, checked by the same kind of test as
+  `adminDataAccess`'s.
+- **The limit, as D-159 named it:** the API process holds three secrets,
+  because the Console and the webhooks live in it (Section 3: one deploy).
+  The database now refuses a tenant connection that sets a flag. But code
+  in the API that deliberately picks the admin or Stripe engine is stopped
+  only by the import-boundary tests.
+
+**A5. Pooler.** Five combinations (four logins plus Storage) at pool size 5
+is 25 connections at most, against about 44 usable on Nano. That's the
+headroom the founder approved on 2026-09-29. The first staging suite run
+after the cutover reports whether 5 is enough.
+
+**A6. Cutover on staging** (proposed; Q5): **one migration, a hard
+cutover.** Staging has no deployed API or worker, only local stacks, so a
+few minutes' gap costs nothing. Production (Phase 6) is created straight
+into the final state.
+1. `0036` (policies, grants, roles, B's table). It changes no rows, so the
+   only "backup" is the reverse script, written and checked in with it (Q5).
+2. The founder sets the four passwords in the SQL Editor; the local `.env`
+   and `apps/web` e2e settings get the new URLs.
+3. Staging suites (core, worker, API) as the new logins.
+4. **`docflow_app` is set NOLOGIN by the founder** (SQL Editor) once the
+   suites pass. It is dropped after 3e has run cleanly for 3 days, the same
+   rule as the backups (RUNBOOK 1.3).
+- CI: `scripts/ci/create_app_role.py` becomes `create_logins.py`. It only
+  turns the four roles on with CI-local passwords; the grants are the
+  migration's own, since the roles now exist when it runs.
+- RUNBOOK gains: creating the logins, rotating one login's password, and
+  which secret goes on which app.
+
+#### B. The worker's restart record (approved 2026-10-01; detail proposed here)
+
+- **Table `worker_starts`** (`0036`): `id`, `started_at`, `machine`
+  (`FLY_MACHINE_ID`, or the hostname locally), `image` (`FLY_IMAGE_REF` when
+  set). It is a **global table, named as such**: an operational record with
+  no tenant and no customer data. RLS is on with no policies, so it is
+  reached only through two SECURITY DEFINER functions:
+  - `record_worker_start(machine, image)` inserts the row and returns the
+    starts in the last 60 minutes, this one included (`docflow_worker`);
+  - `worker_starts_last_hour()` returns that count (`docflow_api` for
+    `/healthz`, `docflow_admin`).
+  - Retention: rows are kept. A few a day is negligible (Q6).
+- **The launcher** (`app.run_workers`), before it starts the two Celery
+  workers:
+  1. records the start;
+  2. if the count is 3 or more, raises **`worker_restarting`** (high,
+     tenant-less, deduped per UTC hour) with the count and the machine. The
+     founder email comes from the row (7.9).
+  - **Recording never stops the worker from starting.** If the database
+    can't be reached, the launcher logs the error type and starts the
+    workers anyway. A worker that can't reach the database is C's job.
+  - The insert policy for the alert: `TO docflow_worker`, flag
+    `app.dispatcher`, extended to this alert type (as 0035 did for
+    `routing_model_failure`). The every-alert-type test covers it once it
+    is registered. Founder-facing catalog wording comes with the build, as
+    for `dispatcher_stopped`.
+- **`/healthz`** adds `"worker_starts_last_hour": n`. It still returns
+  HTTP 200 always and still contains the bytes `"stale":false` when fresh,
+  so the pinned-bytes test stays as it is.
+
+#### C. The external monitor
+
+**C1. The tool.** Checked 2026-10-02 against the pages themselves (raw
+page text, not a summary):
+- **Better Stack.** Its free plan does include heartbeats ("10 monitors &
+  heartbeats, 1 status page"). **But the pricing page's free-plan heading
+  reads "Free for personal projects."** The Terms of Use say nothing about
+  plan type. **Correction:** RUNBOOK 9.4 records "no restriction on
+  commercial use stated" (read 2026-10-01). Either the page changed or I
+  missed the heading. It is the same kind of wording that ruled out
+  UptimeRobot ("hobby and non-profit projects").
+- **Healthchecks.io.** Free "Hobbyist" plan: 20 checks, email alerts. No
+  commercial or personal-use restriction on its pricing page or in its
+  Terms. Its paid plans add checks and log entries, not permission. It
+  can't poll a URL, though: it only receives pings. Pings are limited to 5
+  a minute per check ("may get rate limited and not recorded"). A check has
+  a period and a grace time, and accepts a `/fail` signal for an immediate
+  alert.
+- **Recommendation (Q1):** Healthchecks.io free for the worker heartbeats
+  (one check each for staging and production). The polled check on
+  production's API is decided in Phase 6, when production's API exists,
+  with its tool chosen then. It isn't needed for the first worker deploy,
+  since staging's API is private.
+
+**C2. What the ping proves** (founder's first point). The dispatch process
+pings after a pass that succeeded. So a ping proves:
+- the dispatch process is running and can reach the database (the pass
+  writes the heartbeat row);
+- the documents worker hasn't exited: the launcher stops the dispatch
+  worker when the documents worker exits (3d), so the pings stop.
+
+On its own it doesn't prove **the documents worker is taking work.** A
+documents worker that is up but not consuming (a hung main process, or a
+lost broker connection) leaves dispatched documents unclaimed. **Found
+while checking: today nothing alerts on that.** After 30 minutes the stuck
+sweep returns them to waiting (D-095) and the dispatcher sends them again,
+around and around, silently. `document_stuck` covers only documents
+already `processing`.
+
+**Proposed (Q2): make the ping depend on the documents side.**
+`dispatcher_status()` also returns the age of the oldest document
+dispatched but not yet claimed. The dispatcher sends only into free slots,
+so a healthy worker claims within seconds.
+- Under `DISPATCH_UNCLAIMED_ALERT_MIN` (proposed 10 minutes): a normal
+  ping.
+- Over it: a `/fail` ping, which alerts at once, and no success pings until
+  it clears.
+
+What the heartbeat still doesn't cover, said plainly:
+- a document that hangs inside a task: the 27-minute hard limit (3a) and
+  `document_stuck`;
+- the parse service: `parse_service_unavailable`;
+- the model provider: `model_api_failure`.
+
+**C3. Throttling** (founder's second point). At most one ping every
+`HEARTBEAT_PING_MIN` = **5 minutes** (a named constant). That's 288 a day
+per environment, far under the 5-a-minute limit. The dispatch process keeps
+the last-ping time in memory; it is a single process, and a restart pinging
+early is harmless.
+- Each ping is a GET with a 5-second timeout and no body or data (7.10).
+- A failed ping is logged by error type and never fails the pass.
+- The URL is a secret (`HEARTBEAT_URL`). It is never logged. When unset
+  (locally and in CI) no ping is sent.
+
+**C4. Timing and pass mark.** The check is set to period 5 minutes, grace
+5 minutes.
+- **Stopping the worker:** the email within **12 minutes** of the last
+  ping. That is 5 to the expected ping, 5 of grace, about 1 for email, and
+  1 of slack, since the docs don't say how often lateness is evaluated. The
+  polled design's was 17.
+- **An unclaimed document:** an alert within 10 minutes plus one pass,
+  from the `/fail` ping.
+- RUNBOOK 9.4 is rewritten for the heartbeat. The polled notes stay for
+  Phase 6.
+
+#### D. The two two-at-once sweep tests (decided at the 3d merge)
+
+Real database, CI and staging. Two threads, each on its own connection,
+released together by a barrier:
+- **Scheduled jobs:** seed several due jobs and run `run_scheduled_jobs`
+  twice at once. Each job runs exactly once (its side effect counted), and
+  each is marked done once.
+- **Stuck sweep:** seed stuck documents across two tenants (`processing`
+  past the timeout, and dispatched but unclaimed), then run the sweep twice
+  at once. Each document is changed once, its attempt counted once, at most
+  one lost-call row, and one alert per document.
+
+#### E. Tests and proof against the real thing
+
+- **E1 (real database, CI + staging):**
+  - For every flag, set it on each of the four logins: only the owning
+    login sees more than its tenant.
+  - A `docflow_api` tenant session that sets every flag sees only its own
+    tenant.
+  - The EXECUTE matrix: every SECURITY DEFINER function is callable by
+    exactly its logins, and refused for `docflow_app`, `anon` and
+    `authenticated`. This includes `docflow_api` being refused
+    `record_stripe_subscription_event` (D-173 closed).
+  - A catalog test: every policy whose expression names an `app.*` flag
+    other than `app.tenant_id` has exactly its expected `TO`. A future
+    migration that adds a flag policy without one fails CI.
+  - No login is BYPASSRLS, a member of another login, or able to CREATE.
+- **E2:** start-up refuses a wrong `current_user`, and the worker refuses
+  admin or Stripe URLs. Import-boundary test for `stripe_tenant_session`.
+  `test_rls_flags.py` rewritten for logins.
+- **E3, restart record:**
+  - a start is recorded;
+  - the third start within 60 minutes raises one alert, the fourth none in
+    the same hour;
+  - the database down at start still starts both workers;
+  - `/healthz` shows the count, and the pinned bytes are unchanged.
+- **E4, heartbeat (unit, with a fake ping server):**
+  - a ping after a successful pass, none after a failed pass;
+  - at most one per 5 minutes;
+  - `/fail` past the unclaimed limit, and back to success after it clears;
+  - a ping error never fails the pass;
+  - no URL, no request; the URL never in a log line.
+- **Against the real thing, at the first worker deploy (gate list):**
+  1. Stop the worker on Fly: the Healthchecks.io email within 12 minutes.
+  2. Start it again: the recovery email.
+  3. Kill the documents worker 3 times within the hour (`fly ssh`): the
+     `worker_restarting` email.
+  4. Stop the documents worker's consumption with the dispatch process
+     left running: the `/fail` alert.
+  - Then the full gate list (G, A4, fresh token, 500 + 1, memory).
+
+**Effort:** about 4-5 days: F-1 3-4, as estimated, plus about 1 for B and
+C. Cost $0 if Q1 goes to Healthchecks.io free.
+
+**Questions for the founder:**
+1. **Monitor tool:**
+   - (a) Healthchecks.io free for the heartbeats (recommended), with
+     production's polled API check decided in Phase 6;
+   - (b) Better Stack free anyway: its Terms don't restrict it, but its
+     pricing page says "personal projects";
+   - (c) a paid Better Stack plan (price checked on request).
+2. **Should the ping depend on the documents worker** (C2's
+   unclaimed-document check and `/fail`, recommended)? Or dispatcher only,
+   with the gap recorded? If yes: `DISPATCH_UNCLAIMED_ALERT_MIN` = 10?
+3. **Policies: keep the flag and add `TO` (recommended), or `TO` only?**
+4. **Table privileges:** the same grants for all four logins through
+   `docflow_tables` (recommended; RLS is the boundary)? Or narrower
+   per-login table grants now (for example `docflow_stripe` only on the
+   tables the webhook touches)? Narrower adds about a day and a list to
+   keep in step. It could be a Phase 6 hardening item instead.
+5. **Cutover:** one migration with a hard cutover on staging, a reverse
+   script instead of a backup schema (no rows change), `docflow_app` set
+   NOLOGIN after the suites pass, and dropped after 3 clean days?
+6. **`worker_starts` kept without pruning?**
+7. **Heartbeat timing:** ping every 5 minutes, period 5 / grace 5, pass
+   mark 12 minutes?
+8. **Logins for scripts:** the maintenance and seed scripts run as
+   `docflow_admin` for everything, tenant sessions included (recommended:
+   one secret on the founder's machine). Or a second URL for their tenant
+   sessions?
 
 ### Stage 2c and 2d -- agreed with the founder before building (2026-09-27)
 

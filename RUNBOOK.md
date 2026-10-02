@@ -1207,7 +1207,10 @@ The detail follows. No more research on it until the 3e design (founder).
 
 **Better Stack Uptime, free plan** (approved by the founder, 2026-10-01).
 Read 2026-10-01: 10 monitors, HTTP(s) keyword checks, e-mail and Slack
-alerts, no restriction on commercial use stated. Its check-frequency page
+alerts, no restriction on commercial use stated. **Correction (2026-10-02,
+3e design):** the pricing page's free-plan heading reads "Free for personal
+projects"; the Terms of Use say nothing about plan type. The tool is
+re-decided in 3e (BUILD-STATUS "3e detailed design", C1, Q1). Its check-frequency page
 says the interval runs "from 3 minutes for free plans to 30 seconds for paid
 plans", so **3 minutes is the free plan's fastest**. UptimeRobot's free plan
 is out: its page limits it to "hobby and non-profit projects". Re-read the
