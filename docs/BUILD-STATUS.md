@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-10-02** (latest: **3e design PROPOSED ("3e detailed design"), Q1-Q8 to the founder; nothing built**. Earlier the same day: 3d merged, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184), recorded in PR #34; the two two-at-once sweep tests go to 3e). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
+commit as the slice. Statuses below are as of **2026-10-02** (latest: **3e design APPROVED WITH CONDITIONS ("3e detailed design"); building; Q9 (the unclaimed limit) open; `0036` not applied before the `backup_0035` check, on or after 2026-10-05 03:18 UTC**. Earlier the same day: 3d merged, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184), recorded in PR #34; the two two-at-once sweep tests go to 3e). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -3614,6 +3614,72 @@ C. Cost $0 if Q1 goes to Healthchecks.io free.
    one secret on the founder's machine). Or a second URL for their tenant
    sessions?
 
+**3e -- APPROVED WITH CONDITIONS (founder, 2026-10-02).** The founder read
+the design and checked Healthchecks.io's pricing page themselves.
+1. **Q1: (a), Healthchecks.io free.** No personal or hobby restriction was
+   found; the only rule is not using several accounts to get round the
+   limits. Two checks of 20.
+2. **Q2: yes, the ping depends on the documents worker; limit 10
+   minutes.** Condition: "claimed" must mean the task actually started.
+   Confirm the documents worker's prefetch is 1, or that dispatch slots
+   account for prefetch. Record the largest unclaimed age seen during the
+   500 + 1 run, so the limit is measured, not guessed.
+   - *Checked:* `worker_prefetch_multiplier=1` with `task_acks_late=True`
+     (`celery_app.py`), so a process holds no message beyond the one it is
+     running. A message that has been taken has been started.
+   - ***Found while checking, which reopens the value (Q9 below):*** the
+     documents worker's processes also run every non-document task:
+     exports, imports and the manual rollup on `interactive`; the four beat
+     sweeps on `bulk`. The dispatcher counts only documents as in flight. So
+     a slot busy with one of those makes a dispatched document wait in the
+     broker on a healthy worker. Their hard limits are rollup 15 min,
+     scheduled jobs 10, lifecycle 10, export and import 5, stuck sweep 4. On
+     staging (one slot), a rollup or a lifecycle sweep held up by Stripe
+     could pass 10 minutes with nothing wrong.
+3. **Q3: keep the flag and add `TO`.**
+4. **Q4: shared grants through `docflow_tables` now.** **Phase 6 item
+   (named):** narrow `docflow_stripe` to the tables the webhook touches. It
+   is the login with an internet-facing caller. The other three are not
+   narrowed.
+5. **Q5: hard cutover, approved with three conditions:**
+   1. **`0036` is not applied to staging until Claude has reported the
+      `backup_0035` check** (on or after 2026-10-05 03:18 UTC), so 3e's
+      cutover can't land inside 3d's 3-day clean-run window. Written into
+      the cutover steps (A6, step 0).
+   2. **The reverse script is tested, not just checked in.** CI runs
+      forward, reverse, forward. On staging, `pg_policies` and the function
+      grants are snapshotted before applying, and the reverse is shown to
+      restore them exactly. That snapshot is the backup.
+   3. **Before `docflow_app` goes NOLOGIN, every place its URL lives is
+      listed:** the local `.env`, any Fly secrets left from 3c's staging
+      run, GitHub secrets, and anything else found.
+6. **Q6: yes,** rows kept. A crash loop writes few rows and the alert is
+   deduped per hour.
+7. **Q7: yes.** Pings land 5:00-5:30 apart (passes every 30 s), and 5
+   minutes of grace covers that.
+8. **Q8: `docflow_admin` for all script work,** one secret on the
+   founder's machine.
+
+**A6, step 0 (added):** before step 1, Claude reports the `backup_0035`
+check, not before 2026-10-05 03:18 UTC; the founder confirms; then the
+`pg_policies` and function-grant snapshot is taken; then `0036`.
+
+**Q9 (open, from the Q2 check): the unclaimed limit, given shared slots.**
+Options:
+- (a) **Recommended:** `DISPATCH_UNCLAIMED_ALERT_MIN` above the longest
+  non-document hard limit: **20 minutes** (the rollup's is 15). The
+  measurement condition stays: record the largest unclaimed age during the
+  500 + 1 run. Also run the rollup and a sweep during it, so the shared-slot
+  case is in the number. Cost: the "not taking work" alert comes after 20
+  minutes, not 10. It is still the only alert for that failure.
+- (b) Keep 10. Accept a false `/fail` when a long non-document task holds
+  the only slot (staging: one slot; production: rarer with more slots).
+- (c) Count running non-document tasks as in flight, so the dispatcher
+  never sends into a slot they hold. That changes 3d's dispatcher; not
+  recommended inside 3e.
+- Building goes ahead meanwhile. The limit is one named constant, and
+  nothing else depends on its value.
+
 ### Stage 2c and 2d -- agreed with the founder before building (2026-09-27)
 
 Written here so they survive a context reset; until now they lived only in the
@@ -3811,6 +3877,17 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   3. Then revisit lowering `idle_in_transaction_session_timeout` for
      `docflow_app` (migration 0028 sets 5 min) toward 60 s, as a new
      migration plus the CI role script and its agreement test.
+
+- **Narrow `docflow_stripe`'s table grants to the tables the Stripe webhook
+  touches** (founder, 2026-10-02, 3e Q4). In 3e all four logins share
+  `docflow_tables`. `docflow_stripe` is the one with an internet-facing
+  caller, so it is the one worth narrowing; the other three stay shared.
+  Done with a test that lists the webhook's tables and fails when the code
+  touches one not granted.
+- **Production's polled `/healthz` check** (3e, C1): production's API is
+  public, and the worker heartbeat says nothing about the API. Tool and
+  settings chosen when production's API exists (Healthchecks.io can't poll;
+  Better Stack's free plan is labelled "personal projects").
 
 ---
 
