@@ -22,6 +22,10 @@ def test_a_stale_heartbeat_shows_stale(client, monkeypatch):
     response = client.get("/healthz")
     assert response.status_code == 200
     body = response.json()
+    # Exactly these keys: /healthz is public in production (no sign-in), so a
+    # new field must be a deliberate change that updates this test (founder,
+    # 2026-10-02).
+    assert set(body) == {"status", "dispatcher", "worker_starts_last_hour"}
     assert body["status"] == "ok"
     assert body["dispatcher"] == {"heartbeat_age_seconds": DISPATCHER_STALE_MIN * 60 + 1, "stale": True}
 
