@@ -17,7 +17,9 @@ and event order was ignored. Now:
 
 1. A SELECT-only lookup (`stripe_webhook_session`) finds the tenant by its
    Stripe customer id.
-2. Inside that tenant's own `tenant_session()`, the database function
+2. Inside that tenant's own session, as docflow_stripe
+   (`stripe_tenant_session()`; Stage 3e, the only login that may execute
+   it, migration 0036), the database function
    `record_stripe_subscription_event()` (migration 0029) checks the event id,
    applies the ordering guard and saves the status -- recording the event id
    in the same transaction as the write. The past-due alert is raised in that
@@ -51,7 +53,7 @@ from sqlalchemy.orm import Session
 
 from docflow_core import card_billing, external_services, founder_alerts
 from docflow_core.constants import STRIPE_CLOCK_TOLERANCE_SECONDS
-from docflow_core.db import stripe_webhook_session, tenant_session
+from docflow_core.db import stripe_tenant_session, stripe_webhook_session
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +149,7 @@ def _tenant_for_customer(customer_id: str) -> UUID | None:
 
 
 def _billed_by_card(tenant_id: UUID) -> bool:
-    with tenant_session(tenant_id) as session:
+    with stripe_tenant_session(tenant_id) as session:
         method = session.execute(
             text("SELECT billing_method FROM tenants WHERE id = :id"), {"id": str(tenant_id)}
         ).scalar()
@@ -166,7 +168,7 @@ def _record(
     mode: str,
     amount_cents: int | None = None,
 ) -> str:
-    with tenant_session(tenant_id) as session:
+    with stripe_tenant_session(tenant_id) as session:
         if mode == "event" and _beyond_clock_tolerance(session, created):
             # Not a real Stripe event (every accepted delivery proves Stripe's
             # clock is within the tolerance of ours), and saving its time would
@@ -270,7 +272,7 @@ def _card_updated(
     tenant_id = _tenant_for_customer(customer_id)
     if tenant_id is None:
         return "unmatched"
-    with tenant_session(tenant_id) as session:
+    with stripe_tenant_session(tenant_id) as session:
         tenant = session.execute(
             text(
                 "SELECT billing_method, stripe_subscription_status, stripe_subscription_id "

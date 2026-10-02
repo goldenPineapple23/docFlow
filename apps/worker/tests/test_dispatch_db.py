@@ -647,13 +647,14 @@ _FUNCTIONS = (
 def test_every_0035_function_is_security_definer_with_an_empty_search_path_and_no_public_execute():
     """Founder's Q8 condition: a fixed search_path (here '' -- nothing to
     shadow), every name schema-qualified in the source, and nothing callable
-    by Supabase's public roles."""
+    by Supabase's public roles. Since Stage 3e each is callable by the worker's
+    own login (test_logins_db.py has the full grant table)."""
     with platform_session() as session:
         rows = session.execute(
             text(
                 """
                 SELECT p.proname, p.prosecdef, p.proconfig,
-                       has_function_privilege('docflow_app', p.oid, 'EXECUTE') AS app_can,
+                       has_function_privilege('docflow_worker', p.oid, 'EXECUTE') AS app_can,
                        (SELECT bool_or(has_function_privilege(r.rolname, p.oid, 'EXECUTE'))
                           FROM pg_roles r WHERE r.rolname IN ('anon', 'authenticated')) AS public_can
                   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -671,7 +672,7 @@ def test_every_0035_function_is_security_definer_with_an_empty_search_path_and_n
         assert not row["public_can"], name
 
 
-def test_the_flag_lets_the_dispatcher_raise_only_its_four_tenant_less_alerts():
+def test_the_flag_lets_the_dispatcher_raise_only_its_tenant_less_alerts():
     with pytest.raises(Exception):
         with dispatcher_session() as session:
             founder_alerts.raise_alert(
@@ -679,3 +680,19 @@ def test_the_flag_lets_the_dispatcher_raise_only_its_four_tenant_less_alerts():
             )
     with dispatcher_session() as session:
         assert session.execute(text("SELECT count(*) FROM documents")).scalar_one() == 0  # reads nothing
+
+
+# ── Stage 3e (part C2): the heartbeat's unclaimed check, on the real database ──
+
+
+def test_the_unclaimed_age_is_the_oldest_document_dispatched_and_not_yet_claimed():
+    """0036's dispatch_unclaimed_age(), through the worker's login. Other
+    tests' documents may share the database, so the bound is "at least"."""
+    from docflow_core import heartbeat
+
+    with WorkerTestTenant("Acme Test Unclaimed") as a:
+        sent, claimed = _waiting(a, 2, minutes_ago=40)
+        _set(sent, "dispatched_at = now() - interval '25 minutes'")
+        _set(claimed, "dispatched_at = now() - interval '35 minutes', status = 'processing'")
+        age = heartbeat.unclaimed_age_seconds()
+        assert age is not None and age >= 25 * 60

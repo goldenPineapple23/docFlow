@@ -524,10 +524,12 @@ def test_the_function_refuses_to_run_outside_a_tenant_session(_environment):
 
 
 @requires_lifecycle_schema
-def test_only_the_app_role_may_execute_the_function(_environment):
+def test_only_the_stripe_login_may_execute_the_function(_environment):
     """REVOKE from PUBLIC, and from Supabase's anon/authenticated roles, which
     otherwise get EXECUTE on every new function in `public` -- i.e. callable
-    from the browser's public key through the REST API."""
+    from the browser's public key through the REST API. Since Stage 3e only
+    docflow_stripe may execute it: the API's, the worker's and the admin
+    login are refused, which closes D-173's residual risk."""
     with stripe_webhook_session() as session:
         acl = session.execute(
             text("SELECT proacl::text[] FROM pg_proc WHERE proname = 'record_stripe_subscription_event'")
@@ -542,8 +544,8 @@ def test_only_the_app_role_may_execute_the_function(_environment):
                 text("SELECT has_function_privilege(:role, :fn, 'EXECUTE')"),
                 {"role": role, "fn": FUNCTION_SIGNATURE},
             ).scalar_one()
-            for role in [*roles, "docflow_app"]
+            for role in [*roles, "docflow_stripe", "docflow_api", "docflow_worker", "docflow_admin"]
         }
     assert not any(entry.startswith("=") for entry in acl or []), acl  # no PUBLIC grant
-    assert can.pop("docflow_app") is True
-    assert not any(can.values()), can  # anon / authenticated, where they exist
+    assert can.pop("docflow_stripe") is True
+    assert not any(can.values()), can  # the other logins, and anon / authenticated

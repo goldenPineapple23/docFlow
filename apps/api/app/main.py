@@ -4,6 +4,7 @@ import traceback
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from docflow_core import db, worker_starts
 from docflow_core.config import get_settings
 from docflow_core.dispatch import health as dispatcher_health
 from fastapi import Depends, FastAPI, Request
@@ -52,6 +53,28 @@ def parse_token_startup_refusal() -> str | None:
     return None
 
 
+# Stage 3e (F-1): the API's tenant sessions run as docflow_api.
+db.use_own_login("api")
+
+
+def login_startup_check() -> list[str]:
+    """
+    Each database URL the API holds must connect as its own login
+    (docflow_api, and docflow_admin / docflow_stripe when set; 3e, A4). A
+    wrong one stops the API before it serves a request: a pasted wrong URL
+    would otherwise run tenant requests with another service's policies. A
+    database that can't be reached is logged, not fatal: /healthz must still
+    answer, and it reports the database itself. Returns the logins checked.
+    """
+    try:
+        return db.verify_logins(("api", "admin", "stripe"))
+    except db.WrongLoginError:
+        raise
+    except Exception as exc:  # noqa: BLE001 -- unreachable, not wrong
+        logger.error("login_startup_check_unreachable error_type=%s", type(exc).__name__)
+        return []
+
+
 _refusal = parse_token_startup_refusal()
 if _refusal is not None:
     print(f"DocFlow API refused to start: {_refusal}", file=sys.stderr, flush=True)
@@ -76,6 +99,11 @@ def console_mfa_startup_check() -> bool:
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    try:
+        login_startup_check()
+    except db.WrongLoginError as exc:
+        print(f"DocFlow API refused to start: {exc}", file=sys.stderr, flush=True)
+        raise SystemExit(1) from None
     console_mfa_startup_check()
     yield
 
@@ -199,7 +227,8 @@ def healthz() -> dict:
     """
     The API's liveness answer, and (Stage 3d, gap 1) whether the dispatcher
     is alive: its heartbeat's age and whether that is past
-    DISPATCHER_STALE_MIN. No sign-in, so the age only -- no counts, no ids.
+    DISPATCHER_STALE_MIN, and how many times the worker started in the last
+    hour (3e). No sign-in, so ages and counts only -- no ids.
     Always HTTP 200: a platform check pointed here must never restart a
     healthy API because the worker is down. The external uptime monitor
     (from the first worker deploy, RUNBOOK 9.4) matches the bytes
@@ -210,4 +239,11 @@ def healthz() -> dict:
     except Exception as exc:  # noqa: BLE001 -- the database is unreachable
         logger.error("healthz_dispatcher_unreadable error_type=%s", type(exc).__name__)
         dispatcher = {"heartbeat_age_seconds": None, "stale": True}
-    return {"status": "ok", "dispatcher": dispatcher}
+    # Stage 3e (part B): a worker restarting slowly keeps the heartbeat fresh,
+    # so the starts in the last hour show it here. null when unreadable.
+    try:
+        starts: int | None = worker_starts.starts_last_hour()
+    except Exception as exc:  # noqa: BLE001 -- the database is unreachable
+        logger.error("healthz_worker_starts_unreadable error_type=%s", type(exc).__name__)
+        starts = None
+    return {"status": "ok", "dispatcher": dispatcher, "worker_starts_last_hour": starts}

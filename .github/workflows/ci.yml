@@ -16,9 +16,12 @@ on:
 # The Python suites run against a real Supabase stack (Postgres 17 with the
 # auth schema and Supabase roles), started by the Supabase CLI from
 # supabase/config.toml, with every migration in supabase/migrations/ applied
-# in order. They connect as `docflow_app` (NOBYPASSRLS), exactly as the app
-# does on docflow-staging, so the RLS and tenant-isolation tests run on every
-# push. Phase 5.5 Stage 0, DECISIONS.md D-148; review docs/REVIEW-PHASE5.md H7.
+# in order. They connect as the four logins migration 0036 creates (Stage
+# 3e, F-1; all NOBYPASSRLS), exactly as the apps do on docflow-staging, so the
+# RLS and tenant-isolation tests run on every push: DATABASE_URL is the
+# process's own login (docflow_api; the worker job's is docflow_worker), and
+# the others are named for the sessions that use them. Phase 5.5 Stage 0,
+# DECISIONS.md D-148; review docs/REVIEW-PHASE5.md H7.
 #
 # Every job then fails if any test was skipped without an approval in
 # .github/approved-skips.txt (scripts/ci/check_skips.py). Target: zero.
@@ -29,7 +32,11 @@ env:
   SUPABASE_CLI_VERSION: "2.118.0"
   SUPERUSER_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
   APP_ROLE_PASSWORD: ci-local-only
-  DATABASE_URL: postgresql://docflow_app:ci-local-only@127.0.0.1:54322/postgres
+  DATABASE_URL: postgresql://docflow_api:ci-local-only@127.0.0.1:54322/postgres
+  API_DATABASE_URL: postgresql://docflow_api:ci-local-only@127.0.0.1:54322/postgres
+  WORKER_DATABASE_URL: postgresql://docflow_worker:ci-local-only@127.0.0.1:54322/postgres
+  ADMIN_DATABASE_URL: postgresql://docflow_admin:ci-local-only@127.0.0.1:54322/postgres
+  STRIPE_DATABASE_URL: postgresql://docflow_stripe:ci-local-only@127.0.0.1:54322/postgres
   REDIS_URL: redis://127.0.0.1:6379/0
   SUPABASE_JWT_SECRET: ci-local-only-jwt-secret-not-used-anywhere-else
   DOCUMENT_URL_SIGNING_SECRET: ci-local-only-signing-secret
@@ -144,6 +151,10 @@ jobs:
             checked=$((checked + 1))
           done <<EOF
           DATABASE_URL=$DATABASE_URL
+          API_DATABASE_URL=$API_DATABASE_URL
+          WORKER_DATABASE_URL=$WORKER_DATABASE_URL
+          ADMIN_DATABASE_URL=$ADMIN_DATABASE_URL
+          STRIPE_DATABASE_URL=$STRIPE_DATABASE_URL
           SUPABASE_URL=$SUPABASE_URL
           NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
           NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
@@ -165,9 +176,9 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install -r apps/api/requirements.lock.txt
       - run: pip install --no-deps -e packages/core
-      - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
+      - name: Turn on the four logins (migration 0036 creates them), as RUNBOOK 10.2 does
         id: app_role
-        run: python scripts/ci/create_app_role.py
+        run: python scripts/ci/create_logins.py
       - name: Start the API
         run: |
           nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/api.log 2>&1 &
@@ -238,14 +249,20 @@ jobs:
       - id: core
         run: pip install --no-deps -e .
       - run: pip install pip-audit
-      - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
+      # Founder's Q5 condition 2 (Stage 3e): the reverse script is tested, not
+      # just checked in. Before the logins are turned on, since the reverse
+      # drops the roles and forward creates them again.
+      - name: Migration 0036 forward -> reverse -> forward (against staging's pre-0036 snapshot)
+        id: roundtrip
+        run: python "${{ github.workspace }}/scripts/ci/migration_roundtrip.py"
+      - name: Turn on the four logins (migration 0036 creates them), as RUNBOOK 10.2 does
         id: app_role
-        run: python "${{ github.workspace }}/scripts/ci/create_app_role.py"
+        run: python "${{ github.workspace }}/scripts/ci/create_logins.py"
       - id: ruff
         run: ruff check .
       - id: mypy
         run: mypy docflow_core
-      - name: Test (against the local Supabase stack, as docflow_app)
+      - name: Test (against the local Supabase stack, as the four logins)
         id: test
         run: pytest -v --junitxml=junit.xml
       - name: No unapproved skipped tests
@@ -291,9 +308,9 @@ jobs:
       - id: core
         run: pip install --no-deps -e ../../packages/core
       - run: pip install pip-audit
-      - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
+      - name: Turn on the four logins (migration 0036 creates them), as RUNBOOK 10.2 does
         id: app_role
-        run: python "${{ github.workspace }}/scripts/ci/create_app_role.py"
+        run: python "${{ github.workspace }}/scripts/ci/create_logins.py"
       # Stage 3c: the catalog tests run the worker's parse step
       # (catalog_import.run_parse), which reads through the real parse service
       # image, as in the worker job.
@@ -317,7 +334,7 @@ jobs:
         run: ruff check .
       - id: mypy
         run: mypy app
-      - name: Test (against the local Supabase stack, as docflow_app; live_api deselected)
+      - name: Test (against the local Supabase stack, as the four logins; live_api deselected)
         id: test
         env:
           # Never PARSE_SERVICE_TOKEN here: the API doesn't hold the parse
@@ -345,6 +362,10 @@ jobs:
     defaults:
       run:
         working-directory: apps/worker
+    # The worker's own login (Stage 3e): its tenant sessions run as
+    # docflow_worker, as on Fly.
+    env:
+      DATABASE_URL: postgresql://docflow_worker:ci-local-only@127.0.0.1:54322/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v2.1.2
@@ -368,9 +389,9 @@ jobs:
       - id: core
         run: pip install --no-deps -e ../../packages/core
       - run: pip install pip-audit
-      - name: Create docflow_app (NOBYPASSRLS), as SETUP.md Step 1.6 does
+      - name: Turn on the four logins (migration 0036 creates them), as RUNBOOK 10.2 does
         id: app_role
-        run: python "${{ github.workspace }}/scripts/ci/create_app_role.py"
+        run: python "${{ github.workspace }}/scripts/ci/create_logins.py"
       # Stage 3c: the worker no longer opens files. Its tests read through the
       # real parse service image (isolation on, production mode), built here
       # from the parse job's layer cache.
@@ -394,7 +415,7 @@ jobs:
         run: ruff check .
       - id: mypy
         run: mypy app
-      - name: Test (against the local Supabase stack, as docflow_app)
+      - name: Test (against the local Supabase stack, as the four logins)
         id: test
         env:
           PARSE_SERVICE_URL: http://127.0.0.1:8100

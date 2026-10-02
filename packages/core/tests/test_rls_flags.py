@@ -5,8 +5,10 @@ Several policies open a table when a transaction carries a flag:
 `app.is_platform_admin`, `app.rollup`, `app.lifecycle`, `app.scheduler`,
 `app.stripe_webhook`, `app.pipeline_sweep`, `app.intake_refusal`,
 `app.dispatcher`, plus the lookups by intake token and sign-in id. Postgres
-lets any connected role set a custom `app.*` setting, so the database alone
-does not decide who carries a flag -- this code does:
+lets any connected role set a custom `app.*` setting. Since Stage 3e (F-1,
+migration 0036) each of those policies applies only TO one login, so the
+database refuses a flag set on any other login (the real-database tests are
+apps/api/tests/test_logins_db.py). This file keeps the code's half:
 
 - Only `docflow_core/db.py` writes SQL that sets an `app.*` flag, each inside
   one named session helper that first clears every flag
@@ -51,14 +53,26 @@ ALLOWED_USERS = {
     },
     "scheduler_session": {"packages/core/docflow_core/scheduled_jobs.py"},
     "stripe_webhook_session": {"packages/core/docflow_core/billing_webhooks.py"},
+    # Stage 3e: tenant_session() as docflow_stripe, the only login that may
+    # execute the two Stripe event functions.
+    "stripe_tenant_session": {
+        "packages/core/docflow_core/billing_webhooks.py",
+        "packages/core/docflow_core/card_billing.py",
+    },
+    "function_session": {
+        "packages/core/docflow_core/dispatch.py",
+        "packages/core/docflow_core/worker_starts.py",
+    },
     "token_lookup_session": {"packages/core/docflow_core/email_intake.py"},
     "intake_refusal_session": {"packages/core/docflow_core/email_intake.py"},
     "identity_lookup_session": {"apps/api/app/deps.py"},
     "dispatcher_session": {
         "packages/core/docflow_core/dispatch.py",
         "packages/core/docflow_core/model_provider.py",
+        # Stage 3e: the restart record and the heartbeat's unclaimed check.
+        "packages/core/docflow_core/worker_starts.py",
+        "packages/core/docflow_core/heartbeat.py",
     },
-    "function_session": {"packages/core/docflow_core/dispatch.py"},
     "platform_session": {"packages/core/docflow_core/admin_data_access.py"},
 }
 

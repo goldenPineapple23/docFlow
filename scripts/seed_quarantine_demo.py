@@ -240,6 +240,9 @@ def seed(
 
 
 if __name__ == "__main__":
+    from docflow_core.db import use_own_login
+
+    use_own_login("admin")  # every script runs as docflow_admin (Stage 3e, Q8)
     parser = argparse.ArgumentParser()
     parser.add_argument("tenant_id", nargs="?")
     parser.add_argument("--tenant-of", help="use the tenant this user belongs to")

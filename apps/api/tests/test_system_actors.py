@@ -129,8 +129,9 @@ def test_a_lifecycle_event_without_an_actor_is_refused():
 
 
 def test_the_app_roles_idle_transactions_are_capped_at_five_minutes():
-    """Set on the role, so every environment gets it from the migration (or,
-    in CI, from create_app_role.py) and every new connection starts with it."""
+    """Set on the role, so every environment gets it from the migration and
+    every new connection starts with it. Since Stage 3e the admin login is
+    checked here (platform_session); test_logins_db.py checks all four."""
     with platform_session() as session:
         settings = session.execute(
             text(

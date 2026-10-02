@@ -54,3 +54,71 @@ def test_a_stop_signal_reaches_both_workers_and_the_launcher_exits_cleanly():
     code = supervisor.wait(timeout=60)
     assert code == 0  # a requested stop: Fly does not restart it
     assert time.monotonic() - started < 10  # both ended on the signal, not on the 30 s kill
+
+
+# ── Stage 3e: what the launcher does before either worker starts ────────────
+
+
+@pytest.fixture
+def launcher(monkeypatch):
+    """app.run_workers with its database calls and supervise() recorded, not run."""
+    from docflow_core import db, worker_starts
+    from docflow_core.config import get_settings
+
+    import app.run_workers as run_workers
+
+    calls: list[str] = []
+    for name in ("ADMIN_DATABASE_URL", "STRIPE_DATABASE_URL", "API_DATABASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    get_settings.cache_clear()
+    monkeypatch.setattr(db, "verify_logins", lambda logins: calls.append(f"verify {logins}") or list(logins))
+    monkeypatch.setattr(worker_starts, "record_start", lambda: calls.append("record") or 1)
+    monkeypatch.setattr(run_workers, "supervise", lambda cmds: calls.append("supervise") or 0)
+    yield run_workers, calls, monkeypatch
+    get_settings.cache_clear()
+
+
+def test_the_launcher_checks_its_login_records_the_start_then_runs_the_workers(launcher):
+    run_workers, calls, _ = launcher
+    assert run_workers.main() == 0
+    assert calls == ["verify ('worker',)", "record", "supervise"]
+
+
+@pytest.mark.parametrize("setting", ["ADMIN_DATABASE_URL", "STRIPE_DATABASE_URL", "API_DATABASE_URL"])
+def test_the_launcher_refuses_to_start_holding_another_services_login(launcher, setting, capsys):
+    from docflow_core.config import get_settings
+
+    run_workers, calls, monkeypatch = launcher
+    monkeypatch.setenv(setting, "postgresql://acme-test-not-a-real-url")
+    get_settings.cache_clear()
+    assert run_workers.main() == 1
+    assert calls == []  # nothing recorded, no worker started
+    err = capsys.readouterr().err
+    assert setting in err and "acme-test-not-a-real-url" not in err
+
+
+def test_the_launcher_refuses_a_url_that_connects_as_another_login(launcher):
+    from docflow_core import db
+
+    run_workers, calls, monkeypatch = launcher
+
+    def wrong(_logins):
+        raise db.WrongLoginError("the docflow_worker URL connects as 'docflow_api'")
+
+    monkeypatch.setattr(db, "verify_logins", wrong)
+    assert run_workers.main() == 1
+    assert calls == []
+
+
+def test_the_launcher_starts_the_workers_when_the_database_is_unreachable(launcher):
+    """Recording never stops the worker starting; the heartbeat reports it."""
+    from docflow_core import db
+
+    run_workers, calls, monkeypatch = launcher
+
+    def unreachable(_logins):
+        raise ConnectionError("acme test: no database")
+
+    monkeypatch.setattr(db, "verify_logins", unreachable)
+    assert run_workers.main() == 0
+    assert calls == ["record", "supervise"]

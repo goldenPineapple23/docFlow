@@ -12,22 +12,22 @@ database, not just by application code:
     CREATE POLICY tenant_isolation ON <table>
       USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 
-Both this module and `admin_data_access.py` connect as the same Postgres
-role (`docflow_app`, created with NOBYPASSRLS -- see SETUP.md / DECISIONS.md
-D-013), so RLS is genuinely enforced rather than bypassed. Cross-tenant
-reads still need to get past that same RLS, which is why every tenant-scoped
-table's policy is written as an OR of two conditions -- the tenant match
-above, and:
+Every session connects as one of four Postgres logins (Stage 3e, F-1,
+D-159; migration 0036), all NOBYPASSRLS, so RLS is genuinely enforced:
+docflow_api (tenant requests and the sign-in and intake lookups),
+docflow_worker (jobs and sweeps), docflow_admin (the Console and the
+scripts) and docflow_stripe (the Stripe webhook). Cross-tenant reads still
+need to get past RLS, which is why every tenant-scoped table's policy is an
+OR of two conditions -- the tenant match above, and:
 
-    CREATE POLICY platform_admin_access ON <table>
+    CREATE POLICY platform_admin_access ON <table> TO docflow_admin
       USING (current_setting('app.is_platform_admin', true) = 'true');
 
-`platform_session()` below sets that second flag. Since Postgres RLS
-policies are permissive-OR'd, a row is visible if either policy matches.
-The flag is only ever set from this one function, which is only ever called
-from `admin_data_access.py` -- the same import boundary enforced for the
-Python layer (Section 7.15.1) now also has a matching database-level
-control, not just an honor system.
+`platform_session()` below sets that flag, and connects as docflow_admin,
+the only login the policy applies to. A tenant connection that set the
+flag would still see nothing more: the database refuses it, not just this
+module's import boundary (Section 7.15.1). Each narrow flag session below
+works the same way, with its own login.
 
 A third, narrower case: before a request even has a resolved tenant_id, the
 auth layer (app/deps.py) needs to look up "which user is this auth token
@@ -68,7 +68,20 @@ psycopg.adapters.register_dumper(list, JsonbBinaryDumper)
 
 from docflow_core.config import get_settings
 
-_engine: Engine | None = None
+# Stage 3e (F-1, D-159): one Postgres login per service. Each process says
+# which is its own (`use_own_login`), and its tenant sessions run as that
+# login. The narrow sessions below each run as the one login their policies
+# are granted TO (migration 0036), whatever process opens them: a worker that
+# opened token_lookup_session would connect as docflow_worker and the
+# database would show it nothing.
+LOGINS = ("api", "worker", "admin", "stripe")
+_own_login = "api"
+_engines: dict[str, Engine] = {}
+_factories: dict[str, sessionmaker[Session]] = {}
+
+
+class MissingLoginError(RuntimeError):
+    """This process holds no URL for the login a session needs."""
 
 
 def rowcount(result: Result[Any]) -> int:
@@ -93,17 +106,57 @@ def _psycopg3_url(database_url: str) -> str:
     return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
 
 
-def get_engine() -> Engine:
-    global _engine
-    if _engine is None:
-        settings = get_settings()
-        if not settings.database_url:
-            raise RuntimeError(
-                "DATABASE_URL is not set. See SETUP.md Step 1 -- copy the pooled "
-                "connection string from Supabase Project Settings -> Database."
-            )
-        _engine = create_engine(
-            _psycopg3_url(settings.database_url),
+def use_own_login(login: str) -> None:
+    """Called once at start-up: the API says "api", the worker "worker", the
+    maintenance and seed scripts "admin" (founder, 3e Q8). Tenant sessions
+    then run as that login."""
+    global _own_login, _SessionLocal
+    if login not in LOGINS:
+        raise ValueError(f"unknown login {login!r}")
+    _own_login = login
+    _SessionLocal = None
+
+
+def own_login() -> str:
+    return _own_login
+
+
+def login_url(login: str) -> str:
+    """The URL for one login, or "" if this process holds none.
+
+    DATABASE_URL is the process's own login. The API and worker logins may
+    also be named separately (API_DATABASE_URL, WORKER_DATABASE_URL), which
+    is what lets one machine hold both: the founder's `.env`, and the test
+    suites. The admin and Stripe logins have only their own setting, so a
+    process without it can't open their sessions at all.
+    """
+    settings = get_settings()
+    if login == "api":
+        return settings.api_database_url or settings.database_url
+    if login == "worker":
+        return settings.worker_database_url or settings.database_url
+    if login == "admin":
+        return settings.admin_database_url
+    if login == "stripe":
+        return settings.stripe_database_url
+    raise ValueError(f"unknown login {login!r}")
+
+
+def engine_for(login: str) -> Engine:
+    url = login_url(login)
+    if not url:
+        setting = {"admin": "ADMIN_DATABASE_URL", "stripe": "STRIPE_DATABASE_URL"}.get(
+            login, "DATABASE_URL"
+        )
+        raise MissingLoginError(
+            f"{setting} is not set, so this process has no docflow_{login} login. "
+            "See SETUP.md Step 1 and RUNBOOK 10."
+        )
+    # Engines are shared by URL: in a process where two logins resolve to the
+    # same string (the API's own login and "api"), there is one pool, not two.
+    if url not in _engines:
+        _engines[url] = create_engine(
+            _psycopg3_url(url),
             pool_pre_ping=True,
             # DATABASE_URL is Supabase's transaction-mode pooler (port 6543):
             # a given logical "connection" can be handed a different backend
@@ -116,7 +169,12 @@ def get_engine() -> Engine:
             # other pooling-specific defense this connection needs.
             connect_args={"prepare_threshold": None},
         )
-    return _engine
+    return _engines[url]
+
+
+def get_engine() -> Engine:
+    """The process's own login (`use_own_login`)."""
+    return engine_for(_own_login)
 
 
 def forget_inherited_connections() -> None:
@@ -125,15 +183,58 @@ def forget_inherited_connections() -> None:
     inherited without closing them, since they belong to the parent. Two
     processes sharing one Postgres connection corrupt each other's traffic.
     The next query opens a fresh connection of this process's own."""
-    if _engine is not None:
-        _engine.dispose(close=False)
+    for engine in _engines.values():
+        engine.dispose(close=False)
 
 
 def get_session_factory() -> sessionmaker[Session]:
+    """Sessions as the process's own login: tenant_session and function_session."""
     global _SessionLocal
     if _SessionLocal is None:
         _SessionLocal = sessionmaker(bind=get_engine(), expire_on_commit=False)
     return _SessionLocal
+
+
+def _session_factory(login: str) -> sessionmaker[Session]:
+    """Sessions as one named login, for the narrow sessions below."""
+    url = login_url(login)
+    if url not in _factories:
+        _factories[url] = sessionmaker(bind=engine_for(login), expire_on_commit=False)
+    return _factories[url]
+
+
+def connected_login(login: str) -> str:
+    """`current_user` on one login's URL: what the start-up checks compare."""
+    with engine_for(login).connect() as conn:
+        return str(conn.execute(text("SELECT current_user")).scalar_one())
+
+
+class WrongLoginError(RuntimeError):
+    """A URL connects as a different role than the login it is configured for."""
+
+
+def verify_logins(logins: tuple[str, ...]) -> list[str]:
+    """
+    Start-up check (3e, A4): each named login that has a URL must connect as
+    `docflow_<login>`. Raises WrongLoginError naming the setting and the role
+    it found (never the URL), so a pasted wrong URL stops the process before
+    it serves anything. A login with no URL is skipped. A database that can't
+    be reached is not a wrong login: the error propagates to the caller,
+    which decides (the API logs and starts; /healthz must answer).
+    Returns the logins checked.
+    """
+    checked: list[str] = []
+    for login in logins:
+        if not login_url(login):
+            continue
+        found = connected_login(login)
+        if found != f"docflow_{login}":
+            raise WrongLoginError(
+                f"the docflow_{login} URL connects as {found!r}. Each service has its own "
+                f"login (RUNBOOK 10); check which secret holds which URL."
+            )
+        checked.append(login)
+    return checked
 
 
 def _reset_rls_settings(session: Session) -> None:
@@ -176,8 +277,30 @@ def tenant_session(tenant_id: UUID) -> Iterator[Session]:
     Open a transaction scoped to exactly one tenant. `tenant_id` must come
     from the authenticated session (see app/deps.py), never from a request
     body, query string, or client-side state (CLAUDE.md Section 10).
+    It runs as the process's own login (`use_own_login`).
     """
-    session_factory = get_session_factory()
+    with _tenant_transaction(get_session_factory(), tenant_id) as session:
+        yield session
+
+
+@contextmanager
+def stripe_tenant_session(tenant_id: UUID) -> Iterator[Session]:
+    """
+    tenant_session() as docflow_stripe, for the Stripe webhook only
+    (`docflow_core.billing_webhooks` and the card-event write it calls in
+    `card_billing`). Only docflow_stripe may execute the two Stripe event
+    functions (migration 0036), which run in the same transaction as the
+    tenant update they stand for (D-173). An import-boundary test keeps every
+    other module from using it.
+    """
+    with _tenant_transaction(_session_factory("stripe"), tenant_id) as session:
+        yield session
+
+
+@contextmanager
+def _tenant_transaction(
+    session_factory: sessionmaker[Session], tenant_id: UUID
+) -> Iterator[Session]:
     session = session_factory()
     try:
         _reset_rls_settings(session)
@@ -208,7 +331,7 @@ def platform_session() -> Iterator[Session]:
     is only ever called from admin_data_access.py -- never import it
     directly to "get around" tenant_session() elsewhere.
     """
-    session_factory = get_session_factory()
+    session_factory = _session_factory("admin")
     session = session_factory()
     try:
         _reset_rls_settings(session)
@@ -235,7 +358,7 @@ def token_lookup_session(token: str) -> Iterator[Session]:
     supabase/migrations/0003_email_intake.sql), and nothing else. This is
     not the Section 7.15.1 admin bypass and must never be used as one.
     """
-    session_factory = get_session_factory()
+    session_factory = _session_factory("api")
     session = session_factory()
     try:
         _reset_rls_settings(session)
@@ -260,7 +383,7 @@ def identity_lookup_session(auth_user_id: str) -> Iterator[Session]:
     which has no RLS -- see the module docstring). Grants visibility into
     exactly one row: the caller's own.
     """
-    session_factory = get_session_factory()
+    session_factory = _session_factory("api")
     session = session_factory()
     try:
         _reset_rls_settings(session)
@@ -288,7 +411,7 @@ def rollup_session() -> Iterator[Session]:
     scheduler and the token lookups, this is not the Section 7.15.1 admin
     bypass: it cannot read a document, a line or a customer.
     """
-    session_factory = get_session_factory()
+    session_factory = _session_factory("worker")
     session = session_factory()
     try:
         _reset_rls_settings(session)
@@ -311,7 +434,7 @@ def scheduler_session() -> Iterator[Session]:
     in a tenant_session() for its own tenant. Like the token and identity
     lookups, this is not the Section 7.15.1 admin bypass.
     """
-    session_factory = get_session_factory()
+    session_factory = _session_factory("worker")
     session = session_factory()
     try:
         _reset_rls_settings(session)
@@ -336,7 +459,7 @@ def stripe_webhook_session() -> Iterator[Session]:
     from the tenant's own tenant_session() in the same transaction as the
     update it stands for (H11, D-173). Not the Section 7.15.1 admin bypass.
     """
-    session_factory = get_session_factory()
+    session_factory = _session_factory("stripe")
     session = session_factory()
     try:
         _reset_rls_settings(session)
@@ -361,7 +484,7 @@ def intake_refusal_session() -> Iterator[Session]:
     alert type with no tenant, and the founder-alert email with it -- and read
     nothing, on any table. Not the Section 7.15.1 admin bypass.
     """
-    session_factory = get_session_factory()
+    session_factory = _session_factory("api")
     session = session_factory()
     try:
         _reset_rls_settings(session)
@@ -384,7 +507,7 @@ def pipeline_sweep_session() -> Iterator[Session]:
     each tenant's documents are then read and changed in that tenant's own
     tenant_session(). Not the Section 7.15.1 admin bypass.
     """
-    session_factory = get_session_factory()
+    session_factory = _session_factory("worker")
     session = session_factory()
     try:
         _reset_rls_settings(session)
@@ -411,7 +534,7 @@ def dispatcher_session() -> Iterator[Session]:
     dispatcher_stopped, routing_model_failure) and their emails -- and read
     nothing, on any table. Not the Section 7.15.1 admin bypass.
     """
-    session_factory = get_session_factory()
+    session_factory = _session_factory("worker")
     session = session_factory()
     try:
         _reset_rls_settings(session)
@@ -430,8 +553,10 @@ def function_session() -> Iterator[Session]:
     """
     A transaction with every app.* flag cleared: RLS shows it no row of any
     table, so all it can do is call a SECURITY DEFINER function granted to
-    docflow_app. Used only by `docflow_core.dispatch` to read the
-    dispatcher's heartbeat for /healthz and the stuck sweep (Stage 3d, gap 1).
+    the process's own login. Used only to read the dispatcher's heartbeat
+    (`docflow_core.dispatch`, for /healthz and the stuck sweep; Stage 3d, gap
+    1) and the worker's starts in the last hour (`docflow_core.worker_starts`,
+    for /healthz; Stage 3e).
     """
     session_factory = get_session_factory()
     session = session_factory()
@@ -457,7 +582,7 @@ def lifecycle_session() -> Iterator[Session]:
     then runs inside that tenant's own tenant_session(), exactly like the
     rollup and the scheduler. Not the Section 7.15.1 admin bypass.
     """
-    session_factory = get_session_factory()
+    session_factory = _session_factory("worker")
     session = session_factory()
     try:
         _reset_rls_settings(session)
