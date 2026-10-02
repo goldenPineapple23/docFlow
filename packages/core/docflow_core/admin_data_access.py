@@ -332,10 +332,20 @@ def dashboard(*, platform_admin_user_id: UUID, days: int = 30) -> dict[str, Any]
                           WHERE status = 'pending' AND deleted_at IS NULL) AS pending,
                         (SELECT count(*) FROM documents
                           WHERE status = 'processing' AND deleted_at IS NULL) AS processing,
+                        -- Stage 3d: waiting = not yet dispatched, so a
+                        -- backfill reads as a backlog, not as stuck.
                         (SELECT extract(epoch FROM (now() - min(created_at))) / 60
                            FROM documents
-                          WHERE status IN ('pending', 'processing') AND deleted_at IS NULL
+                          WHERE status = 'pending' AND dispatched_at IS NULL AND deleted_at IS NULL
                         ) AS oldest_waiting_minutes,
+                        (SELECT count(*) FROM documents
+                          WHERE status = 'pending' AND dispatched_at IS NOT NULL
+                            AND deleted_at IS NULL) AS dispatched,
+                        (SELECT count(*) FROM documents
+                          WHERE status = 'pending' AND wait_cause IS NOT NULL
+                            AND deleted_at IS NULL) AS waiting_on_outage,
+                        (SELECT status FROM public.provider_state('anthropic')) AS model_provider_status,
+                        (SELECT age_seconds FROM public.dispatcher_status()) AS dispatcher_heartbeat_age_seconds,
                         (SELECT count(*) FROM documents
                           WHERE created_at >= date_trunc('day', now()) AND deleted_at IS NULL
                             AND NOT is_test_batch) AS documents_today,

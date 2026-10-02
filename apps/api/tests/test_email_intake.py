@@ -9,7 +9,7 @@ a failing SPF is NOT quarantined (per DECISIONS.md's documented
 interpretation); a no-attachment email writes an intake_rejections row and
 nothing else; a duplicate webhook delivery (same Message-ID) is idempotent;
 a resolvable-token email with one valid Tier-1 attachment creates a
-`documents` row with source='email' and enqueues parse_and_extract; and an
+`documents` row with source='email' and nudges the dispatcher; and an
 unresolvable token 404s without leaking whether the tenant exists.
 
 All of these (other than the unresolvable-token case) need the real
@@ -383,11 +383,9 @@ def test_valid_tier1_attachment_creates_document_and_enqueues(client, monkeypatc
         assert docs[0]["source"] == "email"
         assert docs[0]["status"] == "pending"
 
-        assert len(fake_celery.sent) == 1
-        sent = fake_celery.sent[0]
-        assert sent["name"] == "docflow.parse_and_extract"
-        assert sent["queue"] == "interactive"
-        assert sent["args"] == [str(tenant.tenant_id), str(docs[0]["id"])]
+        # Stage 3d: the document waits as `pending` and the dispatcher is
+        # nudged once; only the dispatcher sends the document task.
+        assert fake_celery.sent == [{"name": "docflow.dispatch", "args": None, "queue": "dispatch"}]
 
 
 @requires_email_intake_schema

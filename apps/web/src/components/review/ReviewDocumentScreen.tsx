@@ -326,7 +326,7 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
           </h1>
           <p className="mt-1 flex items-center gap-2 text-sm text-gray-600">
             <span>{detail.header.buyer_name ?? "Buyer not read"}</span>
-            <StatusBadge status={detail.document.status} />
+            <StatusBadge status={detail.document.delay ? "delayed" : detail.document.status} />
           </p>
         </div>
 
@@ -434,6 +434,19 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
           <p className="font-medium">{detail.document.failure.title}</p>
           <p className="mt-1">{detail.document.failure.message}</p>
           <p className="mt-1 text-red-900/80">{detail.document.failure.action}</p>
+        </div>
+      ) : null}
+
+      {/* Stage 3d: a delay, not an error -- the catalog's words (DOC-023). */}
+      {detail.document.delay ? (
+        <div
+          data-testid="delay-banner"
+          role="status"
+          className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
+        >
+          <p className="font-medium">{detail.document.delay.title}</p>
+          <p className="mt-1">{detail.document.delay.message}</p>
+          <p className="mt-1 text-amber-900/80">{detail.document.delay.action}</p>
         </div>
       ) : null}
 

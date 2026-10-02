@@ -167,6 +167,7 @@ def _reset_rls_settings(session: Session) -> None:
     session.execute(text("RESET app.pipeline_sweep"))
     session.execute(text("RESET app.stripe_webhook"))
     session.execute(text("RESET app.intake_refusal"))
+    session.execute(text("RESET app.dispatcher"))
 
 
 @contextmanager
@@ -388,6 +389,54 @@ def pipeline_sweep_session() -> Iterator[Session]:
     try:
         _reset_rls_settings(session)
         session.execute(text("SET LOCAL app.pipeline_sweep = 'true'"))
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@contextmanager
+def dispatcher_session() -> Iterator[Session]:
+    """
+    Used only by the dispatcher and the model-provider state
+    (`docflow_core.dispatch`, `docflow_core.model_provider`; Stage 3d). Its
+    reads and writes across tenants go through migration 0035's SECURITY
+    DEFINER functions, which return ids, counts and times only. The flag
+    itself opens exactly one thing: 0035's `dispatcher_raise` and
+    `dispatcher_enqueue` policies, which let it insert the four tenant-less
+    alerts the worker raises (model_api_failure, model_api_recovered,
+    dispatcher_stopped, routing_model_failure) and their emails -- and read
+    nothing, on any table. Not the Section 7.15.1 admin bypass.
+    """
+    session_factory = get_session_factory()
+    session = session_factory()
+    try:
+        _reset_rls_settings(session)
+        session.execute(text("SET LOCAL app.dispatcher = 'true'"))
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@contextmanager
+def function_session() -> Iterator[Session]:
+    """
+    A transaction with every app.* flag cleared: RLS shows it no row of any
+    table, so all it can do is call a SECURITY DEFINER function granted to
+    docflow_app. Used only by `docflow_core.dispatch` to read the
+    dispatcher's heartbeat for /healthz and the stuck sweep (Stage 3d, gap 1).
+    """
+    session_factory = get_session_factory()
+    session = session_factory()
+    try:
+        _reset_rls_settings(session)
         yield session
         session.commit()
     except Exception:

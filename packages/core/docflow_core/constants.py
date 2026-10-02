@@ -166,6 +166,47 @@ PAST_DUE_REMINDER_DAYS_BEFORE = 3
 # trialing or is cancelling by then.
 TRIAL_ENDING_REMINDER_DAYS_BEFORE = 2
 
+# ── The dispatcher and waiting documents (Stage 3d; review H4) ─────────────
+# The most documents one tenant keeps in flight (dispatched or processing)
+# while another tenant has a document that may go now (founder, Q1). With no
+# one else ready, a tenant may use every free slot.
+TENANT_IN_FLIGHT_CAP = 2
+# A web upload or a release of at most this many documents goes in the
+# tenant's interactive lane; more is bulk (Q3). The lane orders a tenant's
+# own documents only.
+INTERACTIVE_BATCH_MAX = 10
+# Celery beat starts a dispatch pass this often: the backstop behind the
+# intake nudge and the pass at the end of every document task (Q4).
+DISPATCH_INTERVAL_SECONDS = 30
+# A heartbeat older than this while documents wait means the dispatcher has
+# stopped: `dispatcher_stopped`, and /healthz and the Console show it (Q5).
+DISPATCHER_STALE_MIN = 10
+# How long a document waiting on the model provider waits before each retry,
+# stepped by the time since it first waited: 1, 2, 4, 8, then 15 minutes for
+# as long as it waits. A 429 waits at least its Retry-After.
+PROVIDER_RETRY_MINUTES = (1, 2, 4, 8, 15)
+# The longest a document waits on the model provider, counted from its first
+# wait; then DOC-024 (Q7).
+PROVIDER_MAX_WAIT_HOURS = 6
+# The provider is marked down after this many waiting-class failures within
+# PROVIDER_DOWN_WINDOW_MIN, from any tenants, with no success between them.
+# Our own configuration (a wrong key, a retired model, no credit) marks it down
+# at the first one (founder, 2026-10-01).
+PROVIDER_DOWN_FAILURES = 3
+PROVIDER_DOWN_WINDOW_MIN = 5
+# While it is down, one waiting document is sent this often as a probe.
+PROVIDER_PROBE_MINUTES = 2
+# Storage and the parse service: a fixed retry interval and no maximum, as
+# before 3d (Q6).
+STORAGE_WAIT_RETRY_MINUTES = 5
+PARSE_SERVICE_WAIT_RETRY_MINUTES = 2
+# The dispatch task's own hard limit: a pass reads counts and marks rows.
+DISPATCH_TASK_TIME_LIMIT_SECONDS = 60
+# The queue only `docflow.dispatch` is sent to, read by the worker machine's
+# one dispatch process and nothing else (founder, 2026-10-01: the extra
+# process reads only this queue and never claims a document).
+DISPATCH_QUEUE = "dispatch"
+
 
 def constants_in_effect(*names: str) -> dict[str, Any]:
     """The named constants' current values, for a lifecycle event's

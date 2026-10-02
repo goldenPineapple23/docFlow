@@ -101,9 +101,41 @@ follow-up, PR #29) merged. Since then:
 - `backup_3b` (the 3b cutover's restore point), unless the founder has
   dropped it;
 - **`backup_0034`** (documents 105, extraction_runs 17; live = backup),
-  taken 2026-10-01 before `0034`. The founder keeps it until 3c has merged
-  and run cleanly on staging for a few days; then it is dropped and recorded
-  here.
+  taken 2026-10-01 before `0034`. **Founder, 2026-10-01: dropped after 3c
+  has run cleanly on staging for 3 days** -- 3c merged 2026-10-01 20:53 UTC,
+  so not before 2026-10-04 20:53 UTC, and only after Claude reports the
+  check (staging suites green on `main`; no `document_failed`,
+  `document_stuck`, `parse_service_unavailable` or `parse_seccomp_kill`
+  alert on staging since the merge). The founder runs, in the SQL Editor on
+  `docflow-staging` (no `cascade`, so nothing else can go with it):
+
+  ```sql
+  drop table backup_0034.documents;
+  drop table backup_0034.extraction_runs;
+  drop schema backup_0034;
+  ```
+
+  and the date is recorded here and in BUILD-STATUS.
+- **`backup_0035`** (documents 105, founder_alerts 15, email_outbox 73;
+  live = backup), taken 2026-10-01 before `0035`. **Founder, 2026-10-01:
+  the same rule as `backup_0034`.** It is dropped after 3d has run cleanly
+  on staging for 3 days, counted from the 3d merge, and only after Claude
+  reports the check:
+  - the staging suites are green on `main`;
+  - no `document_failed`, `document_stuck`, `dispatcher_stopped` or
+    `model_api_failure` alert on staging since the merge (DOC-024 arrives as
+    `document_failed`).
+
+  The founder runs, in the SQL Editor on `docflow-staging`:
+
+  ```sql
+  drop table backup_0035.documents;
+  drop table backup_0035.founder_alerts;
+  drop table backup_0035.email_outbox;
+  drop schema backup_0035;
+  ```
+
+  The date is recorded here and in BUILD-STATUS.
 
 `docflow-prod` doesn't exist yet (Phase 6), so it has no backups.
 
@@ -143,10 +175,13 @@ How a run is reported:
 - Save each suite's full output to a file. Never cut it with `tail` or
   `head`: the exit code of the pipe replaces pytest's, so a failed run looks
   like it passed, and the failure details are lost.
-- Quote pytest's last line as printed. The API suite should read `571 passed,
-  3 deselected` with nothing failed or skipped (staging, 2026-09-30, Stage 3b
-  on `aefd428`; the DOC-028 follow-up commit changed test wording, not the
-  count; it was 424 at Stage 1, 562 after card billing and 568 on `e3e8641`).
+- Quote pytest's last line as printed. The API suite should read `586
+  passed, 1 skipped, 3 deselected` with nothing failed. Staging on
+  2026-10-01 (Stage 3d) read 585, plus the keyword test added during that
+  run and passed on its own. The one skip, `test_parse_token_boundary.py`, needs the real
+  parse service with a token and runs in CI; it took 42:52, against about 34
+  minutes before). Earlier: 571 at 3b (`aefd428`), 424 at Stage 1, 562 after
+  card billing, 568 on `e3e8641`.
   If the count is *lower* than the number written here, find out what
   stopped running before calling the run green.
   The 3 deselected are the `live_api` tests, which only run at checkpoints
@@ -793,10 +828,11 @@ test runs). They are left where they are.
 At most one an hour for the whole platform; it names the first tenant that
 hit it. While Storage is down: uploads answer DOC-025 and nothing is
 received; Postmark gets a 503 and sends the mail again later; documents
-already received wait in Processing without using up their tries. Check the
-Supabase status page and the project's Storage logs. Nothing needs doing
-once Storage is back: the waiting documents are picked up by the stuck sweep
-within `STUCK_PROCESSING_TIMEOUT_MIN`.
+already received go back to waiting (Stage 3d: `pending`, `wait_cause =
+storage`) without using up their tries. Check the Supabase status page and
+the project's Storage logs. Nothing needs doing once Storage is back: the
+dispatcher sends each waiting document again every
+`STORAGE_WAIT_RETRY_MINUTES` (5), with no maximum.
 
 A `document_failed` alert with **DOC-026** is different: the stored original
 is missing or isn't the file that was received. That is never an outage. Ask
@@ -925,8 +961,9 @@ switch isolation off to get it running.**
 At most once an hour for the whole platform. The payload's `reason`:
 - `no_connection` / `http_503`: the service is down,
   overloaded, or its canary is failing. Check the app's machines and its
-  startup log (8.3). Documents wait and retry by themselves; nothing is
-  failed for waiting.
+  startup log (8.3). Documents wait (`wait_cause = parse_service`) and the
+  dispatcher sends them again every `PARSE_SERVICE_WAIT_RETRY_MINUTES` (2);
+  nothing is failed for waiting (Stage 3d).
 - `unauthorized`: the worker's and the service's `PARSE_SERVICE_TOKEN`
   differ. Set the same value on both apps.
 - `http_4xx`: a request the service refused (a DocFlow bug, never the
@@ -979,3 +1016,329 @@ waiting for Monday.
 A build never changes by itself: until the date moves, a rebuild installs
 exactly what the last one did. If snapshot.debian.org is down, the build
 fails; it never falls back to the live archive.
+
+## 9. The dispatcher and waiting documents (Stage 3d)
+
+Since 3d nothing sends a document straight to the queue. A new, released or
+test-batch document waits as `pending`, and the dispatcher
+(`docflow_core/dispatch.py`, in the worker) sends the next ones, taking turns
+between tenants: fewest in flight first, then the tenant served least
+recently. At most `TENANT_IN_FLIGHT_CAP` (2) per tenant while another tenant
+has something ready, and never more than `DISPATCH_IN_FLIGHT_TARGET` in
+flight across all tenants. A dispatch pass runs after every intake, at the
+end of every document task, and from beat every 30 seconds.
+
+### 9.1 Cutover order (the 3d rollout, and any fresh environment)
+
+1. Back up and apply `0035` (section 1; `backup_0035`: documents,
+   founder_alerts, email_outbox).
+2. Deploy the worker with its `beat` process (9.3).
+3. Then deploy the API, which stops sending the document task.
+
+On staging the worker and API are not on Fly until 3e (their own database
+logins); until then step 2 is the local worker and beat (README), and only
+one stack runs against staging at a time (9.3).
+
+An API running without a dispatcher behind it leaves every new document
+waiting. `dispatcher_stopped` says so within `DISPATCHER_STALE_MIN` (10
+minutes), and `/healthz` shows `"stale": true`.
+
+### 9.2 Adding worker capacity
+
+`DISPATCH_IN_FLIGHT_TARGET` (a setting, staging 1) is the worker's document
+slots. The worker machine runs one command, `python -m app.run_workers`,
+which starts two Celery workers and keeps them together (if one exits, it
+stops the other and exits non-zero, and Fly restarts the machine):
+- `documents`: `DISPATCH_IN_FLIGHT_TARGET` processes, reading `interactive`
+  and `bulk` (documents, exports, imports, sweeps);
+- `dispatch`: one process, reading only the `dispatch` queue. It never
+  claims a document, so a long order can't hold up the heartbeat.
+
+With one worker machine:
+1. Set `DISPATCH_IN_FLIGHT_TARGET` to the new number of slots, on the worker
+   app AND the API app (the API doesn't use it today, but keep them equal).
+2. Size the machine for two Celery main processes, the dispatch process and
+   one process per slot (each document process may reach
+   `WORKER_MAX_MEMORY_PER_CHILD_KIB` before it is replaced). Measure it on
+   the machine (below) before relying on it.
+3. Deploy the worker.
+
+**The first worker deploy is gated on all of these** (founder, 2026-10-01;
+the same list as BUILD-STATUS "3d on staging"):
+- G, and A4 against the real API and worker (section 8, from 3c);
+- **a fresh `PARSE_SERVICE_TOKEN`**, generated by the founder and set on the
+  parse app and the worker together (agreed in 3c);
+- the 500 + 1 staging run, its budget to the founder first;
+- the memory measurement below, and the founder's choice;
+- 3e's restart record: starts recorded, starts in the last hour on
+  `/healthz`, and `worker_restarting` (high) at 3 or more starts in 60
+  minutes, raised by the launcher;
+- **the external uptime monitor, set up and tested.** Its approach is
+  undecided: the staging API is private-only, so 3e chooses between polling
+  `/healthz` and a push heartbeat (9.4).
+
+**Measuring the worker machine's memory** (founder, 2026-10-01). The worker
+and the API stay off Fly until 3e gives them their own database logins, so
+this happens at **the first worker deploy after 3e, with G and the 500 + 1
+staging run**, never before. It does not gate the 3d merge. At that deploy,
+with `fly ssh console -a docflow-worker-staging --process-group worker`
+(Fly is cgroup v1):
+
+```
+cat /sys/fs/cgroup/memory/memory.usage_in_bytes      # the machine, now
+cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes  # the machine, peak since start
+ps -o pid,ppid,rss,args -u docflow                   # each process, KiB, now
+grep VmHWM /proc/<pid>/status                        # each process, its own peak
+```
+
+1. Idle: both Celery main processes, the dispatch process, the document
+   process.
+2. Under real documents, **including `.doc` and scanned PDFs** (the
+   heaviest): the same four, the document process at its peak.
+3. Expect 700 MiB per process (`WORKER_MAX_MEMORY_PER_CHILD_KIB`) not to fit
+   with headroom on 1 GB: a document process at the limit plus three others
+   at roughly 100 MiB each is about the whole machine. Bring the founder the
+   numbers and two options: a lower per-process limit (around 550 MiB, if
+   real documents stay well under it), or a 2 GB worker machine and its
+   monthly cost. **Change neither until the founder chooses.** Record the
+   numbers and the choice in BUILD-STATUS.
+
+**When the worker keeps restarting.** `fly.toml` sets the `worker` group's
+restart policy to `on-failure`, 10 retries. Fly counts those within a
+5-minute window (its restart-policy docs, read 2026-10-01); after the 10th
+it leaves the machine stopped. Check it on the deploy with
+`fly machine status <id>` (the restart policy is listed).
+- **Down and staying down** (it can't start, or ran out of retries): no
+  dispatch passes, so the heartbeat ages and `/healthz` reads
+  `"stale":true` after `DISPATCHER_STALE_MIN` (10 minutes). Only `/healthz`
+  can see this: `dispatcher_stopped` is raised by the stuck sweep, which runs
+  on the same machine. The external monitor (9.4) is what tells the founder.
+- **Restarting slowly** (up for a few minutes, then a worker exits, again
+  and again): each start's dispatch process runs passes before the next
+  exit, so the heartbeat can stay fresh and `/healthz` won't show it. Today
+  this is visible only in `fly logs` (`run_workers: ... exited; stopping the
+  other`) and in Fly's machine events, and indirectly as `document_stuck`
+  alerts for documents caught mid-read. **3e closes this before the first
+  worker deploy** (founder, 2026-10-01): the launcher records each start,
+  `/healthz` shows the starts in the last hour, and an alert fires past a
+  threshold (BUILD-STATUS "3e -- F-1").
+
+More than one worker machine is a Phase 6 decision. Until then,
+`DISPATCH_IN_FLIGHT_TARGET` must equal one machine's slots. The dispatcher
+would otherwise keep more documents in flight than any worker can take.
+
+### 9.3 Beat: exactly one, never two at once
+
+Beat is its own process, never `celery worker -B`. Locally it is the
+README's second terminal. On Fly it is the worker app's `beat` process group
+(`apps/worker/fly.toml`):
+- **Never scale `beat` above 1:** `fly scale count worker=1 beat=1`.
+- **Never deploy the worker app with `--strategy canary` or `bluegreen`.**
+  Both start a new machine beside the old one, which means two beats for a
+  while. `fly.toml` pins `strategy = "rolling"`, which updates the machine in
+  place.
+- **Run only one stack (local or Fly) against staging at a time.** Two
+  dispatchers on one database would share the in-flight count but send to
+  two different queues.
+
+If two beats ever do run, nothing breaks: every beat task is safe to run
+twice. The beat schedule is in `apps/worker/app/celery_app.py`
+(`beat_schedule`, five entries), and its design record is BUILD-STATUS "3d
+-- APPROVED WITH CHANGES", change C.
+
+| Beat task (interval) | The guard (code) | The test |
+|---|---|---|
+| `run_scheduled_jobs` (5 min) | Jobs claimed `FOR UPDATE SKIP LOCKED` (`scheduled_jobs.py` line 70) | **Guard only.** `test_scheduled_jobs.py` covers one sweep (a dead worker's job picked up again); no test runs two sweeps at once |
+| `run_daily_rollup` (03:15 UTC) | Upsert `ON CONFLICT (tenant_id, day) DO UPDATE` (`metrics.py` line 155); `rollup_stale` deduped | `test_dashboard_api.py::test_running_a_day_twice_leaves_the_same_row` (one after the other; two at once rely on Postgres's `ON CONFLICT`) |
+| `run_lifecycle_sweep` (5 min) | Compare-and-set claim with the tenant row locked `FOR UPDATE` across the Stripe calls (`lifecycle.claim_for_suspend`) | `test_lifecycle_api.py::test_the_sweep_never_claims_a_tenant_twice` |
+| `sweep_stuck_documents` (5 min) | Every status change compare-and-set (`document_status.transition`); lost-call rows `ON CONFLICT DO NOTHING`; alerts deduped | **Guard only, tested in general.** `test_pipeline_integrity_db.py::test_H3_a_status_change_is_compare_and_set`; no test runs two sweeps at once |
+| `dispatch` (30 s) | Transaction advisory lock `pg_try_advisory_xact_lock(3352026100)` (`dispatch.py`): a second pass returns at once | `test_dispatch_db.py::test_twenty_concurrent_passes_dispatch_every_document_exactly_once` |
+
+Two rows rest on the guard alone, with no test that fires the task twice:
+the scheduled-jobs sweep and the stuck sweep. Adding those two tests is
+proposed to the founder (BUILD-STATUS "3d on staging").
+
+### 9.4 The external uptime monitor (from the first worker deploy)
+
+> **MONITOR APPROACH UNDECIDED, SEE 3e.** Don't set up a monitor from this
+> section. Everything below the keyword is **notes for the 3e design**, not
+> a final setup: the staging API is private-only, so a polled check can't
+> reach it, and 3e decides between polling and a push heartbeat
+> (BUILD-STATUS "3e -- F-1"). The keyword itself is settled and pinned by a
+> test.
+
+**Needed from the first worker deploy, not Phase 6** (founder, 2026-10-01).
+Once the worker is on Fly, nothing inside DocFlow can report these:
+- a worker machine that is down;
+- a worker crash-looping because it can't reach the database.
+
+`dispatcher_stopped` (the stuck sweep) and `worker_restarting` (the
+launcher, 3e) both need a running worker that can reach the database. The
+heartbeat going stale is the one signal left, and only `/healthz` shows it.
+
+A polled monitor would check the API's `GET /healthz` (no sign-in) and
+alert when **either**:
+- the endpoint doesn't answer (the API itself is down), or
+- the body does **not** contain `"stale":false`.
+
+That keyword is exact: compact JSON, **no space after the colon**.
+`test_healthz_dispatcher.py` pins the bytes and checks this section gives
+them. The response is always HTTP 200, so the monitor must match the body,
+not the status. A database the API can't reach also reads `"stale":true`.
+
+#### Notes for the 3e design (not a setup)
+
+What was found on 2026-10-01, in short:
+- a 120 s confirmation period is possible (Better Stack's API takes it in
+  seconds);
+- whether Better Stack re-checks inside the confirmation period is
+  undocumented, so assume the confirming check is the next 3-minute one;
+- Fly's auto-stop loop runs "every few minutes", so with 3-minute checks the
+  API may stay awake or be cold-started;
+- the staging API is private-only, so Better Stack can't poll it.
+
+The detail follows. No more research on it until the 3e design (founder).
+
+**Better Stack Uptime, free plan** (approved by the founder, 2026-10-01).
+Read 2026-10-01: 10 monitors, HTTP(s) keyword checks, e-mail and Slack
+alerts, no restriction on commercial use stated. Its check-frequency page
+says the interval runs "from 3 minutes for free plans to 30 seconds for paid
+plans", so **3 minutes is the free plan's fastest**. UptimeRobot's free plan
+is out: its page limits it to "hobby and non-profit projects". Re-read the
+terms on the day it is set up.
+
+A polled check, if 3e chooses one, would be set up like this (Monitors ->
+the monitor -> Configure -> Advanced settings):
+- an HTTP keyword monitor on `https://<api>/healthz`, alerting when
+  `"stale":false` is absent;
+- check frequency **3 minutes**;
+- **confirmation period 120 seconds** (founder, 2026-10-01). Better
+  Stack's API takes it in seconds, so 120 can be set exactly; if the
+  dashboard's dropdown has no 2 minutes, take the nearest and write it
+  down. Why not "immediate": the 10-minute stale wait protects only the
+  stale path. The "no answer" path would page on a single dropped request
+  (a network blip, a slow Fly proxy, a hiccup at Better Stack's probe),
+  and a monitor that cries wolf gets ignored.
+- **request timeout 30 seconds** (the options are 2, 3, 5, 10, 15, 30, 45,
+  60): enough for an API machine that Fly has auto-stopped to start and
+  answer (below);
+- recovery period: write down the value (the API's default is 0);
+- e-mail to the founder's alert address.
+
+**How long the alert can take, worked out from the settings.** Measured
+from the moment the worker is stopped (S) to the founder's e-mail:
+
+| Step | Worst case | Why |
+|---|---|---|
+| Last heartbeat | at S, or up to 30 s before | Beat sends a pass every `DISPATCH_INTERVAL_SECONDS` (30), and the dispatch process has nothing else to do |
+| `/healthz` reads stale | **up to 10:00** after S | stale once the heartbeat is more than `DISPATCHER_STALE_MIN` (10) minutes old: between 9:30 and 10:00 after S |
+| The monitor's first failing check | **up to 3:00** more | the 3-minute check frequency |
+| Confirmation | **up to 3:00** more | the period is 2:00, but Better Stack's docs don't say whether it re-checks inside it; at worst the confirming check is the next one, 3:00 later |
+| The e-mail | about 1:00 | delivery; not ours to set, an allowance |
+
+**Worst case = 17 minutes** (16 to the incident, plus a minute for the
+e-mail). If Better Stack does re-check inside the confirmation period, the
+alert comes at about 16; 17 is the pass mark either way.
+
+**Test it on the day:**
+1. Note the time, then stop the worker.
+2. **Pass:** the alert e-mail arrives no later than **17 minutes** after
+   the stop.
+3. **Investigate if it arrives earlier than 9:30.** That alert didn't come
+   from the stale heartbeat, so something else failed (the endpoint
+   itself?).
+4. Start the worker again. The next pass writes the heartbeat within 30 s,
+   and the monitor sees it at its next check. **Pass:** the incident
+   resolves within **3:30 + the recovery period**.
+5. Record the times, the confirmation and recovery periods as set, and the
+   request timeout in BUILD-STATUS.
+
+**The API's auto-stop and the monitor.** On staging, `apps/api/fly.toml`
+has `auto_stop_machines = "stop"`, `auto_start_machines = true` and
+`min_machines_running = 0`. Fly's stop loop "runs every few minutes and
+stops at most one Machine per region per pass" (Fly's autostop docs, read
+2026-10-01). The docs don't say exactly when an idle machine counts as
+spare, so with a request only every 3 minutes, assume both can happen:
+- **It stays awake.** The checks keep it running, so staging pays for the
+  API all month: shared-cpu-1x 512 MB, about $3.19 a month at the rates
+  read 2026-09-30. That's small, and accepted rather than fought.
+- **It is stopped between checks.** The next check starts it (cold start).
+  Our own measurement of a Fly cold start is 3c's N3: a request to the
+  stopped parse machine was answered in 5.5 s, the machine started by that
+  request. The API's start time is measured on the day (a check against a
+  stopped machine). The 30-second request timeout covers both with margin,
+  and the 2-minute confirmation absorbs a one-off slow start.
+
+**Production** has no `fly.toml` yet (Phase 6). Its API should run with
+`min_machines_running = 1` regardless of the monitor, so that a customer is
+never the one who waits for a cold start.
+
+**The staging API is private.**
+`apps/api/fly.toml` gives it no public IP. It is reached over `fly proxy`
+or Flycast from other Fly apps (3c, N1/N2). Better Stack's probes are on the
+public internet, so as configured they can't reach `/healthz` at all.
+**The monitor approach is decided in 3e** (founder, 2026-10-01), before the
+first worker deploy. 3e evaluates a push heartbeat instead of polling
+(BUILD-STATUS "3e -- F-1"). The settings and timing above are for a polled
+check; if 3e chooses push, this section is rewritten with it.
+
+**Not built: a status-code endpoint** (a 503 when stale), suggested by the
+founder as optional. It is less fragile than matching text, but it must
+never be the path Fly's own health check uses, or Fly would restart a
+healthy API whenever the worker is down. With the keyword pinned by a test
+it isn't needed now.
+
+The Console's health strip shows the same heartbeat, red past
+`DISPATCHER_STALE_MIN`, but only while someone is looking at it.
+
+### 9.5 When the founder gets one of these alerts
+
+- **`model_api_failure`** (high, no tenant): the model provider is marked
+  down. Nothing is failed and nothing is sent except one probe every
+  `PROVIDER_PROBE_MINUTES` (2). Customers see **Delayed** (DOC-023). Its
+  `cause`:
+  - `our_configuration`: the API key, the account, the credit or the model.
+    Its `last_error` names it: `http_401` key, `http_402` billing or credit,
+    `http_403` access, `http_404` the model retired or renamed,
+    `http_400_own_spend_limit` our own spend limit in the Console,
+    `http_429_spend_cap` the tier's monthly cap. Fix it in the Anthropic
+    Console. A retired model needs a code change (the model IDs are still
+    constants, review M10). The next probe after the fix recovers.
+  - `5xx`, `overloaded`, `rate_limited`, `network`: the provider's side.
+    Check status.anthropic.com. Nothing to do: it recovers on the first
+    probe that succeeds.
+  Documents still waiting after `PROVIDER_MAX_WAIT_HOURS` (6) fail with
+  **DOC-024** (a `document_failed` alert per tenant per day). The customer is
+  told to upload again or enter the order by hand.
+- **`model_api_recovered`** (info): the first success after an outage. It
+  shows how long it lasted, how many documents waited and how many reached
+  the 6-hour limit. The backlog goes out at once, in turns. Acknowledge
+  the `model_api_failure` alert yourself; recovery doesn't.
+- **`dispatcher_stopped`** (high, at most one an hour): documents are
+  waiting and no dispatch pass has run for `DISPATCHER_STALE_MIN`. Check
+  that the worker and the `beat` process are running (`fly status --app
+  docflow-worker-staging`), and the Upstash queue. Documents resume by
+  themselves once both run.
+- **`routing_model_failure`** (warning, once a UTC day): the cheaper routing
+  model refused DocFlow (same causes as `our_configuration` above).
+  Documents are still read, but without approved examples.
+  `documents_without_examples` on the Console's alert counts them since the
+  day's first failure (the email has the count when it was raised).
+- **`document_stuck` with `lost_jobs_returned`**: documents were sent to the
+  queue and never claimed (a queue or broker problem). They are back to
+  waiting and go out again by themselves.
+
+### 9.6 The constants (`packages/core/docflow_core/constants.py`)
+
+| Constant | Value | What it does |
+|---|---|---|
+| `TENANT_IN_FLIGHT_CAP` | 2 | Most in flight for one tenant while another has something ready |
+| `INTERACTIVE_BATCH_MAX` | 10 | An upload or release of up to this many goes in the interactive lane |
+| `DISPATCH_INTERVAL_SECONDS` | 30 | Beat's backstop pass |
+| `DISPATCHER_STALE_MIN` | 10 | Heartbeat age that means stopped |
+| `PROVIDER_RETRY_MINUTES` | 1, 2, 4, 8, 15 | Provider wait backoff (then every 15) |
+| `PROVIDER_MAX_WAIT_HOURS` | 6 | Then DOC-024 |
+| `PROVIDER_DOWN_FAILURES` / `PROVIDER_DOWN_WINDOW_MIN` | 3 / 5 | Marked down (our own configuration: at the first) |
+| `PROVIDER_PROBE_MINUTES` | 2 | One probe while down |
+| `STORAGE_WAIT_RETRY_MINUTES` | 5 | Storage wait, no maximum |
+| `PARSE_SERVICE_WAIT_RETRY_MINUTES` | 2 | Parse-service wait, no maximum |

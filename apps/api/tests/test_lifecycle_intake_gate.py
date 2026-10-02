@@ -69,7 +69,7 @@ def _upload_environment(monkeypatch):
     monkeypatch.setenv("SUPABASE_JWT_SECRET", JWT_SECRET)
     get_settings.cache_clear()
     fake_celery = _FakeCeleryClient()
-    monkeypatch.setattr("app.routers.documents.celery_client", fake_celery)
+    monkeypatch.setattr("app.celery_client.celery_client", fake_celery)
     yield fake_celery
     get_settings.cache_clear()
 

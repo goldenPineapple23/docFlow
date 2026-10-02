@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from docflow_core.config import get_settings
+from docflow_core.dispatch import health as dispatcher_health
 from fastapi import Depends, FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
@@ -195,4 +196,18 @@ for _router in (review.router, exports.router):
 
 @app.get("/healthz")
 def healthz() -> dict:
-    return {"status": "ok"}
+    """
+    The API's liveness answer, and (Stage 3d, gap 1) whether the dispatcher
+    is alive: its heartbeat's age and whether that is past
+    DISPATCHER_STALE_MIN. No sign-in, so the age only -- no counts, no ids.
+    Always HTTP 200: a platform check pointed here must never restart a
+    healthy API because the worker is down. The external uptime monitor
+    (from the first worker deploy, RUNBOOK 9.4) matches the bytes
+    `"stale":false` -- compact JSON, no space (test_healthz_dispatcher.py).
+    """
+    try:
+        dispatcher = dispatcher_health()
+    except Exception as exc:  # noqa: BLE001 -- the database is unreachable
+        logger.error("healthz_dispatcher_unreadable error_type=%s", type(exc).__name__)
+        dispatcher = {"heartbeat_age_seconds": None, "stale": True}
+    return {"status": "ok", "dispatcher": dispatcher}

@@ -86,10 +86,15 @@ export type UploadOutcome =
  * Uploads one file through the one upload endpoint every other intake path uses
  * (Section 10: no second upload handler). One request per file, so a refusal
  * names the file it belongs to and the rest still go.
+ *
+ * `batchSize` is how many files the person chose at once (Stage 3d, Q3): a
+ * handful goes in the account's interactive lane, a large batch in bulk, so a
+ * single urgent order doesn't wait behind the account's own backfill.
  */
-export async function uploadOne(file: File): Promise<UploadOutcome> {
+export async function uploadOne(file: File, batchSize = 1): Promise<UploadOutcome> {
   const body = new FormData();
   body.append("file", file);
+  body.append("batch_size", String(batchSize));
 
   let response: Response;
   try {

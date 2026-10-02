@@ -313,8 +313,39 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="high",
         audience="both",
     ),
+    # ── Stage 3d: the model provider is down (founder-approved wording, Q7) ──
+    # Shown on a document waiting on the provider while the provider is marked
+    # down -- when `model_api_failure` has been raised, which keeps the promise
+    # below (D-145).
+    "DOC-023": ErrorCatalogEntry(
+        code="DOC-023",
+        title="Reading delayed",
+        message=(
+            "The service DocFlow uses to read orders isn't responding right now, so this order "
+            "is waiting. Nothing is wrong with the file."
+        ),
+        action=(
+            "Nothing to do. DocFlow retries automatically and has been alerted. If it is still "
+            "waiting after 6 hours, this page will say so."
+        ),
+        severity="info",
+        audience="both",
+    ),
+    "DOC-024": ErrorCatalogEntry(
+        code="DOC-024",
+        title="The reading service was unavailable",
+        message=(
+            "DocFlow tried to read this order for 6 hours, but the service it uses to read "
+            "orders did not respond. Nothing is wrong with the file."
+        ),
+        action=(
+            "Upload the same file again, or enter the order by hand if it is urgent. DocFlow "
+            "has already been alerted."
+        ),
+        severity="high",
+        audience="both",
+    ),
     # ── Stage 3b: Supabase Storage (BUILD-STATUS "3b detailed design") ───────
-    # The two codes below DOC-025 are reserved for Stages 3c and 3d (BUILD-STATUS).
     "DOC-025": ErrorCatalogEntry(
         code="DOC-025",
         title="We couldn't save this file",

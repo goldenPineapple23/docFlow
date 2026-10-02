@@ -96,7 +96,7 @@ def queue(monkeypatch):
             sent.append((name, args, queue))
 
     monkeypatch.setattr("app.routers.admin.celery_client", _FakeCelery())
-    monkeypatch.setattr("app.routers.documents.celery_client", _FakeCelery())
+    monkeypatch.setattr("app.celery_client.celery_client", _FakeCelery())
     return sent
 
 
@@ -249,13 +249,15 @@ def test_run_sends_the_batch_through_the_normal_pipeline_and_completion_waits_fo
 
         run = client.post(f"/admin/tenants/{tenant_id}/test-batch/run", headers=console.headers())
         assert run.status_code == 200 and run.json() == {"started": 2}
-        assert queue == [
-            ("docflow.parse_and_extract", [tenant_id, staged[0]], "interactive"),
-            ("docflow.parse_and_extract", [tenant_id, staged[1]], "interactive"),
-        ]
+        # Stage 3d: both wait as `pending` in the interactive lane, and the
+        # dispatcher is nudged once; it sends them oldest first.
+        assert queue == [("docflow.dispatch", None, "dispatch")]
         assert _scalar(
-            "SELECT count(*) FROM documents WHERE tenant_id = :t AND status = 'pending'", t=tenant_id
+            "SELECT count(*) FROM documents WHERE tenant_id = :t AND status = 'pending' "
+            "AND dispatch_lane = 'interactive' AND dispatched_at IS NULL",
+            t=tenant_id,
         ) == 2
+        assert sorted(staged) == sorted(staged[:2])
         assert console.overview(client, tenant_id)["onboarding_status"] == "test_batch_running"
 
         again = client.post(f"/admin/tenants/{tenant_id}/test-batch/run", headers=console.headers())

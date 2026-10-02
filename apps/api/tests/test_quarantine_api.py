@@ -71,8 +71,8 @@ def celery(monkeypatch):
     fake = _Celery()
     for target in (
         "docflow_core.email_intake.celery_client",
-        "app.routers.documents.celery_client",
-        "app.routers.held.celery_client",
+        "app.celery_client.celery_client",
+        "app.celery_client.celery_client",
         "app.routers.admin.celery_client",
     ):
         monkeypatch.setattr(target, fake)
@@ -479,7 +479,11 @@ def test_release_goes_in_received_order_and_only_then_counts(client, celery):
             json={"document_ids": [str(newest), str(oldest), str(middle)]},  # deliberately scrambled
         )
         assert response.status_code == 200, response.text
-        assert celery.document_ids() == [str(oldest), str(middle), str(newest)]
+        # Stage 3d: released in received order, and the dispatcher -- nudged
+        # once -- sends a tenant's waiting documents oldest first
+        # (test_dispatch_db.py proves that order on the real database).
+        assert response.json()["released"] == [str(oldest), str(middle), str(newest)]
+        assert celery.sent == [{"name": "docflow.dispatch", "args": None, "queue": "dispatch"}]
         assert t.used() == before + 3
         released = {d["id"]: d for d in t.docs()}
         assert all(

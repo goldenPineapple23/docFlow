@@ -386,6 +386,8 @@ export type TestBatchDocument = {
   id: string;
   original_filename: string;
   status: string;
+  // Stage 3d: waiting on a model provider that is down ("Delayed", DOC-023).
+  delayed?: boolean;
   created_at: string;
   approved_at: string | null;
   // Money and confidence arrive as strings (Section 7.1).
@@ -681,7 +683,15 @@ export type Dashboard = {
   health: {
     pending: number;
     processing: number;
+    // Stage 3d: waiting = `pending` and not yet dispatched to the queue.
     oldest_waiting_minutes: string | null;
+    // `pending` and on the queue, not yet claimed.
+    dispatched: number;
+    // `pending` because the provider, Storage or the parse service was down.
+    waiting_on_outage: number;
+    model_provider_status: "up" | "down" | null;
+    // null: the dispatcher has never run.
+    dispatcher_heartbeat_age_seconds: number | null;
     documents_today: number;
     needs_review: number;
     model_calls_hour: number;
@@ -715,6 +725,8 @@ export type Dashboard = {
   } | null;
   rollup_stale_hours: number;
   rollup_is_stale: boolean;
+  // Stage 3d (gap 1): the heartbeat shows red past this many minutes.
+  dispatcher_stale_min: number;
   queues: { interactive: number | null; bulk: number | null };
   worker: string | null;
 };

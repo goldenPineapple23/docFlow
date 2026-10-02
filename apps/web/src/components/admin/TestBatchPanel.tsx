@@ -197,7 +197,7 @@ export function TestBatchPanel({
                 <tr key={d.id} className="border-t border-gray-100">
                   <td className="px-2 py-1.5">{d.original_filename}</td>
                   <td className="px-2 py-1.5">
-                    <StatusBadge status={d.status} />
+                    <StatusBadge status={d.delayed ? "delayed" : d.status} />
                   </td>
                   <td className="px-2 py-1.5 text-gray-700">
                     {d.po_number ?? "—"}

@@ -438,6 +438,77 @@ def test_a_failed_order_says_why_in_the_catalogs_words(client):
         assert failure(fine) is None
 
 
+def _delete_provider_alerts_since(started) -> None:
+    """The provider's own alerts this test raised (tenant-less), then their emails."""
+    with platform_session() as session:
+        outbox = [
+            r[0]
+            for r in session.execute(
+                text(
+                    "DELETE FROM founder_alerts WHERE tenant_id IS NULL AND created_at >= :s "
+                    "AND type IN ('model_api_failure', 'model_api_recovered') RETURNING email_outbox_id"
+                ),
+                {"s": started},
+            )
+            if r[0] is not None
+        ]
+        for outbox_id in outbox:
+            session.execute(text("DELETE FROM email_outbox WHERE id = :id"), {"id": str(outbox_id)})
+
+
+@requires_review_schema
+def test_one_failure_on_our_own_configuration_shows_a_waiting_order_as_delayed_at_once(client):
+    """
+    Founder, 2026-10-01 (3d build, finding 2): "Delayed" only while the
+    provider is marked down, and a wrong key, no credit or a retired model
+    (`our_configuration`) must show it at once -- no 3-in-5 threshold. One
+    real failure through model_provider.record_failure, then the review
+    queue and the detail view as the reviewer's screen reads them. The
+    worker's side (a 401 puts the order in this wait) is in its own suite.
+    """
+    from docflow_core import model_provider
+    from docflow_core.provider_errors import ProviderError
+
+    with platform_session() as session:
+        started = session.execute(text("SELECT now()")).scalar_one()
+    model_provider.record_success()  # start from "up", as staging normally is
+    try:
+        with _ReviewTenant("Acme Test Distributor -- delayed") as tenant:
+            waiting = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES, status="pending")
+            with platform_session() as session:
+                session.execute(
+                    text(
+                        "UPDATE documents SET wait_cause = 'model_provider', waiting_since = now(), "
+                        "last_wait_error = 'http_401', retry_at = now() + interval '1 minute' "
+                        "WHERE id = :id"
+                    ),
+                    {"id": str(waiting)},
+                )
+
+            def shown() -> tuple[bool, dict | None]:
+                queue = client.get("/review/documents", headers=tenant.headers())
+                assert queue.status_code == 200
+                row = next(r for r in queue.json()["documents"] if r["id"] == str(waiting))
+                detail = client.get(f"/review/documents/{waiting}", headers=tenant.headers())
+                assert detail.status_code == 200
+                return row["delayed"], detail.json()["document"]["delay"]
+
+            # Up: waiting is not yet a promise that DocFlow has been alerted.
+            assert shown() == (False, None)
+
+            assert model_provider.record_failure(ProviderError("wait", "our_configuration", "http_401"))
+            delayed, delay = shown()
+            assert delayed is True
+            assert delay["code"] == "DOC-023" and delay["title"] and delay["message"] and delay["action"]
+
+            # Recovered: no longer delayed.
+            assert model_provider.record_success() is True
+            assert shown() == (False, None)
+    finally:
+        model_provider.record_success()
+        _delete_provider_alerts_since(started)
+
+
 # -- roles are enforced at the API, not in the UI (Section 3) ----------------
 
 

@@ -35,6 +35,7 @@ from docflow_core.constants import (
     constants_in_effect,
 )
 from docflow_core.db import rowcount
+from docflow_core.model_provider import PROVIDER
 
 ORDER = (
     "tenant_created",
@@ -208,13 +209,18 @@ def list_test_batch_documents(session: Session) -> list[dict[str, Any]]:
                 """
             SELECT d.id, d.original_filename, d.status, d.created_at, d.approved_at,
                    d.est_cost_usd, d.overall_confidence, d.input_tokens, d.output_tokens,
-                   h.po_number, h.buyer_name
+                   h.po_number, h.buyer_name,
+                   -- Stage 3d: "Delayed" (DOC-023), as on the tenant surface.
+                   (d.status = 'pending' AND d.wait_cause = 'model_provider'
+                    AND (SELECT p.status FROM public.provider_state(:provider) p) = 'down'
+                   ) AS delayed
             FROM documents d
             LEFT JOIN document_headers h ON h.document_id = d.id AND h.deleted_at IS NULL
             WHERE d.is_test_batch AND d.deleted_at IS NULL
             ORDER BY d.created_at, d.id
             """
-            )
+            ),
+            {"provider": PROVIDER},
         )
         .mappings()
         .all()

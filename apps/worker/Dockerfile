@@ -39,6 +39,8 @@ COPY apps/worker/app /opt/worker/app
 WORKDIR /opt/worker
 ENV PATH=/opt/worker/venv/bin:/usr/bin:/bin
 USER docflow
-# No beat on Fly staging (item 12): it only takes work enqueued through the
-# Fly API; scheduled sweeps stay with the local worker.
-CMD ["celery", "-A", "app.celery_app", "worker", "--loglevel=info", "-Q", "interactive,bulk"]
+# The default process: the document worker and the dispatch worker together
+# (app.run_workers). On Fly, apps/worker/fly.toml's [processes] runs this
+# image twice: `worker` (this command) and `beat`, exactly one machine
+# (Stage 3d, change C).
+CMD ["python", "-m", "app.run_workers"]

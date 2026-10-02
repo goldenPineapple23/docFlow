@@ -217,7 +217,7 @@ function ReviewQueue() {
                   {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : "—"}
                 </td>
                 <td className="px-4 py-3">
-                  <StatusBadge status={doc.status} />
+                  <StatusBadge status={doc.delayed ? "delayed" : doc.status} />
                 </td>
                 <td className="px-4 py-3">
                   {/*

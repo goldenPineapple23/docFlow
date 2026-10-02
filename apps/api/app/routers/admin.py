@@ -49,6 +49,7 @@ from docflow_core.constants import (
     ABUSE_CEILING_MULTIPLIER,
     DAILY_AI_COST_CEILING_USD,
     DAILY_TOKEN_CEILING,
+    DISPATCHER_STALE_MIN,
     INVOICE_DAYS_UNTIL_DUE,
     ROLLUP_STALE_HOURS,
     TRIAL_PERIOD_DAYS,
@@ -61,7 +62,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from pydantic import BaseModel, EmailStr, Field
 
 from app.actor import Actor
-from app.celery_client import celery_client
+from app.celery_client import celery_client, nudge_dispatcher
 from app.deps import AuthenticatedIdentity, StepUp, require_platform_admin, require_recent_mfa
 from app.errors import catalog_error
 from app.routers.documents import ingest_upload
@@ -798,17 +799,16 @@ def run_test_batch(
     tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
 ) -> dict:
     """Step 7: the staged documents go through the normal pipeline at
-    interactive priority. Enqueued after commit, oldest first."""
+    interactive priority: `pending` in the interactive lane, sent by the
+    dispatcher oldest first (Stage 3d). Nudged after commit."""
     admin_id = _console_act(identity, tenant_id, "test_batch_run", target_type="test_batch")
     with tenant_session(tenant_id) as session:
         try:
             document_ids = onboarding.start_test_batch_run(session, tenant_id, actor_user_id=admin_id)
         except onboarding.OnboardingError as exc:
             raise _onboarding_error(exc) from exc
-    for document_id in document_ids:
-        celery_client.send_task(
-            "docflow.parse_and_extract", args=[str(tenant_id), str(document_id)], queue="interactive"
-        )
+    if document_ids:
+        nudge_dispatcher()
     return {"started": len(document_ids)}
 
 
@@ -1507,6 +1507,8 @@ def dashboard(
         "worker": _worker_heartbeat(),
         "rollup_stale_hours": ROLLUP_STALE_HOURS,
         "rollup_is_stale": metrics.is_stale(data["rollup"]),
+        # Stage 3d (gap 1): the strip shows the heartbeat red past this.
+        "dispatcher_stale_min": DISPATCHER_STALE_MIN,
     }
 
 
@@ -1627,12 +1629,10 @@ def release_quarantine(
             )
         except quarantine.QuarantineError as exc:
             raise _quarantine_error(exc) from exc
-    # Oldest first: the order they were received.
-    queue = "interactive" if len(result.released) <= 10 else "bulk"
-    for document_id in result.released:
-        celery_client.send_task(
-            "docflow.parse_and_extract", args=[str(tenant_id), str(document_id)], queue=queue
-        )
+    # Stage 3d: `pending` in the lane the release set; the dispatcher sends
+    # them oldest first, the order they were received. Nudged after commit.
+    if result.released:
+        nudge_dispatcher()
     return {"released": [str(i) for i in result.released], "skipped": [str(i) for i in result.skipped]}
 
 

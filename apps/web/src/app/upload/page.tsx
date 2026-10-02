@@ -47,7 +47,7 @@ export default function UploadPage() {
     // One at a time: a person watching a phone upload photos over a poor
     // connection would rather see steady progress than several stalled bars.
     for (const file of queued) {
-      outcomes.push(await uploadOne(file));
+      outcomes.push(await uploadOne(file, queued.length));
       setDone(outcomes.length);
       setResults([...outcomes]);
     }

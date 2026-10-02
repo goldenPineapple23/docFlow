@@ -33,7 +33,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from docflow_core import field_schema, file_types, founder_alerts
+from docflow_core import field_schema, file_types, founder_alerts, model_provider
 from docflow_core.config import get_settings
 from docflow_core.db import tenant_session
 from docflow_core.errors import get_error
@@ -187,6 +187,9 @@ def list_documents(
                        d.overall_confidence, d.is_test_batch, d.injection_suspected,
                        d.is_possible_duplicate, d.is_possible_change_order,
                        d.review_started_at, d.approved_at,
+                       (d.status = 'pending' AND d.wait_cause = 'model_provider'
+                        AND (SELECT p.status FROM public.provider_state(:provider) p) = 'down'
+                       ) AS delayed,
                        h.po_number, h.buyer_name, h.order_total, h.currency,
                        (SELECT count(*) FROM document_warnings w
                          WHERE w.document_id = d.id AND w.status = 'open'
@@ -201,7 +204,7 @@ def list_documents(
                 LIMIT :limit OFFSET :offset
                 """
             ),
-            {"status": status, "limit": limit, "offset": offset},
+            {"status": status, "limit": limit, "offset": offset, "provider": model_provider.PROVIDER},
         ).mappings().all()
         # The total is what lets the queue page instead of silently showing
         # only the first `limit` orders (DECISIONS.md D-097). Same filter as
@@ -231,6 +234,9 @@ def _queue_row(row) -> dict[str, Any]:
         "id": str(row["id"]),
         "original_filename": row["original_filename"],
         "status": row["status"],
+        # Stage 3d: waiting on the model provider while it is marked down --
+        # shown as "Delayed" (DOC-023), never as an error.
+        "delayed": bool(row["delayed"]),
         "source": row["source"],
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         "approved_at": row["approved_at"].isoformat() if row["approved_at"] else None,
@@ -292,10 +298,15 @@ def get_document(
                 # way it was). A count only; the examples themselves are
                 # other orders and stay on their own screens.
                 "(SELECT jsonb_array_length(r.examples_used) FROM extraction_runs r "
-                " WHERE r.id = documents.current_extraction_run_id) AS examples_used "
+                " WHERE r.id = documents.current_extraction_run_id) AS examples_used, "
+                # Stage 3d: Delayed (DOC-023) while it waits on a provider
+                # that is marked down -- the condition under which DOC-023's
+                # "DocFlow has been alerted" is true (D-145).
+                "(status = 'pending' AND wait_cause = 'model_provider' "
+                " AND (SELECT p.status FROM public.provider_state(:provider) p) = 'down') AS delayed "
                 "FROM documents WHERE id = :id AND deleted_at IS NULL"
             ),
-            {"id": str(document_id)},
+            {"id": str(document_id), "provider": model_provider.PROVIDER},
         ).mappings().first()
         if document is None:
             # RLS already hid another tenant's document, so this is a 404 for
@@ -368,6 +379,9 @@ def get_document(
             # Why DocFlow couldn't read it, in the catalog's words (7.16.5,
             # D-145); None unless the status is `failed`.
             "failure": failure,
+            # Stage 3d: why it is still waiting, in the catalog's words
+            # (DOC-023); None unless it is delayed.
+            "delay": _catalog_payload("DOC-023") if document["delayed"] else None,
         },
         "header": _header_payload(header),
         "lines": [_line_payload(line) for line in lines],
@@ -417,6 +431,11 @@ def _failure(session, document) -> dict[str, str]:
         entry = get_error(code or _FALLBACK_FAILURE)
     except KeyError:
         entry = get_error(_FALLBACK_FAILURE)
+    return _catalog_payload(entry.code)
+
+
+def _catalog_payload(code: str) -> dict[str, str]:
+    entry = get_error(code)
     return {
         "code": entry.code,
         "title": entry.title,

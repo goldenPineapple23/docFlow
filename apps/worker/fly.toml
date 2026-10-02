@@ -1,7 +1,8 @@
 # The worker on Fly staging (Stage 3c; BUILD-STATUS "3c detailed design",
 # item 12). No services, no IP: it only pulls work from the staging Upstash
 # queue and calls the parse service over Flycast. Stopped between test
-# sessions (founder's Q6, option B): `fly scale count 0` / `1`.
+# sessions (founder's Q6, option B): `fly scale count 0 --process-group
+# worker --process-group beat` / `fly scale count worker=1 beat=1`.
 #
 # Deploy from the repository root:
 #
@@ -18,6 +19,45 @@ primary_region = "iad"
   DOCFLOW_ENV = "staging"
   PARSE_SERVICE_URL = "http://docflow-parse-staging.flycast"
 
+# Stage 3d (founder, 2026-10-01; BUILD-STATUS "3d -- APPROVED WITH CHANGES",
+# change C). Two process groups from one image:
+#   worker -- app.run_workers: two Celery workers that live and die together
+#             (founder, 2026-10-01). `documents` (DISPATCH_IN_FLIGHT_TARGET
+#             processes) reads interactive and bulk; `dispatch` (one process)
+#             reads only the dispatch queue and never claims a document.
+#   beat   -- celery beat, its own process, EXACTLY ONE machine. It only sends
+#             the schedule (the dispatcher's 30 s backstop, the sweeps, the
+#             nightly rollup); it never runs a task itself.
+# Every beat task is safe if two beats fire it (the table in BUILD-STATUS),
+# so a second beat would be harmless -- but never scale `beat` above 1.
+# 3c ran no beat on Fly; from 3d, run only one stack (local or Fly) against
+# staging at a time (RUNBOOK 9.3).
+[processes]
+  worker = "python -m app.run_workers"
+  beat = "celery -A app.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule"
+
+# Rolling updates each machine in place (stop, update, start), so a deploy
+# never runs an old and a new beat side by side. Never deploy this app with
+# --strategy canary or bluegreen: both start a new machine beside the old
+# one (Fly's deploy docs, read 2026-10-01).
+[deploy]
+  strategy = "rolling"
+
+# Fly's default, written down because app.run_workers depends on it: when one
+# of the two workers dies, run_workers stops the other and exits non-zero, and
+# Fly restarts the machine. A stop (SIGINT) exits 0 and is not restarted.
+[[restart]]
+  policy = "on-failure"
+  retries = 10
+  processes = ["worker"]
+
 [[vm]]
   size = "shared-cpu-1x"
   memory = "1gb"
+  processes = ["worker"]
+
+# beat sends a few small messages a minute: the smallest machine.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+  processes = ["beat"]

@@ -125,6 +125,11 @@ class Settings(BaseSettings):
     # Fly: http://docflow-parse-<env>.flycast (private, over Flycast).
     parse_service_url: str = "http://127.0.0.1:8100"
     parse_service_token: str = ""
+    # Stage 3d (founder, Q2): how many documents may be in flight (on the
+    # queue or being read) across all tenants -- the worker's document slots.
+    # The worker's Celery concurrency is set from this same value, so the two
+    # can't drift (one worker machine; RUNBOOK 9.2 when adding workers).
+    dispatch_in_flight_target: int = 1
     # Set by Fly on every machine it runs (never in .env). The API uses it to
     # know it is deployed: on Fly it refuses to start holding the parse token
     # (apps/api/app/main.py, founder Q12), as the parse service refuses to
