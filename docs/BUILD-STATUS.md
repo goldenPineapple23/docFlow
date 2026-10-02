@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-10-02** (latest: **Stage 3 checkpoint DRAFTED (CHECKPOINTS.md, gaps for the cutover, the backup checks and the first worker deploy) and the Stage 4 design APPROVED WITH CHANGES (founder, 2026-10-02: Q1-Q12 decided; Q13-Q15 and the DOC-030 wording open), nothing built. The checkpoint waits for the first worker deploy, scheduled straight after the cutover is verified. Before that: 3e MERGED 2026-10-02 17:43 UTC (PR #35, `e99fbb9`, D-185) and the CI runner pin merged 17:48 UTC (PR #36, main `d004186`); the backup checks run the staging suites at `f191e27`, in a separate worktree as `docflow_app` (founder, PR #37; RUNBOOK 1.3); `0036` not applied to staging before the `backup_0035` check, on or after 2026-10-05 03:18 UTC**. Earlier the same day: 3d merged, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184), recorded in PR #34; the two two-at-once sweep tests go to 3e). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
+commit as the slice. Statuses below are as of **2026-10-02** (latest: **Stage 3 checkpoint DRAFTED (CHECKPOINTS.md, gaps for the cutover, the backup checks and the first worker deploy) and the Stage 4 design APPROVED WITH CHANGES (founder, 2026-10-02: Q1-Q15 decided, the new catalog wording recorded; one wording point open: DOC-030's opening fails the catalog's banned-phrase test), nothing built. The checkpoint waits for the first worker deploy, scheduled straight after the cutover is verified. Before that: 3e MERGED 2026-10-02 17:43 UTC (PR #35, `e99fbb9`, D-185) and the CI runner pin merged 17:48 UTC (PR #36, main `d004186`); the backup checks run the staging suites at `f191e27`, in a separate worktree as `docflow_app` (founder, PR #37; RUNBOOK 1.3); `0036` not applied to staging before the `backup_0035` check, on or after 2026-10-05 03:18 UTC**. Earlier the same day: 3d merged, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184), recorded in PR #34; the two two-at-once sweep tests go to 3e). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -187,7 +187,7 @@ are D-149 – D-153.
 | 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents. **Plus the two defects the founder's walkthrough found on the real stack (2026-09-27): the review screen said nothing when an edit raised a check (D-166), and a session token one second ahead of this clock was refused as "signed out" (D-167).** | **CHECKPOINT DONE 2026-09-26, awaiting "go"** (`CHECKPOINTS.md`: C1, H1, H3, M1, M3, H2, M4, M5 all closed). 1a DONE (PR #4, D-156); 1b DONE (PR #6, migration `0027`, D-158 – D-160); 1c DONE (PR #7: golden rename, M1 streaming measured, H2/M4/M5, one read budget, every paid call costed, Audit tab on one clock; D-159, D-161 – D-164); named system actors DONE (PR #8, migration `0028` applied and verified on staging 2026-09-26: 3 system actors, no blank lifecycle actor, idle-transaction cap 5 min; D-165); Stage 1 checkpoint run on `b04f16d`; walkthrough fixes DONE (D-166 the review screen, D-167 clock skew, D-169 the line table marking the rows and numbers a check is about, and the live end-to-end suite that catches this class of defect) | D-149, D-154 – D-169 |
 | 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events (record the event in the same transaction as its effect; ignore an event older than the state already saved; **an event in the same second as the saved state can't be ordered by `created` (one-second resolution), so it re-fetches the subscription from Stripe and saves that, never guesses** -- a webhook-side fetch, not a page-load one, so within 7.15.3 (founder, 2026-09-26); the Phase 6 plan-change reconcile reuses this guard). **Plus two clock items folded in from the D-170 sweep:** `first_past_due_at` written from Stripe's event time rather than the app clock, and tests that a stale and a future-dated Stripe webhook signature are both refused (the 300 s tolerance is real but untested today). **Also carries 2a's deferred `intake_webhook_refused` alert** and the `founder_alerts` insert policy it needs (the `rollup_raise` pattern from 0017), since `0029` is the migration already planned (D-171). **2a (H8) DONE (PR #14):** the inbound webhook now authenticates the provider with Postmark's HTTP Basic credentials, checked before the payload is parsed and before the token is resolved; the per-tenant token identifies the tenant and no longer authenticates the request. A blank credential refuses all inbound mail on purpose (D-171), so RUNBOOK 2.1's cutover order is a requirement: credentials set and deployed, *then* Postmark pointed at the URL carrying them. A refusal logs which reason it was, and **raises a high-severity `intake_webhook_refused` alert in 2c, not 2a** -- a tenant-less alert needs its own RLS insert policy, which needs a migration, and 2c already has `0029`; `test_rls_flags.py` caught the attempt to raise it from the router and located the right home (D-171). **Blocking condition (founder, 2026-09-27): credential enforcement must not go live on an address real customers send to until 2c's alert lands.** A refused request is, from outside, either a misconfigured cutover or an attacker, and the first means no mail arrives at all -- so until the alert exists, the only signal is a log line nobody is watching. Staging and a test address are fine; the RUNBOOK 2.1 cutover on a production intake address waits for 2c. The IP allowlist is log-only with no enforcing branch (D-155); RUNBOOK 2.3 is the confirm-then-enforce procedure and 2.2 the rotation procedure. 12 tests; 10 of them fail with the credential check disabled **2b (H10) DONE (PR #15):** a suspended or pending-deletion tenant can no longer upload -- refused with a new `INT-010` before the file is validated or stored, so it costs nothing; read and export stay open, asserted against `/home`, the order history, one order in full and its export history, in both blocked states (7.14). `cancelling` deliberately does not block. One predicate, `intake_gate.blocks_new_intake`, is shared by both intake channels so the lifecycle answer cannot drift -- which is how the defect existed. Two departures from the review's proposed fix, reasoned in D-172: a new catalog entry rather than reusing INT-006 (whose reader is a buyer whose mail bounced, not the tenant's own user), and the gate reads lifecycle status rather than `intake_address_active` (which is also false before go-live). The refused attempt is recorded in `intake_rejections` (the file is not), so a customer who keeps trying is visible -- a retention signal, not only an audit one. Three drift tests beyond the shared predicate: both real endpoints asserted to agree across four states, a structural test forbidding the status pair inside any condition, and the invariant that the suspend transition sets `status` and clears `intake_address_active` together (they are different columns and only the transition keeps them in step). 14 tests; 3 fail with the gate disabled **2c (H11, clock items #3 and #6, 2a's deferred alert) BUILT, migration `0029` not yet applied to staging:** Stripe events go through `record_stripe_subscription_event()`, a SECURITY DEFINER function called inside the tenant's own session, which records the event id in the same transaction as the status write, applies the ordering guard (older events recorded, not applied; a NULL saved time applies), and cross-checks the customer against the session's tenant. A same-second event fetches Stripe's state with no transaction open and re-checks the guard before saving. `first_past_due_at` is Stripe's event time and `unpaid` no longer resets it. No session can write `stripe_webhook_events` any more; EXECUTE is revoked from PUBLIC **and from Supabase's `anon`/`authenticated`** (which get it by default -- found while building, D-175). A refused inbound webhook now raises a high-severity `intake_webhook_refused` alert, one per reason, never changing the 401 -- **which satisfies 2a's blocking condition once 0029 is applied** (RUNBOOK 2.1). Stripe's clock against ours has one named tolerance, `STRIPE_CLOCK_TOLERANCE_SECONDS` (300 s), enforced at the signature and, on the database's clock, at the event time: an event stamped beyond it is not applied and alerts the founder (D-176). 29 new API tests (22 webhook, 7 refusal alert) plus 5 static core tests | 2a, 2b DONE; **2c DONE** (PR #18; `0029` applied to staging 2026-09-28; on `b540433`: API 477 passed / 3 deselected, core 547 passed, worker 107 passed; CI green); **2d (H9) DONE** (PR #20; lost-device drill passed on staging 2026-09-28, D-177): the Console needs an aal2 session (AUTH-006); seven destructive actions -- hard delete, clear quarantine, cancel, address rotation, buyer merge, go live, tier change -- need a TOTP challenge under 5 min old (AUTH-007, 30 s GoTrue allowance); a wrong code is AUTH-008, mirrored in the web app and kept in step by a test; `CONSOLE_MFA_ENFORCED` ships off, with a startup warning, a Console banner and a founder alert while off; enrol and add a backup at /admin/security; RUNBOOK section 4. No migration. 24 API tests (11 fail with the checks disabled), 4 Vitest, 4 e2e. **Founder enrolled 2026-09-28: two authenticators, both verified** (checked through the Supabase admin API). The backup first failed: Supabase refuses a second factor with the same name (422), and both were named after the date -- fixed in PR #21 (each new authenticator gets a name not already taken; 2 Vitest). A failed enrolment now shows its own catalog entry, **`AUTH-009`** (PR #22), mirrored in the web app and drift-tested like AUTH-008, instead of the generic "We couldn't reach DocFlow" (founder, 2026-09-28, who also set its next-step wording; 2 e2e). **The e2e suite now fails any test whose browser reaches a host other than this machine** (`apps/web/e2e/networkGuard.ts`, every spec imports it and a check fails the suite if one doesn't) -- one AUTH-009 test draft had reached real staging; shown failing with a test pointed at staging. **Second lost-device drill with enforcement on PASSED 2026-09-28 (D-178)**: backup-only sign-in, stale step-up refused, fresh one accepted, dashboard removal leaving only enrolment, re-enrol; drill admin revoked and deleted. **`CONSOLE_MFA_ENFORCED` is on** for the local API (`.env` and the running process agree). A CI timing race in `test_console_mfa.py` was found and fixed (D-178) | D-151, D-170, D-171, D-172, D-173, D-175, D-176, D-177 |
 | 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation (**host settled, D-150: Fly.io, each parse process in its own network namespace; proof spike PASSED 2026-09-28. Carried in from the spike: hide `/.fly` and `/sys` in a mount namespace, and re-run the probe against the real Upstash and API**), H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) -- **including a login for the Stripe webhook that holds EXECUTE on 2c's event function, with EXECUTE then revoked from `docflow_app`**, which closes the residual risk D-173 names. **Also moves with it (founder, 2026-09-28): 0029's `platform_admin_read` policy on `stripe_webhook_events`** -- a flag policy on `app.is_platform_admin`, so it goes to real login separation with D-173's function grant; likewise 0029's `app.intake_refusal` policies (D-175 §8). **H6 note: signed URLs become cross-clock** -- minted and verified on the app clock today (`signed_urls.py`), one clock because one service does both; on Supabase Storage the expiry is Supabase's clock, so D-170 applies (a named tolerance and a test, or the expiry decided in one place) -- **settled 2026-09-29: the expiry is decided in one place, our own signed links with the API streaming from Storage.** **Also carried from the Stage 1 checkpoint (D-163):** a run row before the model call, so a worker killed mid-call still records the call's cost | **IN PROGRESS** -- design agreed 2026-09-29 ("Stage 3 -- agreed with the founder before building", below); order 3a -> 3e. **3b MERGED 2026-09-30 (PR #31, main `5810a54`, D-182). **3c MERGED 2026-10-01 (PR #32, main `085a2a5`; Fly staging run 2 passed every item, D-183).** **3d MERGED 2026-10-02 (PR #33, main `4a2b907`, D-184; `0035` on staging; the dispatch process on its own queue per the founder's condition) -- see "3d build" and "3d on staging". The 500 + 1 run, memory, fresh parse token, restart record, external monitor and the two two-at-once sweep tests gate the first worker deploy after 3e. 3e (F-1) MERGED 2026-10-02 (PR #35, `e99fbb9`; D-185; see "3e build -- as built" and "3e MERGED"); `0036` waits for the 2026-10-05 check, then the cutover (RUNBOOK 10.2).** Earlier: 3c design approved 2026-10-01 (Q1-Q10); BUILT and CI GREEN 2026-10-01 on `0be5422` (D-183; founder's Q11-Q14 decided during the build); migration `0034` awaiting staging; the Fly staging run (RUNBOOK 8.1) owed; see "3c build".** **3a BUILT** (D-179; branch `phase55/stage3a-task-limits`, migration `0030`), including reactivation option C (**3a MERGED, PR #26**). **Card billing, between 3a and 3b: BUILT** (D-181; branch `phase55/card-billing`, migration `0031` waiting on staging; see "Card billing with a 7-day trial"). **Also (founder, 2026-09-29): a second test run against the same database refuses to start** -- an advisory lock in the API and worker suites (D-180, RUNBOOK 1.4). `0030` applied to staging 2026-09-29 after the founder's backup (`backup_0030`: documents, tenants, RLS on). Staging suites on `621141f`: worker 134 passed / 2 skipped (the two prefork tests, Linux only; they pass in CI), API 518 passed / 1 failed / 3 deselected, core 564 passed. The one API failure, `test_a_failed_tenant_creation_rolls_back_everything_including_the_file_move`, counts every tenant on staging and saw the count fall from 20 to 19 during the test -- something else was writing to staging at that moment; a failed creation cannot remove a tenant. Rerun alone: the file 13 passed, the test 3 of 3 passed. D-163 moved to 3c | D-003, D-150, D-159, D-163, D-170, D-173 |
-| 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items. **Also (founder, 2026-09-29): audit the ~23 broad `except` blocks on the document path.** Each one turns *any* exception into a data outcome -- DOC-005 (parsing, conversion), DOC-021 (saving, validation) or VAL-016 (buyer identification, matching, duplicate detection) -- so a real bug in our code can be shown as a problem with the customer's file. After the audit only the exceptions each block expects get a catalog code; anything else fails loudly as our error. Found while designing 3a's timeouts, not in 3a's scope | **DESIGN APPROVED WITH CHANGES 2026-10-02** ("Stage 4 detailed design": Q1-Q12 decided, two PRs with B first; Q13-Q15 open; the audit counts 34 blocks, not ~23); building waits for the Stage 3 checkpoint's "go"; `0037` after `0036`, and nothing on staging before `docflow_app` is dropped (about 2026-10-08) | D-152 |
+| 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items. **Also (founder, 2026-09-29): audit the ~23 broad `except` blocks on the document path.** Each one turns *any* exception into a data outcome -- DOC-005 (parsing, conversion), DOC-021 (saving, validation) or VAL-016 (buyer identification, matching, duplicate detection) -- so a real bug in our code can be shown as a problem with the customer's file. After the audit only the exceptions each block expects get a catalog code; anything else fails loudly as our error. Found while designing 3a's timeouts, not in 3a's scope | **DESIGN APPROVED WITH CHANGES 2026-10-02** ("Stage 4 detailed design": Q1-Q15 decided, two PRs with B first, the database retry in PR 2 with `0037`; DOC-030 and the email warnings' wording recorded; the audit counts 34 blocks, not ~23); building waits for the Stage 3 checkpoint's "go"; `0037` after `0036`, and nothing on staging before `docflow_app` is dropped (about 2026-10-08) | D-152 |
 | 5 | Remaining findings (**review findings still open for Stage 5, counted 2026-10-01: Critical 0, High 0, **Medium 3** (was 4: **M6 fixed in 3d** -- `rollup_stale` registered in `ALERT_TYPES` and raised through the rollup's own session, with a test that raises every registered type; on `main` once 3d merges) -- M7 the three missing Phase 5 alerts (D-155); M10 nine settings never read, the model IDs hardcoded; M11 SETUP.md and a migration ledger -- Low 0**: Lows are fixed only when their file is touched, D-155; the review put M8, M9, M12, M13, M15, L2 and L8 in Phase 6 and deferred L1, L3-L7 and L9), doc/code contradictions (**plus one found 2026-10-01: `celery_app.py` says interactive is always drained first, but kombu's Redis transport takes turns between queues**), proposed CLAUDE.md additions; **audit every test that counts a whole table** (the `deal7` pattern) and move each one to data only that test can see, after which staging suites may run concurrently again (RUNBOOK 1.4); **robust test cleanup** (every test that creates data cleans it up in a fixture or `finally`, so a failing test still leaves nothing); **a staging sweep script** that lists tenants named "Acme Test ..." older than a day, with what each holds, and deletes one only on the founder's per-action OK (a stopped run always strands something); **triage the API suite's warnings** (425 on the 2026-09-26 run): list each kind, say which are harmless library deprecations and which point at a real problem in our code -- listed, not fixed (triage done 2026-09-26, D-163: all 439 are test-only; 438 are PyJWT's `InsecureKeyLengthWarning` from short test signing keys); **use a test JWT secret of at least 32 bytes** to clear that noise (founder); **a test that expects the database to refuse a write** must run in a transaction that is always rolled back, or on data it owns, so it can't leave a row behind when the refusal doesn't happen (D-165 incident); **two audit-trail findings from the second lost-device drill (D-178; founder: fixed before any pilot, with tests; design settled 2026-09-28)** -- (1) refused Console and step-up attempts are recorded server-side (AUTH-006/007); AUTH-008 is never browser-reported, and Supabase's database audit log was checked and records nothing on this project, so that gap is documented and Supabase's rate limit covers wrong-code guessing (its behaviour measured with the test account at build time); 5 refusals in 15 min for one account raise one high-severity founder alert per window, set only after measuring what a normal sign-in and step-up produce; (2) the outcome is a second, append-only `admin_actions` row referencing the intent row (succeeded, or failed with its code; no migration), and an intent with no outcome is shown in the Console as crashed midway, never as done; *low priority, not a blocker:* **count rows in spreadsheet and CSV orders for free before extraction** (no model call needed), so an oversized order is caught before a paid read (founder, D-163) | PLANNED | D-160, D-163, D-165, D-178 |
 
 ### Stage 3 -- agreed with the founder before building (2026-09-29)
@@ -3991,6 +3991,8 @@ change lands inside the 3 clean days (Q8):
 - `create extension if not exists pg_trgm with schema extensions;` and the
   same for `btree_gist` (if Q2 is GiST);
 - the two partial indexes on `items`;
+- `documents.wait_cause` gains a fourth value for a database wait (Q14,
+  decided; the constraint only, no rows);
 - `grant usage on schema extensions to docflow_worker`, **if** the build
   finds the login can't reach the operator class and the `<->` operator
   there. Nothing in `0001`-`0036` grants on `extensions` today, and
@@ -4125,8 +4127,12 @@ put a parse-sandbox change and an index migration in one review.
    wording settled first (Q12). It merges once its CI is green, never
    before the Stage 3 checkpoint's "go", and its parse-service changes
    reach the Fly parse app only after Stage 3's G and A4 have passed
-   (CHECKPOINTS.md, Stage 3 draft). **Unless Q14 puts a migration in it.**
-2. **PR 2, part A (matching).** CI green, parity included. After
+   (CHECKPOINTS.md, Stage 3 draft). **Migration-free** (Q14, decided:
+   the database retry is PR 2's). Also in PR 1: DOC-030, VAL-017 and
+   VAL-018 once their wording is settled, and the RUNBOOK step for a
+   DOC-030 (below).
+2. **PR 2, part A (matching), plus kind 3's database retry** (Q14).
+   CI green, parity included. After
    `docflow_app` is dropped (about 2026-10-08): `0037` on staging (no
    backup, Q9), the staging suites as the four logins, then the 50k timing
    run on staging under the test lock. The PR carries the benchmark output
@@ -4192,7 +4198,7 @@ same file again to have it read and checked again"). A "DocFlow will
 re-read it once the fix is in" promise needs something that doesn't exist:
 a founder-only re-run for a failed document (Q15).
 
-#### New questions (from the answers)
+#### New questions (from the answers) -- decided below
 
 13. **A second non-generated source for the corpus.** The golden set is 4
     lines, which can't balance 2,000 generated ones. Staging holds lines
@@ -4225,6 +4231,93 @@ a founder-only re-run for a failed document (Q15).
     migration. That's outside this design, and a scope question for you,
     not something to add quietly. Without it, the wording says the
     customer sends the file again.
+
+#### Decided (founder, 2026-10-02): Q13-Q15
+
+13. **Yes: hand-typed lines from staging go into the corpus**, because they
+    are the "not made up by the generator" input Q5 asked for. Two
+    conditions:
+    - **Only from test tenants.** Claude lists the tenants and the lines it
+      proposes to copy, and **the founder approves that list before
+      anything is copied.** Never read from a customer tenant, now or when
+      real customers exist.
+    - **If the lines go into the repository as CI fixtures, the same list
+      review covers that.** Anything committed is permanent.
+14. **(b): the database retry goes in PR 2, with `0037`.** `0037` also
+    adds the fourth `wait_cause` value, and the bounded retry on
+    `OperationalError` and `InterfaceError` is built and tested in PR 2.
+    PR 1 stays migration-free, which is the reason B goes first. (c) is
+    out: a retry hidden inside a task, next to the stuck sweep's 30-minute
+    timeout, is the interaction 3a and 3d were careful to avoid.
+    **Until PR 2 lands, a dropped database connection during buyer
+    identification, matching, duplicate detection, saving or validation
+    still fails the document with DOC-021, as it does today.** PR 1 adds
+    only the alert's exception type, code location and hourly dedupe to
+    those blocks.
+15. **No founder re-run in Stage 4.** It would reopen `failed` as a final
+    status, which `0027`'s trigger enforces on purpose, and that needs its
+    own design, not a rider on an audit. **During the pilot the founder
+    covers the gap by hand:** a DOC-030 pages the founder, who emails the
+    customer when the fix is deployed. **Moved to Phase 6**, next to the
+    other "before real volume" items. If DOC-030s turn out to be common in
+    the pilot, that is the evidence for building it.
+
+#### The new catalog entries (founder's wording, 2026-10-02)
+
+The founder's text, verbatim:
+
+> **DOC-030** (tenant audience): Something went wrong on our end, not with
+> your file. We're already on it. Please hold off on resending until we
+> notify you that it's fixed, then re-upload the file or forward the
+> original email.
+
+"Forward the original email" is deliberate: re-sending an identical copy is
+dropped as a duplicate (the same Message-ID).
+
+> **Kind-2 warning, an attachment** (on the document, for the reviewer):
+> Part of this email couldn't be read: the attachment "{filename}". The
+> order was read from the rest of the email and may be incomplete. Check
+> it against the original email before approving.
+
+> **Kind-2 warning, the body:** The text of this email couldn't be read.
+> The order was read from its attachments only. Check it against the
+> original email before approving.
+
+**To settle before PR 1 builds them (found while recording, 2026-10-02):**
+
+1. **DOC-030's first sentence fails the catalog's own test.**
+   `test_no_entry_uses_a_banned_empty_phrase` refuses "something went
+   wrong" in any title or message: the 7.16.5 tone rule ("never say 'error
+   occurred' or 'something went wrong' without the what/why/next"),
+   enforced literally. The entry does carry the what, why and next, but
+   the test doesn't read meaning, and relaxing it would let the empty
+   form back in. Proposed: keep the test and change the opening, e.g.
+   "This failed on our end, not because of your file." The founder's
+   choice.
+2. **Each entry has a title, a message and an action** (`ErrorCatalogEntry`;
+   titles at most 8 words, tested). Proposed split, from the founder's
+   sentences, with the titles mine and the founder's to change:
+
+   | Code | Title (proposed) | Message | Action | Severity, audience |
+   |---|---|---|---|---|
+   | DOC-030 | "This failed on our side, not your file" (8 words) | the first two sentences (with item 1's change) | "Please hold off on resending until we notify you that it's fixed, then re-upload the file or forward the original email." | high, tenant (as DOC-021; the founder's alert is separate) |
+   | VAL-017 (proposed code) | "An email attachment couldn't be read" | "Part of this email couldn't be read: the attachment "{filename}". The order was read from the rest of the email and may be incomplete." | "Check it against the original email before approving." | high, tenant |
+   | VAL-018 (proposed code) | "This email's text couldn't be read" | "The text of this email couldn't be read. The order was read from its attachments only." | "Check it against the original email before approving." | high, tenant |
+
+   **High**, like VAL-014, because an order that may be missing lines is
+   at least as serious as one unreadable number. The reviewer must
+   acknowledge it to approve (7.3).
+3. **`{filename}` is the parse service's sanitized label**
+   (`_sanitize_label`: anything but letters, digits, `.`, `_` and `-`
+   becomes `_`, last 80 characters), so "Purchase Order March.pdf" shows
+   as `Purchase_Order_March.pdf`. That is safe by construction. The UI
+   escapes it as every document-derived value (7.12), and it is never
+   logged (7.10).
+4. **DOC-030's "until we notify you" is a promise the founder keeps by
+   hand** (Q15). PR 1 adds the RUNBOOK step that goes with it: on a
+   DOC-030 alert, the affected tenants are recorded, and when the fix is
+   deployed each one is emailed. Without that step the catalog would
+   promise something nobody is told to do.
 
 ### Stage 2c and 2d -- agreed with the founder before building (2026-09-27)
 
@@ -4433,6 +4526,14 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   caller, so it is the one worth narrowing; the other three stay shared.
   Done with a test that lists the webhook's tables and fails when the code
   touches one not granted.
+- **A founder-only re-run for a failed document** (founder, 2026-10-02,
+  Stage 4 Q15). `failed` is final today (the state machine and `0027`'s
+  trigger), so a DOC-030 or DOC-021 document is read again only when the
+  customer sends it again. Reopening `failed` needs its own design: the
+  new move, the trigger, a Console action and its audit row, a migration.
+  Until then the founder emails the customer when a DOC-030's fix is
+  deployed (RUNBOOK, from Stage 4 PR 1). If DOC-030s are common in the
+  pilot, that is the evidence for building it.
 - **Production's polled `/healthz` check** (3e, C1): production's API is
   public, and the worker heartbeat says nothing about the API. Tool and
   settings chosen when production's API exists (Healthchecks.io can't poll;
