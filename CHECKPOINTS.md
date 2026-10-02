@@ -48,7 +48,15 @@ What's left is proof on staging and on Fly. **Proposed (Q1 below):**
 | Moving CI to Ubuntu 26 | **Can follow** | A deliberate CI change before 24.04 is retired, not Stage 3 work |
 
 So the checkpoint waits for the first worker deploy (RUNBOOK 9.2) and the
-runs made with it. The alternative is in Q1.
+runs made with it. **Decided (founder, 2026-10-02, Q1 below).**
+
+**Order:** the backup checks (2026-10-04 and 2026-10-05), then the cutover
+(RUNBOOK 10.2 steps 0-6), then **the first worker deploy straight after the
+cutover is verified**. It doesn't wait for `docflow_app`'s drop (about
+2026-10-08), so the checkpoint isn't idle. G and A4 run against Stage 3's
+parse service, the image on Fly since run 2. **No Stage 4 parse-service
+change reaches the Fly parse app before G and A4 have passed**, so each
+stage's evidence is about its own code.
 
 ### Test runs
 
@@ -161,8 +169,9 @@ IPv6 isolation is proven on Fly). `[GAP: CI on the checkpoint commit]`
 ### Open, carried forward
 
 - **Stage 4:** matching speed (`pg_trgm`, measured at 50k items) and the
-  broad-`except` audit. Design proposed with this draft; building waits for
-  this checkpoint's "go".
+  broad-`except` audit. Design approved with changes (founder,
+  2026-10-02; two PRs, B first; Q13-Q15 and the DOC-030 wording open);
+  building waits for this checkpoint's "go".
 - **Stage 5:** as listed in BUILD-STATUS (test hygiene, the D-178
   audit-trail findings, the stranded test data, M7, M10, M11).
 - **Phase 6:** narrow `docflow_stripe`'s grants; production's polled
@@ -172,18 +181,18 @@ IPv6 isolation is proven on Fly). `[GAP: CI on the checkpoint commit]`
   orders): still not measured. The 500 + 1 run's documents will be the
   first such sample, if its mix includes them.
 
-### Questions for the founder (this draft)
+### Decided (founder, 2026-10-02, on this draft)
 
-1. **The gate split.** Proposed above: the checkpoint waits for the first
-   worker deploy, because G, A4 against the real targets and the 500 + 1
-   run are the real-system proof of H5 end to end and of H4 at scale. The
-   alternative: write the checkpoint once the cutover and the backup checks
-   are in, with H5 and H4 marked "closed in CI; Fly proof owed at the first
-   worker deploy", and give Stage 4 its "go" then. That starts Stage 4
-   sooner, but closes two findings on CI evidence alone, which your rule
-   says isn't done. Which?
-2. **The live golden run** is in the checkpoint's runs, as in Stages 1 and 2
-   (about $0.05). Keep it?
+1. **The gate split: the checkpoint waits for the first worker deploy**, as
+   proposed. Closing H4 and H5 on CI evidence alone breaks the
+   real-system rule. And Stage 4's part B edits the parse service
+   (`conversion.py`, `documents.py`, `tables.py`): if it landed before G
+   and A4, Stage 3's real-system proof would run against Stage 4's parse
+   code, and neither stage's evidence would be clean. **The worker deploy
+   is scheduled straight after the cutover is verified**, not after the
+   `docflow_app` drop.
+2. **The live golden run stays** in the checkpoint's runs: about $0.05 for
+   the only end-to-end run against the real model.
 
 ---
 
