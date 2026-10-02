@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-10-02** (latest: **3e BUILT ("3e build -- as built", D-185); Q9 decided (20 minutes); PR next; `0036` not applied to staging before the `backup_0035` check, on or after 2026-10-05 03:18 UTC**. Earlier the same day: 3d merged, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184), recorded in PR #34; the two two-at-once sweep tests go to 3e). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
+commit as the slice. Statuses below are as of **2026-10-02** (latest: **3e BUILT ("3e build -- as built", D-185); Q9 decided (20 minutes); PR #35 open (every test 3e removed is named in its record); the CI runner pin is PR #36, merged after #35; `0036` not applied to staging before the `backup_0035` check, on or after 2026-10-05 03:18 UTC**. Earlier the same day: 3d merged, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184), recorded in PR #34; the two two-at-once sweep tests go to 3e). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -3773,6 +3773,26 @@ CI green, including the `0036` round trip and the four-login tests. The PR
 can merge before the cutover; `0036` reaches staging only after the
 `backup_0035` check (on or after 2026-10-05 03:18 UTC), and the staging
 suites run then (RUNBOOK 10.2).
+
+**Every test 3e removed, by name (founder, 2026-10-02: "a deleted test is
+the one change a green run can't show you").** Counts against main
+`f191e27` (run 37023497763): core 747 -> 745, api 587 -> 626, worker 167 ->
+180. Read from `pytest --collect-only` on both commits, which reproduces
+CI's counts exactly; the totals hide removals, so each suite was diffed by
+test ID. 17 IDs are gone; each one's check is still made, by the test named
+beside it:
+
+| Suite | Gone from main | Why | Where the check is now |
+|---|---|---|---|
+| core | `test_each_stripe_event_function_is_granted_the_same_way_in_the_migration_and_in_ci`, 13 cases (one per function: the 2 Stripe functions, 11 of 0035's) | It compared each function's `GRANT EXECUTE ... TO docflow_app` in its migration with the same grant in `scripts/ci/create_app_role.py`. 3e deleted that script: CI's roles now come from `0036` itself, so there is no second copy to keep in step | `test_migration_0036_grants_each_function_to_exactly_its_logins` (core): one test, all 16 functions (the 13, plus 0036's 3 new), the exact set of logins for each, and that each is revoked from `docflow_app` and PUBLIC first. Against the live database: `test_each_security_definer_function_is_callable_by_exactly_its_logins` (api, 16 cases; the same table, checked identical; also asserts `anon` and `authenticated` are refused) |
+| core | `test_ci_connects_as_the_non_bypassing_app_role` | CI connects as `docflow_app` no more | Renamed `test_ci_connects_as_the_four_logins`: each of the 5 URLs names its login, the worker job's own URL is `docflow_worker`, and `docflow_app` appears nowhere in `ci.yml`. NOBYPASSRLS is checked by `create_logins.py` and `test_each_login_connects_as_itself_and_is_only_a_member_of_docflow_tables` (api) |
+| core | `test_the_idle_transaction_timeout_is_the_same_in_the_migration_and_in_ci` | Read the timeout from the deleted script | Renamed `test_the_idle_transaction_timeout_is_the_same_for_docflow_app_and_the_four_logins`: `0028`'s value for `docflow_app`, and the same `5min` set four times in `0036` |
+| api | `test_only_the_app_role_may_execute_the_function` | The Stripe function moves from `docflow_app` to `docflow_stripe` (D-173) | Renamed `test_only_the_stripe_login_may_execute_the_function`: `docflow_stripe` may; the API, worker and admin logins, `anon` and `authenticated` are refused; no PUBLIC grant |
+| worker | `test_the_flag_lets_the_dispatcher_raise_only_its_four_tenant_less_alerts` | Name only: 3e adds a fifth (`worker_restarting`); the body is unchanged | Renamed `test_the_flag_lets_the_dispatcher_raise_only_its_tenant_less_alerts` |
+
+So core's net -2 is 15 IDs gone (the 13 cases and 2 renames) and 13 added
+(the grants test, the round-trip order test, 2 renames, 9 heartbeat tests).
+api: 1 renamed, 39 new. worker: 1 renamed, 13 new.
 
 ### Stage 2c and 2d -- agreed with the founder before building (2026-09-27)
 
