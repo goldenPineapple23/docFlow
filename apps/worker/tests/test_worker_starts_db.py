@@ -65,7 +65,11 @@ def test_each_start_is_recorded_and_counted_with_the_ones_before_it(machine):
     first = worker_starts.record_start()
     second = worker_starts.record_start()
     assert first is not None and second == first + 1
-    assert worker_starts.starts_last_hour() >= second
+    # /healthz reads the count as docflow_api; the worker's own login is not
+    # granted it (0036), so it is read here as the Console would.
+    with platform_session() as session:
+        shown = session.execute(text("SELECT public.worker_starts_last_hour()")).scalar_one()
+    assert shown >= second
 
 
 def test_the_third_start_in_an_hour_raises_one_high_alert_and_the_fourth_none(machine):

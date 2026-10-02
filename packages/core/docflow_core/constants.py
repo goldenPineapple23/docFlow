@@ -221,10 +221,14 @@ WORKER_RESTART_WINDOW_MIN = 60
 HEARTBEAT_PING_MIN = 5
 HEARTBEAT_PING_TIMEOUT_SECONDS = 5
 # A document dispatched but not claimed for longer than this sends the
-# heartbeat's /fail instead (Q2, approved at 10; Q9 open: the non-document
-# tasks share the documents worker's slots, and the longest hard limit among
-# them is the rollup's 15 minutes).
-DISPATCH_UNCLAIMED_ALERT_MIN = 10
+# heartbeat's /fail instead (Q2). 20, not the first-approved 10 (founder, Q9,
+# 2026-10-02): the non-document tasks share the documents worker's slots, and
+# the longest hard limit among them is the rollup's 15 minutes, so a healthy
+# worker can hold a dispatched document that long. It must stay below
+# STUCK_PROCESSING_TIMEOUT_MIN: the stuck sweep returns an unclaimed document
+# to waiting then, the next dispatch restarts its age, and a limit at or above
+# the sweep's could never fire (a test pins it).
+DISPATCH_UNCLAIMED_ALERT_MIN = 20
 
 
 def constants_in_effect(*names: str) -> dict[str, Any]:

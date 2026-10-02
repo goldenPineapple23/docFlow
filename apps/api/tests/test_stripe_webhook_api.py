@@ -36,7 +36,7 @@ import pytest
 from docflow_core import billing_webhooks, external_services
 from docflow_core.config import get_settings
 from docflow_core.constants import STRIPE_CLOCK_TOLERANCE_SECONDS
-from docflow_core.db import stripe_webhook_session, tenant_session
+from docflow_core.db import stripe_tenant_session, stripe_webhook_session, tenant_session
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
@@ -274,7 +274,7 @@ def test_the_event_id_is_recorded_in_the_same_transaction_as_the_status_write(cl
         event = _ev("atomic", customer, "past_due", int(time.time()))
 
         with pytest.raises(_ForceRollback):
-            with tenant_session(UUID(tenant_id)) as session:
+            with stripe_tenant_session(UUID(tenant_id)) as session:
                 outcome = session.execute(
                     text(
                         "SELECT record_stripe_subscription_event("
@@ -410,7 +410,7 @@ def test_the_lock_probe_does_fail_while_the_decision_transaction_is_open(client,
         now = int(time.time())
         _post(client, _ev("n1", customer, "active", now))
 
-        with tenant_session(UUID(tenant_id)) as session:
+        with stripe_tenant_session(UUID(tenant_id)) as session:
             outcome = session.execute(
                 text(
                     "SELECT record_stripe_subscription_event("
@@ -497,7 +497,7 @@ def test_the_function_refuses_a_customer_that_is_not_the_session_tenants(client,
         tenant_a, _customer_a = _tenant(client, console)
         _tenant_b, customer_b = _tenant(client, console)
         with pytest.raises(DBAPIError, match="not this tenant"):
-            with tenant_session(UUID(tenant_a)) as session:
+            with stripe_tenant_session(UUID(tenant_a)) as session:
                 session.execute(
                     text(
                         "SELECT record_stripe_subscription_event("

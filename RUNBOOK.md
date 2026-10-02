@@ -1209,7 +1209,12 @@ to 5:30 apart, inside the grace.
 - stop the documents worker taking work with the dispatch process running:
   the `/fail` e-mail within `DISPATCH_UNCLAIMED_ALERT_MIN` plus one pass.
 - record the largest unclaimed age seen during the 500 + 1 run (founder,
-  Q2), with the rollup and a sweep run during it (Q9).
+  Q2). **It must include the slow case** (founder, Q9): partway through,
+  trigger the rollup by hand (the Console's "recompute") and a sweep, so a
+  document waits behind them. Well under 20 minutes: keep 20. Near 20:
+  back to the founder before changing anything. Never raise it to 30 or
+  more: the stuck sweep returns an unclaimed document to waiting at 30 and
+  its next dispatch restarts the age, so the `/fail` could never fire.
 
 The rest of this section is about **the polled check for production's API
 (Phase 6)**, written on 2026-10-01 before 3e decided. The keyword itself is
@@ -1412,7 +1417,7 @@ The Console's health strip shows the same heartbeat, red past
 | `WORKER_RESTART_ALERT_STARTS` / `WORKER_RESTART_WINDOW_MIN` | 3 / 60 | `worker_restarting` (3e); the window is also in 0036's functions, a test keeps them equal |
 | `HEARTBEAT_PING_MIN` | 5 | At most one heartbeat ping this often (3e) |
 | `HEARTBEAT_PING_TIMEOUT_SECONDS` | 5 | A ping's own time limit; a failed ping never fails a pass |
-| `DISPATCH_UNCLAIMED_ALERT_MIN` | 10 | Dispatched and unclaimed this long sends `/fail` (Q2; Q9 open: 20 proposed) |
+| `DISPATCH_UNCLAIMED_ALERT_MIN` | 20 | Dispatched and unclaimed this long sends `/fail` (Q2; founder Q9: 20, above every non-document task's hard limit and below `STUCK_PROCESSING_TIMEOUT_MIN` (30), both pinned by a test) |
 
 ## 10. Database logins (Stage 3e, F-1)
 

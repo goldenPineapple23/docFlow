@@ -37,6 +37,9 @@ from tests.conftest import requires_console_schema
 pytestmark = requires_console_schema
 
 LOGINS = ("api", "worker", "admin", "stripe")
+# Lists go to Postgres as jsonb in this codebase (db.py registers the dumper),
+# so the ids travel as one comma-separated string.
+_THESE = "id = ANY(CAST(string_to_array(:ids, ',') AS uuid[]))"
 
 # The flag -> the one login its policies apply to (3e design, A2).
 FLAG_OWNER = {
@@ -104,7 +107,7 @@ def two_tenants() -> Iterator[tuple[str, str]]:
             )
     yield ids
     with platform_session() as session:
-        session.execute(text("DELETE FROM tenants WHERE id = ANY(CAST(:ids AS uuid[]))"), {"ids": list(ids)})
+        session.execute(text(f"DELETE FROM tenants WHERE {_THESE}"), {"ids": ",".join(ids)})
 
 
 @pytest.mark.parametrize("login", LOGINS)
@@ -164,8 +167,8 @@ def test_a_flag_that_opens_tenants_opens_it_only_on_its_own_login(flag, two_tena
     for login in LOGINS:
         with _as(login, **{flag: "true"}) as conn:
             seen = conn.execute(
-                text("SELECT count(*) FROM tenants WHERE id = ANY(CAST(:ids AS uuid[]))"),
-                {"ids": list(two_tenants)},
+                text(f"SELECT count(*) FROM tenants WHERE {_THESE}"),
+                {"ids": ",".join(two_tenants)},
             ).scalar_one()
         assert seen == (2 if login == owner else 0), (flag, login, seen)
 
@@ -179,8 +182,8 @@ def test_an_api_tenant_session_that_sets_every_flag_sees_only_its_own_tenant(two
         seen = [
             str(r[0])
             for r in conn.execute(
-                text("SELECT id FROM tenants WHERE id = ANY(CAST(:ids AS uuid[]))"),
-                {"ids": list(two_tenants)},
+                text(f"SELECT id FROM tenants WHERE {_THESE}"),
+                {"ids": ",".join(two_tenants)},
             )
         ]
     assert seen == [mine]

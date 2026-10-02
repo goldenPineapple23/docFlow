@@ -140,3 +140,24 @@ def test_only_the_dispatch_task_pings():
         and "heartbeat.after_pass" in path.read_text(encoding="utf-8")
     )
     assert callers == ["apps/worker/app/tasks/dispatch.py"]
+
+
+def test_the_unclaimed_limit_stays_below_the_stuck_sweeps_timeout_and_above_the_longest_other_task():
+    """Founder, Q9 (2026-10-02). Below: the stuck sweep returns a document
+    unclaimed for STUCK_PROCESSING_TIMEOUT_MIN to waiting, and its next
+    dispatch restarts the age (test_dispatch_db.py proves the restart), so a
+    limit at or above it could never fire. Above: every non-document task
+    shares the documents worker's slots, so a healthy worker can hold a
+    dispatched document for the longest of their hard limits."""
+    from docflow_core import constants
+
+    others = [
+        constants.EXPORT_TASK_TIME_LIMIT_SECONDS,
+        constants.IMPORT_TASK_TIME_LIMIT_SECONDS,
+        constants.ROLLUP_TASK_TIME_LIMIT_SECONDS,
+        constants.SCHEDULED_JOBS_TASK_TIME_LIMIT_SECONDS,
+        constants.LIFECYCLE_SWEEP_TASK_TIME_LIMIT_SECONDS,
+        constants.STUCK_SWEEP_TASK_TIME_LIMIT_SECONDS,
+    ]
+    assert max(others) < DISPATCH_UNCLAIMED_ALERT_MIN * 60
+    assert DISPATCH_UNCLAIMED_ALERT_MIN < constants.STUCK_PROCESSING_TIMEOUT_MIN

@@ -21,10 +21,9 @@ def test_a_stale_heartbeat_shows_stale(client, monkeypatch):
     )
     response = client.get("/healthz")
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "ok",
-        "dispatcher": {"heartbeat_age_seconds": DISPATCHER_STALE_MIN * 60 + 1, "stale": True},
-    }
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["dispatcher"] == {"heartbeat_age_seconds": DISPATCHER_STALE_MIN * 60 + 1, "stale": True}
 
 
 def test_a_fresh_heartbeat_shows_fresh(client, monkeypatch):

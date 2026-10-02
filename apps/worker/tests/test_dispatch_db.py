@@ -696,3 +696,26 @@ def test_the_unclaimed_age_is_the_oldest_document_dispatched_and_not_yet_claimed
         _set(claimed, "dispatched_at = now() - interval '35 minutes', status = 'processing'")
         age = heartbeat.unclaimed_age_seconds()
         assert age is not None and age >= 25 * 60
+
+
+def test_a_document_the_sweep_returns_to_waiting_starts_a_new_unclaimed_age_when_dispatched_again():
+    """Founder's Q9 condition 1: the stuck sweep clears dispatched_at after
+    STUCK_PROCESSING_TIMEOUT_MIN, and the next dispatch stamps it afresh. So
+    the heartbeat's unclaimed limit must stay below the sweep's timeout
+    (test_heartbeat.py pins the constants); this is the restart itself."""
+    with WorkerTestTenant("Acme Test Unclaimed Restart") as a:
+        (document_id,) = _waiting(a, 1, minutes_ago=90)
+        _set(document_id, "dispatched_at = now() - interval '45 minutes'")
+        result = stuck_documents.sweep_tenant(a.tenant_id, lambda _t, _d: None)
+        assert result.lost_jobs == [document_id]
+        assert _row(document_id)["dispatched_at"] is None
+        with dispatcher_session() as session:
+            assert session.execute(
+                text("SELECT public.mark_dispatched(:id)"), {"id": str(document_id)}
+            ).scalar_one()
+        with platform_session() as session:
+            age = session.execute(
+                text("SELECT extract(epoch from (now() - dispatched_at)) FROM documents WHERE id = :id"),
+                {"id": str(document_id)},
+            ).scalar_one()
+        assert 0 <= age < 60

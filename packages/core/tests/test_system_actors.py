@@ -10,7 +10,7 @@ from docflow_core import system_actors
 
 REPO = Path(__file__).resolve().parents[3]
 MIGRATION = REPO / "supabase" / "migrations" / "0028_system_actors.sql"
-CI_ROLE = REPO / "scripts" / "ci" / "create_app_role.py"
+LOGINS_MIGRATION = REPO / "supabase" / "migrations" / "0036_separate_logins.sql"
 CORE = REPO / "packages" / "core" / "docflow_core"
 
 
@@ -25,10 +25,13 @@ def test_every_system_actor_in_code_is_seeded_by_the_migration_with_the_same_id(
     assert seeded == {key: str(uuid) for key, uuid in system_actors.ALL.items()}
 
 
-def test_the_idle_transaction_timeout_is_the_same_in_the_migration_and_in_ci():
+def test_the_idle_transaction_timeout_is_the_same_for_docflow_app_and_the_four_logins():
+    """0028 set it on docflow_app; since Stage 3e, 0036 sets the same on each
+    of the four logins (CI's roles come from 0036 itself, so there is no
+    second copy to keep in step)."""
     value = re.compile(r"idle_in_transaction_session_timeout = '+(\w+)'+")
     assert value.findall(MIGRATION.read_text(encoding="utf-8")) == ["5min"]
-    assert value.findall(CI_ROLE.read_text(encoding="utf-8")) == ["5min"]
+    assert value.findall(LOGINS_MIGRATION.read_text(encoding="utf-8")) == ["5min"] * 4
 
 
 def test_no_code_writes_a_lifecycle_event_without_an_actor():
