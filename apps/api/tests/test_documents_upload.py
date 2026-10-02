@@ -195,8 +195,7 @@ def test_a_large_batch_goes_in_the_bulk_lane_and_a_small_one_in_interactive(clie
                 response = client.post(
                     "/documents/upload",
                     headers={"Authorization": f"Bearer {tenant.token()}"},
-                    files={"file": ("po.txt", f"PO TEST-{size}
-".encode(), "text/plain")},
+                    files={"file": ("po.txt", f"PO TEST-{size}\n".encode(), "text/plain")},
                     data={"batch_size": str(size)},
                 )
                 assert response.status_code == 200, response.text

@@ -16,6 +16,7 @@ CI on a database that holds nothing else waiting.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import signal
 import subprocess
@@ -79,12 +80,15 @@ def _waiting(tenant: WorkerTestTenant, n: int, *, lane: str, minutes_ago: int) -
             session.execute(
                 text(
                     "INSERT INTO documents (id, tenant_id, original_filename, storage_path, source, status, "
-                    "dispatch_lane, created_at) VALUES (:id, :t, 'po.txt', :p, 'upload', 'pending', :lane, "
-                    "now() - make_interval(mins => :ago) + make_interval(secs => :i))"
+                    "content_sha256, dispatch_lane, created_at) VALUES (:id, :t, 'po.txt', :p, 'upload', "
+                    "'pending', :sha, :lane, now() - make_interval(mins => :ago) + make_interval(secs => :i))"
                 ),
                 {
                     "id": str(document_id),
                     "t": str(tenant.tenant_id),
+                    # No file is stored (the stubbed work never reads one); the
+                    # hash is the real SHA-256 of these stated bytes.
+                    "sha": hashlib.sha256(b"dispatcher test document: no file is stored").hexdigest(),
                     "lane": lane,
                     "ago": minutes_ago,
                     "i": i,

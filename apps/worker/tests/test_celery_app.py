@@ -35,6 +35,7 @@ def test_a_worker_started_from_this_app_registers_the_extraction_task():
         "assert 'docflow.run_scheduled_jobs' in celery_app.tasks\n"
         "assert 'docflow.run_lifecycle_sweep' in celery_app.tasks\n"
         "assert 'docflow.sweep_stuck_documents' in celery_app.tasks\n"
+        "assert 'docflow.dispatch' in celery_app.tasks\n"
     )
     worker_root = Path(__file__).resolve().parents[1]
     result = subprocess.run([sys.executable, "-c", probe], cwd=worker_root, capture_output=True)

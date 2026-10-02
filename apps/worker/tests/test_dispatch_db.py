@@ -14,6 +14,7 @@ provider marked up, as they found it.
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from collections.abc import Iterator
 from uuid import UUID
@@ -38,6 +39,11 @@ pytestmark = [requires_stage3d_schema, pytest.mark.real_dispatch]
 
 WIDE_OPEN = 100_000  # a target no test reaches: every ready document is chosen, in turn order
 
+# The documents these tests insert have no stored file (the dispatcher never
+# reads one); their hash is the real SHA-256 of these bytes, never invented.
+NO_FILE = b"dispatcher test document: no file is stored"
+NO_FILE_SHA256 = hashlib.sha256(NO_FILE).hexdigest()
+
 _TENANT_LESS = ("model_api_failure", "model_api_recovered", "dispatcher_stopped", "routing_model_failure")
 
 
@@ -45,22 +51,29 @@ _TENANT_LESS = ("model_api_failure", "model_api_recovered", "dispatcher_stopped"
 
 
 def _waiting(tenant: WorkerTestTenant, n: int, *, minutes_ago: int, lane: str = "interactive") -> list[UUID]:
-    """n waiting documents, oldest first, one minute apart. No file: the
-    dispatcher never reads one."""
+    """n waiting documents, oldest first, one minute apart. No file is stored:
+    the dispatcher never reads one. The hash is the real SHA-256 of the
+    stated bytes (NO_FILE), never a made-up value."""
     with platform_session() as session:
         rows = session.execute(
             text(
                 """
                 INSERT INTO documents (id, tenant_id, original_filename, storage_path, source, status,
-                                       dispatch_lane, created_at)
-                SELECT gen_random_uuid(), :t, 'po.txt', 'tenants/' || :t || '/uploads/none.txt',
-                       'upload', 'pending', :lane,
-                       now() - make_interval(mins => :ago) + make_interval(mins => g)
+                                       content_sha256, dispatch_lane, created_at)
+                SELECT gen_random_uuid(), CAST(:t AS uuid), 'po.txt', :path, 'upload', 'pending',
+                       :sha, :lane, now() - make_interval(mins => :ago) + make_interval(mins => g)
                   FROM generate_series(0, :n - 1) AS g
                 RETURNING id, created_at
                 """
             ),
-            {"t": str(tenant.tenant_id), "n": n, "ago": minutes_ago, "lane": lane},
+            {
+                "t": str(tenant.tenant_id),
+                "path": f"tenants/{tenant.tenant_id}/uploads/none.txt",
+                "sha": NO_FILE_SHA256,
+                "n": n,
+                "ago": minutes_ago,
+                "lane": lane,
+            },
         ).all()
     return [UUID(str(r[0])) for r in sorted(rows, key=lambda r: r[1])]
 
@@ -90,19 +103,26 @@ def _provider_up() -> None:
     _delete_tenant_less_alerts()
 
 
-def _delete_tenant_less_alerts() -> None:
+def _delete_alerts(where: str, params: dict) -> None:
+    """The alerts first (they point at their emails), then their emails."""
     with platform_session() as session:
-        session.execute(
-            text(
-                "DELETE FROM email_outbox WHERE id IN (SELECT email_outbox_id FROM founder_alerts "
-                "WHERE tenant_id IS NULL AND type = ANY(:types))"
-            ),
-            {"types": list(_TENANT_LESS)},
-        )
-        session.execute(
-            text("DELETE FROM founder_alerts WHERE tenant_id IS NULL AND type = ANY(:types)"),
-            {"types": list(_TENANT_LESS)},
-        )
+        outbox = [
+            r[0]
+            for r in session.execute(
+                text(f"DELETE FROM founder_alerts WHERE {where} RETURNING email_outbox_id"), params
+            )
+            if r[0] is not None
+        ]
+        for outbox_id in outbox:
+            session.execute(text("DELETE FROM email_outbox WHERE id = :id"), {"id": str(outbox_id)})
+
+
+def _delete_tenant_less_alerts() -> None:
+    # Lists go to Postgres as jsonb in this codebase (db.py), so an array is
+    # built from a comma-separated string, as elsewhere.
+    _delete_alerts(
+        "tenant_id IS NULL AND type = ANY(string_to_array(:types, ','))", {"types": ",".join(_TENANT_LESS)}
+    )
 
 
 def _alerts(alert_type: str) -> list[dict]:
@@ -175,8 +195,11 @@ def test_candidates_list_only_documents_that_can_go_now_with_each_tenants_in_fli
 
         with dispatcher_session() as session:
             rows = session.execute(
-                text("SELECT * FROM public.dispatch_candidates(10) WHERE tenant_id = ANY(:t)"),
-                {"t": [str(a.tenant_id), str(b.tenant_id)]},
+                text(
+                    "SELECT * FROM public.dispatch_candidates(10) "
+                    "WHERE tenant_id = ANY(CAST(string_to_array(:t, ',') AS uuid[]))"
+                ),
+                {"t": f"{a.tenant_id},{b.tenant_id}"},
             ).mappings().all()
         assert {UUID(str(r["tenant_id"])) for r in rows} == {a.tenant_id}
         assert [UUID(str(r["document_id"])) for r in rows] == ready
@@ -543,15 +566,7 @@ def test_every_registered_alert_type_can_be_raised_end_to_end():
             }
         assert raised == set(founder_alerts.ALERT_TYPES)
     finally:
-        with platform_session() as session:
-            session.execute(
-                text(
-                    "DELETE FROM email_outbox WHERE id IN (SELECT email_outbox_id FROM founder_alerts "
-                    "WHERE payload->>'test' = :m)"
-                ),
-                {"m": marker},
-            )
-            session.execute(text("DELETE FROM founder_alerts WHERE payload->>'test' = :m"), {"m": marker})
+        _delete_alerts("payload->>'test' = :m", {"m": marker})
 
 
 def test_m6_the_rollups_stale_alert_is_raised_through_its_own_session():
@@ -580,17 +595,7 @@ def test_m6_the_rollups_stale_alert_is_raised_through_its_own_session():
     assert len(after) == 1, after
     ours = after - before
     if ours:
-        with platform_session() as session:
-            session.execute(
-                text(
-                    "DELETE FROM email_outbox WHERE id IN (SELECT email_outbox_id FROM founder_alerts "
-                    "WHERE id = CAST(:id AS uuid))"
-                ),
-                {"id": next(iter(ours))},
-            )
-            session.execute(
-                text("DELETE FROM founder_alerts WHERE id = CAST(:id AS uuid)"), {"id": next(iter(ours))}
-            )
+        _delete_alerts("id = CAST(:id AS uuid)", {"id": next(iter(ours))})
 
 
 # ── the functions themselves (Q8 condition) ──────────────────────────────────
@@ -615,10 +620,10 @@ def test_every_0035_function_is_security_definer_with_an_empty_search_path_and_n
                        (SELECT bool_or(has_function_privilege(r.rolname, p.oid, 'EXECUTE'))
                           FROM pg_roles r WHERE r.rolname IN ('anon', 'authenticated')) AS public_can
                   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-                 WHERE n.nspname = 'public' AND p.proname = ANY(:names)
+                 WHERE n.nspname = 'public' AND p.proname = ANY(string_to_array(:names, ','))
                 """
             ),
-            {"names": list(_FUNCTIONS)},
+            {"names": ",".join(_FUNCTIONS)},
         ).mappings().all()
     found = {r["proname"]: r for r in rows}
     assert set(found) == set(_FUNCTIONS)
