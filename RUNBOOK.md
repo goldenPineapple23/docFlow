@@ -158,7 +158,12 @@ follow-up, PR #29) merged. Since then:
     `f191e27`) and the worktree's `packages/core` first on `PYTHONPATH`,
     checked before each suite: `docflow_core.__file__` must be inside the
     worktree, or the run stops (the venvs' editable install points at the
-    main checkout, which is 3e's code);
+    main checkout, which is 3e's code). **For the API and worker suites,
+    `app.__file__` too** (founder, 2026-10-02): `app` isn't an installed
+    package, so pytest finds it from the suite's own folder, and the check
+    runs the same way, from the worktree's `apps/api` or `apps/worker`:
+    `python -c "import app, docflow_core; print(app.__file__); print(docflow_core.__file__)"`.
+    Both paths must be inside the worktree;
   - core, worker, API, one at a time (1.4).
 
   The report names the commit (`f191e27`) and the login (`docflow_app`)

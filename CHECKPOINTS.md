@@ -7,6 +7,186 @@ phase."
 
 ---
 
+## Phase 5.5 Stage 3 — Worker, storage, queue, database logins — DRAFT (2026-10-02), not complete
+
+**DRAFT.** Written ahead of its evidence so the founder can review the form
+and the gate split now. Every `[GAP: ...]` is a result that doesn't exist
+yet; nothing in a gap is a prediction. The checkpoint is complete when the
+gaps are filled, the suites below have passed, and the founder gives "go".
+
+Built as 3a (PR #26), 3b (PR #31), 3c (PR #32), 3d (PR #33) and 3e
+(PR #35), in that order, as agreed on 2026-09-29. Between them: the one-run
+test lock (PR #27, D-180), card billing with a trial (PRs #28 and #29,
+D-181), the PyJWT and Next.js security update (PR #30), the CI runner pin
+(PR #36) and the docs records (PRs #25, #34, #37). Migrations `0030` to
+`0035` are applied on `docflow-staging`; `0036` is merged and **not
+applied** (the logins cutover, RUNBOOK 10.2). Checkpoint run on `main` at
+`[GAP: the commit the checkpoint suites run on, after the cutover]`.
+
+### What the checkpoint needs, and what can follow
+
+Stage 3's findings are H5, H6, H4 (fairness) and F-1, plus D-163's run row.
+Each verdict needs proof on the real system it concerns (founder's standing
+rule: a fake-only proof is not done). Code and CI are done for all of them.
+What's left is proof on staging and on Fly. **Proposed (Q1 below):**
+
+| Item | Checkpoint? | Why |
+|---|---|---|
+| `backup_0034` check (3c ran cleanly for 3 days) | **Needed** | Staging evidence that 3c held. Suites at `f191e27`, as `docflow_app` (RUNBOOK 1.3) |
+| `backup_0035` check (3d ran cleanly for 3 days) | **Needed** | The same for 3d, and step 0 of the cutover |
+| Logins cutover, RUNBOOK 10.2 steps 0-6, verified | **Needed** | F-1's verdict: until `0036` is on staging and `docflow_app` is NOLOGIN, F-1 holds in CI only |
+| Staging suites on `main` as the four logins (10.2 step 5), plus the live golden run | **Needed** | The checkpoint's test runs of record (the two-at-once sweep tests and the restart record run here on staging's database) |
+| G (end to end through the queue and the parse service) and A4 against the real API and worker, on Fly | **Needed** | H5's verdict end to end: the parse service is proven alone on Fly (run 2); that the deployed worker reaches it, and the jobs can't reach the API, is proven only here |
+| The 500 + 1 staging run, including the slow case and the largest unclaimed age | **Needed** | H4's verdict at the scale the review measured (a 500-document backfill); CI proves the rule with a real Celery worker, not the scale |
+| A fresh `PARSE_SERVICE_TOKEN` | Needed **by dependency** | Not evidence, but G and the 500 + 1 run need the worker on Fly, and the founder gated that deploy on it |
+| Worker memory measured, and the founder's choice | Needed **by dependency** | The same: it gates the deploy that produces G and the 500 + 1 run |
+| Healthchecks.io heartbeat set up and tested to its pass marks (RUNBOOK 9.4) | Needed **by dependency** | The same |
+| Two-at-once sweep tests | Done (CI) | Built in 3e, green in CI (worker 180); they run again on staging in the step 5 run |
+| Restart record built and tested | Done (CI) | The same |
+| `docflow_app` dropped (10.2 step 7, 3 clean days after the cutover) | **Can follow** | Cleanup after F-1 is already enforced; it doesn't change a verdict |
+| `backup_0034` and `backup_0035` dropped | **Can follow** | The founder's own actions after each check |
+| Moving CI to Ubuntu 26 | **Can follow** | A deliberate CI change before 24.04 is retired, not Stage 3 work |
+
+So the checkpoint waits for the first worker deploy (RUNBOOK 9.2) and the
+runs made with it. The alternative is in Q1.
+
+### Test runs
+
+`[GAP: staging suites on main after the cutover, one at a time (RUNBOOK
+1.4), each as pytest printed it, with the login each ran as]`
+- **Core:** `[GAP]`
+- **Worker** (as `docflow_worker`): `[GAP]`
+- **API** (as `docflow_api`, `docflow_admin`, `docflow_stripe`): `[GAP]`
+- **Live** (`pytest -m live_api`: golden, golden with examples,
+  contamination): `[GAP]`, with each call's cost
+
+**The two backup checks:** `[GAP: backup_0034 check, on or after 2026-10-04
+20:53 UTC; backup_0035 check, on or after 2026-10-05 03:18 UTC. Each: the
+suites at f191e27 as docflow_app, with their summary lines, and the alert
+types RUNBOOK 1.3 names, counted since the merge]`
+
+**The cutover:** `[GAP: RUNBOOK 10.2 -- the snapshot compare (step 1),
+verify_logins and the second snapshot (step 5), every place docflow_app's
+URL lived and what became of it (step 6), the NOLOGIN time]`
+
+**The first worker deploy:** `[GAP: G; A4 against the real API and worker;
+the 500 + 1 run with its cost, its time, its slow case and the largest
+unclaimed age seen (back to the founder if it nears 20 minutes, Q9); the
+memory figures and the founder's choice; the heartbeat drill against its
+pass marks; the fresh token's set time on both apps]`
+
+**CI**, latest on `main` (`d004186`, run 37043224237, after 3e and the
+runner pin): core 745 tests, api 626, worker 180, parse unit 128 and HTTP
+56, each `0 failed, 0 skipped, 0 unapproved`; web 73 passed, web-live 3
+passed. The only warning is the known IPv6 one (the runner has no IPv6;
+IPv6 isolation is proven on Fly). `[GAP: CI on the checkpoint commit]`
+
+### Verdicts (draft; each one final only when its gap is filled)
+
+| Finding | Draft verdict | Evidence so far | Still owed |
+|---|---|---|---|
+| **H5** (quick part, 3a) No time limits or memory cap on any task | **Closed** | A hard limit per task, one retry after a timeout, then DOC-022 (D-179). Worker `test_time_limits_prefork.py`, a real prefork worker in CI: `test_a_hung_task_is_killed_the_worker_carries_on_and_a_timeout_gets_one_retry`, `test_a_worker_killed_outright_records_no_timeout_and_takes_the_worker_stopped_path` | Nothing |
+| **H5** (3c) Parsers ran inside the worker, which held every key | **Closed on the parse service; end to end owed** | `apps/parse`: one sandboxed job per file, isolation confirmed by the job itself, no keys in the service (D-183). CI: canary, A, S and B self-tests in the real sandbox, D1 parity on every fixture through the real service. **Fly staging run 2 (2026-10-01): every item PASS**, including A-net IPv6, cgroup v1, A3 against real Upstash and A4 against a stand-in (`docs/spikes/3c-fly-staging/2026-10-01-sha256-acc99434/`). API `test_parse_token_boundary.py`: the API never holds the parse token | G, and A4 against the real API and worker |
+| **H6** Files on one machine's disk | **Closed** | Supabase Storage, a private bucket, the prefix check on read, write and delete (D-182). Core `test_storage.py` (25), including `test_tenant_a_cannot_read_a_tenant_b_path_and_storage_is_never_contacted`; `test_storage_bucket_live.py` against the real bucket: `test_the_bucket_has_no_public_url`, `test_the_anon_key_reaches_no_file`, `test_a_customers_own_signed_in_token_reaches_no_file`, `test_a_hard_delete_empties_the_tenants_folder_in_the_real_bucket`. API `test_storage_outage_api.py`. Staging rollout 2026-09-30: 89 files copied and verified by SHA-256; 14 rows flagged and left out by the founder's choice (seed and test data) | Nothing |
+| **H4** (fairness, 3d) One tenant's backfill starved every other tenant | **Closed in CI; scale owed** | The dispatcher takes turns between tenants with a per-tenant cap; providers' outages are waits, not failures (D-184). Worker `test_dispatch_real_worker.py`, a real Celery worker and queue: `test_a_newcomer_gets_the_next_slot_and_a_tenants_single_order_beats_its_own_backfill`, `test_the_dispatch_process_reads_only_its_queue_and_never_claims_a_document`; `test_dispatch_db.py` (22) on the real database. Staging suites 2026-10-01 green on 3d's final code | The 500 + 1 run |
+| **H4** (matching speed) | **Not Stage 3** | Stage 4 (design proposed alongside this draft) | -- |
+| **F-1** Flag policies keyed on settings any connection could set | **Closed in CI; staging owed** | Four logins, each flag policy `TO` one login, functions granted login by login (D-185). API `test_logins_db.py` (13 tests, some per login or per function), including `test_every_flag_policy_applies_to_exactly_its_login`, `test_a_flag_that_opens_tenants_opens_it_only_on_its_own_login`, `test_each_security_definer_function_is_callable_by_exactly_its_logins`. `0036` round-tripped in CI (forward, reverse, forward) against staging's pre-0036 snapshot | The cutover, verified |
+| **D-173 residual risk** Any app code could call the Stripe event function | **Closed in CI; staging owed** | Only `docflow_stripe` may execute it: `test_only_the_stripe_login_may_execute_the_function`, `test_the_api_login_is_refused_the_stripe_event_function` | The cutover |
+| **D-163** A worker killed mid-call left the call uncosted | **Closed** | A `started` run row before every paid call (0034). Worker `test_stage3c_db.py`: `test_F3_a_worker_killed_during_the_model_call_leaves_the_call_on_the_cost_record`, `test_F3_a_finished_call_has_its_started_row_and_one_outcome`, `test_F3_the_database_refuses_a_started_row_that_claims_an_outcome`; core `test_D163_the_routing_call_has_a_started_row_before_it_and_its_outcome_points_at_it` | Nothing |
+| **M6** `rollup_stale` raised but never registered | **Closed** (fixed in 3d) | Registered; one test raises every registered type end to end | Nothing |
+| **Spike carry-ins** (D-150): hide `/.fly` and `/sys`; re-probe against the real Upstash and API | **Partly closed** | Hidden in the job's mount namespace and checked on Fly in run 2; A3 against the real Upstash passed there | The real API: A4 against the real target, with G |
+
+### What was built
+
+- **3a (D-179, `0030`):** hard time limits per task; a timeout written by
+  the worker's main process; one retry, then DOC-022; the owed Stripe cancel
+  retried by the lifecycle sweep; exports and imports that never finish
+  (EXP-009, IMP-009).
+- **3b (D-182, `0033`):** files in Supabase Storage through a
+  Storage-only key; a Storage outage waits, never fails; a refused stored
+  path is told apart from a missing one, and a cross-tenant path raises a
+  critical alert; DOC-025 to DOC-028.
+- **3c (D-183, `0034`):** the parse service on Fly, one sandboxed job per
+  file; the worker and API hold no parsing library; the run row before
+  every paid call; Debian from a dated snapshot, moved weekly by CI.
+- **3d (D-184, `0035`):** the dispatcher, per-tenant turns and caps;
+  provider, Storage and parse-service waits; `/healthz` with the
+  dispatcher's heartbeat; beat as its own process.
+- **3e (D-185, `0036`):** four database logins; the restart record and
+  `worker_restarting`; the Healthchecks.io heartbeat with `/fail` for a
+  document dispatched and unclaimed for 20 minutes; the two two-at-once
+  sweep tests; the tested reverse.
+- **Between slices:** the one-run test lock (D-180), card billing with a
+  7-day trial (D-181), the security update (#30), the CI runner pin (#36).
+
+### What was assumed
+
+- **Fly's machine restart policy** (`on-failure`, 10 retries counted within
+  5 minutes) is as Fly documents it; the restart record covers what it
+  doesn't (a slow crash loop).
+- **Healthchecks.io's free plan** is as its pricing page read on 2026-10-02
+  and Terms read on 2026-10-02 (20 checks; no commercial-use restriction
+  stated; at most 5 pings a minute per check).
+- **The pooler's headroom:** four logins at pool size 5 is 25 connections
+  against about 44 usable on Nano; production's pool size is a Phase 6
+  decision.
+- **A duplicate retry job can exist, by design** (3e, founder): the
+  document task's claim runs it once. Nobody should "fix" it into counting
+  jobs.
+
+### Found during Stage 3, not by the tests
+
+- **3b:** Supabase's bulk delete never worked (`DeleteObjects` needs its
+  body labelled `application/xml`); found on the first staging worker run.
+- **3c:** on Fly's cgroup v1 a dead process shows the root cgroup, so the
+  first orphan reaper reaped nothing there; found on Fly run 1 and fixed
+  before the merge.
+- **3d:** the agreed tie-break starved a newcomer at one slot (now "served
+  least recently"); the monitor keyword `"stale": false` could never match
+  the compact JSON the API sends.
+- **3e:** Better Stack's free plan is "for personal projects"; dispatched
+  documents could cycle unclaimed with no alert; the documents worker's
+  slots are shared with every other task, which set the unclaimed limit at
+  20 minutes; `create_logins.py` called a method psycopg's cursor doesn't
+  have, and every CI job stopped there until it was fixed.
+- **At the 3e merge:** the backup checks' rule "suites green on `main`"
+  became impossible once `main` needed `0036`; decided: suites at
+  `f191e27` (RUNBOOK 1.3).
+- **While drafting this:** the Phase 6 item on plan changes still said to
+  lower the idle-transaction cap "for `docflow_app` ... plus the CI role
+  script and its agreement test". After 3e the cap is set on the four logins
+  in `0036`, and the CI role script no longer exists. Corrected in
+  BUILD-STATUS in the same commit as this draft.
+
+### Open, carried forward
+
+- **Stage 4:** matching speed (`pg_trgm`, measured at 50k items) and the
+  broad-`except` audit. Design proposed with this draft; building waits for
+  this checkpoint's "go".
+- **Stage 5:** as listed in BUILD-STATUS (test hygiene, the D-178
+  audit-trail findings, the stranded test data, M7, M10, M11).
+- **Phase 6:** narrow `docflow_stripe`'s grants; production's polled
+  `/healthz` check; plan changes outside the transaction; the Sentry
+  scrubber; production's pool size.
+- **A representative cost sample** (scans, images, spreadsheets, long
+  orders): still not measured. The 500 + 1 run's documents will be the
+  first such sample, if its mix includes them.
+
+### Questions for the founder (this draft)
+
+1. **The gate split.** Proposed above: the checkpoint waits for the first
+   worker deploy, because G, A4 against the real targets and the 500 + 1
+   run are the real-system proof of H5 end to end and of H4 at scale. The
+   alternative: write the checkpoint once the cutover and the backup checks
+   are in, with H5 and H4 marked "closed in CI; Fly proof owed at the first
+   worker deploy", and give Stage 4 its "go" then. That starts Stage 4
+   sooner, but closes two findings on CI evidence alone, which your rule
+   says isn't done. Which?
+2. **The live golden run** is in the checkpoint's runs, as in Stages 1 and 2
+   (about $0.05). Keep it?
+
+---
+
 ## Phase 5.5 Stage 2 — Security and lifecycle — COMPLETE (2026-09-29), go given
 
 Built as 2a (PR #14), 2b (PR #15), 2c (PR #18, migration `0029` applied and
