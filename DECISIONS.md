@@ -2838,6 +2838,6 @@ The fresh backup challenge passed the step-up. The rotation then stopped at `QUA
 4. **Two stuck sweeps can both put the same retry on the queue: a duplicate retry job can exist, by design.** A retry changes no status, so compare-and-set doesn't guard it. The document task's claim runs it once and the second job does nothing. The two-at-once test checks that property (claimed once) and allows one or two queued jobs. **Don't "fix" it into counting jobs**: "queued once" isn't true and isn't what keeps documents safe (founder, 2026-10-02).
 5. **The local worker needs its own URL.** With one `.env` for the API, the worker and the scripts, a worker using `DATABASE_URL` would run its tenant sessions as `docflow_api`. So `WORKER_DATABASE_URL` and `API_DATABASE_URL` name those two logins where one machine holds both. Deployed, each app's `DATABASE_URL` is its own login.
 
-**Not applied to staging yet:** `0036` waits for the `backup_0035` check (on or after 2026-10-05 03:18 UTC; Q5 condition 1), so CI is the database proof until the cutover (RUNBOOK 10.2).
+**Merged** 2026-10-02 17:43 UTC (PR #35, `e99fbb9`). **Not applied to staging yet:** `0036` waits for the `backup_0035` check (on or after 2026-10-05 03:18 UTC; Q5 condition 1), so CI is the database proof until the cutover (RUNBOOK 10.2).
 
 **Related:** Sections 7.5, 7.9, 7.15.1; D-013, D-159, D-165, D-173, D-184; RUNBOOK 9.2-9.6 and 10.

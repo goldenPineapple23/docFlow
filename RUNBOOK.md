@@ -104,7 +104,8 @@ follow-up, PR #29) merged. Since then:
   taken 2026-10-01 before `0034`. **Founder, 2026-10-01: dropped after 3c
   has run cleanly on staging for 3 days** -- 3c merged 2026-10-01 20:53 UTC,
   so not before 2026-10-04 20:53 UTC, and only after Claude reports the
-  check (staging suites green on `main`; no `document_failed`,
+  check (staging suites green at `f191e27`, see "Which code the checks
+  run" below; no `document_failed`,
   `document_stuck`, `parse_service_unavailable` or `parse_seccomp_kill`
   alert on staging since the merge). The founder runs, in the SQL Editor on
   `docflow-staging` (no `cascade`, so nothing else can go with it):
@@ -122,7 +123,7 @@ follow-up, PR #29) merged. Since then:
   on staging for 3 days, counted from the 3d merge. 3d merged 2026-10-02
   03:18 UTC (PR #33, `4a2b907`), so not before **2026-10-05 03:18 UTC**,
   and only after Claude reports the check:
-  - the staging suites are green on `main`;
+  - the staging suites are green at `f191e27` (below);
   - no `document_failed`, `document_stuck`, `dispatcher_stopped` or
     `model_api_failure` alert on staging since the merge (DOC-024 arrives as
     `document_failed`).
@@ -137,6 +138,31 @@ follow-up, PR #29) merged. Since then:
   ```
 
   The date is recorded here and in BUILD-STATUS.
+- **Which code the checks run (founder, 2026-10-02, at the 3e merge):** both
+  checks run the staging suites at **`f191e27`**, not at `main`. `main`
+  holds 3e (merged 2026-10-02, PR #35), whose suites connect as the four
+  logins and test `0036`, and `0036` isn't on staging until the cutover,
+  which itself waits for the `backup_0035` check -- so `main`'s suites
+  can't pass on staging before then. `f191e27` is the last `main` before
+  3e; it differs from 3d's merge (`4a2b907`) only in `RUNBOOK.md` and
+  `docs/BUILD-STATUS.md`, so it is exactly the code staging's `0035` schema
+  expects. `main`'s suites run on staging for the first time at RUNBOOK
+  10.2 step 5, after `0036` is applied. How Claude runs them:
+  - in a **separate worktree** checked out at `f191e27`
+    (`git worktree add <scratch dir> f191e27`), never by moving the main
+    checkout back;
+  - **connecting as `docflow_app`**, the login `f191e27` uses (the
+    worktree's `.env` is a copy of the root `.env`, whose `DATABASE_URL` is
+    `docflow_app`; the copy is deleted with the worktree);
+  - with the existing venvs (no Python dependency changed after
+    `f191e27`) and the worktree's `packages/core` first on `PYTHONPATH`,
+    checked before each suite: `docflow_core.__file__` must be inside the
+    worktree, or the run stops (the venvs' editable install points at the
+    main checkout, which is 3e's code);
+  - core, worker, API, one at a time (1.4).
+
+  The report names the commit (`f191e27`) and the login (`docflow_app`)
+  beside each suite's own summary line.
 
 `docflow-prod` doesn't exist yet (Phase 6), so it has no backups.
 
@@ -1479,6 +1505,8 @@ The founder's conditions (2026-10-02, Q5) are steps 0, 1 and 6.
 5. **Claude verifies:** a second snapshot equals CI's forward state; each
    login connects as itself (`db.verify_logins`); then the staging suites
    (core, worker, API; RUNBOOK 1.4), reported with their own summary lines.
+   This is the first time `main`'s suites run on staging since 3e merged:
+   until `0036` is there, the backup checks run them at `f191e27` (1.3).
 6. **Before `docflow_app` is switched off, every place its URL lives is
    listed** and switched or removed: the local `.env` (and any other `.env*`
    in the repository, searched by name only), Fly secrets on every app
