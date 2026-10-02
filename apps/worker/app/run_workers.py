@@ -14,6 +14,11 @@ restarts the machine (its default `on-failure` policy, set explicitly in
 fly.toml): one never runs without the other. A stop signal (Fly sends SIGINT)
 is passed to both, and this exits 0 once both have ended.
 
+Before either starts (Stage 3e): it refuses to start holding another
+service's database URL or connecting as the wrong login, and it records the
+start, raising `worker_restarting` at 3 starts in an hour
+(docflow_core.worker_starts).
+
     python -m app.run_workers
 """
 
@@ -25,6 +30,7 @@ import sys
 import time
 from collections.abc import Mapping, Sequence
 
+from docflow_core import db, worker_starts
 from docflow_core.config import get_settings
 from docflow_core.constants import DISPATCH_QUEUE
 
@@ -88,5 +94,48 @@ def supervise(cmds: Mapping[str, Sequence[str]]) -> int:
     return 0 if stopping else 1
 
 
+def foreign_login_refusal() -> str | None:
+    """Why the worker must not start, or None (Stage 3e, A4). The worker holds
+    only its own login; the admin and Stripe logins live on the API, so either
+    URL here means a secret was put on the wrong app."""
+    settings = get_settings()
+    held = [
+        name
+        for name, value in (
+            ("ADMIN_DATABASE_URL", settings.admin_database_url),
+            ("STRIPE_DATABASE_URL", settings.stripe_database_url),
+            ("API_DATABASE_URL", settings.api_database_url),
+        )
+        if value
+    ]
+    if held:
+        return (
+            f"{', '.join(held)} set on the worker. The worker holds only its own login "
+            "(docflow_worker, in DATABASE_URL); remove the others from this app (RUNBOOK 10)."
+        )
+    return None
+
+
+def main() -> int:
+    """The worker machine's start: refuse a wrong configuration, record the
+    start (3e, part B), then run the two workers."""
+    refusal = foreign_login_refusal()
+    if refusal is not None:
+        print(f"run_workers refused to start: {refusal}", file=sys.stderr, flush=True)
+        return 1
+    db.use_own_login("worker")
+    try:
+        db.verify_logins(("worker",))
+    except db.WrongLoginError as exc:
+        print(f"run_workers refused to start: {exc}", file=sys.stderr, flush=True)
+        return 1
+    except Exception as exc:  # noqa: BLE001 -- unreachable, not wrong: start anyway
+        print(
+            f"run_workers: database unreachable at start ({type(exc).__name__})", file=sys.stderr, flush=True
+        )
+    worker_starts.record_start()
+    return supervise(commands())
+
+
 if __name__ == "__main__":
-    sys.exit(supervise(commands()))
+    sys.exit(main())

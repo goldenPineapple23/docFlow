@@ -95,6 +95,9 @@ ALERT_TYPES: dict[str, str] = {
     "model_api_recovered": "The model provider is back; waiting documents are going out",
     "dispatcher_stopped": "The dispatcher has stopped; documents are waiting",
     "routing_model_failure": "The routing model refused DocFlow; documents go without examples",
+    # Stage 3e (founder, 2026-10-01): raised by the worker's launcher at
+    # start-up, tenant-less, under the dispatcher flag (0036).
+    "worker_restarting": "The worker keeps restarting",
 }
 
 # Why a seccomp kill's alert has no syscall number (founder: say so when it

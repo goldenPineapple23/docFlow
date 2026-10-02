@@ -207,6 +207,29 @@ DISPATCH_TASK_TIME_LIMIT_SECONDS = 60
 # process reads only this queue and never claims a document).
 DISPATCH_QUEUE = "dispatch"
 
+# Stage 3e, the worker's restart record (founder, 2026-10-01): the launcher
+# records every start and raises `worker_restarting` (high, at most hourly)
+# when this many fall within WORKER_RESTART_WINDOW_MIN, this one included.
+# The window is also written into migration 0036's two functions; a test
+# keeps them equal.
+WORKER_RESTART_ALERT_STARTS = 3
+WORKER_RESTART_WINDOW_MIN = 60
+
+# Stage 3e, the external heartbeat (founder, 2026-10-02, Q1/Q7): the dispatch
+# process pings HEARTBEAT_URL (Healthchecks.io) at most this often, after a
+# pass that succeeded. The check there: period 5 minutes, grace 5.
+HEARTBEAT_PING_MIN = 5
+HEARTBEAT_PING_TIMEOUT_SECONDS = 5
+# A document dispatched but not claimed for longer than this sends the
+# heartbeat's /fail instead (Q2). 20, not the first-approved 10 (founder, Q9,
+# 2026-10-02): the non-document tasks share the documents worker's slots, and
+# the longest hard limit among them is the rollup's 15 minutes, so a healthy
+# worker can hold a dispatched document that long. It must stay below
+# STUCK_PROCESSING_TIMEOUT_MIN: the stuck sweep returns an unclaimed document
+# to waiting then, the next dispatch restarts its age, and a limit at or above
+# the sweep's could never fire (a test pins it).
+DISPATCH_UNCLAIMED_ALERT_MIN = 20
+
 
 def constants_in_effect(*names: str) -> dict[str, Any]:
     """The named constants' current values, for a lifecycle event's

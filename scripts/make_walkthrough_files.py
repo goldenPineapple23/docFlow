@@ -242,4 +242,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from docflow_core.db import use_own_login
+
+    use_own_login("admin")  # every script runs as docflow_admin (Stage 3e, Q8)
     raise SystemExit(main())

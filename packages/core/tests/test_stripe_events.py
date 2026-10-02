@@ -4,8 +4,9 @@ behaviour is tested against the real database in
 apps/api/tests/test_stripe_webhook_api.py; these hold the parts a reader can't
 see from there:
 
-- (The migration's grant and scripts/ci/create_app_role.py's are kept in step
-  by test_ci_guards.py, with the other checks on what CI sets up.)
+- (Since Stage 3e the grant is migration 0036's, to docflow_stripe only;
+  test_ci_guards.py checks the migration says it and
+  apps/api/tests/test_logins_db.py that the database does.)
 - The function hygiene D-173 requires: SECURITY DEFINER with a pinned
   search_path; EXECUTE revoked from PUBLIC and from Supabase's anon and
   authenticated roles.

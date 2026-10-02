@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from docflow_core import email_outbox, founder_alerts
 from docflow_core.config import get_settings
 from docflow_core.constants import CURE_PERIOD_DAYS, PAST_DUE_REMINDER_DAYS_BEFORE
-from docflow_core.db import tenant_session
+from docflow_core.db import stripe_tenant_session
 from docflow_core.errors import ErrorCatalogEntry, render_error
 
 logger = logging.getLogger(__name__)
@@ -224,9 +224,11 @@ def record_card_event(
     kind: str,
     amount_cents: int | None,
 ) -> str:
-    """Migration 0031's record_stripe_card_event(), in the tenant's own session,
-    with the founder alert its outcome calls for in the same transaction."""
-    with tenant_session(tenant_id) as session:
+    """Migration 0031's record_stripe_card_event(), in the tenant's own session
+    as docflow_stripe (Stage 3e: the only login that may execute it), with the
+    founder alert its outcome calls for in the same transaction. Called only
+    by the Stripe webhook (billing_webhooks)."""
+    with stripe_tenant_session(tenant_id) as session:
         outcome = str(
             session.execute(
                 text("SELECT record_stripe_card_event(:event_id, :event_type, :customer_id, :kind, :amount)"),

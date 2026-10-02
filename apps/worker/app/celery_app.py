@@ -28,11 +28,15 @@ from __future__ import annotations
 
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import worker_process_init
+from celery.signals import worker_init, worker_process_init
+from docflow_core import db
 from docflow_core.config import get_settings
 from docflow_core.constants import DISPATCH_INTERVAL_SECONDS, DISPATCH_QUEUE, WORKER_MAX_MEMORY_PER_CHILD_KIB
 
 settings = get_settings()
+
+# Stage 3e (F-1): every worker session runs as docflow_worker.
+db.use_own_login("worker")
 
 celery_app = Celery(
     "docflow_worker",
@@ -139,3 +143,22 @@ def _forget_inherited_db_connections(**_kwargs: object) -> None:
     from docflow_core.db import forget_inherited_connections
 
     forget_inherited_connections()
+
+
+@worker_init.connect
+def _check_own_login(**_kwargs: object) -> None:
+    """Stage 3e (A4): the worker's URL must connect as docflow_worker, or the
+    worker stops before taking a task (a pasted API URL would otherwise run
+    every job with the API's policies). Unreachable is logged, not fatal:
+    the heartbeat stops and the external monitor says so (RUNBOOK 9.4)."""
+    import logging
+
+    try:
+        db.verify_logins(("worker",))
+    except db.WrongLoginError as exc:
+        logging.getLogger("docflow.worker").critical("worker_refused_to_start %s", exc)
+        raise SystemExit(1) from None
+    except Exception as exc:  # noqa: BLE001 -- unreachable, not wrong
+        logging.getLogger("docflow.worker").error(
+            "login_startup_check_unreachable error_type=%s", type(exc).__name__
+        )

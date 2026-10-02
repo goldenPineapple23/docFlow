@@ -233,6 +233,9 @@ def clean(tenant_id: UUID) -> None:
 
 
 if __name__ == "__main__":
+    from docflow_core.db import use_own_login
+
+    use_own_login("admin")  # every script runs as docflow_admin (Stage 3e, Q8)
     if len(sys.argv) < 2:
         raise SystemExit(__doc__)
     tenant = UUID(sys.argv[1])

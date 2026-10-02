@@ -21,10 +21,13 @@ def test_a_stale_heartbeat_shows_stale(client, monkeypatch):
     )
     response = client.get("/healthz")
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "ok",
-        "dispatcher": {"heartbeat_age_seconds": DISPATCHER_STALE_MIN * 60 + 1, "stale": True},
-    }
+    body = response.json()
+    # Exactly these keys: /healthz is public in production (no sign-in), so a
+    # new field must be a deliberate change that updates this test (founder,
+    # 2026-10-02).
+    assert set(body) == {"status", "dispatcher", "worker_starts_last_hour"}
+    assert body["status"] == "ok"
+    assert body["dispatcher"] == {"heartbeat_age_seconds": DISPATCHER_STALE_MIN * 60 + 1, "stale": True}
 
 
 def test_a_fresh_heartbeat_shows_fresh(client, monkeypatch):
@@ -79,3 +82,23 @@ def test_healthz_reads_the_real_heartbeat_and_shows_only_its_age(client):
     age = body["dispatcher"]["heartbeat_age_seconds"]
     assert age is None or isinstance(age, int)
     assert body["dispatcher"]["stale"] == (age is None or age > DISPATCHER_STALE_MIN * 60)
+
+
+@requires_database
+def test_healthz_shows_the_workers_starts_in_the_last_hour(client):
+    """Stage 3e (part B): a worker restarting slowly keeps the heartbeat
+    fresh, so /healthz also shows the starts in the last hour -- a count,
+    through the API's own login (worker_starts_last_hour())."""
+    body = client.get("/healthz").json()
+    assert set(body) == {"status", "dispatcher", "worker_starts_last_hour"}
+    assert isinstance(body["worker_starts_last_hour"], int) and body["worker_starts_last_hour"] >= 0
+
+
+def test_an_unreadable_start_count_is_null_and_healthz_still_answers(client, monkeypatch):
+    def broken():
+        raise ConnectionError("database unreachable")
+
+    monkeypatch.setattr("app.main.worker_starts.starts_last_hour", broken)
+    response = client.get("/healthz")
+    assert response.status_code == 200
+    assert response.json()["worker_starts_last_hour"] is None
