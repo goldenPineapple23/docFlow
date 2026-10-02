@@ -2840,6 +2840,20 @@ the task's branches in `test_parse_and_extract.py`; `/healthz` in
 provider state by default (`conftest.py`), so no test can mark the shared
 database's provider down by accident.
 
+*CI:* the first run (`b7df093`) failed in test code only: ruff on an API test
+string the shell had mangled; 15 worker DB tests passing Python lists to
+`ANY()` (lists bind as jsonb in this codebase, so arrays are built with
+`string_to_array`, as elsewhere); the real-worker test missing
+`content_sha256`. Fixed in `f96db83`, which also deletes test alerts before
+their emails (foreign key) and adds `docflow.dispatch` to the
+fresh-interpreter registration probe. **CI GREEN on `f96db83`** (run
+36947657091): core 747, worker 161 (the real-worker fairness test included,
+on Linux), api 585, parse unit 128, parse HTTP 56, all 0 failed / 0 skipped;
+web, web-live and the parse self-tests as before (A-net IPv6 NOT-RUN on CI,
+as in 3c). **Next:** the founder backs up and applies `0035` on staging, then
+the staging suites (RUNBOOK 1.4), the PR, and the 500 + 1 staging run (its
+budget to the founder first).
+
 **Before the first pilot: measure the cost of the documents that cost the
 most** (founder, 2026-09-29). The 18 documents in the Stage 2 checkpoint's
 cost figures are all short, one-page text orders. On staging, measure cost
