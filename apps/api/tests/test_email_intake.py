@@ -385,7 +385,7 @@ def test_valid_tier1_attachment_creates_document_and_enqueues(client, monkeypatc
 
         # Stage 3d: the document waits as `pending` and the dispatcher is
         # nudged once; only the dispatcher sends the document task.
-        assert fake_celery.sent == [{"name": "docflow.dispatch", "args": None, "queue": "interactive"}]
+        assert fake_celery.sent == [{"name": "docflow.dispatch", "args": None, "queue": "dispatch"}]
 
 
 @requires_email_intake_schema

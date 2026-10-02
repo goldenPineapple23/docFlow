@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from celery import Celery
 from docflow_core.config import get_settings
+from docflow_core.constants import DISPATCH_QUEUE
 
 settings = get_settings()
 
@@ -22,5 +23,6 @@ celery_client = Celery("docflow_api_client", broker=settings.redis_url, backend=
 
 def nudge_dispatcher() -> None:
     """Start a dispatch pass now, after the caller's transaction has
-    committed. Passes never overlap, so extra nudges cost one quick no-op."""
-    celery_client.send_task("docflow.dispatch", queue="interactive")
+    committed. Passes never overlap, so extra nudges cost one quick no-op.
+    On the dispatch queue, which only the worker's dispatch process reads."""
+    celery_client.send_task("docflow.dispatch", queue=DISPATCH_QUEUE)

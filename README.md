@@ -36,7 +36,9 @@ uvicorn app.main:app --reload
 
 # Worker (needs Redis running -- Memurai on Windows, see DECISIONS.md D-095)
 # --pool=solo is required on Windows: Celery's default prefork pool does not run there.
-cd apps/worker && celery -A app.celery_app worker --loglevel=info --pool=solo -Q interactive,bulk
+# One solo process reads all three queues here; on Fly, app.run_workers gives the
+# dispatch queue a process of its own (Stage 3d).
+cd apps/worker && celery -A app.celery_app worker --loglevel=info --pool=solo -Q interactive,bulk,dispatch
 
 # Scheduler (a second terminal, alongside the worker). Every 5 minutes it asks
 # the worker to run due scheduled jobs -- the first-week check-in today, the

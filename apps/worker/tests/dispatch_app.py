@@ -8,7 +8,9 @@ work replaced at import, before the worker forks:
     records the claim's order in Redis, "reads" for WORK_SECONDS, and fails
     the document (DOC-008) to free its slot -- no file, no model;
   * the pass at the end of every task is the real `dispatch.run_pass`, with a
-    target of one slot (staging's) and sends to this test's own queue.
+    target of one slot (staging's) and sends to this test's own queue;
+  * the dispatch task, and a document task handed back from the dispatch
+    queue, send to this test's own queue too (`send_document`).
 
 Usage: python -m celery -A tests.dispatch_app worker --pool=prefork -c 2 -Q <queue>
 with DISPATCH_TEST_QUEUE and DISPATCH_TEST_ORDER_KEY set. Never import this
@@ -26,6 +28,7 @@ from docflow_core import dispatch, document_status
 from docflow_core.config import get_settings
 from docflow_core.db import tenant_session
 
+import app.tasks.dispatch as dispatch_task_module
 import app.tasks.parse_and_extract as task_module
 from app.celery_app import celery_app
 
@@ -59,5 +62,7 @@ def _work(tid: UUID, did: UUID) -> None:
 
 task_module._parse_and_extract = _work  # type: ignore[assignment]
 task_module.dispatch_after_task = lambda: dispatch.run_pass(send, target=TARGET)  # type: ignore[assignment]
+task_module.send_document = send  # type: ignore[assignment]
+dispatch_task_module.send_document = send  # type: ignore[assignment]
 
 app = celery_app

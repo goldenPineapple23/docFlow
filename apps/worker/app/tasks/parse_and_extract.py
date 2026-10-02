@@ -46,6 +46,7 @@ from docflow_core import (
 from docflow_core.buyers import identify_and_link_buyer
 from docflow_core.config import get_settings
 from docflow_core.constants import (
+    DISPATCH_QUEUE,
     DOCUMENT_TASK_TIME_LIMIT_SECONDS,
     PARSE_SERVICE_WAIT_RETRY_MINUTES,
     PROVIDER_MAX_WAIT_HOURS,
@@ -564,7 +565,14 @@ def parse_and_extract(tenant_id: str, document_id: str) -> None:
       founder is alerted: never in review with zero warnings.
     * **Then a dispatch pass** (Stage 3d, Q4): this process has just freed a
       slot, so the next waiting document goes now, not at the next beat.
+    * **Never on the dispatch queue** (founder, 2026-10-01): that queue's one
+      process must never hold a document. A document task that arrives there
+      claims nothing and is put on `interactive`, where it belongs.
     """
+    if (parse_and_extract.request.delivery_info or {}).get("routing_key") == DISPATCH_QUEUE:
+        logger.error("document_task_on_dispatch_queue document_id=%s resent=interactive", document_id)
+        send_document(UUID(tenant_id), UUID(document_id))
+        return
     try:
         _parse_and_extract(UUID(tenant_id), UUID(document_id))
     finally:

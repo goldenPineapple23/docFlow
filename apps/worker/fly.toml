@@ -21,7 +21,10 @@ primary_region = "iad"
 
 # Stage 3d (founder, 2026-10-01; BUILD-STATUS "3d -- APPROVED WITH CHANGES",
 # change C). Two process groups from one image:
-#   worker -- takes documents, sweeps and dispatch passes from both queues.
+#   worker -- app.run_workers: two Celery workers that live and die together
+#             (founder, 2026-10-01). `documents` (DISPATCH_IN_FLIGHT_TARGET
+#             processes) reads interactive and bulk; `dispatch` (one process)
+#             reads only the dispatch queue and never claims a document.
 #   beat   -- celery beat, its own process, EXACTLY ONE machine. It only sends
 #             the schedule (the dispatcher's 30 s backstop, the sweeps, the
 #             nightly rollup); it never runs a task itself.
@@ -30,7 +33,7 @@ primary_region = "iad"
 # 3c ran no beat on Fly; from 3d, run only one stack (local or Fly) against
 # staging at a time (RUNBOOK 9.3).
 [processes]
-  worker = "celery -A app.celery_app worker --loglevel=info -Q interactive,bulk"
+  worker = "python -m app.run_workers"
   beat = "celery -A app.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule"
 
 # Rolling updates each machine in place (stop, update, start), so a deploy
@@ -39,6 +42,14 @@ primary_region = "iad"
 # one (Fly's deploy docs, read 2026-10-01).
 [deploy]
   strategy = "rolling"
+
+# Fly's default, written down because app.run_workers depends on it: when one
+# of the two workers dies, run_workers stops the other and exits non-zero, and
+# Fly restarts the machine. A stop (SIGINT) exits 0 and is not restarted.
+[[restart]]
+  policy = "on-failure"
+  retries = 10
+  processes = ["worker"]
 
 [[vm]]
   size = "shared-cpu-1x"

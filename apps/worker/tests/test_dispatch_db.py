@@ -442,14 +442,21 @@ def test_a_document_waiting_six_hours_on_the_provider_fails_doc_024_and_alerts(c
 
 
 class _ProviderDownThenUp:
-    """The Anthropic client: raises the provider's 529 `failures` times, then
-    answers with `payload` (via the suite's FakeAnthropic)."""
+    """The Anthropic client: raises the provider's 529 (or `status`) `failures`
+    times, then answers with `payload` (via the suite's FakeAnthropic). The
+    exception is the SDK's own class for that status."""
 
-    def __init__(self, failures: int, payload: dict):
+    _ERRORS = {
+        529: ("InternalServerError", "overloaded_error", "Overloaded"),
+        401: ("AuthenticationError", "authentication_error", "invalid x-api-key"),
+    }
+
+    def __init__(self, failures: int, payload: dict, status: int = 529):
         from tests.db_helpers import FakeAnthropic
 
         self.left = failures
         self.answer = FakeAnthropic(payload)
+        self.status = status
 
     def __call__(self, *args, **kwargs):
         return self
@@ -473,10 +480,11 @@ class _ProviderDownThenUp:
             import anthropic
             import httpx2
 
+            cls, error_type, message = self._ERRORS[self.status]
             request = httpx2.Request("POST", "https://api.anthropic.test/v1/messages")
-            response = httpx2.Response(529, request=request, json={"type": "error", "error": {
-                "type": "overloaded_error", "message": "Overloaded"}})
-            raise anthropic.InternalServerError("Overloaded", response=response, body=response.json())
+            response = httpx2.Response(self.status, request=request, json={"type": "error", "error": {
+                "type": error_type, "message": message}})
+            raise getattr(anthropic, cls)(message, response=response, body=response.json())
         return self.answer.stream(**kwargs)
 
 
@@ -509,6 +517,35 @@ def test_waiting_never_costs_a_try_and_the_wait_is_cleared_on_success(monkeypatc
         assert row["status"] == "needs_review", row["failure_code"]
         assert row["processing_attempts"] == 1 and list(row["timeout_attempts"] or []) == []
         assert (row["waiting_since"], row["wait_cause"], row["retry_at"]) == (None, None, None)
+
+
+def test_one_401_puts_the_order_in_the_provider_wait_and_marks_the_provider_down_at_once(
+    monkeypatch, clean_provider
+):
+    """Founder, 2026-10-01 (3d build, finding 2): an `our_configuration`
+    hold shows "Delayed" at once. The worker's half: ONE real 401 from the
+    SDK, through the real task and the real provider row -- the order waits
+    on the model provider, the provider is down, one high alert. The API's
+    half (that this state reads "Delayed" with DOC-023) is
+    apps/api/tests/test_review_api.py."""
+    import app.tasks.parse_and_extract as task_module
+
+    monkeypatch.setattr(task_module, "dispatch_after_task", lambda: None)
+    with WorkerTestTenant("Acme Test Wrong Key") as tenant:
+        document_id = tenant.create_pending_document()
+        client = _ProviderDownThenUp(1, model_payload(lines=[{}]), status=401)
+        monkeypatch.setattr(task_module.anthropic, "Anthropic", client)
+        task_module.parse_and_extract(str(tenant.tenant_id), str(document_id))
+
+        row = _row(document_id)
+        assert (row["status"], row["wait_cause"], row["last_wait_error"]) == (
+            "pending", "model_provider", "http_401"
+        )
+        assert row["processing_attempts"] == 0
+        assert _provider_status() == "down"
+        down = _alerts("model_api_failure")
+        assert len(down) == 1 and down[0]["severity"] == "high"
+        assert down[0]["payload"]["cause"] == "our_configuration"
 
 
 def test_a_document_inside_its_backoff_is_not_claimed_by_a_stray_job(clean_provider):

@@ -4,10 +4,13 @@ process is deliberately separate from the FastAPI web app (apps/api), on
 its own deploy, so a crash here takes one document to `failed`, never the
 web app down.
 
-Two queues:
+Three queues:
   - "interactive": every document task, sent only by the dispatcher
-    (docflow_core.dispatch), plus the dispatch task itself and exports.
+    (docflow_core.dispatch), plus exports and imports.
   - "bulk": scheduled sweeps and other background work.
+  - "dispatch": the dispatch task, and nothing else. Read only by the worker
+    machine's one dispatch process (app.run_workers), never by the document
+    worker (founder, 2026-10-01).
 Celery's Redis transport takes turns between the queues a worker reads
 (kombu's round-robin queue order); it does NOT drain "interactive" first.
 Until Stage 3d this docstring claimed it did (a doc/code contradiction found
@@ -27,7 +30,7 @@ from celery import Celery
 from celery.schedules import crontab
 from celery.signals import worker_process_init
 from docflow_core.config import get_settings
-from docflow_core.constants import DISPATCH_INTERVAL_SECONDS, WORKER_MAX_MEMORY_PER_CHILD_KIB
+from docflow_core.constants import DISPATCH_INTERVAL_SECONDS, DISPATCH_QUEUE, WORKER_MAX_MEMORY_PER_CHILD_KIB
 
 settings = get_settings()
 
@@ -77,17 +80,17 @@ celery_app.conf.update(
     task_queues={
         "interactive": {"exchange": "interactive", "routing_key": "interactive"},
         "bulk": {"exchange": "bulk", "routing_key": "bulk"},
+        DISPATCH_QUEUE: {"exchange": DISPATCH_QUEUE, "routing_key": DISPATCH_QUEUE},
     },
     task_acks_late=True,
     worker_prefetch_multiplier=1,
-    # Stage 3d (founder, Q2): the worker's document slots ARE the
+    # Stage 3d (founder, Q2): the document worker's slots ARE the
     # dispatcher's in-flight target, set from the one setting so the two
-    # can't drift -- plus ONE process the dispatcher never fills, because it
-    # never puts more than the target in flight. That one is always free for
-    # the dispatch pass, the sweeps and exports, so a 15-minute order can't
-    # hold up the heartbeat and make /healthz read "stale" (gap 1). One
-    # worker machine; RUNBOOK 9.2 when adding workers.
-    worker_concurrency=settings.dispatch_in_flight_target + 1,
+    # can't drift. The dispatch pass has its own process on the same machine,
+    # reading only the dispatch queue (app.run_workers sets it to 1), so a
+    # 15-minute order can't hold up the heartbeat and make /healthz read
+    # "stale" (gap 1). RUNBOOK 9.2 when adding workers.
+    worker_concurrency=settings.dispatch_in_flight_target,
     # Stage 3a (review H5): a worker process is replaced after the task that
     # took it past this much memory. Time limits are per task, on each task's
     # decorator (hard only; see docflow_core.constants), and both need
@@ -121,7 +124,7 @@ celery_app.conf.update(
         "dispatch-waiting-documents": {
             "task": "docflow.dispatch",
             "schedule": DISPATCH_INTERVAL_SECONDS,
-            "options": {"queue": "interactive", "expires": DISPATCH_INTERVAL_SECONDS},
+            "options": {"queue": DISPATCH_QUEUE, "expires": DISPATCH_INTERVAL_SECONDS},
         },
     },
 )

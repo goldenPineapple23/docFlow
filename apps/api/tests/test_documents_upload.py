@@ -158,7 +158,7 @@ def test_upload_accepts_valid_file_and_enqueues(client, monkeypatch):
 
             # Stage 3d: the API never sends the document task. The document
             # waits as `pending`, and the dispatcher is nudged to take it.
-            assert fake_celery.sent == [{"name": "docflow.dispatch", "args": None, "queue": "interactive"}]
+            assert fake_celery.sent == [{"name": "docflow.dispatch", "args": None, "queue": "dispatch"}]
 
             with platform_session() as session:
                 row = session.execute(

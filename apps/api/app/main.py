@@ -202,7 +202,8 @@ def healthz() -> dict:
     DISPATCHER_STALE_MIN. No sign-in, so the age only -- no counts, no ids.
     Always HTTP 200: a platform check pointed here must never restart a
     healthy API because the worker is down. The external uptime monitor
-    (Phase 6, RUNBOOK) matches `"stale": false`.
+    (from the first worker deploy, RUNBOOK 9.4) matches the bytes
+    `"stale":false` -- compact JSON, no space (test_healthz_dispatcher.py).
     """
     try:
         dispatcher = dispatcher_health()

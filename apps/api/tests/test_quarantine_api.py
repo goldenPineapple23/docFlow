@@ -483,7 +483,7 @@ def test_release_goes_in_received_order_and_only_then_counts(client, celery):
         # once -- sends a tenant's waiting documents oldest first
         # (test_dispatch_db.py proves that order on the real database).
         assert response.json()["released"] == [str(oldest), str(middle), str(newest)]
-        assert celery.sent == [{"name": "docflow.dispatch", "args": None, "queue": "interactive"}]
+        assert celery.sent == [{"name": "docflow.dispatch", "args": None, "queue": "dispatch"}]
         assert t.used() == before + 3
         released = {d["id"]: d for d in t.docs()}
         assert all(

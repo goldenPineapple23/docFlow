@@ -39,7 +39,8 @@ COPY apps/worker/app /opt/worker/app
 WORKDIR /opt/worker
 ENV PATH=/opt/worker/venv/bin:/usr/bin:/bin
 USER docflow
-# The default process. On Fly, apps/worker/fly.toml's [processes] runs this
+# The default process: the document worker and the dispatch worker together
+# (app.run_workers). On Fly, apps/worker/fly.toml's [processes] runs this
 # image twice: `worker` (this command) and `beat`, exactly one machine
 # (Stage 3d, change C).
-CMD ["celery", "-A", "app.celery_app", "worker", "--loglevel=info", "-Q", "interactive,bulk"]
+CMD ["python", "-m", "app.run_workers"]

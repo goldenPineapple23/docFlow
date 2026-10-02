@@ -938,3 +938,40 @@ def test_every_document_task_ends_with_a_dispatch_pass_even_when_it_raises(monke
     with pytest.raises(RuntimeError):
         mod.parse_and_extract(str(uuid4()), str(uuid4()))
     assert request.node.dispatch_calls == [("dispatch",)]
+
+
+def test_a_document_task_delivered_on_the_dispatch_queue_claims_nothing_and_goes_to_interactive(
+    monkeypatch, request
+):
+    """Founder's condition (2026-10-01): the dispatch process never holds a
+    document. Delivered through the dispatch queue, the task neither reads
+    the document nor runs a pass; it is put on `interactive`. The same
+    through a real worker: test_dispatch_real_worker.py (Linux, CI)."""
+    from uuid import uuid4
+
+    from docflow_core.constants import DISPATCH_QUEUE
+
+    import app.tasks.parse_and_extract as mod
+
+    ran: list = []
+    sent: list = []
+    monkeypatch.setattr(mod, "_parse_and_extract", lambda tid, did: ran.append(did))
+    monkeypatch.setattr(mod, "send_document", lambda tid, did: sent.append((tid, did)))
+    request.node.dispatch_calls.clear()
+    tenant_id, document_id = uuid4(), uuid4()
+
+    mod.parse_and_extract.push_request(delivery_info={"routing_key": DISPATCH_QUEUE})
+    try:
+        mod.parse_and_extract(str(tenant_id), str(document_id))
+    finally:
+        mod.parse_and_extract.pop_request()
+    assert ran == [] and request.node.dispatch_calls == []
+    assert sent == [(tenant_id, document_id)]
+
+    # Through `interactive`, the same task reads the document as always.
+    mod.parse_and_extract.push_request(delivery_info={"routing_key": "interactive"})
+    try:
+        mod.parse_and_extract(str(tenant_id), str(document_id))
+    finally:
+        mod.parse_and_extract.pop_request()
+    assert ran == [document_id]

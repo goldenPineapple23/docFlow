@@ -42,7 +42,7 @@ from docflow_core import allowance, file_types, founder_alerts, intake_gate
 from docflow_core.config import get_settings
 
 # Named constants (Section 7.15.4) are defined once, in docflow_core.constants.
-from docflow_core.constants import MAX_ATTACHMENTS_PER_EMAIL, UNKNOWN_SENDER_HOURLY_LIMIT
+from docflow_core.constants import DISPATCH_QUEUE, MAX_ATTACHMENTS_PER_EMAIL, UNKNOWN_SENDER_HOURLY_LIMIT
 from docflow_core.db import intake_refusal_session, tenant_session, token_lookup_session
 from docflow_core.duplicates import find_content_duplicate_at_ingest
 from docflow_core.errors import render_error
@@ -866,6 +866,6 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
     # (tenant_session's __exit__), so the pass sees them -- mirrors
     # apps/api/app/routers/documents.py's upload endpoint.
     if pending_enqueues:
-        celery_client.send_task("docflow.dispatch", queue="interactive")
+        celery_client.send_task("docflow.dispatch", queue=DISPATCH_QUEUE)
 
     return ProcessResult(outcome=result_outcome, raw_email_id=raw_email_id, attachments=attachment_outcomes)

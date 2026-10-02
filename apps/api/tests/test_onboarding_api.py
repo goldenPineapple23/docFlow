@@ -251,7 +251,7 @@ def test_run_sends_the_batch_through_the_normal_pipeline_and_completion_waits_fo
         assert run.status_code == 200 and run.json() == {"started": 2}
         # Stage 3d: both wait as `pending` in the interactive lane, and the
         # dispatcher is nudged once; it sends them oldest first.
-        assert queue == [("docflow.dispatch", None, "interactive")]
+        assert queue == [("docflow.dispatch", None, "dispatch")]
         assert _scalar(
             "SELECT count(*) FROM documents WHERE tenant_id = :t AND status = 'pending' "
             "AND dispatch_lane = 'interactive' AND dispatched_at IS NULL",

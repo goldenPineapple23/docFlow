@@ -202,6 +202,10 @@ STORAGE_WAIT_RETRY_MINUTES = 5
 PARSE_SERVICE_WAIT_RETRY_MINUTES = 2
 # The dispatch task's own hard limit: a pass reads counts and marks rows.
 DISPATCH_TASK_TIME_LIMIT_SECONDS = 60
+# The queue only `docflow.dispatch` is sent to, read by the worker machine's
+# one dispatch process and nothing else (founder, 2026-10-01: the extra
+# process reads only this queue and never claims a document).
+DISPATCH_QUEUE = "dispatch"
 
 
 def constants_in_effect(*names: str) -> dict[str, Any]:

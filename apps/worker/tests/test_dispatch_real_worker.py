@@ -136,3 +136,67 @@ def test_a_newcomer_gets_the_next_slot_and_a_tenants_single_order_beats_its_own_
         claims = _claims(order_key)
         assert claims == [backfill[0], newcomer, single, *backfill[1:]], claims
         assert len(set(claims)) == 7  # each claimed once
+
+
+@pytest.fixture
+def dispatch_worker() -> Iterator[tuple[str, str]]:
+    """The dispatch worker exactly as app.run_workers starts it on Fly (its
+    command line, the real dispatch queue, one prefork process), on the test
+    app: what it sends goes to this test's own documents queue, which no
+    worker reads."""
+    from app.run_workers import commands
+
+    documents_queue = f"dispatch-test-docs-{uuid4().hex[:8]}"
+    order_key = f"{documents_queue}:claims"
+    env = {**os.environ, "DISPATCH_TEST_QUEUE": documents_queue, "DISPATCH_TEST_ORDER_KEY": order_key}
+    process = subprocess.Popen(
+        commands(app="tests.dispatch_app")["dispatch"], cwd=WORKER_ROOT, env=env, start_new_session=True
+    )
+    try:
+        yield documents_queue, order_key
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=30)
+        redis.Redis.from_url(get_settings().redis_url).delete(order_key, documents_queue)
+
+
+def test_the_dispatch_process_reads_only_its_queue_and_never_claims_a_document(dispatch_worker):
+    """Founder's condition on the extra process (2026-10-01). The dispatch
+    worker runs a real pass -- the order goes to the documents queue and
+    stays there, unclaimed -- and a document task put straight on the
+    dispatch queue is handed back to the documents queue, never claimed."""
+    from docflow_core.constants import DISPATCH_QUEUE
+
+    documents_queue, order_key = dispatch_worker
+    queue = redis.Redis.from_url(get_settings().redis_url)
+    before = dispatch.status().waiting
+    assert before == 0, f"{before} documents from other tenants are waiting on this database"
+
+    def unclaimed(document_id: UUID) -> None:
+        with platform_session() as session:
+            status, attempts = session.execute(
+                text("SELECT status, processing_attempts FROM documents WHERE id = :id"),
+                {"id": str(document_id)},
+            ).one()
+        assert (status, attempts) == ("pending", 0), (status, attempts)
+        assert _claims(order_key) == []
+
+    with WorkerTestTenant("Acme Test Dispatch Process") as a:
+        order = _waiting(a, 1, lane="interactive", minutes_ago=0)[0]
+
+        celery_app.send_task("docflow.dispatch", queue=DISPATCH_QUEUE)
+        _wait_for("the dispatch pass to send the order", lambda: queue.llen(documents_queue) == 1)
+        assert dispatch.status().age_seconds < 60  # the pass ran here, heartbeat and all
+        time.sleep(3)  # time enough to take it, if this process read that queue
+        assert queue.llen(documents_queue) == 1
+        unclaimed(order)
+
+        celery_app.send_task(
+            "docflow.parse_and_extract", args=[str(a.tenant_id), str(order)], queue=DISPATCH_QUEUE
+        )
+        _wait_for("the document task to be handed back", lambda: queue.llen(documents_queue) == 2)
+        assert queue.llen(DISPATCH_QUEUE) == 0
+        unclaimed(order)
