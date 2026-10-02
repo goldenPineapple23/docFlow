@@ -3006,6 +3006,18 @@ on core and the API but not on the worker app. Fixed with `Mapping`.
 Every other job was green on that run: core 747 tests, 0 skipped; api 587,
 0 skipped; parse unit 128 and HTTP 56; web 73; web-live 3.
 
+**CI GREEN on `d16e4e0`** (run 36957133781), every job, from each job's
+own counts notice: core `747 tests, 0 failed, 0 skipped, 0 unapproved`;
+api `587 tests, 0 failed, 0 skipped, 0 unapproved`; **worker `167 tests, 0
+failed, 0 skipped, 0 unapproved`**; parse unit 128 and HTTP 56 (both 0
+failed, 0 skipped); web 73 passed; web-live 3 passed. The parse
+self-tests are as before (canary 5, S 5, B 17, A with only IPv6 NOT-RUN).
+`.github/approved-skips.txt` is empty and a skip fails the job, so worker
+167 / 0 skipped means the Linux-only tests ran and passed. That includes
+the real-Celery fairness test and the dispatch-worker test. **The 3d merge
+gate is met:** CI green including those two, and the staging suites green.
+Next: the founder opens the PR; its own CI run must pass too.
+
 **Before the first pilot: measure the cost of the documents that cost the
 most** (founder, 2026-09-29). The 18 documents in the Stage 2 checkpoint's
 cost figures are all short, one-page text orders. On staging, measure cost
