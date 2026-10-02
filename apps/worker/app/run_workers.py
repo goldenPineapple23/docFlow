@@ -23,7 +23,7 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from docflow_core.config import get_settings
 from docflow_core.constants import DISPATCH_QUEUE
@@ -48,7 +48,7 @@ def commands(app: str = "app.celery_app") -> dict[str, list[str]]:
     }
 
 
-def supervise(cmds: dict[str, Sequence[str]]) -> int:
+def supervise(cmds: Mapping[str, Sequence[str]]) -> int:
     """Run every command; return when they have all ended. 0 if a stop signal
     ended them, 1 if one of them ended by itself."""
     children: dict[str, subprocess.Popen] = {}

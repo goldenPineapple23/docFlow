@@ -2999,6 +2999,13 @@ exactly them.
 - **The keyword test**, added after the API run had started, run on its own:
   `test_healthz_dispatcher.py` `5 passed in 0.60s`.
 
+*CI on `2d18b0f`* (run 36956558799): **worker failed at mypy**, so pytest
+never ran: `supervise()` took `dict[str, Sequence[str]]`, and a
+`dict[str, list[str]]` doesn't match (dict is invariant). I had run mypy
+on core and the API but not on the worker app. Fixed with `Mapping`.
+Every other job was green on that run: core 747 tests, 0 skipped; api 587,
+0 skipped; parse unit 128 and HTTP 56; web 73; web-live 3.
+
 **Before the first pilot: measure the cost of the documents that cost the
 most** (founder, 2026-09-29). The 18 documents in the Stage 2 checkpoint's
 cost figures are all short, one-page text orders. On staging, measure cost
