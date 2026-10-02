@@ -20,7 +20,7 @@ on:
 
 jobs:
   date:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       snapshot: ${{ steps.today.outputs.snapshot }}
     steps:
@@ -35,13 +35,13 @@ jobs:
 
   move-the-date:
     needs: [date, suite]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
       SNAPSHOT: ${{ needs.date.outputs.snapshot }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Set DEBIAN_SNAPSHOT in the Dockerfiles
         # The parse image (tested by the suite above) and the worker and API
         # images on Fly, which use the same base and snapshot.

@@ -4008,6 +4008,15 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 ## Known open items (across phases)
 
 - IIF export not yet validated against real QuickBooks Desktop (Phase 4).
+- **CI runner pinned to `ubuntu-24.04` (2026-10-02, founder's review of PR #35):**
+  `ubuntu-latest` moves to Ubuntu 26 from 2026-10-19, and the parse sandbox
+  tests depend on the runner's cgroup v2 and network setup. Both workflows now
+  name `ubuntu-24.04`; the actions moved to their Node 24 majors (checkout,
+  setup-node, setup-python and upload-artifact v7, setup-buildx v4, build-push
+  v7; `supabase/setup-cli` v2.1.2 already runs Node 24 inside). Moving to
+  Ubuntu 26 is its own tested change, before 24.04 is retired.
+  Known and approved: the parse self-test "A-net:internet-ipv6 NOT RUN (no
+  control)" warning; the runner has no IPv6 (on 229cc4b's run too).
 - Stuck-in-processing alert (7.9): built in Phase 5.5 Stage 1b, watching
   `pending` too (D-095, D-158).
 - **Very long orders (D-161):** measured and streamed in Stage 1c. Before, a non-streaming
