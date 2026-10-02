@@ -119,8 +119,9 @@ follow-up, PR #29) merged. Since then:
 - **`backup_0035`** (documents 105, founder_alerts 15, email_outbox 73;
   live = backup), taken 2026-10-01 before `0035`. **Founder, 2026-10-01:
   the same rule as `backup_0034`.** It is dropped after 3d has run cleanly
-  on staging for 3 days, counted from the 3d merge, and only after Claude
-  reports the check:
+  on staging for 3 days, counted from the 3d merge. 3d merged 2026-10-02
+  03:18 UTC (PR #33, `4a2b907`), so not before **2026-10-05 03:18 UTC**,
+  and only after Claude reports the check:
   - the staging suites are green on `main`;
   - no `document_failed`, `document_stuck`, `dispatcher_stopped` or
     `model_api_failure` alert on staging since the merge (DOC-024 arrives as
@@ -1075,7 +1076,10 @@ the same list as BUILD-STATUS "3d on staging"):
   minutes, raised by the launcher;
 - **the external uptime monitor, set up and tested.** Its approach is
   undecided: the staging API is private-only, so 3e chooses between polling
-  `/healthz` and a push heartbeat (9.4).
+  `/healthz` and a push heartbeat (9.4);
+- **the two two-at-once sweep tests** (founder, 2026-10-01): the
+  scheduled-jobs sweep and the stuck sweep, each run twice at once against
+  the real database, built in 3e and passing (9.3).
 
 **Measuring the worker machine's memory** (founder, 2026-10-01). The worker
 and the API stay off Fly until 3e gives them their own database logins, so
@@ -1148,15 +1152,17 @@ twice. The beat schedule is in `apps/worker/app/celery_app.py`
 
 | Beat task (interval) | The guard (code) | The test |
 |---|---|---|
-| `run_scheduled_jobs` (5 min) | Jobs claimed `FOR UPDATE SKIP LOCKED` (`scheduled_jobs.py` line 70) | **Guard only.** `test_scheduled_jobs.py` covers one sweep (a dead worker's job picked up again); no test runs two sweeps at once |
+| `run_scheduled_jobs` (5 min) | Jobs claimed `FOR UPDATE SKIP LOCKED` (`scheduled_jobs.py` line 70) | **Guard only until 3e.** `test_scheduled_jobs.py` covers one sweep (a dead worker's job picked up again); the two-at-once test is built in 3e |
 | `run_daily_rollup` (03:15 UTC) | Upsert `ON CONFLICT (tenant_id, day) DO UPDATE` (`metrics.py` line 155); `rollup_stale` deduped | `test_dashboard_api.py::test_running_a_day_twice_leaves_the_same_row` (one after the other; two at once rely on Postgres's `ON CONFLICT`) |
 | `run_lifecycle_sweep` (5 min) | Compare-and-set claim with the tenant row locked `FOR UPDATE` across the Stripe calls (`lifecycle.claim_for_suspend`) | `test_lifecycle_api.py::test_the_sweep_never_claims_a_tenant_twice` |
-| `sweep_stuck_documents` (5 min) | Every status change compare-and-set (`document_status.transition`); lost-call rows `ON CONFLICT DO NOTHING`; alerts deduped | **Guard only, tested in general.** `test_pipeline_integrity_db.py::test_H3_a_status_change_is_compare_and_set`; no test runs two sweeps at once |
+| `sweep_stuck_documents` (5 min) | Every status change compare-and-set (`document_status.transition`); lost-call rows `ON CONFLICT DO NOTHING`; alerts deduped | **Guard only until 3e, tested in general.** `test_pipeline_integrity_db.py::test_H3_a_status_change_is_compare_and_set`; the two-at-once test is built in 3e |
 | `dispatch` (30 s) | Transaction advisory lock `pg_try_advisory_xact_lock(3352026100)` (`dispatch.py`): a second pass returns at once | `test_dispatch_db.py::test_twenty_concurrent_passes_dispatch_every_document_exactly_once` |
 
 Two rows rest on the guard alone, with no test that fires the task twice:
-the scheduled-jobs sweep and the stuck sweep. Adding those two tests is
-proposed to the founder (BUILD-STATUS "3d on staging").
+the scheduled-jobs sweep and the stuck sweep. **Founder, 2026-10-01 (at
+the 3d merge): both tests are built in 3e**, not 3d and not Stage 5. Each
+runs its sweep twice at once against the real database and asserts that
+nothing is done twice. They gate the first worker deploy (9.2).
 
 ### 9.4 The external uptime monitor (from the first worker deploy)
 
