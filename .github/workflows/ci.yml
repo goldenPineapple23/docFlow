@@ -34,16 +34,21 @@ env:
   SUPABASE_JWT_SECRET: ci-local-only-jwt-secret-not-used-anywhere-else
   DOCUMENT_URL_SIGNING_SECRET: ci-local-only-signing-secret
 
+# Every job runs on ubuntu-24.04, not ubuntu-latest: the parse sandbox tests
+# depend on the runner's kernel, cgroup v2 and network setup, and
+# ubuntu-latest moves to Ubuntu 26 from 2026-10-19. Moving to a new image is
+# a change made and tested on its own branch, never a surprise on an
+# unrelated PR. The actions are the Node 24 majors (Node 20 is deprecated).
 jobs:
   web:
     name: web (lint, typecheck, test, build, e2e, audit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: apps/web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -75,9 +80,9 @@ jobs:
 
   web-live:
     name: web-live (the review screen against the real API)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v2.1.2
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
@@ -157,7 +162,7 @@ jobs:
             exit 1
           fi
           echo "$checked addresses checked."
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -177,7 +182,7 @@ jobs:
           done
           curl -sf http://127.0.0.1:8000/healthz
         working-directory: apps/api
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -204,7 +209,7 @@ jobs:
 
   core:
     name: core (lint, test, audit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       redis:
         image: redis:7
@@ -214,7 +219,7 @@ jobs:
       run:
         working-directory: packages/core
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v2.1.2
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
@@ -225,7 +230,7 @@ jobs:
       - name: Point Storage at this runner's own bucket (Stage 3b)
         working-directory: ${{ github.workspace }}
         run: python3 scripts/ci/local_storage_env.py
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -259,7 +264,7 @@ jobs:
 
   api:
     name: api (lint, typecheck, test, audit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       redis:
         image: redis:7
@@ -269,7 +274,7 @@ jobs:
       run:
         working-directory: apps/api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v2.1.2
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
@@ -280,7 +285,7 @@ jobs:
       - name: Point Storage at this runner's own bucket (Stage 3b)
         working-directory: ${{ github.workspace }}
         run: python3 scripts/ci/local_storage_env.py
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -297,10 +302,10 @@ jobs:
       # Stage 3c: the catalog tests run the worker's parse step
       # (catalog_import.run_parse), which reads through the real parse service
       # image, as in the worker job.
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build the parse service image
         id: parse_image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/parse/Dockerfile
@@ -336,7 +341,7 @@ jobs:
 
   worker:
     name: worker (lint, typecheck, test, audit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       redis:
         image: redis:7
@@ -346,7 +351,7 @@ jobs:
       run:
         working-directory: apps/worker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v2.1.2
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
@@ -357,7 +362,7 @@ jobs:
       - name: Point Storage at this runner's own bucket (Stage 3b)
         working-directory: ${{ github.workspace }}
         run: python3 scripts/ci/local_storage_env.py
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -374,10 +379,10 @@ jobs:
       # Stage 3c: the worker no longer opens files. Its tests read through the
       # real parse service image (isolation on, production mode), built here
       # from the parse job's layer cache.
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build the parse service image
         id: parse_image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/parse/Dockerfile
@@ -417,7 +422,7 @@ jobs:
     # image and exercises the real namespaces, cgroups (v2 here; Fly is v1,
     # so the Fly B tests gate production, RUNBOOK 8.1), seccomp and limits.
     name: parse service (lint, unit, image, sandbox, limits, audit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: apps/parse
@@ -427,8 +432,8 @@ jobs:
       # baseline was recorded on (tests/test_parity.py says why).
       PARITY_REENCODED: size
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -454,10 +459,10 @@ jobs:
         env:
           CI_STEPS: ${{ toJSON(steps) }}
         run: python "${{ github.workspace }}/scripts/ci/check_skips.py" parse junit-unit.xml
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build the production image
         id: image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/parse/Dockerfile
@@ -494,7 +499,7 @@ jobs:
         run: python "${{ github.workspace }}/scripts/ci/selftest_annotations.py" parse-selftest.txt
       - name: Keep the self-test evidence
         if: success() || failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: parse-selftest
           path: apps/parse/parse-selftest.txt
