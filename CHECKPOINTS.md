@@ -94,7 +94,13 @@ suites, at `f191e27`, in a worktree, connecting as `docflow_app` (RUNBOOK
   need Linux or CI's parse container (pytest's reasons, in the run's
   output); the same counts as 3d's final staging run. It took 20:32
   against about 12 minutes before; nothing failed.
-- **API:** `[GAP: running]`
+- **API:** `586 passed, 1 skipped, 3 deselected, 657 warnings in 2561.04s
+  (0:42:41)`, the count RUNBOOK 1.4 expects. The skip is
+  `test_parse_token_boundary.py` (it needs the real parse service with a
+  token; it runs in CI). The 3 deselected are the `live_api` tests.
+- **After the three suites** the alert query read the same: 15 rows, none
+  since either merge. The worktree and its copy of `.env` were then
+  deleted, and the parse service stopped.
 - **The parse service was started by hand** from the worktree's code, a
   departure from RUNBOOK 1.3 as it was written (the worktree has no
   `apps/parse/.venv`). `apps/parse` is the same at `f191e27` and `main`,
