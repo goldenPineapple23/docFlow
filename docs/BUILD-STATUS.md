@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-10-05** (latest: **the two backup checks run at `f191e27` as `docflow_app`: core 746 passed and 1 skipped, worker 161 passed and 6 skipped, API 586 passed, 1 skipped and 3 deselected, nothing failed; alerts empty, which carries no weight; `backup_0034`, `backup_0035` and `backup_3b` kept until the first worker deploy has processed real documents on staging (founder); staging confirmed at `0035`**. Earlier, 2026-10-02: **Stage 3 checkpoint DRAFTED (CHECKPOINTS.md, gaps for the cutover, the backup checks and the first worker deploy) and the Stage 4 design APPROVED WITH CHANGES (founder, 2026-10-02: Q1-Q15 decided; DOC-030, VAL-017 and VAL-018 final; PR 1's content final at `444dc78`, blocked only on the Stage 3 checkpoint's "go"), nothing built. The checkpoint waits for the first worker deploy, scheduled straight after the cutover is verified. Before that: 3e MERGED 2026-10-02 17:43 UTC (PR #35, `e99fbb9`, D-185) and the CI runner pin merged 17:48 UTC (PR #36, main `d004186`); the backup checks run the staging suites at `f191e27`, in a separate worktree as `docflow_app` (founder, PR #37; RUNBOOK 1.3); `0036` not applied to staging before the `backup_0035` check, on or after 2026-10-05 03:18 UTC**. Earlier the same day: 3d merged, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184), recorded in PR #34; the two two-at-once sweep tests go to 3e). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
+commit as the slice. Statuses below are as of **2026-10-05** (latest: **the logins cutover (RUNBOOK 10.2) started: step 1 passed, then stopped before `0036` on a gap in step 5 (CI's forward state was kept nowhere); the forward state is now a committed file, `0036_post_snapshot.json`, asserted in CI (D-188); staging still at `0035`**. Earlier the same day: **the two backup checks run at `f191e27` as `docflow_app`: core 746 passed and 1 skipped, worker 161 passed and 6 skipped, API 586 passed, 1 skipped and 3 deselected, nothing failed; alerts empty, which carries no weight; `backup_0034`, `backup_0035` and `backup_3b` kept until the first worker deploy has processed real documents on staging (founder); staging confirmed at `0035`**. Earlier, 2026-10-02: **Stage 3 checkpoint DRAFTED (CHECKPOINTS.md, gaps for the cutover, the backup checks and the first worker deploy) and the Stage 4 design APPROVED WITH CHANGES (founder, 2026-10-02: Q1-Q15 decided; DOC-030, VAL-017 and VAL-018 final; PR 1's content final at `444dc78`, blocked only on the Stage 3 checkpoint's "go"), nothing built. The checkpoint waits for the first worker deploy, scheduled straight after the cutover is verified. Before that: 3e MERGED 2026-10-02 17:43 UTC (PR #35, `e99fbb9`, D-185) and the CI runner pin merged 17:48 UTC (PR #36, main `d004186`); the backup checks run the staging suites at `f191e27`, in a separate worktree as `docflow_app` (founder, PR #37; RUNBOOK 1.3); `0036` not applied to staging before the `backup_0035` check, on or after 2026-10-05 03:18 UTC**. Earlier the same day: 3d merged, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184), recorded in PR #34; the two two-at-once sweep tests go to 3e). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -3862,6 +3862,35 @@ PR #38's web job failed on a new high advisory against `braces`
 `ci/web-audit-exception`) makes the audit pass exactly that advisory until
 2026-11-05 and fail on any other. Its own note is under "Known open
 items", added by that PR.
+
+**The logins cutover (RUNBOOK 10.2), started 2026-10-05** on the founder's
+go, given for after PRs #38, #39 and #40 had merged (main `e2f53c3`).
+- **Step 1, passed (15:52 UTC):** staging's snapshot, taken read-only as
+  `docflow_app`, is identical to `supabase/reverse/0036_pre_snapshot.json`:
+  80 policies, 13 functions, SHA-256 `11f4ebefb1ce...`. Staging at `0035`;
+  `founder_alerts` at 15 rows, the newest from 2026-09-30.
+- **Stopped before step 2, on a gap in the RUNBOOK (D-188).** Step 5
+  compares a second snapshot with "CI's forward state", and CI kept that
+  state nowhere: `migration_roundtrip.py` held it in memory. `0036` was
+  not applied. **Founder: commit the forward state.**
+- **Built (CI-only PR, branch `ci/0036-post-snapshot`):**
+  `supabase/reverse/0036_post_snapshot.json` (80 policies, 16 functions,
+  SHA-256 `81bd33599151...`), taken from CI's own run by the same snapshot
+  code; the round trip now fails unless its forward state equals that
+  file and its reversed state equals the pre file, and prints both
+  hashes on every run; RUNBOOK 10.2 step 5 compares by SHA-256, and
+  section 1 has the pattern for later migrations that change policies or
+  grants.
+- **The file is from CI, so it was checked independently** against
+  `0036`'s own statements: 51 policies changed, exactly the 51 named by
+  its `ALTER POLICY ... TO` statements (35 to `docflow_admin`, 10 to
+  `docflow_worker`, 5 to `docflow_api`, 1 to `docflow_stripe`; all were
+  `public`); 29 unchanged; one expression changed (`dispatcher_raise`
+  gains `worker_restarting`); none added or removed. Functions 13 to 16:
+  3 added, 13 re-granted from `docflow_app`, equal to `FUNCTION_GRANTS`;
+  `docflow_app` holds nothing. `test_policy_snapshots.py` keeps that
+  check in CI.
+- **Next:** this PR merges, then steps 2 to 4 (the founder), then step 5.
 
 ### Stage 4 detailed design -- APPROVED WITH CHANGES (founder, 2026-10-02; three more changes 2026-10-05); nothing built before the Stage 3 checkpoint's "go"
 

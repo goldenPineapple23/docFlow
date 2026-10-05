@@ -32,6 +32,26 @@ migration that **only creates Storage buckets** (inserts into
 1-2. There is nothing in it to restore. A migration that does anything else
 as well, even adding one policy, takes the backup as normal.
 
+**A migration that changes policies or grants** (the pattern from `0036`,
+founder, 2026-10-05). Rows have a backup; who-may-use-what has a snapshot
+(`scripts/ci/policy_snapshot.py`: every RLS policy on `public` and the
+EXECUTE grantees of every SECURITY DEFINER function). Such a migration
+ships with three files beside it in `supabase/reverse/`:
+- `NNNN_pre_snapshot.json`: staging before the migration, taken read-only;
+- `NNNN_post_snapshot.json`: the state after it, as CI's database shows it
+  through the same snapshot code;
+- `NNNN_reverse.sql`, if the founder asked for a tested way back.
+
+CI asserts both states on every push and prints their SHA-256s
+(`scripts/ci/migration_roundtrip.py` for `0036`). **The post file comes
+from CI, so CI agreeing with it shows only that it is pinned, not that it
+is right:** a test holds it to the migration's own statements and to a list
+a person wrote (for `0036`, `packages/core/tests/test_policy_snapshots.py`:
+only the named policies changed, and the function grants equal
+`FUNCTION_GRANTS`). At the cutover, the database's snapshot is compared
+with the pre file before applying and with the post file after, by
+SHA-256 (10.2 steps 1 and 5). Production compares with the same post file.
+
 ### 1.1 The standard backup (run before the migration)
 
 Replace `NNNN` with the migration's number and list every table the migration
@@ -247,6 +267,13 @@ How a run is reported:
 - Save each suite's full output to a file. Never cut it with `tail` or
   `head`: the exit code of the pipe replaces pytest's, so a failed run looks
   like it passed, and the failure details are lost.
+- **A commit or a push never shares a command with the checks that gate
+  it.** Run lint, the type check and the tests, read each one's own exit
+  code, and only then commit and push, as a separate command. On
+  2026-10-05 Claude pushed a script that didn't parse (`a810f92`): the
+  checks had failed, but they were piped and chained in front of the push,
+  so the push ran anyway. Fixed in the next commit; CI would have caught
+  it, but only after it was on GitHub.
 - Quote pytest's last line as printed. **The worker suite** should read
   `161 passed, 6 skipped` on this Windows machine (the six need Linux or
   CI's parse container) and takes about 20 and a half minutes on staging
@@ -1557,6 +1584,21 @@ The founder's conditions (2026-10-02, Q5) are steps 0, 1 and 6.
 5. **Claude verifies:** a second snapshot equals CI's forward state; each
    login connects as itself (`db.verify_logins`); then the staging suites
    (core, worker, API; RUNBOOK 1.4), reported with their own summary lines.
+   **The forward state is a committed file,
+   `supabase/reverse/0036_post_snapshot.json`** (founder, 2026-10-05; found
+   at this step on staging: CI used to hold that state in memory and throw
+   it away, so there was nothing to compare with). CI's round trip fails
+   unless its own forward state equals that file, and prints both states'
+   SHA-256s on every run. The comparison is by SHA-256, with the same code
+   CI uses:
+   ```
+   python scripts/ci/policy_snapshot.py "<URL>" > policy_snapshot_after_0036.json
+   python scripts/ci/policy_snapshot.py --sha256 policy_snapshot_after_0036.json supabase/reverse/0036_post_snapshot.json
+   ```
+   The two hashes must be equal, and equal to the "post-0036 state" hash on
+   `main`'s latest CI run. If they differ, `--diff <taken> <committed>`
+   names each policy or function that differs, and the cutover stops. The
+   file taken is kept with the evidence.
    This is the first time `main`'s suites run on staging since 3e merged:
    until `0036` is there, the backup checks run them at `f191e27` (1.3).
 6. **Before `docflow_app` is switched off, every place its URL lives is
@@ -1608,7 +1650,10 @@ back to its URL, since the four logins stop existing. It loses only the
 rows of `worker_starts`.
 
 **Production (Phase 6)** is created straight into this state: `0036` with
-the rest, then 10.2 steps 3-5. It never has `docflow_app`.
+the rest, then 10.2 steps 3-5. It never has `docflow_app`. Step 5's
+snapshot is compared with the same `0036_post_snapshot.json`, or with the
+post-state file of whichever later migration last changed a policy or a
+grant (section 1, "A migration that changes policies or grants").
 
 ### 10.3 Rotating one login's password
 

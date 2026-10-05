@@ -2878,3 +2878,25 @@ The fresh backup challenge passed the step-up. The rotation then stopped at `QUA
 **To do before 2026-11-05:** look for a patched `braces`, or a Next lint chain without it; then remove the line, or give it a new date and say why.
 
 **Related:** Section 5 (dependency audit in CI); D-148; `.github/approved-skips.txt` (the same rule for skipped tests).
+
+
+## D-188 — The state after a policy migration is a committed file, checked in CI and at every cutover (founder, 2026-10-05)
+
+**Context:** the logins cutover on staging (RUNBOOK 10.2) passed step 1 on 2026-10-05 and was stopped before `0036` was applied. Step 5 says "a second snapshot equals CI's forward state", and that state existed nowhere: `scripts/ci/migration_roundtrip.py` took it, compared forward -> reverse -> forward in memory, and discarded it. After applying `0036` there would have been nothing to prove staging had reached the state CI tested. Offered: a hash printed by CI plus an artifact, or a state derived from the migration file. The founder chose neither as offered.
+
+**Decided:**
+1. **The forward state is committed:** `supabase/reverse/0036_post_snapshot.json`, beside the pre-0036 snapshot. Not an artifact: artifacts expire, and production's cutover needs the same reference.
+2. **CI asserts both states.** The round trip fails unless its forward state equals the post file and its reversed state equals the pre file. Both SHA-256s are annotations on every run. On a difference, the differences are annotations, and so is the state CI found.
+3. **The cutover compares by SHA-256** with the same code (`policy_snapshot.py --sha256`), over the snapshot's canonical text, so line endings can't change it. RUNBOOK 10.2 step 5.
+4. **A file taken from CI is pinned, not proven.** It is also held, by a test, to things written independently of it: the migration's own `ALTER POLICY` statements and the hand-written `FUNCTION_GRANTS`.
+5. **The pattern for later migrations** that change policies or grants is in RUNBOOK section 1.
+
+**As built:**
+- The file came from CI's run on `2520e42` (run 37337590889), through its annotations, since job logs and artifacts need a GitHub sign-in this machine doesn't have. **It was accepted only because its SHA-256 equals the hash CI printed in that run** (`81bd3359915120f6f948fb42026f7befdcfaf6ccb4acc15d2a044c597e615f9d`); the run also uploads the state as the artifact `0036-forward-state`, as a second source.
+- **The independent check, with its counts:** 80 policies before and after, none added or removed. 51 changed, exactly the 51 named by `0036`: 35 to `docflow_admin`, 10 to `docflow_worker`, 5 to `docflow_api`, 1 to `docflow_stripe`, each from `public`. 29 unchanged. One expression changed: `dispatcher_raise` on `founder_alerts` gains `worker_restarting`. SECURITY DEFINER functions 13 to 16: 3 added (`record_worker_start`, `worker_starts_last_hour`, `dispatch_unclaimed_age`), all 13 re-granted from `docflow_app` to the logins in `FUNCTION_GRANTS`. `docflow_app` holds nothing; nothing is granted to PUBLIC.
+- The pre-0036 hash is `11f4ebefb1ce0e33c41c723dfe800694ff26657c38d3ae10439528b1242a9b2e`: the committed file, CI's state after the reverse, and staging at step 1 all have it.
+- Tests: `packages/core/tests/test_policy_snapshots.py`.
+
+**Also recorded:** the first push of this change (`a810f92`) didn't parse; the checks had failed but were chained in front of the push. RUNBOOK 1.4 now says a commit or push never shares a command with the checks that gate it.
+
+**Related:** Section 7.5; D-159, D-185; RUNBOOK 1 and 10.2; `supabase/reverse/`.
