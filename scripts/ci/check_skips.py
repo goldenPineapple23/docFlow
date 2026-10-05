@@ -18,6 +18,12 @@ where the test id is "<classname>::<name>" as JUnit records it, e.g.
 Stale approvals (listed, but the test ran) are reported, not failed, so that
 fixing an environment gap doesn't break the build; delete them when seen.
 
+A line whose suite is written "<suite-name>-staging" is a skip on
+docflow-staging only (founder, 2026-10-05; D-189). It approves nothing here.
+The opposite: that test MUST be in this job's report, passed, and the job
+fails if it is skipped, failed or missing. Its result is printed as an
+annotation, so the run page shows that it ran.
+
 It also lists failed tests as GitHub annotations (`::error::`), so a failure
 can be read from the run's summary page without opening the log.
 """
@@ -70,6 +76,42 @@ def failed_tests(junit_path: Path) -> list[tuple[str, str]]:
                 found.append((f"{case.get('classname', '')}::{case.get('name', '')}", first))
                 break
     return found
+
+
+def test_outcomes(junit_path: Path) -> dict[str, tuple[str, str]]:
+    """test id -> (passed | skipped | failed, seconds as JUnit records them)."""
+    found: dict[str, tuple[str, str]] = {}
+    for case in ET.parse(junit_path).iter("testcase"):
+        test_id = f"{case.get('classname', '')}::{case.get('name', '')}"
+        if case.find("failure") is not None or case.find("error") is not None:
+            outcome = "failed"
+        elif case.find("skipped") is not None:
+            outcome = "skipped"
+        else:
+            outcome = "passed"
+        if found.get(test_id, ("passed", ""))[0] == "passed":  # one bad entry is enough
+            found[test_id] = (outcome, case.get("time", "?"))
+    return found
+
+
+def check_must_run(suite: str, must_run: set[str], outcomes: dict[str, tuple[str, str]]) -> int:
+    """Each test that may skip on docflow-staging only must have run and
+    passed here. Prints one annotation per test; returns how many did not."""
+    not_proven = 0
+    for test_id in sorted(must_run):
+        outcome, seconds = outcomes.get(test_id, ("not in the report", ""))
+        if outcome == "passed":
+            print(
+                f"::notice title={suite}: must run in CI::{test_id}: ran and passed ({seconds}s). "
+                "It may skip on docflow-staging only."
+            )
+        else:
+            not_proven += 1
+            print(
+                f"::error title={suite}: must run in CI::{test_id}: {outcome}. "
+                "It may skip on docflow-staging only, so in CI it has to run and pass."
+            )
+    return not_proven
 
 
 def annotate_failures(suite: str, failures: list[tuple[str, str]]) -> None:
@@ -156,7 +198,9 @@ def main(argv: list[str]) -> int:
         print(f"  stale approval (test ran; remove it): {test_id}")
     for test_id, why in unapproved:
         print(f"  UNAPPROVED SKIP: {test_id}\n      reason given: {why}")
-    return 1 if unapproved else 0
+    must_run = read_approvals(approvals_path, f"{suite}-staging")
+    not_proven = check_must_run(suite, must_run, test_outcomes(junit_path))
+    return 1 if unapproved or not_proven else 0
 
 
 if __name__ == "__main__":

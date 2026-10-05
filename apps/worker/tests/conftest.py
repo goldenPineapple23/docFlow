@@ -244,3 +244,191 @@ def parse_service():
         os.environ.pop("PARSE_SERVICE_TOKEN", None)
         get_settings.cache_clear()
 
+
+# ── Stage 3e: the suite leaves `worker_starts` as it found it ──────────────
+# (founder, 2026-10-05; RUNBOOK 10.2 step 5.) `worker_starts` has no delete
+# path: no policy, no function. Until this date the restart-record tests
+# committed six starts a run, and each counts toward `worker_restarting`
+# (three in an hour) on a database a real worker shares. Now a test that
+# records a start does it inside `rolled_back_worker_starts`, and the session
+# checks itself at the end: no test kept a start, and the one number any login
+# can read (the starts in the last 60 minutes) did not go up.
+#
+# One test commits a start on purpose, to show it in the count /healthz reads.
+# It runs only where the database is thrown away with the job
+# (`throwaway_ci_database`), and the session expects exactly that one.
+from collections.abc import Callable, Iterator  # noqa: E402
+from contextlib import contextmanager  # noqa: E402
+
+
+class WorkerStartsCheck:
+    """What the session knows about the starts its own tests recorded."""
+
+    def __init__(self) -> None:
+        self.rolled_back = False  # a rolled_back_worker_starts block is open
+        self.kept: list[str] = []  # tests that recorded a start outside one
+        self.committing = False  # a worker_starts_committed_on_ci block is open
+        self.committed = 0  # starts committed inside one (CI's own database only)
+        self.before: int | None = None  # starts in the last 60 minutes, as the Console reads them
+        self.after: int | None = None
+        self.not_read: str | None = None  # why the count could not be read, if it couldn't
+
+    def watch(self, record_start: Callable[[], int | None]) -> Callable[[], int | None]:
+        def recorded() -> int | None:
+            starts = record_start()
+            if starts is None or self.rolled_back:
+                return starts
+            if self.committing:
+                self.committed += 1
+            else:
+                self.kept.append(os.environ.get("PYTEST_CURRENT_TEST", "a test"))
+            return starts
+
+        return recorded
+
+    def problems(self) -> list[str]:
+        out = [f"recorded a worker start outside rolled_back_worker_starts: {test}" for test in self.kept]
+        if (
+            self.before is not None
+            and self.after is not None
+            and self.after > self.before + self.committed
+        ):
+            out.append(
+                f"worker_starts_last_hour() went from {self.before} to {self.after} during the run, with "
+                f"{self.committed} committed on purpose: a start was committed that should not have been "
+                "(rows only leave that count by ageing out)"
+            )
+        return out
+
+    def summary(self) -> str:
+        if self.not_read:
+            return f"worker_starts: count not read ({self.not_read}); starts kept by tests: {len(self.kept)}"
+        return (
+            f"worker_starts in the last 60 minutes: before {self.before}, after {self.after}; "
+            f"starts kept by tests: {len(self.kept)}; committed on CI's own database: {self.committed}"
+        )
+
+
+WORKER_STARTS_CHECK = WorkerStartsCheck()
+
+
+def worker_starts_last_hour() -> int:
+    """The starts in the last 60 minutes, read as the Console would (docflow_admin)."""
+    from docflow_core.db import platform_session
+    from sqlalchemy import text
+
+    with platform_session() as session:
+        return int(session.execute(text("SELECT public.worker_starts_last_hour()")).scalar_one())
+
+
+@contextmanager
+def worker_starts_rolled_back() -> Iterator[None]:
+    """
+    Every start recorded inside this block is in ONE transaction on the
+    worker's own login, rolled back when the block ends. `record_start()`
+    still opens the real `dispatcher_session()`; only the connection under it
+    is this one, so each "commit" releases a savepoint and nothing more. The
+    real function, the real `dispatcher_raise` policy and the real unique
+    index all run. Nothing is left in `worker_starts`, `founder_alerts` or
+    `email_outbox`, and nothing that was already there is touched.
+    """
+    from docflow_core import db
+    from sqlalchemy.orm import sessionmaker
+
+    connection = db.engine_for("worker").connect()
+    outer = connection.begin()
+    joined = sessionmaker(bind=connection, expire_on_commit=False, join_transaction_mode="create_savepoint")
+    real_factory = db._session_factory
+
+    def factory(login: str):
+        return joined if login == "worker" else real_factory(login)
+
+    db._session_factory = factory
+    WORKER_STARTS_CHECK.rolled_back = True
+    try:
+        yield
+    finally:
+        WORKER_STARTS_CHECK.rolled_back = False
+        db._session_factory = real_factory
+        outer.rollback()
+        connection.close()
+
+
+_LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+def is_throwaway_ci_database(github_actions: str | None, worker_database_url: str) -> bool:
+    """Both must hold: this is a GitHub Actions runner, AND the worker's login
+    points at the runner's own Postgres. docflow-staging and production are
+    never on a loopback address, so neither can pass, whatever is set."""
+    from sqlalchemy.engine import make_url
+
+    if github_actions != "true" or not worker_database_url:
+        return False
+    try:
+        return make_url(worker_database_url).host in _LOOPBACK
+    except Exception:
+        return False
+
+
+def throwaway_ci_database() -> bool:
+    from docflow_core import db
+
+    return is_throwaway_ci_database(os.environ.get("GITHUB_ACTIONS"), db.login_url("worker"))
+
+
+requires_throwaway_ci_database = pytest.mark.skipif(
+    not throwaway_ci_database(),
+    reason=(
+        "commits a worker start, which nothing can delete: runs only on CI's own database "
+        "(GitHub Actions and a loopback database host); .github/approved-skips.txt, D-189"
+    ),
+)
+
+
+@contextmanager
+def worker_starts_committed_on_ci() -> Iterator[None]:
+    """The one place a test may commit a start. Refuses anywhere but CI's own
+    database, checked again here, at the moment of committing."""
+    assert throwaway_ci_database(), "refusing to commit a worker start: this is not CI's own database"
+    WORKER_STARTS_CHECK.committing = True
+    try:
+        yield
+    finally:
+        WORKER_STARTS_CHECK.committing = False
+
+
+@pytest.fixture
+def rolled_back_worker_starts() -> Iterator[None]:
+    with worker_starts_rolled_back():
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _worker_starts_left_as_found():
+    if not database_available():
+        yield
+        return
+    from docflow_core import worker_starts
+
+    check = WORKER_STARTS_CHECK
+    try:
+        check.before = worker_starts_last_hour()
+    except Exception as exc:  # a database without 0036, or no admin login here
+        check.not_read = type(exc).__name__
+    real = worker_starts.record_start
+    worker_starts.record_start = check.watch(real)
+    try:
+        yield
+    finally:
+        worker_starts.record_start = real
+    if check.not_read is None:
+        check.after = worker_starts_last_hour()
+    problems = check.problems()
+    assert not problems, "the suite changed worker_starts:\n" + "\n".join(problems)
+
+
+def pytest_terminal_summary(terminalreporter):
+    check = WORKER_STARTS_CHECK
+    if check.before is not None or check.not_read:  # not on a collect-only run
+        terminalreporter.write_line(check.summary())
