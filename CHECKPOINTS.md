@@ -146,9 +146,160 @@ suites, at `f191e27`, in a worktree, connecting as `docflow_app` (RUNBOOK
   keeping them costs nothing and risks nothing. Every backup table has RLS
   on.
 
-**The cutover:** `[GAP: RUNBOOK 10.2 -- the snapshot compare (step 1),
-verify_logins and the second snapshot (step 5), every place docflow_app's
-URL lived and what became of it (step 6), the NOLOGIN time]`
+**The cutover (RUNBOOK 10.2 on `docflow-staging`, 2026-10-05; all times
+UTC). Steps 1 to 6 are done; step 7 is not.** The evidence files are in
+`docs/cutover/0036-staging/`.
+
+- **Step 1, 15:52:** staging's snapshot, taken as `docflow_app`, was
+  identical to `supabase/reverse/0036_pre_snapshot.json`: 80 policies, 13
+  functions, SHA-256 `11f4ebefb1ce0e33c41c723dfe800694ff26657c38d3ae10439528b1242a9b2e`
+  (`policy_snapshot_before_0036.json`). Read again at 16:31, the same.
+- **Stopped before step 2** on a gap in the RUNBOOK: step 5 had no
+  reference state to compare with. Fixed first (D-188, PR #41).
+- **Steps 2 to 4, the founder, about 16:50:** `0036` applied, the four
+  logins turned on, the five URLs in the root `.env`. Checked without
+  showing a value: each URL well formed, four different passwords, each
+  connecting as its own login.
+- **Step 5, the snapshot, 16:52:31:** SHA-256
+  `81bd3359915120f6f948fb42026f7befdcfaf6ccb4acc15d2a044c597e615f9d`, equal
+  to `supabase/reverse/0036_post_snapshot.json` and to `main`'s CI; 0
+  differences; 80 policies, 16 functions
+  (`policy_snapshot_after_0036.json`). Taken again at 21:27:08, after the
+  last suite run: the same hash.
+- **Step 5, the logins:** `db.verify_logins` passes for all four; none is
+  a superuser or bypasses RLS. Read again after every suite run.
+- **Step 5, the suites, as the four logins, one at a time:**
+
+  | Suite | Commit | Line as printed | CI's count |
+  |---|---|---|---|
+  | core | `9fd519a` | `796 passed, 1 skipped in 43.53s` | 797 |
+  | worker | `9fd519a` | `2 failed, 172 passed, 6 skipped in 1275.38s (0:21:15)` | 180 |
+  | API | `9fd519a` | `1 failed, 624 passed, 1 skipped, 3 deselected, 657 warnings in 2783.15s (0:46:23)` | 626 |
+  | API, full re-run | `9fd519a` | `625 passed, 1 skipped, 3 deselected, 657 warnings in 2552.60s (0:42:32)` | 626 |
+  | worker | `6cac1bd` | `184 passed, 7 skipped in 1276.50s (0:21:16)` | 191 |
+  | core | `6cac1bd` | `805 passed, 1 skipped in 39.59s` | 806 |
+
+  - **The two worker failures were the tests, not `0036`** (D-189, PR
+    #42, `main` `6cac1bd`): the launcher tests cleared the other logins
+    from the environment but not from the root `.env`. The evidence the
+    founder asked for before any fix is in D-189.
+  - **The one API failure is recorded as transient** (founder,
+    2026-10-05; D-190). `test_11_attachments_quarantines_all_and_none_enqueued`
+    got 503 because an upload to Supabase Storage did not answer
+    (`ReadTimeoutError`; the client waits 30 s for an answer and tries
+    up to three times).
+    **Once in 1,252 API tests across the two full runs, and not
+    reproduced:** the test passed alone at 18:04, straight after that
+    run, and in the full re-run. The evidence:
+    1. **Supabase's status history has one incident open across the
+       run's window** (17:17 to 18:03 UTC): "Intermittent latency in
+       Eastern US", on its API Gateway, opened 2026-09-29 16:26 UTC
+       (https://stspg.io/gxmmvm5s9rh0). In its words, "increased latency
+       for clients in the eastern US", for "clients connecting to
+       Supabase Projects from the eastern United States ... regardless
+       of the region in which the Project is hosted". On 2026-10-02 it
+       said some users were "still experiencing issues during peak
+       Eastern US business hours"; its next update, "A fix for this
+       issue has been implemented", came at 18:45 UTC on 2026-10-05,
+       about 40 minutes after the run ended. This machine is in that region
+       (its clock is UTC-4) and the run was in the early afternoon
+       there. Supabase lists no Storage incident that day. **This fits
+       the timeout; it does not prove it.**
+    2. **The project's own Storage logs for that window:** `[GAP: read
+       by the founder in the Supabase dashboard; Claude has no access to
+       them]`
+    3. **What a real email meets when intake answers 503.** The whole
+       email is rolled back, so nothing is half received, and Postmark
+       sends it again. Its documentation ("Errors and retries",
+       https://postmarkapp.com/developer/webhooks/inbound-webhook, read
+       2026-10-05): "If Postmark does not receive a 200 response from a
+       webhook server, we will retry the POSTing the webhooks. If we
+       receive a 403 response, we will stop retries. A total of 10
+       retries will be made, with growing intervals." The schedule it
+       lists: 1, 5, 10, 10, 10, 15 and 30 minutes, then 1, 2 and 6 hours,
+       which is 10 hours 21 minutes in all. Then: "If all of the retries
+       have failed, your Inbound page will show the message as Inbound
+       Error." Intake answers 503 here and never 403
+       (`test_the_inbound_webhook_answers_503_during_an_outage_so_postmark_retries`),
+       and a second delivery of the same email is received once
+       (`test_duplicate_webhook_delivery_is_idempotent`). So one timeout
+       costs that email about a minute. **Two limits:** an outage longer
+       than about 10 hours leaves the message at "Inbound Error" until
+       someone retries it from Postmark by hand (now in RUNBOOK 7.3); and
+       none of this has been seen with a real email, because no Postmark
+       account exists yet (D-027).
+  - **The API suite was not run again on `6cac1bd`.** PR #42 changed no
+    file under `apps/api`, `packages/core/docflow_core`, `apps/worker/app`,
+    `apps/parse` or `supabase/migrations`.
+  - **Every skip is one this machine always has:** core's
+    `test_storage_bucket_live.py` (D-174), the API's
+    `test_parse_token_boundary.py`, the worker's six that need Linux or
+    CI's parse container, and since D-189 the one that commits a worker
+    start, which runs only in CI.
+  - **`worker_starts`:** 0 in the last hour before the `6cac1bd` worker
+    run (21:04:32) and 0 after it (21:25:56), read as `docflow_admin` and
+    as `docflow_api`. The suite's own line: `before 0, after 0; starts
+    kept by tests: 0`.
+  - **Which worker tests take the time,** measured for the first time
+    (`--durations=25`, the founder's request): one test,
+    `test_C1_property_random_decimals_survive_model_db_edit_approve_and_every_export`,
+    takes 255 to 269 s, about a fifth of the run. The next 24 take 16 to
+    36 s each: the dispatch, time-limit and pipeline-integrity tests.
+- **Step 5, alerts:** `founder_alerts` had 15 rows before `0036`, the
+  newest from 2026-09-30, and has the same 15 after every run.
+- **`main`'s CI on `6cac1bd`** (run 37373539167), all six jobs green: core
+  806, api 626, worker 191, parse 128 and 56, web 73, web-live 3. The
+  worker job shows `worker: must run in CI: ...
+  test_a_committed_start_appears_in_the_count_healthz_reads: ran and
+  passed`. Core and web passed on a re-run: GitHub had cancelled them
+  before they started ("The job was not acquired by Runner of type
+  hosted"), during its own Actions incident that day.
+- **Step 6, every place `docflow_app`'s URL lived:**
+
+  | Place | What became of it |
+  |---|---|
+  | The root `.env`, live setting | replaced by the four logins at step 4 |
+  | The root `.env`, a comment kept from step 4 | removed at 21:35, after the refusal was verified |
+  | `.env.example`, any other `.env*` in the repository | never held it |
+  | Fly secrets | none on the API and worker apps; only `PARSE_SERVICE_TOKEN` on parse |
+  | GitHub secrets and variables | none (the founder's check, both tabs) |
+  | A copy of the whole `.env` from 2026-09-28, in a folder beside the repository | **not on the RUNBOOK's list.** A local backup, never uploaded or shared (the founder); deleted by the founder and removed from the Recycle Bin, verified 18:37 |
+  | Claude Code's own files on this machine: two edit backups and two session transcripts | left in place; the URL in them stopped working at `NOLOGIN` |
+
+  The founder asked for a search of the whole user profile for other
+  copies. As run: files matched by name (`.env*`, `*env*.txt`, `*.env`)
+  and by content (the old URL, the service role key, the Anthropic key,
+  the four new passwords), 57,911 files seen and 42,233 read, plus the
+  twenty session transcripts over 5 MB read separately. Not covered:
+  browser profiles and app caches, game folders, zip files other than
+  those in Downloads, files over 5 MB, and 40 files that were locked.
+  The four new passwords are in the root `.env` and nowhere else.
+- **Step 6, `NOLOGIN`:** the founder ran `ALTER ROLE docflow_app NOLOGIN`
+  at about 21:32 (`rolcanlogin` false at 21:33:13). **The old URL still
+  connected.** The pooler held one open session for `docflow_app`, opened
+  at 21:31:22 by Claude's own first check, made before `NOLOGIN` had run;
+  `NOLOGIN` stops new logins, not open sessions, and the pooler handed
+  that session to each new attempt. The founder ended it
+  (`pg_terminate_backend`). **Refused at 21:35:02, three attempts of
+  three:** `FATAL:  (EAUTHQUERY) user not found in the database`. Only
+  then was the old URL removed from `.env`; the five settings were
+  checked again at 21:35:36. RUNBOOK 10.2 step 6 now has the missing
+  step.
+- **Step 7 (dropping `docflow_app`) is not done.** Decided (founder,
+  2026-10-05; D-190): only after the first worker deploy has processed
+  real documents on staging, the same trigger as the backups (D-186).
+  The RUNBOOK said "after 3e has run cleanly on staging for 3 days", and
+  nothing of 3e runs on staging until the worker is deployed.
+- **What was not expected, in one list** (10.2's stop rule: each stops
+  the first worker deploy until explained and the founder has said go):
+  the missing reference state at step 5 (D-188); the two worker test
+  failures and the six rows the suite left in `worker_starts` (D-189);
+  one Storage timeout in the API suite; the copy of `.env` outside the
+  repository; jobs cancelled by GitHub before they started, in the CI
+  runs on `69a2970` and on `6cac1bd`; the pooled session after
+  `NOLOGIN`. Each is explained above; the Storage timeout is
+  recorded as transient, with its evidence. **The first worker deploy
+  has not been started and waits for the founder's go.**
 
 **The first worker deploy:** `[GAP: G; A4 against the real API and worker;
 the 500 + 1 run with its cost, its time, its slow case and the largest
@@ -171,8 +322,8 @@ IPv6 isolation is proven on Fly). `[GAP: CI on the checkpoint commit]`
 | **H6** Files on one machine's disk | **Closed** | Supabase Storage, a private bucket, the prefix check on read, write and delete (D-182). Core `test_storage.py` (25), including `test_tenant_a_cannot_read_a_tenant_b_path_and_storage_is_never_contacted`; `test_storage_bucket_live.py` against the real bucket: `test_the_bucket_has_no_public_url`, `test_the_anon_key_reaches_no_file`, `test_a_customers_own_signed_in_token_reaches_no_file`, `test_a_hard_delete_empties_the_tenants_folder_in_the_real_bucket`. API `test_storage_outage_api.py`. Staging rollout 2026-09-30: 89 files copied and verified by SHA-256; 14 rows flagged and left out by the founder's choice (seed and test data) | Nothing |
 | **H4** (fairness, 3d) One tenant's backfill starved every other tenant | **Closed in CI; scale owed** | The dispatcher takes turns between tenants with a per-tenant cap; providers' outages are waits, not failures (D-184). Worker `test_dispatch_real_worker.py`, a real Celery worker and queue: `test_a_newcomer_gets_the_next_slot_and_a_tenants_single_order_beats_its_own_backfill`, `test_the_dispatch_process_reads_only_its_queue_and_never_claims_a_document`; `test_dispatch_db.py` (22) on the real database. Staging suites 2026-10-01 green on 3d's final code | The 500 + 1 run |
 | **H4** (matching speed) | **Not Stage 3** | Stage 4 (design proposed alongside this draft) | -- |
-| **F-1** Flag policies keyed on settings any connection could set | **Closed in CI; staging owed** | Four logins, each flag policy `TO` one login, functions granted login by login (D-185). API `test_logins_db.py` (13 tests, some per login or per function), including `test_every_flag_policy_applies_to_exactly_its_login`, `test_a_flag_that_opens_tenants_opens_it_only_on_its_own_login`, `test_each_security_definer_function_is_callable_by_exactly_its_logins`. `0036` round-tripped in CI (forward, reverse, forward) against staging's pre-0036 snapshot | The cutover, verified |
-| **D-173 residual risk** Any app code could call the Stripe event function | **Closed in CI; staging owed** | Only `docflow_stripe` may execute it: `test_only_the_stripe_login_may_execute_the_function`, `test_the_api_login_is_refused_the_stripe_event_function` | The cutover |
+| **F-1** Flag policies keyed on settings any connection could set | **Closed in CI and on staging; the deployed apps owed** | Four logins, each flag policy `TO` one login, functions granted login by login (D-185). API `test_logins_db.py` (13 tests, some per login or per function), including `test_every_flag_policy_applies_to_exactly_its_login`, `test_a_flag_that_opens_tenants_opens_it_only_on_its_own_login`, `test_each_security_definer_function_is_callable_by_exactly_its_logins`. `0036` round-tripped in CI (forward, reverse, forward) against staging's pre-0036 snapshot. **On staging since 2026-10-05** ("The cutover", above): the snapshot equals the committed post-0036 state, the API suite with these tests passed as the four logins (`625 passed, 1 skipped, 3 deselected`), and `docflow_app` is `NOLOGIN` and refused | The worker and the API deployed on their own logins (the first worker deploy); step 7, dropping `docflow_app` |
+| **D-173 residual risk** Any app code could call the Stripe event function | **Closed in CI and on staging** | Only `docflow_stripe` may execute it: `test_only_the_stripe_login_may_execute_the_function`, `test_the_api_login_is_refused_the_stripe_event_function`. Both passed on staging as the four logins on 2026-10-05, and the function's grant there is `docflow_stripe` alone (the post-0036 snapshot) | -- |
 | **D-163** A worker killed mid-call left the call uncosted | **Closed** | A `started` run row before every paid call (0034). Worker `test_stage3c_db.py`: `test_F3_a_worker_killed_during_the_model_call_leaves_the_call_on_the_cost_record`, `test_F3_a_finished_call_has_its_started_row_and_one_outcome`, `test_F3_the_database_refuses_a_started_row_that_claims_an_outcome`; core `test_D163_the_routing_call_has_a_started_row_before_it_and_its_outcome_points_at_it` | Nothing |
 | **M6** `rollup_stale` raised but never registered | **Closed** (fixed in 3d) | Registered; one test raises every registered type end to end | Nothing |
 | **Spike carry-ins** (D-150): hide `/.fly` and `/sys`; re-probe against the real Upstash and API | **Partly closed** | Hidden in the job's mount namespace and checked on Fly in run 2; A3 against the real Upstash passed there | The real API: A4 against the real target, with G |
