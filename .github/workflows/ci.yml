@@ -88,10 +88,14 @@ jobs:
       # review date: the job warns for 7 days before, then fails again. npm
       # exits non-zero when it finds anything, so its exit code is dropped and
       # the check reads the report; a report it can't read fails.
+      # The second report leaves dev dependencies out and can only add a
+      # failure: an exception is for a dev-only advisory, so an excepted
+      # advisory that shows up there too fails the job.
       - name: Dependency audit (fail on high/critical; exceptions in .github/audit-exceptions.txt)
         run: |
           npm audit --json > npm-audit.json || true
-          python3 "${{ github.workspace }}/scripts/ci/npm_audit.py" web npm-audit.json
+          npm audit --omit=dev --json > npm-audit-runtime.json || true
+          python3 "${{ github.workspace }}/scripts/ci/npm_audit.py" web npm-audit.json npm-audit-runtime.json
 
   web-live:
     name: web-live (the review screen against the real API)

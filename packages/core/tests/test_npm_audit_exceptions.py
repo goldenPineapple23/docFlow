@@ -4,8 +4,10 @@ The web dependency audit passes one named advisory and nothing else
 
 `fixtures/npm_audit/web_2026-10-05.json` is npm's own report for apps/web on
 2026-10-05, unedited: five packages marked high, all through one advisory,
-GHSA-vfj7-8cjw-p6xm (braces, reached only through the lint chain). The planted
-advisories below are made up and named so.
+GHSA-vfj7-8cjw-p6xm (braces, reached only through the lint chain).
+`web_runtime_2026-10-05.json` is the same day's `npm audit --omit=dev`, also
+unedited: nothing reported. The planted advisories and the planted runtime
+path below are made up and named so.
 """
 
 import copy
@@ -20,6 +22,7 @@ REPO = Path(__file__).resolve().parents[3]
 WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 EXCEPTIONS = REPO / ".github" / "audit-exceptions.txt"
 REPORT = Path(__file__).parent / "fixtures" / "npm_audit" / "web_2026-10-05.json"
+RUNTIME_REPORT = Path(__file__).parent / "fixtures" / "npm_audit" / "web_runtime_2026-10-05.json"
 
 BRACES = "GHSA-vfj7-8cjw-p6xm"
 PLANTED = "GHSA-0000-0000-0000"
@@ -66,11 +69,52 @@ def _plant(report: dict, severity: str, advisory: str = PLANTED) -> dict:
     return planted
 
 
-def _run(report, capsys, exceptions=None, today=BEFORE_REVIEW) -> tuple[int, str]:
+def _runtime_report() -> dict:
+    return json.loads(RUNTIME_REPORT.read_text(encoding="utf-8"))
+
+
+def _braces_through_a_runtime_dependency() -> tuple[dict, dict]:
+    """The planted runtime path: a made-up runtime package starts depending on
+    braces. npm then reports the same advisory with dev dependencies left out
+    too, so braces (npm's own entry, unedited) and the package that brought it
+    appear in both reports."""
+    full = _report()
+    carrier = {
+        "name": "acme-test-runtime-package",
+        "severity": "high",
+        "isDirect": True,
+        "via": ["braces"],
+        "effects": [],
+        "range": "*",
+        "nodes": ["node_modules/acme-test-runtime-package"],
+        "fixAvailable": False,
+    }
+    full["vulnerabilities"]["acme-test-runtime-package"] = carrier
+    full["metadata"]["vulnerabilities"]["high"] += 1
+    full["metadata"]["vulnerabilities"]["total"] += 1
+
+    runtime = _runtime_report()
+    runtime["vulnerabilities"] = {
+        "braces": copy.deepcopy(full["vulnerabilities"]["braces"]),
+        "acme-test-runtime-package": copy.deepcopy(carrier),
+    }
+    runtime["metadata"]["vulnerabilities"]["high"] = 2
+    runtime["metadata"]["vulnerabilities"]["total"] = 2
+    return full, runtime
+
+
+_REAL_RUNTIME = object()
+
+
+def _run(
+    report, capsys, exceptions=None, today=BEFORE_REVIEW, runtime=_REAL_RUNTIME
+) -> tuple[int, str]:
     module = _npm_audit()
     if exceptions is None:
         exceptions = module.read_exceptions(EXCEPTIONS, "web")
-    code = module.check("web", report, exceptions, today)
+    if runtime is _REAL_RUNTIME:
+        runtime = _runtime_report()
+    code = module.check("web", report, runtime, exceptions, today)
     return code, capsys.readouterr().out
 
 
@@ -195,11 +239,82 @@ def test_a_report_that_counts_high_findings_it_does_not_list_fails(capsys):
 
 def test_a_missing_or_broken_report_file_fails(tmp_path, capsys):
     module = _npm_audit()
-    assert module.main(["npm_audit.py", "web", str(tmp_path / "absent.json")]) == 1
+    good, absent = str(REPORT), str(tmp_path / "absent.json")
     broken = tmp_path / "npm-audit.json"
     broken.write_text("npm error", encoding="utf-8")
-    assert module.main(["npm_audit.py", "web", str(broken)]) == 1
-    assert capsys.readouterr().out.count("could not be read") == 2
+    # Either report, missing or broken: the audit fails.
+    assert module.main(["npm_audit.py", "web", absent, str(RUNTIME_REPORT)]) == 1
+    assert module.main(["npm_audit.py", "web", str(broken), str(RUNTIME_REPORT)]) == 1
+    assert module.main(["npm_audit.py", "web", good, absent]) == 1
+    assert module.main(["npm_audit.py", "web", good, str(broken)]) == 1
+    assert capsys.readouterr().out.count("could not be read") == 4
+    # And the runtime report can't be left out.
+    assert module.main(["npm_audit.py", "web", good]) == 2
+
+
+def test_the_two_real_reports_pass_through_the_command_line(capsys):
+    module = _npm_audit()
+    assert module.main(["npm_audit.py", "web", str(REPORT), str(RUNTIME_REPORT)]) in (0, 1)
+    out = capsys.readouterr().out
+    # 0 before the review date, 1 from it: either way braces is the only finding,
+    # and nothing is reported at runtime.
+    assert "1 advisories reported, 1 high or critical" in out
+    assert "0 reported in runtime dependencies, 0 of them excepted" in out
+
+
+def test_the_real_runtime_report_is_clean():
+    """The premise of the braces exception: with dev dependencies left out, npm
+    reports nothing."""
+    assert _npm_audit().advisories(_runtime_report()) == []
+
+
+def test_an_excepted_advisory_that_reaches_runtime_dependencies_fails(capsys):
+    """Founder, 2026-10-05: the exception is justified as dev-only but keyed by
+    advisory id. If braces arrives through a runtime dependency, the same id
+    must not pass silently."""
+    full, runtime = _braces_through_a_runtime_dependency()
+    code, out = _run(full, capsys, runtime=runtime)
+    assert code == 1
+    assert f"::error title=web: audit exception no longer dev-only::{BRACES} (braces)" in out
+    assert "the dev-only premise of its exception" in out and "no longer holds" in out
+    assert "audit exception in use" not in out
+    assert "0 passing by exception, 1 refused; 1 reported in runtime dependencies, 1 of them excepted" in out
+    # One error for it, with the reason; not a second, bare one.
+    assert out.count("::error") == 1
+
+
+def test_the_runtime_check_holds_whatever_the_runtime_severity(capsys):
+    full, runtime = _braces_through_a_runtime_dependency()
+    for package in runtime["vulnerabilities"].values():
+        package["severity"] = "moderate"
+        for via in package["via"]:
+            if isinstance(via, dict):
+                via["severity"] = "moderate"
+    runtime["metadata"]["vulnerabilities"].update(high=0, moderate=2)
+    code, out = _run(full, capsys, runtime=runtime)
+    assert code == 1
+    assert f"::error title=web: audit exception no longer dev-only::{BRACES}" in out
+
+
+def test_an_unexcepted_runtime_advisory_is_caught_by_the_main_audit_not_the_runtime_check(capsys):
+    """The runtime report is read only to hold exceptions to their premise. A
+    new runtime advisory is in the full report too, and fails there."""
+    full = _plant(_report(), "high")
+    runtime = _plant(_runtime_report(), "high")
+    code, out = _run(full, capsys, runtime=runtime)
+    assert code == 1
+    assert f"::error title=web: high advisory in acme-test-package::{PLANTED}" in out
+    assert "no longer dev-only" not in out
+
+
+@pytest.mark.parametrize(
+    "runtime",
+    [{"error": {"code": "ENOAUDIT", "summary": "the registry did not answer"}}, {}, [], None],
+)
+def test_a_runtime_report_that_cannot_be_read_fails(runtime, capsys):
+    code, out = _run(_report(), capsys, runtime=runtime)
+    assert code == 1
+    assert "::error title=web: runtime dependency audit could not be read::" in out
 
 
 @pytest.mark.parametrize(
@@ -229,10 +344,14 @@ def test_the_web_job_audits_dev_dependencies_through_the_exception_check():
     workflow = WORKFLOW.read_text(encoding="utf-8")
     start = workflow.index("\n  web:\n")
     block = workflow[start : workflow.index("\n  web-live:\n", start)]
-    assert "npm audit --json > npm-audit.json" in block
-    assert "scripts/ci/npm_audit.py" in block
-    assert block.index("npm audit --json") < block.index("scripts/ci/npm_audit.py")
-    # Dev dependencies stay in the audit, and nothing else switches it off.
-    for flag in ("--omit", "--production", "--only", "continue-on-error"):
+    full = "          npm audit --json > npm-audit.json || true\n"
+    runtime = "          npm audit --omit=dev --json > npm-audit-runtime.json || true\n"
+    script = 'scripts/ci/npm_audit.py" web npm-audit.json npm-audit-runtime.json\n'
+    assert full in block and runtime in block and script in block
+    assert block.index(full) < block.index(runtime) < block.index(script)
+    # Dev dependencies stay in the audit: the only `--omit` is the runtime
+    # report's, which can only add a failure. Nothing else switches it off.
+    assert block.count("npm audit") == 2
+    assert block.count("--omit") == 1
+    for flag in ("--production", "--only", "continue-on-error"):
         assert flag not in block, f"the web job's audit must not use {flag}"
-    assert block.count("npm audit") == 1

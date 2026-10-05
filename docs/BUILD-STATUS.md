@@ -4058,10 +4058,15 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   the audit. **The exception ends on its review date (founder,
   2026-10-05): the job warns on every run from 2026-10-29, and from
   2026-11-05 the web job fails until the line is removed or re-dated with
-  a reason.** Tests:
+  a reason.** **An exception is held to its dev-only premise (founder,
+  2026-10-05):** the job also reads `npm audit --omit=dev`, and an excepted
+  advisory that appears in that runtime report fails the job, since the
+  exception is keyed by advisory id and `braces` could later arrive through
+  a runtime dependency. Tests:
   `packages/core/tests/test_npm_audit_exceptions.py` (npm's real report
   passes; the same report with a planted high or critical advisory fails;
-  a report that can't be read fails; the warning and the end date). **To do
+  a planted runtime path for `braces` fails; a report that can't be read
+  fails; the warning and the end date). **To do
   before 2026-11-05, or the web job goes red:** check for a
   patched `braces` or a Next lint chain without it, then remove the line or
   re-date it with a reason.

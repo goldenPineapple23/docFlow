@@ -3,8 +3,15 @@
 #
 # Target: zero. Every line here needs the founder's approval, a reason and a
 # review date. An exception covers exactly one advisory: any other high or
-# critical advisory still fails the job, in dev dependencies too (the audit
-# never runs with --omit=dev).
+# critical advisory still fails the job, in dev dependencies too (the full
+# audit never runs with --omit=dev).
+#
+# An exception is only for an advisory in dev dependencies (founder,
+# 2026-10-05). It is keyed by advisory id, not by how the package is reached,
+# so the job also reads `npm audit --omit=dev`: if an advisory listed here
+# appears in that runtime report, its dev-only premise no longer holds and the
+# job fails, whatever the line's date. Fix the runtime dependency; the line
+# can't be used to pass it.
 #
 # Format:  <suite> <advisory id> review=<YYYY-MM-DD>  # reason
 #   suite = web

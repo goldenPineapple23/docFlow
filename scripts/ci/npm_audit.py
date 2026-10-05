@@ -8,9 +8,17 @@ advisory except the ones listed, one by one, in .github/audit-exceptions.txt
 with the reason the founder accepted and a review date. Dev dependencies stay
 in the audit.
 
+An exception is only for an advisory in dev dependencies (founder,
+2026-10-05). It is keyed by advisory id, so the check also reads the runtime
+report (`npm audit --omit=dev`): if an excepted advisory appears there, the
+package has arrived through a runtime dependency, the exception's dev-only
+premise no longer holds, and the job fails.
+
 Usage:
   npm audit --json > npm-audit.json || true
-  python scripts/ci/npm_audit.py <suite-name> <npm-audit.json> [<audit-exceptions.txt>]
+  npm audit --omit=dev --json > npm-audit-runtime.json || true
+  python scripts/ci/npm_audit.py <suite-name> <npm-audit.json> <npm-audit-runtime.json> \
+      [<audit-exceptions.txt>]
 
 Each non-comment line of the exceptions file is
   <suite-name> <advisory id> review=<YYYY-MM-DD>  # reason
@@ -123,15 +131,47 @@ def _escape(text: str) -> str:
     return text.replace("%", "%25").replace("\r", " ").replace("\n", " ")
 
 
-def check(suite: str, report: object, exceptions: dict[str, AuditException], today: date) -> int:
+def check(
+    suite: str,
+    report: object,
+    runtime_report: object,
+    exceptions: dict[str, AuditException],
+    today: date,
+) -> int:
+    """`report` is the whole audit (dev dependencies included); `runtime_report`
+    is `npm audit --omit=dev`, read only to hold each exception to its
+    dev-only premise."""
     try:
         found = advisories(report)
     except UnreadableReport as unreadable:
         print(f"::error title={suite}: dependency audit could not be read::{_escape(str(unreadable))}")
         return 1
+    try:
+        at_runtime = advisories(runtime_report)
+    except UnreadableReport as unreadable:
+        print(
+            f"::error title={suite}: runtime dependency audit could not be read::"
+            f"{_escape(str(unreadable))}"
+        )
+        return 1
+
+    # An exception is for a dev-only advisory. One that npm also reports with
+    # dev dependencies left out has reached the runtime tree: it fails, whatever
+    # its date and whatever its severity there.
+    broken = [a for a in at_runtime if a.advisory in exceptions]
+    for advisory in broken:
+        print(
+            f"::error title={suite}: audit exception no longer dev-only::{advisory.advisory} "
+            f"({advisory.package}) is now reported in runtime dependencies (npm audit --omit=dev), so "
+            "the dev-only premise of its exception in .github/audit-exceptions.txt no longer holds. "
+            f"The exception does not apply. {_escape(advisory.title)} {advisory.url}"
+        )
+    not_dev_only = {a.advisory for a in broken}
 
     failing = [a for a in found if a.severity in FAILING]
-    in_force = {k for k, allowed in exceptions.items() if today < allowed.review}
+    in_force = {
+        k for k, allowed in exceptions.items() if today < allowed.review and k not in not_dev_only
+    }
     refused = [a for a in failing if a.advisory not in in_force]
     passed = [a for a in failing if a.advisory in in_force]
     reported = {a.advisory for a in found}
@@ -156,6 +196,8 @@ def check(suite: str, report: object, exceptions: dict[str, AuditException], tod
             ".github/audit-exceptions.txt but npm no longer reports it. Delete the line."
         )
     for advisory in refused:
+        if advisory.advisory in not_dev_only:
+            continue  # already reported above, with the reason
         ended = exceptions.get(advisory.advisory)
         note = (
             f" Its exception ended on {ended.review.isoformat()}: remove the line if a fix exists, or "
@@ -170,26 +212,29 @@ def check(suite: str, report: object, exceptions: dict[str, AuditException], tod
 
     print(
         f"{suite}: {len(found)} advisories reported, {len(failing)} high or critical, "
-        f"{len(passed)} passing by exception, {len(refused)} refused"
+        f"{len(passed)} passing by exception, {len(refused)} refused; "
+        f"{len(at_runtime)} reported in runtime dependencies, {len(broken)} of them excepted"
     )
-    return 1 if refused else 0
+    return 1 if refused or broken else 0
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) not in (3, 4):
+    if len(argv) not in (4, 5):
         print(__doc__, file=sys.stderr)
         return 2
-    suite, report_path = argv[1], Path(argv[2])
-    exceptions = read_exceptions(Path(argv[3]) if len(argv) == 4 else DEFAULT_EXCEPTIONS, suite)
-    try:
-        report = json.loads(report_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as unreadable:
-        print(
-            f"::error title={suite}: dependency audit could not be read::"
-            f"{report_path.name}: {_escape(type(unreadable).__name__)}"
-        )
-        return 1
-    return check(suite, report, exceptions, date.today())
+    suite = argv[1]
+    exceptions = read_exceptions(Path(argv[4]) if len(argv) == 5 else DEFAULT_EXCEPTIONS, suite)
+    reports: list[object] = []
+    for report_path in (Path(argv[2]), Path(argv[3])):
+        try:
+            reports.append(json.loads(report_path.read_text(encoding="utf-8")))
+        except (OSError, ValueError) as unreadable:
+            print(
+                f"::error title={suite}: dependency audit could not be read::"
+                f"{report_path.name}: {_escape(type(unreadable).__name__)}"
+            )
+            return 1
+    return check(suite, reports[0], reports[1], exceptions, date.today())
 
 
 if __name__ == "__main__":
