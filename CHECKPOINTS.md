@@ -70,12 +70,55 @@ stage's evidence is about its own code.
 - **Worker** (as `docflow_worker`): `[GAP]`
 - **API** (as `docflow_api`, `docflow_admin`, `docflow_stripe`): `[GAP]`
 - **Live** (`pytest -m live_api`: golden, golden with examples,
-  contamination): `[GAP]`, with each call's cost
+  contamination): `[GAP]`, with each call's cost, and **the mean, median
+  and maximum of the three** (founder, 2026-10-05). Three calls on two short
+  text orders: a floor for cost per document, not a sample of what
+  customers send ("A representative cost sample", below).
 
-**The two backup checks:** `[GAP: backup_0034 check, on or after 2026-10-04
-20:53 UTC; backup_0035 check, on or after 2026-10-05 03:18 UTC. Each: the
-suites at f191e27 as docflow_app, with their summary lines, and the alert
-types RUNBOOK 1.3 names, counted since the merge]`
+**The two backup checks, run 2026-10-05.** One run serves both: the same
+suites, at `f191e27`, in a worktree, connecting as `docflow_app` (RUNBOOK
+1.3), one at a time.
+
+- **Why `f191e27` and not `main`.** Staging is at `0035`, read from the
+  database on 2026-10-05: `0034`'s and `0035`'s tables and columns are
+  there; `0036`'s roles, `worker_starts` and `record_worker_start` are not.
+  `main` holds 3e, whose suites connect as `0036`'s four logins, so they
+  can't run on staging before the cutover. `f191e27` differs from 3d's
+  merge (`4a2b907`) only in `RUNBOOK.md` and `docs/BUILD-STATUS.md`. It is
+  the right commit for the 3c window too: 3c's own merge commit expects
+  `0034`'s schema, and staging has had `0035` since 2026-10-01.
+- **Core:** `746 passed, 1 skipped in 53.58s`. The skip is in
+  `test_storage_bucket_live.py`. The same counts as staging's run on
+  2026-10-01.
+- **Worker:** `161 passed, 6 skipped in 1232.50s (0:20:32)`. The six skips
+  need Linux or CI's parse container (pytest's reasons, in the run's
+  output); the same counts as 3d's final staging run. It took 20:32
+  against about 12 minutes before; nothing failed.
+- **API:** `[GAP: running]`
+- **The parse service was started by hand** from the worktree's code, a
+  departure from RUNBOOK 1.3 as it was written (the worktree has no
+  `apps/parse/.venv`). `apps/parse` is the same at `f191e27` and `main`,
+  and `app`, `parse_service` and `docflow_core` were each checked to load
+  from the worktree. RUNBOOK 1.3 now gives the steps.
+- **Alerts:** none of any type since either merge (3c, 2026-10-01 20:53
+  UTC; 3d, 2026-10-02 03:18 UTC). `founder_alerts` holds 15 rows, the
+  newest from 2026-09-30. **This carries no weight (founder, 2026-10-05):**
+  the worker and API aren't deployed, so no document was processed on
+  staging in either window outside the test suites. "Ran cleanly for 3
+  days" rests on the suites alone.
+- **The backups stay.** Neither is dropped until the founder decides. The
+  founder's proposal, undecided: keep both until the first worker deploy
+  has run real documents through staging. Their size on staging:
+
+  | Backup | Tables | Size |
+  |---|---|---|
+  | `backup_0034` | documents, extraction_runs | 0.20 MB |
+  | `backup_0035` | documents, founder_alerts, email_outbox | 0.24 MB |
+  | `backup_3b` (still there) | four tables | 0.16 MB |
+
+  The whole database is 23.4 MB against the free plan's 500 MB limit, so
+  keeping them costs nothing and risks nothing. Every backup table has RLS
+  on.
 
 **The cutover:** `[GAP: RUNBOOK 10.2 -- the snapshot compare (step 1),
 verify_logins and the second snapshot (step 5), every place docflow_app's
@@ -185,6 +228,58 @@ IPv6 isolation is proven on Fly). `[GAP: CI on the checkpoint commit]`
 - **A representative cost sample** (scans, images, spreadsheets, long
   orders): still not measured. The 500 + 1 run's documents will be the
   first such sample, if its mix includes them.
+
+### For Stage 4: AI cost per document, and whether the database holds the catalog (founder, 2026-10-05)
+
+**AI cost per document.** `[GAP: mean, median and maximum est_cost_usd of
+the three live calls in this checkpoint's golden run, on the checkpoint
+commit]`. Nothing is measured yet: the live run is part of the step 5 runs,
+after the cutover. The last measurement is Stage 2's (2026-09-29, below):
+$0.0141, $0.0177 and $0.0191, so mean $0.0170, median $0.0177, maximum
+$0.0191 on `claude-sonnet-5`. Those are short text orders. Scans, images,
+spreadsheets and long orders are still unmeasured (above).
+
+**Does the database hold about 2.5 million catalog rows plus the trigram
+indexes?** Nothing here is measured. Staging's `items` table holds 70 rows,
+`pg_trgm` and `btree_gist` aren't installed (both are available), and the
+design allows nothing of Stage 4 on staging before `docflow_app` is
+dropped. What follows is an estimate from the table's columns and the two
+indexes the design names (description, and the stripped SKU), with the
+plan figures read from Supabase's pricing and compute pages on 2026-10-05.
+
+| | Estimate at 2.5 million rows |
+|---|---|
+| Table rows | 0.4 to 1.1 GB. The spread is `raw_data`, the uploaded row kept as JSON, whose size depends on the customer's file |
+| The four existing indexes | 0.3 to 0.5 GB |
+| The two trigram indexes | 0.5 to 1.5 GB. This is the least certain line |
+| **Total** | **about 1.5 to 3 GB** |
+
+| Compute | Plan | Price | Memory | Database size | Holds 2.5 million rows? |
+|---|---|---|---|---|---|
+| **Nano (staging today)** | Free only | $0 | up to 0.5 GB | 500 MB, then the project goes read-only | **No.** The lowest estimate is three times the limit |
+| Micro | Paid plans | about $10/month, covered by the Pro plan's $10 compute credit | 1 GB | 8 GB disk included on Pro, then $0.125 per GB | **Fits on disk, by estimate. Speed unknown:** the indexes are about as large as the memory or larger |
+| Small | Paid plans | about $15/month ($5 after the credit) | 2 GB | the same disk | Fits on disk; more of the indexes in memory. Speed unmeasured |
+
+- **The upgrade price:** the Pro plan is $25 a month for the organisation.
+  It includes $10 of compute credit, which covers one Micro project. A
+  second project on Micro (production, in Phase 6) adds about $10 a month.
+- **Two facts in the records that the question doesn't match:**
+  1. **Staging is Nano on the free plan, not Micro** (founder, from the
+     dashboard, 2026-09-29; D-155: "Staging stays free tier"). The
+     database is 23.4 MB today.
+  2. **No 2.5 million row run is in the approved Stage 4 design.** D-155
+     (2026-09-25) says the 2.5 million row catalog is seeded in the CI
+     database. The design approved on 2026-10-02 times 250,000 rows on
+     staging and checks parity in CI at 50,000. It doesn't mention D-155 or
+     2.5 million rows. **Open, for the founder:** does D-155's CI seed
+     still stand? If it does, a manual CI job could seed 2.5 million rows
+     and print the real table and index sizes, at no cost, which would
+     replace the estimate above. It says nothing about Micro's speed.
+- **A risk to the approved staging run.** By the same estimate, 250,000
+  rows take 150 to 300 MB on a database with a 500 MB limit that turns
+  read-only when passed. **Open, for the founder:** should the benchmark
+  script read the database size before seeding and refuse above a stated
+  margin? Not in the approved design, so not built.
 
 ### Decided (founder, 2026-10-02, on this draft)
 

@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-10-02** (latest: **Stage 3 checkpoint DRAFTED (CHECKPOINTS.md, gaps for the cutover, the backup checks and the first worker deploy) and the Stage 4 design APPROVED WITH CHANGES (founder, 2026-10-02: Q1-Q15 decided; DOC-030, VAL-017 and VAL-018 final; PR 1's content final at `444dc78`, blocked only on the Stage 3 checkpoint's "go"), nothing built. The checkpoint waits for the first worker deploy, scheduled straight after the cutover is verified. Before that: 3e MERGED 2026-10-02 17:43 UTC (PR #35, `e99fbb9`, D-185) and the CI runner pin merged 17:48 UTC (PR #36, main `d004186`); the backup checks run the staging suites at `f191e27`, in a separate worktree as `docflow_app` (founder, PR #37; RUNBOOK 1.3); `0036` not applied to staging before the `backup_0035` check, on or after 2026-10-05 03:18 UTC**. Earlier the same day: 3d merged, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184), recorded in PR #34; the two two-at-once sweep tests go to 3e). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
+commit as the slice. Statuses below are as of **2026-10-05** (latest: **the two backup checks run at `f191e27` as `docflow_app`: core and worker green, API still running; alerts empty, which carries no weight; both backups kept until the founder decides; staging confirmed at `0035`**. Earlier, 2026-10-02: **Stage 3 checkpoint DRAFTED (CHECKPOINTS.md, gaps for the cutover, the backup checks and the first worker deploy) and the Stage 4 design APPROVED WITH CHANGES (founder, 2026-10-02: Q1-Q15 decided; DOC-030, VAL-017 and VAL-018 final; PR 1's content final at `444dc78`, blocked only on the Stage 3 checkpoint's "go"), nothing built. The checkpoint waits for the first worker deploy, scheduled straight after the cutover is verified. Before that: 3e MERGED 2026-10-02 17:43 UTC (PR #35, `e99fbb9`, D-185) and the CI runner pin merged 17:48 UTC (PR #36, main `d004186`); the backup checks run the staging suites at `f191e27`, in a separate worktree as `docflow_app` (founder, PR #37; RUNBOOK 1.3); `0036` not applied to staging before the `backup_0035` check, on or after 2026-10-05 03:18 UTC**. Earlier the same day: 3d merged, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184), recorded in PR #34; the two two-at-once sweep tests go to 3e). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -3821,6 +3821,31 @@ worktree at `f191e27`, connecting as `docflow_app`, never by moving the
 main checkout back, and the report names the commit and the login beside
 the counts. Main's suites run on staging first at RUNBOOK 10.2 step 5.
 RUNBOOK 1.3 ("Which code the checks run") and 10.2 step 5 say so.
+
+**The two backup checks, run 2026-10-05** (one run for both; detail in
+CHECKPOINTS.md, Stage 3 draft). At `f191e27`, in a worktree, as
+`docflow_app`:
+- staging confirmed at `0035` from the database (none of `0036`'s roles,
+  table or functions there);
+- core `746 passed, 1 skipped in 53.58s`; worker `161 passed, 6 skipped in
+  1232.50s (0:20:32)`; API `[GAP: running]`;
+- no alert of any type since either merge, **which carries no weight**
+  (founder): nothing processed documents on staging in either window;
+- **`backup_0034` and `backup_0035` stay until the founder decides**
+  (proposal, undecided: until the first worker deploy has run real
+  documents through staging). 0.20 MB and 0.24 MB; the database is 23.4 MB
+  of the free plan's 500 MB;
+- **departure, now written into RUNBOOK 1.3:** the worktree has no
+  `apps/parse/.venv`, so the dev parse service was started by hand from the
+  worktree's code, with the import check extended to `parse_service`.
+
+**For Stage 4 (founder, 2026-10-05), in the checkpoint draft:** the live
+golden run's cost as mean, median and maximum (a gap until the run), and
+an estimate of 2.5 million catalog rows with both trigram indexes (about
+1.5 to 3 GB: not on Nano's 500 MB; on disk on Micro, speed unmeasured).
+**Two open questions there:** whether D-155's 2.5 million row CI seed still
+stands (the approved design has no such run), and whether the benchmark
+should check the database size before seeding 250,000 rows on staging.
 
 ### Stage 4 detailed design -- APPROVED WITH CHANGES (founder, 2026-10-02); nothing built before the Stage 3 checkpoint's "go"
 

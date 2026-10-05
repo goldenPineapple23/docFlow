@@ -138,6 +138,12 @@ follow-up, PR #29) merged. Since then:
   ```
 
   The date is recorded here and in BUILD-STATUS.
+- **Neither is dropped until the founder decides (2026-10-05).** The alert
+  half of both checks came back empty on 2026-10-05, and it proves
+  nothing: the worker and API aren't deployed, so no document was
+  processed on staging in either window. The founder's proposal, not yet
+  decided: keep both until the first worker deploy has run real documents
+  through staging. Together they hold 0.44 MB (CHECKPOINTS.md, Stage 3).
 - **Which code the checks run (founder, 2026-10-02, at the 3e merge):** both
   checks run the staging suites at **`f191e27`**, not at `main`. `main`
   holds 3e (merged 2026-10-02, PR #35), whose suites connect as the four
@@ -164,6 +170,37 @@ follow-up, PR #29) merged. Since then:
     runs the same way, from the worktree's `apps/api` or `apps/worker`:
     `python -c "import app, docflow_core; print(app.__file__); print(docflow_core.__file__)"`.
     Both paths must be inside the worktree;
+  - **the parse service is started by hand, from the worktree's code**
+    (found 2026-10-05, at the first run). The worker suite starts its own
+    dev parse service from `apps/parse/.venv` beside it, and a worktree has
+    no `.venv` (it isn't in git), so without this the suite stops with "No
+    parse service to test against". The worktree doesn't get a venv of its
+    own: a new one under the scratch path runs into Windows' 260-character
+    limit, and a link to the main checkout's venv could take that venv with
+    it when the worktree is deleted. Instead, from the worktree's
+    `apps/parse`, with the main checkout's `apps/parse/.venv` python and the
+    same `PYTHONPATH`:
+    - check first, the same way as above:
+      `python -c "import parse_service, docflow_core; print(parse_service.__file__); print(docflow_core.__file__)"`.
+      Both paths must be inside the worktree, or the run stops (the parse
+      venv's editable installs point at the main checkout too);
+    - **for the worker suite:** start it with `PARSE_ISOLATION=off`,
+      `DOCFLOW_ENV=development`, a free `PORT`, and `PARSE_SERVICE_TOKEN`
+      set to the test token in `apps/worker/tests/conftest.py`
+      (`DEV_PARSE_TOKEN`); run the suite with `PARSE_SERVICE_URL` pointing
+      at it and the same `PARSE_SERVICE_TOKEN`. That is the path CI's
+      worker job takes (the suite uses the service it is given and starts
+      none);
+    - **for the API suite:** start it as SETUP.md step 7a does
+      (`PARSE_ISOLATION=off`, no token, the default port 8100), as every
+      earlier staging run of the API suite did;
+    - wait for `/health` to answer before starting the suite, and say in
+      the report that the service was started by hand;
+    - stop it afterwards by its process, not from the shell that started
+      it: Git Bash's `kill` leaves the two `python.exe -m
+      parse_service.server` processes running and the port taken. In
+      PowerShell, list `python.exe` processes with their command lines,
+      stop those two, and check the port is free before the next suite;
   - core, worker, API, one at a time (1.4).
 
   The report names the commit (`f191e27`) and the login (`docflow_app`)
