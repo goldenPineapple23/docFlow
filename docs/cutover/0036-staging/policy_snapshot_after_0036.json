@@ -1,0 +1,859 @@
+{
+  "policies": [
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "admin_actions",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "allowance_notices",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "allowance_notices",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "buyer_merge_candidates",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "buyer_merge_candidates",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "buyer_merges",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "buyer_merges",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "buyers",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "buyers",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "catalog_imports",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "catalog_imports",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "document_headers",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "document_headers",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "document_lines",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "document_lines",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "document_snapshots",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "document_snapshots",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "document_warnings",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "document_warnings",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "documents",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "documents",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "INSERT",
+      "name": "dispatcher_enqueue",
+      "roles": [
+        "docflow_worker"
+      ],
+      "table": "email_outbox",
+      "using": null,
+      "with_check": "((current_setting('app.dispatcher'::text, true) = 'true'::text) AND (tenant_id IS NULL) AND (template = 'founder_alert'::text) AND (related_type = 'founder_alert'::text))"
+    },
+    {
+      "cmd": "INSERT",
+      "name": "intake_refusal_enqueue",
+      "roles": [
+        "docflow_api"
+      ],
+      "table": "email_outbox",
+      "using": null,
+      "with_check": "((current_setting('app.intake_refusal'::text, true) = 'true'::text) AND (tenant_id IS NULL) AND (template = 'founder_alert'::text) AND (related_type = 'founder_alert'::text))"
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "email_outbox",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "INSERT",
+      "name": "rollup_enqueue",
+      "roles": [
+        "docflow_worker"
+      ],
+      "table": "email_outbox",
+      "using": null,
+      "with_check": "((current_setting('app.rollup'::text, true) = 'true'::text) AND (tenant_id IS NULL))"
+    },
+    {
+      "cmd": "INSERT",
+      "name": "tenant_enqueue",
+      "roles": [
+        "public"
+      ],
+      "table": "email_outbox",
+      "using": null,
+      "with_check": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)"
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "exports",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "exports",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "extraction_runs",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "extraction_runs",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "INSERT",
+      "name": "dispatcher_raise",
+      "roles": [
+        "docflow_worker"
+      ],
+      "table": "founder_alerts",
+      "using": null,
+      "with_check": "((current_setting('app.dispatcher'::text, true) = 'true'::text) AND (tenant_id IS NULL) AND (type = ANY (ARRAY['model_api_failure'::text, 'model_api_recovered'::text, 'dispatcher_stopped'::text, 'routing_model_failure'::text, 'worker_restarting'::text])))"
+    },
+    {
+      "cmd": "INSERT",
+      "name": "intake_refusal_raise",
+      "roles": [
+        "docflow_api"
+      ],
+      "table": "founder_alerts",
+      "using": null,
+      "with_check": "((current_setting('app.intake_refusal'::text, true) = 'true'::text) AND (type = 'intake_webhook_refused'::text) AND (tenant_id IS NULL))"
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "founder_alerts",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "INSERT",
+      "name": "rollup_raise",
+      "roles": [
+        "docflow_worker"
+      ],
+      "table": "founder_alerts",
+      "using": null,
+      "with_check": "((current_setting('app.rollup'::text, true) = 'true'::text) AND (type = 'rollup_stale'::text) AND (tenant_id IS NULL))"
+    },
+    {
+      "cmd": "SELECT",
+      "name": "rollup_read_own",
+      "roles": [
+        "docflow_worker"
+      ],
+      "table": "founder_alerts",
+      "using": "((current_setting('app.rollup'::text, true) = 'true'::text) AND (type = 'rollup_stale'::text))",
+      "with_check": null
+    },
+    {
+      "cmd": "INSERT",
+      "name": "tenant_raise",
+      "roles": [
+        "public"
+      ],
+      "table": "founder_alerts",
+      "using": null,
+      "with_check": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)"
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "import_mapping_templates",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "import_mapping_templates",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "intake_addresses",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "intake_addresses",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "token_lookup",
+      "roles": [
+        "docflow_api"
+      ],
+      "table": "intake_addresses",
+      "using": "(token = NULLIF(current_setting('app.intake_token'::text, true), ''::text))",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "intake_rejections",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "intake_rejections",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "items",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "items",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "learned_rules",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "learned_rules",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "onboarding_intake_files",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "onboarding_intakes",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "platform_admins",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "self_lookup",
+      "roles": [
+        "docflow_api"
+      ],
+      "table": "platform_admins",
+      "using": "(user_id = ( SELECT users.id\n   FROM users\n  WHERE (users.auth_user_id = (NULLIF(current_setting('app.auth_user_id'::text, true), ''::text))::uuid)))",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "raw_emails",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "raw_emails",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "review_actions",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "review_actions",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "rollup_runs",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "rollup_access",
+      "roles": [
+        "docflow_worker"
+      ],
+      "table": "rollup_runs",
+      "using": "(current_setting('app.rollup'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "scheduled_jobs",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "scheduler_access",
+      "roles": [
+        "docflow_worker"
+      ],
+      "table": "scheduled_jobs",
+      "using": "(current_setting('app.scheduler'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "scheduled_jobs",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_write",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "setup_fee_presets",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "SELECT",
+      "name": "read_all",
+      "roles": [
+        "public"
+      ],
+      "table": "setup_fee_presets",
+      "using": "true",
+      "with_check": null
+    },
+    {
+      "cmd": "SELECT",
+      "name": "platform_admin_read",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "stripe_webhook_events",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "tenant_daily_metrics",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "tenant_daily_metrics",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "tenant_field_schemas",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "tenant_field_schemas",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "tenant_lifecycle_events",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "tenant_lifecycle_events",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "SELECT",
+      "name": "lifecycle_read",
+      "roles": [
+        "docflow_worker"
+      ],
+      "table": "tenants",
+      "using": "(current_setting('app.lifecycle'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "SELECT",
+      "name": "pipeline_sweep_read",
+      "roles": [
+        "docflow_worker"
+      ],
+      "table": "tenants",
+      "using": "(current_setting('app.pipeline_sweep'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "tenants",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "SELECT",
+      "name": "rollup_read",
+      "roles": [
+        "docflow_worker"
+      ],
+      "table": "tenants",
+      "using": "(current_setting('app.rollup'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "SELECT",
+      "name": "stripe_webhook_lookup",
+      "roles": [
+        "docflow_stripe"
+      ],
+      "table": "tenants",
+      "using": "(current_setting('app.stripe_webhook'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "tenants",
+      "using": "(id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_write",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "tiers",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "SELECT",
+      "name": "read_all",
+      "roles": [
+        "public"
+      ],
+      "table": "tiers",
+      "using": "true",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "platform_admin_access",
+      "roles": [
+        "docflow_admin"
+      ],
+      "table": "users",
+      "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "self_lookup",
+      "roles": [
+        "docflow_api"
+      ],
+      "table": "users",
+      "using": "(auth_user_id = (NULLIF(current_setting('app.auth_user_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    },
+    {
+      "cmd": "ALL",
+      "name": "tenant_isolation",
+      "roles": [
+        "public"
+      ],
+      "table": "users",
+      "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+      "with_check": null
+    }
+  ],
+  "security_definer_functions": {
+    "clear_dispatched(p_document_id uuid)": [
+      "docflow_worker"
+    ],
+    "count_routing_model_failure()": [
+      "docflow_worker"
+    ],
+    "dispatch_candidates(p_per_tenant integer)": [
+      "docflow_worker"
+    ],
+    "dispatch_unclaimed_age()": [
+      "docflow_worker"
+    ],
+    "dispatcher_heartbeat()": [
+      "docflow_worker"
+    ],
+    "dispatcher_status()": [
+      "docflow_admin",
+      "docflow_api",
+      "docflow_worker"
+    ],
+    "mark_dispatched(p_document_id uuid)": [
+      "docflow_worker"
+    ],
+    "probe_candidate()": [
+      "docflow_worker"
+    ],
+    "provider_record_failure(p_provider text, p_cause text, p_error text, p_immediate boolean, p_threshold integer, p_window_min integer)": [
+      "docflow_worker"
+    ],
+    "provider_record_success(p_provider text)": [
+      "docflow_worker"
+    ],
+    "provider_state(p_provider text)": [
+      "docflow_admin",
+      "docflow_api",
+      "docflow_worker"
+    ],
+    "provider_take_probe(p_provider text, p_probe_minutes integer)": [
+      "docflow_worker"
+    ],
+    "record_stripe_card_event(p_event_id text, p_event_type text, p_customer_id text, p_kind text, p_amount_cents bigint)": [
+      "docflow_stripe"
+    ],
+    "record_stripe_subscription_event(p_event_id text, p_event_type text, p_event_created timestamp with time zone, p_customer_id text, p_status text, p_period_end timestamp with time zone, p_mode text)": [
+      "docflow_stripe"
+    ],
+    "record_worker_start(p_machine text, p_image text)": [
+      "docflow_worker"
+    ],
+    "worker_starts_last_hour()": [
+      "docflow_admin",
+      "docflow_api"
+    ]
+  }
+}

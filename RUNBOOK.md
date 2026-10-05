@@ -289,7 +289,9 @@ How a run is reported:
   figure of about 12 minutes, from Stage 3a's 136 tests, was quoted on
   2026-10-05 as if it were current. Compare a run with the last
   recorded run of the same code, not with memory.)
-  The API suite should read `586
+  **The API suite** should read `625 passed, 1 skipped, 3 deselected` with
+  nothing failed on `main` since 3e (2026-10-05 at `9fd519a`: 42:32 on
+  staging). Before 3e, at `f191e27`, it read `586
   passed, 1 skipped, 3 deselected` with nothing failed. Staging on
   2026-10-01 (Stage 3d) read 585, plus the keyword test added during that
   run and passed on its own. The one skip, `test_parse_token_boundary.py`, needs the real
@@ -1640,6 +1642,18 @@ The founder's conditions (2026-10-02, Q5) are steps 0, 1 and 6.
    refuse it. Only after that refusal is the old URL removed from the root
    `.env` (on staging it was kept there as a comment from step 4 until this
    point). From then on the old password is recorded nowhere.
+   **`NOLOGIN` does not close sessions that are already open, and the
+   pooler reuses them** (found on staging, 2026-10-05: the old URL kept
+   connecting through one session the pooler still held, opened by a
+   check made a minute before `NOLOGIN` ran). So:
+   - never try the old URL between step 5 and `NOLOGIN`;
+   - straight after `NOLOGIN`, the founder ends the login's open sessions,
+     in the SQL Editor:
+     ```sql
+     select pg_terminate_backend(pid) from pg_stat_activity where usename = 'docflow_app';
+     ```
+   - then the check: three attempts, each refused. Through the pooler the
+     refusal reads `FATAL:  (EAUTHQUERY) user not found in the database`.
 7. **`docflow_app` is dropped** after 3e has run cleanly on staging for 3
    days, after Claude reports the check (as for the backups, 1.3):
    ```sql
@@ -1651,6 +1665,13 @@ The founder's conditions (2026-10-02, Q5) are steps 0, 1 and 6.
    DROP ROLE docflow_app;
    ```
    The date is recorded here and in BUILD-STATUS.
+
+**Done on `docflow-staging`, 2026-10-05 (UTC):** step 1 at 15:52; steps 2
+to 4 by the founder at about 16:50; step 5's snapshot at 16:52 (SHA-256
+`81bd33599151...`) and again at 21:27 after the last suite run; step 6's
+`NOLOGIN` at about 21:32, the refusal verified at 21:35, the old URL
+removed from the root `.env` then. Step 7 is not done. The record is in
+CHECKPOINTS.md (Stage 3, "The cutover").
 
 **Stop condition before the first worker deploy** (founder, 2026-10-02).
 The first worker deploy (9.2) is scheduled straight after steps 1-6 are
