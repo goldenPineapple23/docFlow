@@ -4045,6 +4045,22 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   Ubuntu 26 is its own tested change, before 24.04 is retired.
   Known and approved: the parse self-test "A-net:internet-ipv6 NOT RUN (no
   control)" warning; the runner has no IPv6 (on 229cc4b's run too).
+- **Web dependency audit: one named exception, review by 2026-11-05 (founder, 2026-10-05):**
+  on 2026-10-05 the web job's audit began failing on a new high advisory,
+  GHSA-vfj7-8cjw-p6xm, against `braces`. It is dev-only (reached through
+  the lint chain `eslint-config-next` -> `@next/eslint-plugin-next` ->
+  `fast-glob` -> `micromatch` -> `braces`; `npm audit --omit=dev` reports
+  0), no patched `braces` exists, and npm's offered fix downgrades
+  `eslint-config-next` to 14.2.35, which isn't taken. The audit now reads
+  npm's report (`scripts/ci/npm_audit.py`) and fails on every high or
+  critical advisory except those listed one by one, with a reason and a
+  review date, in `.github/audit-exceptions.txt`. Dev dependencies stay in
+  the audit. From the review date the job warns on every run. Tests:
+  `packages/core/tests/test_npm_audit_exceptions.py` (npm's real report
+  passes; the same report with a planted high or critical advisory fails;
+  a report that can't be read fails). **To do by 2026-11-05:** check for a
+  patched `braces` or a Next lint chain without it, then remove the line or
+  re-date it with a reason.
 - Stuck-in-processing alert (7.9): built in Phase 5.5 Stage 1b, watching
   `pending` too (D-095, D-158).
 - **Very long orders (D-161):** measured and streamed in Stage 1c. Before, a non-streaming
