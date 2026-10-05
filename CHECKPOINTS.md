@@ -92,8 +92,27 @@ suites, at `f191e27`, in a worktree, connecting as `docflow_app` (RUNBOOK
   2026-10-01.
 - **Worker:** `161 passed, 6 skipped in 1232.50s (0:20:32)`. The six skips
   need Linux or CI's parse container (pytest's reasons, in the run's
-  output); the same counts as 3d's final staging run. It took 20:32
-  against about 12 minutes before; nothing failed.
+  output); the same counts as 3d's final staging run. Nothing failed.
+- **The worker suite's 20:32 is its normal time, not a slow run**
+  (founder's question, 2026-10-05). "About 12 minutes" was Claude's
+  figure from Stage 3a (2026-09-29), when the suite was 136 tests. It
+  was never the time for this code and should not have been quoted.
+  The evidence:
+  - **The same suite on the same code took 20:43 on staging on
+    2026-10-01:** `161 passed, 6 skipped in 1243.29s (0:20:43)`
+    (BUILD-STATUS, "3d on staging", worker, final code). Today:
+    1232.50 s, 11 s less. Between that run's commit (`2d18b0f`) and
+    `f191e27`, the worker, core and parse code differ by one typing
+    change in `run_workers.py` (2 lines).
+  - **The hand-started parse service isn't the cause.** That earlier
+    run let the suite start its own parse service, and took 11 s
+    longer. Today's parse service log shows 77 parse jobs taking 39.3
+    s in all (3% of the run), the longest 13.66 s; the first came 3
+    min 20 s into the run.
+  - **How the time grew:** 109 tests in 10:01 at the Stage 2
+    checkpoint (below), 167 tests in 20:43 after 3a to 3d. **Which
+    tests take the time isn't measured:** neither run printed
+    per-test times.
 - **API:** `586 passed, 1 skipped, 3 deselected, 657 warnings in 2561.04s
   (0:42:41)`, the count RUNBOOK 1.4 expects. The skip is
   `test_parse_token_boundary.py` (it needs the real parse service with a
@@ -112,9 +131,10 @@ suites, at `f191e27`, in a worktree, connecting as `docflow_app` (RUNBOOK
   the worker and API aren't deployed, so no document was processed on
   staging in either window outside the test suites. "Ran cleanly for 3
   days" rests on the suites alone.
-- **The backups stay.** Neither is dropped until the founder decides. The
-  founder's proposal, undecided: keep both until the first worker deploy
-  has run real documents through staging. Their size on staging:
+- **The backups stay (decided, founder, 2026-10-05):** `backup_0034`,
+  `backup_0035` and `backup_3b` are kept until the first worker deploy
+  has processed real documents on staging. The first two together are
+  0.44 MB. Their size on staging:
 
   | Backup | Tables | Size |
   |---|---|---|
