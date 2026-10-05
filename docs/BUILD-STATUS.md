@@ -3856,6 +3856,13 @@ Nano; D-155's 2.5 million row CI seed becomes one manual CI job, run
 before the staging run; the staging benchmark guards the database's size
 at 350 MB and removes its rows at the end of the run on a typed OK.
 
+**The web dependency audit's one exception (founder, 2026-10-05; D-187):**
+PR #38's web job failed on a new high advisory against `braces`
+(GHSA-vfj7-8cjw-p6xm; dev-only, no patched version). A CI-only PR (branch
+`ci/web-audit-exception`) makes the audit pass exactly that advisory until
+2026-11-05 and fail on any other. Its own note is under "Known open
+items", added by that PR.
+
 ### Stage 4 detailed design -- APPROVED WITH CHANGES (founder, 2026-10-02; three more changes 2026-10-05); nothing built before the Stage 3 checkpoint's "go"
 
 Branch `phase55/stage3-checkpoint-stage4-design`, from `main` `b90b1c4`,

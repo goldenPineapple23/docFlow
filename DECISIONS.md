@@ -2858,3 +2858,22 @@ The fresh backup challenge passed the step-up. The rotation then stopped at `QUA
 **Not decided, raised for the build:** deleting rows doesn't shrink the database on disk by itself, so the second size read may not fall (detail in `docs/BUILD-STATUS.md`, Stage 4 design, "Decided (founder, 2026-10-05)").
 
 **Related:** Section 0 (rule 5); D-152, D-155, D-180; RUNBOOK 1.3; `docs/BUILD-STATUS.md` Stage 4 design A5-A7 and Q7.
+
+
+## D-187 — The web dependency audit passes one named advisory, until a review date (founder, 2026-10-05)
+
+**Context:** on 2026-10-05 the web job's `npm audit --audit-level=high` began failing on a new high advisory, GHSA-vfj7-8cjw-p6xm, against `braces`. It stopped PR #38, which is docs only. Checked the same day: the package is reached only through the lint chain `eslint-config-next` -> `@next/eslint-plugin-next` -> `fast-glob` -> `micromatch` -> `braces`, and `npm audit --omit=dev` reports 0; every `braces` up to the latest (3.0.3) is affected and the advisory lists no patched version; npm's offered fix downgrades `eslint-config-next` to 14.2.35.
+
+**Decided:**
+1. **The audit ignores exactly that advisory and nothing else.** `scripts/ci/npm_audit.py` reads npm's JSON report and fails on every high or critical advisory not listed in `.github/audit-exceptions.txt`. A report it can't read fails.
+2. **Dev dependencies stay in the audit.** Not `--omit=dev`: that would hide every later advisory in the build and lint tools, not just this one.
+3. **The downgrade isn't taken.**
+4. **Every exception carries a reason and a review date, and ends on that date.** For this one: 2026-11-05. The job warns on every run from 2026-10-29, and from 2026-11-05 the advisory fails the web job again until the line is removed (a fix exists) or re-dated with a reason.
+
+**Why:** `npm audit --audit-level=high` is all or nothing. One advisory with no fix either blocks every merge, docs included, or gets the audit switched off, which hides the next one. An exception that names one advisory and expires keeps the check meaningful for everything else and can't be forgotten.
+
+**Built** in its own CI-only PR (branch `ci/web-audit-exception`, from `main` `b90b1c4`). Tests: `packages/core/tests/test_npm_audit_exceptions.py`, on npm's own report of 2026-10-05: it passes with the exception, and fails with a planted high or critical advisory, without the exception, from the review date, and on an unreadable report. This entry is on the record branch, not in that PR, because both would otherwise append to the end of this file.
+
+**To do before 2026-11-05:** look for a patched `braces`, or a Next lint chain without it; then remove the line, or give it a new date and say why.
+
+**Related:** Section 5 (dependency audit in CI); D-148; `.github/approved-skips.txt` (the same rule for skipped tests).
