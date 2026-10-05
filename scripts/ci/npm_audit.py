@@ -20,8 +20,11 @@ e.g.
 A report that can't be read, or that counts high or critical findings this
 check can't trace to an advisory, fails: the audit never passes on a report it
 doesn't understand. Stale exceptions (listed, but no longer reported) are
-announced, not failed; delete them when seen. An exception on or past its
-review date warns on every run.
+announced, not failed; delete them when seen.
+
+An exception ends on its review date (founder, 2026-10-05): the job warns for
+the 7 days before it, and from that date the advisory fails again until the
+line is removed or re-dated with a reason.
 
 Results are GitHub annotations, so they can be read from the run's summary
 page without opening the log.
@@ -31,12 +34,15 @@ import json
 import re
 import sys
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 DEFAULT_EXCEPTIONS = Path(__file__).resolve().parents[2] / ".github" / "audit-exceptions.txt"
 
 FAILING = ("high", "critical")
+# An exception warns for this many days before its review date, then stops
+# applying on the date itself.
+REVIEW_WARNING_DAYS = 7
 _GHSA = re.compile(r"GHSA(?:-[0-9a-z]{4}){3}")
 _LINE = re.compile(r"^(\S+)\s+(\S+)\s+review=(\d{4}-\d{2}-\d{2})$")
 
@@ -125,8 +131,9 @@ def check(suite: str, report: object, exceptions: dict[str, AuditException], tod
         return 1
 
     failing = [a for a in found if a.severity in FAILING]
-    refused = [a for a in failing if a.advisory not in exceptions]
-    passed = [a for a in failing if a.advisory in exceptions]
+    in_force = {k for k, allowed in exceptions.items() if today < allowed.review}
+    refused = [a for a in failing if a.advisory not in in_force]
+    passed = [a for a in failing if a.advisory in in_force]
     reported = {a.advisory for a in found}
 
     for advisory in passed:
@@ -136,11 +143,12 @@ def check(suite: str, report: object, exceptions: dict[str, AuditException], tod
             f"({advisory.package}, {advisory.severity}) passes by exception: "
             f"{_escape(allowed.reason)}. Review by {allowed.review.isoformat()}."
         )
-        if today >= allowed.review:
+        if today >= allowed.review - timedelta(days=REVIEW_WARNING_DAYS):
             print(
-                f"::warning title={suite}: audit exception due for review::{advisory.advisory} "
-                f"({advisory.package}) was due for review on {allowed.review.isoformat()}. Remove it if a "
-                "fix exists, or give it a new date and reason in .github/audit-exceptions.txt."
+                f"::warning title={suite}: audit exception ends soon::{advisory.advisory} "
+                f"({advisory.package}) stops passing on {allowed.review.isoformat()}. Before then, remove "
+                "the line if a fix exists, or give it a new date and reason in "
+                ".github/audit-exceptions.txt."
             )
     for stale in sorted(set(exceptions) - reported):
         print(
@@ -148,9 +156,16 @@ def check(suite: str, report: object, exceptions: dict[str, AuditException], tod
             ".github/audit-exceptions.txt but npm no longer reports it. Delete the line."
         )
     for advisory in refused:
+        ended = exceptions.get(advisory.advisory)
+        note = (
+            f" Its exception ended on {ended.review.isoformat()}: remove the line if a fix exists, or "
+            "give it a new date and reason in .github/audit-exceptions.txt."
+            if ended
+            else ""
+        )
         print(
             f"::error title={suite}: {advisory.severity} advisory in {advisory.package}::"
-            f"{advisory.advisory} {_escape(advisory.title)} {advisory.url}"
+            f"{advisory.advisory} {_escape(advisory.title)} {advisory.url}{note}"
         )
 
     print(

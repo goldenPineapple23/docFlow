@@ -4055,10 +4055,14 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   npm's report (`scripts/ci/npm_audit.py`) and fails on every high or
   critical advisory except those listed one by one, with a reason and a
   review date, in `.github/audit-exceptions.txt`. Dev dependencies stay in
-  the audit. From the review date the job warns on every run. Tests:
+  the audit. **The exception ends on its review date (founder,
+  2026-10-05): the job warns on every run from 2026-10-29, and from
+  2026-11-05 the web job fails until the line is removed or re-dated with
+  a reason.** Tests:
   `packages/core/tests/test_npm_audit_exceptions.py` (npm's real report
   passes; the same report with a planted high or critical advisory fails;
-  a report that can't be read fails). **To do by 2026-11-05:** check for a
+  a report that can't be read fails; the warning and the end date). **To do
+  before 2026-11-05, or the web job goes red:** check for a
   patched `braces` or a Next lint chain without it, then remove the line or
   re-date it with a reason.
 - Stuck-in-processing alert (7.9): built in Phase 5.5 Stage 1b, watching

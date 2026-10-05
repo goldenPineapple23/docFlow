@@ -125,11 +125,37 @@ def test_an_exception_for_another_suite_does_not_apply(tmp_path):
     assert _npm_audit().read_exceptions(path, "web") == {}
 
 
-@pytest.mark.parametrize("today", [date(2026, 11, 5), date(2026, 12, 1)])
-def test_from_the_review_date_every_run_warns_and_still_passes(today, capsys):
+def test_the_day_before_the_warning_starts_there_is_no_warning(capsys):
+    code, out = _run(_report(), capsys, today=date(2026, 10, 28))
+    assert code == 0
+    assert "::warning" not in out
+
+
+@pytest.mark.parametrize("today", [date(2026, 10, 29), date(2026, 11, 4)])
+def test_for_the_seven_days_before_the_review_date_every_run_warns_and_still_passes(today, capsys):
     code, out = _run(_report(), capsys, today=today)
     assert code == 0
-    assert f"::warning title=web: audit exception due for review::{BRACES}" in out
+    assert f"::warning title=web: audit exception ends soon::{BRACES}" in out
+    assert "stops passing on 2026-11-05" in out
+
+
+@pytest.mark.parametrize("today", [date(2026, 11, 5), date(2026, 12, 1)])
+def test_from_the_review_date_the_exception_ends_and_the_job_fails(today, capsys):
+    """Founder, 2026-10-05: an exception can't be forgotten. Until the line is
+    removed or re-dated with a reason, the advisory fails as if unlisted."""
+    code, out = _run(_report(), capsys, today=today)
+    assert code == 1
+    assert f"::error title=web: high advisory in braces::{BRACES}" in out
+    assert "Its exception ended on 2026-11-05" in out
+    assert "audit exception in use" not in out
+
+
+def test_a_new_date_puts_the_exception_back_in_force(capsys):
+    module = _npm_audit()
+    redated = {BRACES: module.AuditException(BRACES, date(2026, 12, 5), "made up for the test")}
+    code, out = _run(_report(), capsys, exceptions=redated, today=date(2026, 11, 5))
+    assert code == 0
+    assert "Review by 2026-12-05." in out
 
 
 def test_a_clean_report_announces_the_exception_as_stale(capsys):

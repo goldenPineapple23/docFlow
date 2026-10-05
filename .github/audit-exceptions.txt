@@ -9,8 +9,10 @@
 # Format:  <suite> <advisory id> review=<YYYY-MM-DD>  # reason
 #   suite = web
 #
-# On or after the review date the job warns on every run until the line is
-# reviewed: remove it if a fix exists, or give it a new date and say why.
+# An exception ends on its review date (founder, 2026-10-05). The job warns
+# on every run for the 7 days before it. From the date itself the advisory
+# fails the job again, until the line is removed (a fix exists) or given a
+# new date and reason.
 # A line whose advisory is no longer reported is announced as stale; delete it.
 
 # braces (stack exhaustion on deeply nested brace patterns). Dev-only: it is
