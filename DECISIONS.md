@@ -1760,7 +1760,7 @@ Target: zero API tests skipped in CI. Built as D-148.
 
 ## D-155 -- The founder's Phase 5.5 decisions of 2026-09-25 (second round)
 
-1. **Stage 4's 2.5M-row catalog is seeded in the CI database, not staging.** Staging stays free tier, as the build prompt says. The CI seed is deleted after the benchmark is recorded; no per-action confirmation is needed, because the CI database is neither staging nor prod.
+1. **Stage 4's 2.5M-row catalog is seeded in the CI database, not staging.** *(Superseded 2026-10-05 by D-186: one manually triggered CI job, not a routine seed.)* Staging stays free tier, as the build prompt says. The CI seed is deleted after the benchmark is recorded; no per-action confirmation is needed, because the CI database is neither staging nor prod.
 2. **M7 and the three missing Phase 5 alerts** (review backlog, confidence drift, staging TTL) come into 5.5. Lows are fixed only when already in that file. The rest stays in Phase 6, as the review bucketed it.
 3. **Email stays on Postmark.** The founder asked whether anything stronger than credentials in the URL plus an IP allowlist exists. Findings (Postmark docs, 2026-09-25):
    - "Postmark does not currently support HMAC webhook signature verification."
@@ -2841,3 +2841,20 @@ The fresh backup challenge passed the step-up. The rotation then stopped at `QUA
 **Merged** 2026-10-02 17:43 UTC (PR #35, `e99fbb9`). **Not applied to staging yet:** `0036` waits for the `backup_0035` check (on or after 2026-10-05 03:18 UTC; Q5 condition 1), so CI is the database proof until the cutover (RUNBOOK 10.2).
 
 **Related:** Sections 7.5, 7.9, 7.15.1; D-013, D-159, D-165, D-173, D-184; RUNBOOK 9.2-9.6 and 10.
+
+
+## D-186 — The backups stay until real documents have run, and three changes to Stage 4's design (founder, 2026-10-05)
+
+**Context:** the two backup checks ran on 2026-10-05 (suites green at `f191e27` as `docflow_app`; CHECKPOINTS.md, Stage 3 draft). Their alert half came back empty and proves nothing, because the worker and API aren't deployed and no document was processed on staging in either window. Separately, the founder asked whether the database holds about 2.5 million catalog rows with the trigram indexes. Found when answering: staging is Nano on the free plan (500 MB, then read-only), the estimate is 1.5 to 3 GB (unmeasured), D-155's 2.5 million row CI seed isn't in the Stage 4 design approved on 2026-10-02, and that design's 250,000-row staging run is estimated at 150 to 300 MB.
+
+**Decided:**
+1. **`backup_0034`, `backup_0035` and `backup_3b` are kept until the first worker deploy has processed real documents on staging.** This replaces "3 days after the merge" (RUNBOOK 1.3). The first two hold 0.44 MB together; the database is 23.4 MB.
+2. **Staging stays on Nano for Stage 4.** Production's compute is a Phase 6 decision from measured numbers.
+3. **D-155's item 1 is superseded.** Routine CI uses the approved design's sizes (a few thousand on every push, 50,000 in the manual parity job; 250,000 on staging). One manually triggered CI job seeds 2.5 million catalog rows with the trigram indexes and prints table size, index sizes and query timings. It runs before the staging run.
+4. **The staging benchmark guards the database's size:** it reads the size first, refuses to start if the current size plus the projected 250,000-row size (scaled from the manual job's measurement) is over 350 MB, reports the size afterwards, and removes its seeded rows at the end of the same run on the founder's typed OK, with a second size read. That last step replaces the per-action-OK sweep for the bench rows (Stage 4 design, Q7).
+
+**Why:** past 500 MB Nano goes read-only, which takes all of staging down. $25 a month for the Pro plan buys nothing the free measurements won't show. Seeding 2.5 million rows on every CI run is slow and proves little each time; once, by hand, it turns an estimate into real sizes.
+
+**Not decided, raised for the build:** deleting rows doesn't shrink the database on disk by itself, so the second size read may not fall (detail in `docs/BUILD-STATUS.md`, Stage 4 design, "Decided (founder, 2026-10-05)").
+
+**Related:** Section 0 (rule 5); D-152, D-155, D-180; RUNBOOK 1.3; `docs/BUILD-STATUS.md` Stage 4 design A5-A7 and Q7.

@@ -297,15 +297,28 @@ plan figures read from Supabase's pricing and compute pages on 2026-10-05.
      (2026-09-25) says the 2.5 million row catalog is seeded in the CI
      database. The design approved on 2026-10-02 times 250,000 rows on
      staging and checks parity in CI at 50,000. It doesn't mention D-155 or
-     2.5 million rows. **Open, for the founder:** does D-155's CI seed
-     still stand? If it does, a manual CI job could seed 2.5 million rows
-     and print the real table and index sizes, at no cost, which would
-     replace the estimate above. It says nothing about Micro's speed.
+     2.5 million rows.
 - **A risk to the approved staging run.** By the same estimate, 250,000
   rows take 150 to 300 MB on a database with a 500 MB limit that turns
-  read-only when passed. **Open, for the founder:** should the benchmark
-  script read the database size before seeding and refuse above a stated
-  margin? Not in the approved design, so not built.
+  read-only when passed.
+- **Decided (founder, 2026-10-05; D-186):**
+  1. **Staging stays on Nano for Stage 4.** Production's compute is a
+     Phase 6 decision from measured numbers.
+  2. **D-155's CI seed is replaced by one manually triggered CI job**
+     that seeds 2.5 million rows with the trigram indexes and prints
+     table size, index sizes and query timings. It runs before the
+     staging run, and replaces the estimate above with a measurement.
+  3. **The staging benchmark guards the database's size:** it refuses
+     to start if the current size plus the projected 250,000-row size
+     is over 350 MB, reports the size afterwards, and removes its rows
+     at the end of the run on the founder's typed OK, with a second
+     size read.
+
+  The detail, and what was found while recording it, is in
+  BUILD-STATUS (Stage 4 design, "Decided (founder, 2026-10-05)").
+- **A limit the founder named:** Stage 2's cost figures, and the golden
+  set, are short text orders. With no long or scanned order in the
+  sample, the margin will look better than it is.
 
 ### Decided (founder, 2026-10-02, on this draft)
 

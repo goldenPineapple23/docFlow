@@ -3850,11 +3850,13 @@ CHECKPOINTS.md, Stage 3 draft). At `f191e27`, in a worktree, as
 golden run's cost as mean, median and maximum (a gap until the run), and
 an estimate of 2.5 million catalog rows with both trigram indexes (about
 1.5 to 3 GB: not on Nano's 500 MB; on disk on Micro, speed unmeasured).
-**Two open questions there:** whether D-155's 2.5 million row CI seed still
-stands (the approved design has no such run), and whether the benchmark
-should check the database size before seeding 250,000 rows on staging.
+**Both questions raised there are decided (founder, 2026-10-05; D-186;
+Stage 4 design, "Decided (founder, 2026-10-05)"):** staging stays on
+Nano; D-155's 2.5 million row CI seed becomes one manual CI job, run
+before the staging run; the staging benchmark guards the database's size
+at 350 MB and removes its rows at the end of the run on a typed OK.
 
-### Stage 4 detailed design -- APPROVED WITH CHANGES (founder, 2026-10-02); nothing built before the Stage 3 checkpoint's "go"
+### Stage 4 detailed design -- APPROVED WITH CHANGES (founder, 2026-10-02; three more changes 2026-10-05); nothing built before the Stage 3 checkpoint's "go"
 
 Branch `phase55/stage3-checkpoint-stage4-design`, from `main` `b90b1c4`,
 docs only. Scope, from the Stage 4 row: **A** matching speed (review H4's
@@ -4015,6 +4017,10 @@ days start at the cutover's NOLOGIN (RUNBOOK 10.2 step 6, not before the
   at the same time. The benchmark script takes the same advisory lock the
   API and worker suites take, and refuses to start if it's held. **Nothing
   in this stage runs on staging before `docflow_app` is dropped.**
+  *(Changed 2026-10-05, items 16-18 below: a manual 2.5 million row CI
+  job runs first; the staging run guards the database's size; the bench
+  rows are removed at the end of the run on a typed OK, not by the
+  sweep.)*
 
 **A7. Migration `0037_trigram_matching.sql` -- after `0036`.** It is
 numbered after `0036`, and it isn't applied to staging until `0036`'s
@@ -4296,6 +4302,55 @@ a founder-only re-run for a failed document (Q15).
     customer when the fix is deployed. **Moved to Phase 6**, next to the
     other "before real volume" items. If DOC-030s turn out to be common in
     the pilot, that is the evidence for building it.
+
+#### Decided (founder, 2026-10-05): three changes to the approved design
+
+From the database-size question at the backup checks (CHECKPOINTS.md,
+Stage 3 draft, "For Stage 4"; D-186). Nothing is built; building still
+waits for the Stage 3 checkpoint's "go".
+
+16. **Staging stays on Nano for Stage 4. No upgrade.** Production's
+    compute is a Phase 6 decision, made from measured numbers, not from
+    the 1.5 to 3 GB estimate.
+17. **D-155's item 1 is replaced.** Routine CI keeps this design's
+    numbers: a few thousand items on every push, 50,000 in the manual
+    parity job, 250,000 on staging. **Added: one manually triggered CI
+    job that seeds 2.5 million catalog rows with the trigram indexes and
+    prints the table size, the index sizes and the query timings.** It
+    **runs before the staging run**, so the staging run's size comes from
+    a measurement. Its timings are GitHub's runner, not Nano (A6 (c)
+    already says so); its sizes are what it is for.
+18. **The staging benchmark guards the database's size.** Nano turns
+    read-only past 500 MB, and that would stop all of staging, not just
+    the benchmark. The script:
+    - reads the database size before seeding;
+    - **refuses to start if the current size plus the projected size of
+      250,000 rows is over 350 MB** (70% of the limit; a named constant
+      in the script). The projection is the manual job's measurement,
+      scaled from 2.5 million rows to 250,000;
+    - reports the size after the run;
+    - **removes its seeded rows at the end of the same run, on a typed
+      OK:** it lists the bench tenants and their row counts, waits for
+      the founder's OK at the terminal, deletes them, then reads the
+      size again. **This replaces Q7's "removed afterwards through the
+      per-action-OK sweep" for the bench rows** (founder, 2026-10-05:
+      the OK stays per action, and moves to the end of the run).
+
+**Found while recording, for the build (not decided):**
+- **The second size read may not fall.** Postgres doesn't hand space back
+  to the disk when rows are deleted: the table can shrink after a vacuum,
+  the indexes generally don't without a rebuild. So the second read
+  should report the bench tenants' row count (zero) beside the size, and
+  the design should say what happens if the size stays high (a vacuum or
+  a reindex needs the table's owner, which is the founder in the SQL
+  Editor).
+- **Where the guard's numbers lead.** With today's 23.4 MB, the guard
+  passes while the manual job measures 2.5 million rows at about 3.2 GB
+  or less. Above that it refuses, and the question comes back to the
+  founder.
+- **The manual job needs `0037`'s indexes**, so it is built with the
+  matching work (PR 2), and it is one more step before the staging
+  timing in part C's order.
 
 #### The new catalog entries (founder's wording, 2026-10-02)
 
