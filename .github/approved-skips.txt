@@ -6,8 +6,17 @@
 # Format:  <suite> <classname>::<name>  # reason
 #   suite = core | api | worker | parse
 #
+# A suite written <suite>-staging is a skip on docflow-staging ONLY (founder,
+# 2026-10-05; D-189). It approves nothing in CI. The opposite: check_skips.py
+# requires that test to be in the CI job's report, passed, fails the job if it
+# is skipped, failed or missing, and prints its result on the run page
+# ("<suite>: must run in CI"). test_ci_guards.py fails if such a test is also
+# approved for CI.
+#
 # Not listed because they are not skips: the `live_api` tests (the golden
 # fixture and the contamination test against the real model) are DESELECTED
 # in CI by `-m "not live_api"` (apps/api/pyproject.toml), because Section 5
 # runs the golden fixture against its recorded response in CI and live at
 # every checkpoint and before any prompt/schema/model change.
+
+worker-staging tests.test_worker_starts_db::test_a_committed_start_appears_in_the_count_healthz_reads  # commits a worker start, which nothing can delete, so it runs only on CI's own database; on staging the same thing is confirmed by hand at the first worker deploy (RUNBOOK 9.2; D-189)

@@ -13,9 +13,11 @@
 -- supabase/reverse/0036_pre_snapshot.json, which is staging's state before
 -- 0036 (read 2026-10-02); after forward again, 0036's state.
 --
--- Before running it on staging: docflow_app must be able to log in again
--- (ALTER ROLE docflow_app WITH LOGIN), and every app switched back to its
--- URL, since the four logins stop existing.
+-- Before running it on staging: follow RUNBOOK 10.2 "Going back", in its
+-- order (founder, 2026-10-05). The apps are stopped first; docflow_app gets
+-- a new password (its old one is gone after the cutover); this script runs;
+-- only then are the apps given docflow_app's URL and started, since the four
+-- logins stop existing here.
 --
 -- Run as one transaction, in the Supabase SQL Editor.
 

@@ -275,8 +275,16 @@ How a run is reported:
   so the push ran anyway. Fixed in the next commit; CI would have caught
   it, but only after it was on GitHub.
 - Quote pytest's last line as printed. **The worker suite** should read
+  `184 passed, 7 skipped` on this Windows machine since D-189
+  (2026-10-05, 20:46 on staging): six skips need Linux or CI's
+  parse container, and the seventh commits a worker start, so it runs only
+  on CI's own database (`.github/approved-skips.txt`, `worker-staging`).
+  **Its last lines also include the suite's own check**, which should read
+  `worker_starts in the last 60 minutes: before N, after N; starts kept by
+  tests: 0; committed on CI's own database: 0`, with the second number no
+  higher than the first. Before D-189 it read
   `161 passed, 6 skipped` on this Windows machine (the six need Linux or
-  CI's parse container) and takes about 20 and a half minutes on staging
+  CI's parse container) and took about 20 and a half minutes on staging
   at `f191e27`: 20:43 on 2026-10-01, 20:32 on 2026-10-05. (An older
   figure of about 12 minutes, from Stage 3a's 136 tests, was quoted on
   2026-10-05 as if it were current. Compare a run with the last
@@ -1187,6 +1195,25 @@ the same list as BUILD-STATUS "3d on staging"):
 - **the logins cutover done and verified** (section 10), the worker on
   `docflow_worker` and the API on its three.
 
+**Straight after the worker starts, at the first deploy** (founder,
+2026-10-05; D-189): confirm that the start was recorded and that `/healthz`
+reflects it. No test commits a start on staging (the one that does runs
+only on CI's own database), so this is where it is first seen for real.
+1. Before the deploy, read `worker_starts_last_hour` on the API's `/healthz`
+   (the deployed API, or the API run on this machine against staging). The
+   suites leave no row, so with no worker start in the last hour it is 0.
+2. Deploy the worker. When the machine is up, the founder runs, in the SQL
+   Editor on `docflow-staging` (no login the apps use can read this table):
+   ```sql
+   select id, started_at, machine, image from worker_starts order by started_at desc limit 5;
+   ```
+   **One new row:** `started_at` at the deploy, `machine` the Fly machine's
+   id, `image` the deployed image.
+3. `/healthz` again: `worker_starts_last_hour` is step 1's number plus one.
+4. If there is no row, more than one, or `/healthz` did not move by one,
+   stop and report before the deploy's other checks: a second row is a
+   second start, which is what `worker_restarting` counts.
+
 **Measuring the worker machine's memory** (founder, 2026-10-01). The worker
 and the API stay off Fly until 3e gives them their own database logins, so
 this happens at **the first worker deploy after 3e, with G and the 500 + 1
@@ -1608,6 +1635,11 @@ The founder's conditions (2026-10-02, Q5) are steps 0, 1 and 6.
    repository secrets (Settings -> Secrets and variables -> Actions; CI uses
    none today), and anything else the search finds. Then the founder:
    `ALTER ROLE docflow_app NOLOGIN;`
+   **Then it is verified, and the old URL goes** (founder, 2026-10-05):
+   Claude connects with the old `docflow_app` URL and the database must
+   refuse it. Only after that refusal is the old URL removed from the root
+   `.env` (on staging it was kept there as a comment from step 4 until this
+   point). From then on the old password is recorded nowhere.
 7. **`docflow_app` is dropped** after 3e has run cleanly on staging for 3
    days, after Claude reports the check (as for the backups, 1.3):
    ```sql
@@ -1645,9 +1677,43 @@ the day.
 
 **Going back.** `supabase/reverse/0036_reverse.sql` restores the policies
 and grants exactly as before (CI proves it on every push, against the
-snapshot). First `ALTER ROLE docflow_app WITH LOGIN;` and switch every app
-back to its URL, since the four logins stop existing. It loses only the
-rows of `worker_starts`.
+snapshot). It loses only the rows of `worker_starts`.
+
+**The order matters, and the apps are down from step 1 to step 5**
+(founder, 2026-10-05). After `0036`, `docflow_app` holds no policy and no
+function grant, so an app switched to it before the reverse fails every
+query; and the reverse drops the four logins, so run first it pulls them
+from under running apps. **The old `docflow_app` password is gone after
+the cutover** (step 6 removes its URL once the refusal is verified), so
+going back also needs a new one.
+
+1. **Stop the API and the worker.** On Fly, scale each app to zero
+   (`fly scale count 0 --app <app>`); on this machine, stop them.
+2. **The founder gives `docflow_app` a new password**, generated as in
+   step 3 (typed, never pasted into a chat), in the SQL Editor:
+   ```sql
+   ALTER ROLE docflow_app WITH LOGIN PASSWORD '...';
+   ```
+3. **The founder runs `supabase/reverse/0036_reverse.sql`** in the SQL
+   Editor, whole, once. Then the snapshot must equal
+   `supabase/reverse/0036_pre_snapshot.json`, by SHA-256, as in step 5:
+   ```
+   python scripts/ci/policy_snapshot.py "<the new docflow_app URL>" > policy_snapshot_after_reverse.json
+   python scripts/ci/policy_snapshot.py --sha256 policy_snapshot_after_reverse.json supabase/reverse/0036_pre_snapshot.json
+   ```
+   The four logins no longer exist, so the snapshot is taken as
+   `docflow_app`: its new URL (the pooled string, as in step 4) goes into
+   the root `.env` first, on a line of its own. Nothing uses it yet; the
+   apps are stopped. If the hashes differ, stop: nothing is started.
+4. **The new `docflow_app` URL goes everywhere the four logins' URLs
+   were:** `DATABASE_URL` in the root `.env`, with the four logins' lines
+   removed, and the Fly secrets on each app (`fly secrets set`, and
+   `fly secrets unset` for the others).
+5. **Start the apps and confirm each connects as `docflow_app`**
+   (`select current_user`, as `db.connected_login` reads it). They must run
+   the code from before 3e: `main`'s API and worker refuse to start on any
+   login but their own (`db.verify_logins`), and call functions the reverse
+   has dropped. The last `main` before 3e is `f191e27` (1.3).
 
 **Production (Phase 6)** is created straight into this state: `0036` with
 the rest, then 10.2 steps 3-5. It never has `docflow_app`. Step 5's
