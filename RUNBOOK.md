@@ -138,6 +138,15 @@ follow-up, PR #29) merged. Since then:
   ```
 
   The date is recorded here and in BUILD-STATUS.
+- **Decided (founder, 2026-10-05): `backup_0034`, `backup_0035` and
+  `backup_3b` are kept until the first worker deploy has processed real
+  documents on staging.** This replaces "3 days after the merge" for
+  the first two. The alert half of both checks came back empty on
+  2026-10-05, and it proves nothing: the worker and API aren't
+  deployed, so no document was processed on staging in either window.
+  `backup_0034` and `backup_0035` together hold 0.44 MB, `backup_3b`
+  0.16 MB (CHECKPOINTS.md, Stage 3). The drop commands above stay as
+  written, for when the founder runs them.
 - **Which code the checks run (founder, 2026-10-02, at the 3e merge):** both
   checks run the staging suites at **`f191e27`**, not at `main`. `main`
   holds 3e (merged 2026-10-02, PR #35), whose suites connect as the four
@@ -164,6 +173,37 @@ follow-up, PR #29) merged. Since then:
     runs the same way, from the worktree's `apps/api` or `apps/worker`:
     `python -c "import app, docflow_core; print(app.__file__); print(docflow_core.__file__)"`.
     Both paths must be inside the worktree;
+  - **the parse service is started by hand, from the worktree's code**
+    (found 2026-10-05, at the first run). The worker suite starts its own
+    dev parse service from `apps/parse/.venv` beside it, and a worktree has
+    no `.venv` (it isn't in git), so without this the suite stops with "No
+    parse service to test against". The worktree doesn't get a venv of its
+    own: a new one under the scratch path runs into Windows' 260-character
+    limit, and a link to the main checkout's venv could take that venv with
+    it when the worktree is deleted. Instead, from the worktree's
+    `apps/parse`, with the main checkout's `apps/parse/.venv` python and the
+    same `PYTHONPATH`:
+    - check first, the same way as above:
+      `python -c "import parse_service, docflow_core; print(parse_service.__file__); print(docflow_core.__file__)"`.
+      Both paths must be inside the worktree, or the run stops (the parse
+      venv's editable installs point at the main checkout too);
+    - **for the worker suite:** start it with `PARSE_ISOLATION=off`,
+      `DOCFLOW_ENV=development`, a free `PORT`, and `PARSE_SERVICE_TOKEN`
+      set to the test token in `apps/worker/tests/conftest.py`
+      (`DEV_PARSE_TOKEN`); run the suite with `PARSE_SERVICE_URL` pointing
+      at it and the same `PARSE_SERVICE_TOKEN`. That is the path CI's
+      worker job takes (the suite uses the service it is given and starts
+      none);
+    - **for the API suite:** start it as SETUP.md step 7a does
+      (`PARSE_ISOLATION=off`, no token, the default port 8100), as every
+      earlier staging run of the API suite did;
+    - wait for `/health` to answer before starting the suite, and say in
+      the report that the service was started by hand;
+    - stop it afterwards by its process, not from the shell that started
+      it: Git Bash's `kill` leaves the two `python.exe -m
+      parse_service.server` processes running and the port taken. In
+      PowerShell, list `python.exe` processes with their command lines,
+      stop those two, and check the port is free before the next suite;
   - core, worker, API, one at a time (1.4).
 
   The report names the commit (`f191e27`) and the login (`docflow_app`)
@@ -207,7 +247,14 @@ How a run is reported:
 - Save each suite's full output to a file. Never cut it with `tail` or
   `head`: the exit code of the pipe replaces pytest's, so a failed run looks
   like it passed, and the failure details are lost.
-- Quote pytest's last line as printed. The API suite should read `586
+- Quote pytest's last line as printed. **The worker suite** should read
+  `161 passed, 6 skipped` on this Windows machine (the six need Linux or
+  CI's parse container) and takes about 20 and a half minutes on staging
+  at `f191e27`: 20:43 on 2026-10-01, 20:32 on 2026-10-05. (An older
+  figure of about 12 minutes, from Stage 3a's 136 tests, was quoted on
+  2026-10-05 as if it were current. Compare a run with the last
+  recorded run of the same code, not with memory.)
+  The API suite should read `586
   passed, 1 skipped, 3 deselected` with nothing failed. Staging on
   2026-10-01 (Stage 3d) read 585, plus the keyword test added during that
   run and passed on its own. The one skip, `test_parse_token_boundary.py`, needs the real

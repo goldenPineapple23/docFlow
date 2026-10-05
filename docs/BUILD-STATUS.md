@@ -14,7 +14,7 @@ find your way around; go to the linked file for the detail.
 | this file | Phase and slice status, and what is planned next |
 
 **Keeping this file current:** update it at the end of every slice, in the same
-commit as the slice. Statuses below are as of **2026-10-02** (latest: **Stage 3 checkpoint DRAFTED (CHECKPOINTS.md, gaps for the cutover, the backup checks and the first worker deploy) and the Stage 4 design APPROVED WITH CHANGES (founder, 2026-10-02: Q1-Q15 decided; DOC-030, VAL-017 and VAL-018 final; PR 1's content final at `444dc78`, blocked only on the Stage 3 checkpoint's "go"), nothing built. The checkpoint waits for the first worker deploy, scheduled straight after the cutover is verified. Before that: 3e MERGED 2026-10-02 17:43 UTC (PR #35, `e99fbb9`, D-185) and the CI runner pin merged 17:48 UTC (PR #36, main `d004186`); the backup checks run the staging suites at `f191e27`, in a separate worktree as `docflow_app` (founder, PR #37; RUNBOOK 1.3); `0036` not applied to staging before the `backup_0035` check, on or after 2026-10-05 03:18 UTC**. Earlier the same day: 3d merged, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184), recorded in PR #34; the two two-at-once sweep tests go to 3e). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
+commit as the slice. Statuses below are as of **2026-10-05** (latest: **the two backup checks run at `f191e27` as `docflow_app`: core 746 passed and 1 skipped, worker 161 passed and 6 skipped, API 586 passed, 1 skipped and 3 deselected, nothing failed; alerts empty, which carries no weight; `backup_0034`, `backup_0035` and `backup_3b` kept until the first worker deploy has processed real documents on staging (founder); staging confirmed at `0035`**. Earlier, 2026-10-02: **Stage 3 checkpoint DRAFTED (CHECKPOINTS.md, gaps for the cutover, the backup checks and the first worker deploy) and the Stage 4 design APPROVED WITH CHANGES (founder, 2026-10-02: Q1-Q15 decided; DOC-030, VAL-017 and VAL-018 final; PR 1's content final at `444dc78`, blocked only on the Stage 3 checkpoint's "go"), nothing built. The checkpoint waits for the first worker deploy, scheduled straight after the cutover is verified. Before that: 3e MERGED 2026-10-02 17:43 UTC (PR #35, `e99fbb9`, D-185) and the CI runner pin merged 17:48 UTC (PR #36, main `d004186`); the backup checks run the staging suites at `f191e27`, in a separate worktree as `docflow_app` (founder, PR #37; RUNBOOK 1.3); `0036` not applied to staging before the `backup_0035` check, on or after 2026-10-05 03:18 UTC**. Earlier the same day: 3d merged, PR #33, main `4a2b907`, 2026-10-02 03:18 UTC (D-184), recorded in PR #34; the two two-at-once sweep tests go to 3e). Earlier, 2026-10-01: 3d built, `0035` on staging, staging suites green. Earlier the same day: 3c merged, PR #32, main `085a2a5`. Earlier, as of 2026-09-30: security PR #30 and 3b (#31) merged; the 3c design proposed. Earlier summary, as of 2026-09-29 (Phase 5.5: Stages 0, 1 and 2 done -- 2a-2d merged (PRs #14, #15, #18, #20, plus #21 and #22), the audit-findings design (#23) and the D-170 clock PR (#24) merged, Stage 2 checkpoint written; **Stage 3 design agreed 2026-09-29; 3a merged (PR #26, D-179; `0030` on staging); the test-run lock merged (PR #27, D-180); card billing built (D-181), migration `0031` awaiting staging; 3b next**; `0029` row counts confirmed by the founder (the only difference: 52 `stripe_webhook_events` test ids from post-migration runs); D-150 settled -- Fly.io, proof spike PASSED 2026-09-28).
 
 **Status key:** DONE = built, tested, committed. BUILT = built and tested but
 not yet committed. PLANNED = agreed, not started. Exit criteria are quoted from
@@ -3822,7 +3822,48 @@ main checkout back, and the report names the commit and the login beside
 the counts. Main's suites run on staging first at RUNBOOK 10.2 step 5.
 RUNBOOK 1.3 ("Which code the checks run") and 10.2 step 5 say so.
 
-### Stage 4 detailed design -- APPROVED WITH CHANGES (founder, 2026-10-02); nothing built before the Stage 3 checkpoint's "go"
+**The two backup checks, run 2026-10-05** (one run for both; detail in
+CHECKPOINTS.md, Stage 3 draft). At `f191e27`, in a worktree, as
+`docflow_app`:
+- staging confirmed at `0035` from the database (none of `0036`'s roles,
+  table or functions there);
+- core `746 passed, 1 skipped in 53.58s`; worker `161 passed, 6 skipped in
+  1232.50s (0:20:32)`; API `586 passed, 1 skipped, 3 deselected, 657
+  warnings in 2561.04s (0:42:41)`, the count RUNBOOK 1.4 expects;
+- no alert of any type since either merge, **which carries no weight**
+  (founder): nothing processed documents on staging in either window;
+- **decided (founder, 2026-10-05): `backup_0034`, `backup_0035` and
+  `backup_3b` are kept until the first worker deploy has processed real
+  documents on staging.** 0.20 MB, 0.24 MB (0.44 MB together) and 0.16
+  MB; the database is 23.4 MB of the free plan's 500 MB;
+- **the worker suite's 20:32 is its normal time:** the same suite on the
+  same code took 20:43 on staging on 2026-10-01 ("3d on staging",
+  above). "About 12 minutes" was Claude's outdated figure from Stage
+  3a. The parse service's log shows 39.3 s of parse work in the whole
+  run. Evidence in the checkpoint draft; RUNBOOK 1.4 now gives the
+  suite's count and time;
+- **departure, now written into RUNBOOK 1.3:** the worktree has no
+  `apps/parse/.venv`, so the dev parse service was started by hand from the
+  worktree's code, with the import check extended to `parse_service`.
+
+**For Stage 4 (founder, 2026-10-05), in the checkpoint draft:** the live
+golden run's cost as mean, median and maximum (a gap until the run), and
+an estimate of 2.5 million catalog rows with both trigram indexes (about
+1.5 to 3 GB: not on Nano's 500 MB; on disk on Micro, speed unmeasured).
+**Both questions raised there are decided (founder, 2026-10-05; D-186;
+Stage 4 design, "Decided (founder, 2026-10-05)"):** staging stays on
+Nano; D-155's 2.5 million row CI seed becomes one manual CI job, run
+before the staging run; the staging benchmark guards the database's size
+at 350 MB and removes its rows at the end of the run on a typed OK.
+
+**The web dependency audit's one exception (founder, 2026-10-05; D-187):**
+PR #38's web job failed on a new high advisory against `braces`
+(GHSA-vfj7-8cjw-p6xm; dev-only, no patched version). A CI-only PR (branch
+`ci/web-audit-exception`) makes the audit pass exactly that advisory until
+2026-11-05 and fail on any other. Its own note is under "Known open
+items", added by that PR.
+
+### Stage 4 detailed design -- APPROVED WITH CHANGES (founder, 2026-10-02; three more changes 2026-10-05); nothing built before the Stage 3 checkpoint's "go"
 
 Branch `phase55/stage3-checkpoint-stage4-design`, from `main` `b90b1c4`,
 docs only. Scope, from the Stage 4 row: **A** matching speed (review H4's
@@ -3983,6 +4024,10 @@ days start at the cutover's NOLOGIN (RUNBOOK 10.2 step 6, not before the
   at the same time. The benchmark script takes the same advisory lock the
   API and worker suites take, and refuses to start if it's held. **Nothing
   in this stage runs on staging before `docflow_app` is dropped.**
+  *(Changed 2026-10-05, items 16-18 below: a manual 2.5 million row CI
+  job runs first; the staging run guards the database's size; the bench
+  rows are removed at the end of the run on a typed OK, not by the
+  sweep.)*
 
 **A7. Migration `0037_trigram_matching.sql` -- after `0036`.** It is
 numbered after `0036`, and it isn't applied to staging until `0036`'s
@@ -4264,6 +4309,55 @@ a founder-only re-run for a failed document (Q15).
     customer when the fix is deployed. **Moved to Phase 6**, next to the
     other "before real volume" items. If DOC-030s turn out to be common in
     the pilot, that is the evidence for building it.
+
+#### Decided (founder, 2026-10-05): three changes to the approved design
+
+From the database-size question at the backup checks (CHECKPOINTS.md,
+Stage 3 draft, "For Stage 4"; D-186). Nothing is built; building still
+waits for the Stage 3 checkpoint's "go".
+
+16. **Staging stays on Nano for Stage 4. No upgrade.** Production's
+    compute is a Phase 6 decision, made from measured numbers, not from
+    the 1.5 to 3 GB estimate.
+17. **D-155's item 1 is replaced.** Routine CI keeps this design's
+    numbers: a few thousand items on every push, 50,000 in the manual
+    parity job, 250,000 on staging. **Added: one manually triggered CI
+    job that seeds 2.5 million catalog rows with the trigram indexes and
+    prints the table size, the index sizes and the query timings.** It
+    **runs before the staging run**, so the staging run's size comes from
+    a measurement. Its timings are GitHub's runner, not Nano (A6 (c)
+    already says so); its sizes are what it is for.
+18. **The staging benchmark guards the database's size.** Nano turns
+    read-only past 500 MB, and that would stop all of staging, not just
+    the benchmark. The script:
+    - reads the database size before seeding;
+    - **refuses to start if the current size plus the projected size of
+      250,000 rows is over 350 MB** (70% of the limit; a named constant
+      in the script). The projection is the manual job's measurement,
+      scaled from 2.5 million rows to 250,000;
+    - reports the size after the run;
+    - **removes its seeded rows at the end of the same run, on a typed
+      OK:** it lists the bench tenants and their row counts, waits for
+      the founder's OK at the terminal, deletes them, then reads the
+      size again. **This replaces Q7's "removed afterwards through the
+      per-action-OK sweep" for the bench rows** (founder, 2026-10-05:
+      the OK stays per action, and moves to the end of the run).
+
+**Found while recording, for the build (not decided):**
+- **The second size read may not fall.** Postgres doesn't hand space back
+  to the disk when rows are deleted: the table can shrink after a vacuum,
+  the indexes generally don't without a rebuild. So the second read
+  should report the bench tenants' row count (zero) beside the size, and
+  the design should say what happens if the size stays high (a vacuum or
+  a reindex needs the table's owner, which is the founder in the SQL
+  Editor).
+- **Where the guard's numbers lead.** With today's 23.4 MB, the guard
+  passes while the manual job measures 2.5 million rows at about 3.2 GB
+  or less. Above that it refuses, and the question comes back to the
+  founder.
+- **The manual job needs `0037`'s indexes**, so it is built with the
+  matching work (PR 2), and it is one more step before the staging
+  timing in part C's order.
 
 #### The new catalog entries (founder's wording, 2026-10-02)
 
