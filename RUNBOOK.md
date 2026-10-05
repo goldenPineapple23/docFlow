@@ -943,7 +943,14 @@ test runs). They are left where they are.
 
 At most one an hour for the whole platform; it names the first tenant that
 hit it. While Storage is down: uploads answer DOC-025 and nothing is
-received; Postmark gets a 503 and sends the mail again later; documents
+received; Postmark gets a 503 and sends the mail again later (**up to 10
+more times over about 10 hours 20 minutes:** after 1, 5, 10, 10, 10, 15
+and 30 minutes, then 1, 2 and 6 hours; it stops at once on a 403, which
+intake never sends for this. Postmark's inbound webhook documentation,
+"Errors and retries", read 2026-10-05. **After the last try Postmark
+shows the message as "Inbound Error" and nothing sends it again by
+itself:** after an outage longer than that, retry those messages from
+Postmark by hand); documents
 already received go back to waiting (Stage 3d: `pending`, `wait_cause =
 storage`) without using up their tries. Check the Supabase status page and
 the project's Storage logs. Nothing needs doing once Storage is back: the
@@ -1654,8 +1661,11 @@ The founder's conditions (2026-10-02, Q5) are steps 0, 1 and 6.
      ```
    - then the check: three attempts, each refused. Through the pooler the
      refusal reads `FATAL:  (EAUTHQUERY) user not found in the database`.
-7. **`docflow_app` is dropped** after 3e has run cleanly on staging for 3
-   days, after Claude reports the check (as for the backups, 1.3):
+7. **`docflow_app` is dropped only after the first worker deploy has
+   processed real documents on staging** (founder, 2026-10-05; D-190: the
+   same trigger as the backups, 1.3 and D-186. It replaces "after 3e has
+   run cleanly on staging for 3 days", which proves nothing while no
+   worker is deployed), and after Claude reports the check:
    ```sql
    REVOKE ALL ON ALL TABLES IN SCHEMA public FROM docflow_app;
    REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM docflow_app;
@@ -1670,7 +1680,8 @@ The founder's conditions (2026-10-02, Q5) are steps 0, 1 and 6.
 to 4 by the founder at about 16:50; step 5's snapshot at 16:52 (SHA-256
 `81bd33599151...`) and again at 21:27 after the last suite run; step 6's
 `NOLOGIN` at about 21:32, the refusal verified at 21:35, the old URL
-removed from the root `.env` then. Step 7 is not done. The record is in
+removed from the root `.env` then. Step 7 is not done: it waits for the
+first worker deploy to have processed real documents. The record is in
 CHECKPOINTS.md (Stage 3, "The cutover").
 
 **Stop condition before the first worker deploy** (founder, 2026-10-02).

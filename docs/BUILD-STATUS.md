@@ -3930,10 +3930,17 @@ go, given for after PRs #38, #39 and #40 had merged (main `e2f53c3`).
   at 21:35:02 UTC, three of three**; then the old URL came out of the
   root `.env`. RUNBOOK 10.2 step 6 now says to end the login's sessions
   after `NOLOGIN`, and never to try the old URL before it.
-- **Not done:** step 7 (dropping `docflow_app`; its "3 clean days" clock
-  is a question for the founder, CHECKPOINTS.md). **The first worker
-  deploy waits for the founder's go**: the cutover turned up several
-  things that were not expected, each listed in CHECKPOINTS.md.
+- **Not done:** step 7. `docflow_app` is dropped only after the first
+  worker deploy has processed real documents on staging (founder,
+  2026-10-05; D-190, the backups' trigger). **The first worker deploy
+  waits for the founder's go**: the cutover turned up several things that
+  were not expected, each listed in CHECKPOINTS.md.
+- **The one Storage timeout in the API suite is recorded as transient**
+  (D-190): once in 1,252 API tests across two runs, not reproduced.
+  Supabase had an incident open across the run, "Intermittent latency in
+  Eastern US". A real email that meets a 503 is sent again by Postmark,
+  10 times over about 10 hours 20 minutes (RUNBOOK 7.3). The project's
+  own Storage logs for the window are still to be read by the founder.
 
 ### Stage 4 detailed design -- APPROVED WITH CHANGES (founder, 2026-10-02; three more changes 2026-10-05); nothing built before the Stage 3 checkpoint's "go"
 

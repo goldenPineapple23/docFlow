@@ -183,11 +183,51 @@ UTC). Steps 1 to 6 are done; step 7 is not.** The evidence files are in
     #42, `main` `6cac1bd`): the launcher tests cleared the other logins
     from the environment but not from the root `.env`. The evidence the
     founder asked for before any fix is in D-189.
-  - **The one API failure** was
-    `test_11_attachments_quarantines_all_and_none_enqueued`: 503, because
-    an upload to Supabase Storage timed out (`ReadTimeoutError`). It
-    passed alone at 18:04, straight after that run, and on the full
-    re-run. Why Storage was slow at that moment was not established.
+  - **The one API failure is recorded as transient** (founder,
+    2026-10-05; D-190). `test_11_attachments_quarantines_all_and_none_enqueued`
+    got 503 because an upload to Supabase Storage did not answer
+    (`ReadTimeoutError`; the client waits 30 s for an answer and tries
+    up to three times).
+    **Once in 1,252 API tests across the two full runs, and not
+    reproduced:** the test passed alone at 18:04, straight after that
+    run, and in the full re-run. The evidence:
+    1. **Supabase's status history has one incident open across the
+       run's window** (17:17 to 18:03 UTC): "Intermittent latency in
+       Eastern US", on its API Gateway, opened 2026-09-29 16:26 UTC
+       (https://stspg.io/gxmmvm5s9rh0). In its words, "increased latency
+       for clients in the eastern US", for "clients connecting to
+       Supabase Projects from the eastern United States ... regardless
+       of the region in which the Project is hosted". On 2026-10-02 it
+       said some users were "still experiencing issues during peak
+       Eastern US business hours"; its next update, "A fix for this
+       issue has been implemented", came at 18:45 UTC on 2026-10-05,
+       about 40 minutes after the run ended. This machine is in that region
+       (its clock is UTC-4) and the run was in the early afternoon
+       there. Supabase lists no Storage incident that day. **This fits
+       the timeout; it does not prove it.**
+    2. **The project's own Storage logs for that window:** `[GAP: read
+       by the founder in the Supabase dashboard; Claude has no access to
+       them]`
+    3. **What a real email meets when intake answers 503.** The whole
+       email is rolled back, so nothing is half received, and Postmark
+       sends it again. Its documentation ("Errors and retries",
+       https://postmarkapp.com/developer/webhooks/inbound-webhook, read
+       2026-10-05): "If Postmark does not receive a 200 response from a
+       webhook server, we will retry the POSTing the webhooks. If we
+       receive a 403 response, we will stop retries. A total of 10
+       retries will be made, with growing intervals." The schedule it
+       lists: 1, 5, 10, 10, 10, 15 and 30 minutes, then 1, 2 and 6 hours,
+       which is 10 hours 21 minutes in all. Then: "If all of the retries
+       have failed, your Inbound page will show the message as Inbound
+       Error." Intake answers 503 here and never 403
+       (`test_the_inbound_webhook_answers_503_during_an_outage_so_postmark_retries`),
+       and a second delivery of the same email is received once
+       (`test_duplicate_webhook_delivery_is_idempotent`). So one timeout
+       costs that email about a minute. **Two limits:** an outage longer
+       than about 10 hours leaves the message at "Inbound Error" until
+       someone retries it from Postmark by hand (now in RUNBOOK 7.3); and
+       none of this has been seen with a real email, because no Postmark
+       account exists yet (D-027).
   - **The API suite was not run again on `6cac1bd`.** PR #42 changed no
     file under `apps/api`, `packages/core/docflow_core`, `apps/worker/app`,
     `apps/parse` or `supabase/migrations`.
@@ -245,11 +285,11 @@ UTC). Steps 1 to 6 are done; step 7 is not.** The evidence files are in
   then was the old URL removed from `.env`; the five settings were
   checked again at 21:35:36. RUNBOOK 10.2 step 6 now has the missing
   step.
-- **Step 7 (dropping `docflow_app`) is not done, and its clock is a
-  question for the founder.** The RUNBOOK says "after 3e has run cleanly
-  on staging for 3 days". Nothing of 3e runs on staging until the worker
-  is deployed, the same weakness the founder found in the backups' "3
-  clean days" (D-186).
+- **Step 7 (dropping `docflow_app`) is not done.** Decided (founder,
+  2026-10-05; D-190): only after the first worker deploy has processed
+  real documents on staging, the same trigger as the backups (D-186).
+  The RUNBOOK said "after 3e has run cleanly on staging for 3 days", and
+  nothing of 3e runs on staging until the worker is deployed.
 - **What was not expected, in one list** (10.2's stop rule: each stops
   the first worker deploy until explained and the founder has said go):
   the missing reference state at step 5 (D-188); the two worker test
@@ -257,9 +297,9 @@ UTC). Steps 1 to 6 are done; step 7 is not.** The evidence files are in
   one Storage timeout in the API suite; the copy of `.env` outside the
   repository; jobs cancelled by GitHub before they started, in the CI
   runs on `69a2970` and on `6cac1bd`; the pooled session after
-  `NOLOGIN`. Each is explained above except why Storage
-  was slow once. **The first worker deploy has not been started and
-  waits for the founder's go.**
+  `NOLOGIN`. Each is explained above; the Storage timeout is
+  recorded as transient, with its evidence. **The first worker deploy
+  has not been started and waits for the founder's go.**
 
 **The first worker deploy:** `[GAP: G; A4 against the real API and worker;
 the 500 + 1 run with its cost, its time, its slow case and the largest

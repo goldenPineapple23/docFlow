@@ -2936,3 +2936,19 @@ The evidence turned up a second thing. `record_worker_start` returned 7: the sui
 **Measured on staging, 2026-10-05, on the fix branch:** the two changed files, `20 passed, 2 skipped`; the full worker suite, `184 passed, 7 skipped in 1246.85s (0:20:46)`, with `worker_starts in the last 60 minutes: before 0, after 0; starts kept by tests: 0`. The same day on `9fd519a`: core `796 passed, 1 skipped`; API `1 failed, 624 passed, 1 skipped, 3 deselected` on the first run (one upload to Supabase Storage timed out, `ReadTimeoutError`; that test passed alone minutes later) and `625 passed, 1 skipped, 3 deselected` on the full re-run the founder asked for.
 
 **Related:** Section 7.9; D-148 (skips), D-180 (one run at a time), D-185 (3e), D-188; RUNBOOK 1.4, 9.2, 10.2; `.github/approved-skips.txt`.
+
+## D-190 — After the cutover: when `docflow_app` is dropped, and the one Storage timeout (founder, 2026-10-05)
+
+**Context:** the logins cutover on staging (RUNBOOK 10.2) finished step 6 on 2026-10-05 and left two things open (CHECKPOINTS.md, Stage 3, "The cutover").
+
+**Decided:**
+1. **`docflow_app` is dropped only after the first worker deploy has processed real documents on staging**, the same trigger as the backups (D-186). The RUNBOOK's "after 3e has run cleanly on staging for 3 days" proves nothing while no worker is deployed. RUNBOOK 10.2 step 7.
+2. **The Storage timeout in the first API run does not hold the first worker deploy, and is closed with evidence, not by assertion:** Supabase's status history and the project's Storage logs for the run's window; what a real inbound email meets when intake answers 503, from the email provider's own documentation; then recorded as transient: once in 1,252 API tests across two runs, not reproduced.
+
+**As found:**
+- **Status history:** one incident open across the window, "Intermittent latency in Eastern US" on Supabase's API Gateway (opened 2026-09-29; a fix announced at 18:45 UTC on 2026-10-05, about 40 minutes after the run). It fits the timeout and does not prove it. No Storage incident that day.
+- **The project's Storage logs:** not readable from this machine; the founder's to read in the dashboard. The gap is marked in CHECKPOINTS.md.
+- **A real email:** Postmark retries anything but a 200, stops at once on a 403, and makes 10 retries over 10 hours 21 minutes (1, 5, 10, 10, 10, 15 and 30 minutes, 1, 2 and 6 hours), after which the message shows as "Inbound Error" and can be retried by hand. Intake answers 503 for a Storage failure, never 403, after rolling the whole email back, and a second delivery is received once. So a single timeout delays one email by about a minute; nothing is lost.
+- **Two limits, recorded rather than fixed:** an outage longer than about 10 hours needs a manual retry from Postmark (added to RUNBOOK 7.3); and no Postmark account exists yet (D-027), so the retry has been read in its documentation, not seen.
+
+**Related:** Sections 7.8, 7.9; D-027, D-182 (3b, Storage), D-186, D-189; RUNBOOK 7.3 and 10.2.
