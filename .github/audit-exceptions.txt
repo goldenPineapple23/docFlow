@@ -1,0 +1,31 @@
+# Advisories the dependency audit is allowed to pass with. Read by
+# scripts/ci/npm_audit.py.
+#
+# Target: zero. Every line here needs the founder's approval, a reason and a
+# review date. An exception covers exactly one advisory: any other high or
+# critical advisory still fails the job, in dev dependencies too (the full
+# audit never runs with --omit=dev).
+#
+# An exception is only for an advisory in dev dependencies (founder,
+# 2026-10-05). It is keyed by advisory id, not by how the package is reached,
+# so the job also reads `npm audit --omit=dev`: if an advisory listed here
+# appears in that runtime report, its dev-only premise no longer holds and the
+# job fails, whatever the line's date. Fix the runtime dependency; the line
+# can't be used to pass it.
+#
+# Format:  <suite> <advisory id> review=<YYYY-MM-DD>  # reason
+#   suite = web
+#
+# An exception ends on its review date (founder, 2026-10-05). The job warns
+# on every run for the 7 days before it. From the date itself the advisory
+# fails the job again, until the line is removed (a fix exists) or given a
+# new date and reason.
+# A line whose advisory is no longer reported is announced as stale; delete it.
+
+# braces (stack exhaustion on deeply nested brace patterns). Dev-only: it is
+# reached only through the lint chain eslint-config-next ->
+# @next/eslint-plugin-next -> fast-glob -> micromatch -> braces, and
+# `npm audit --omit=dev` reports 0. No patched braces exists (every version up
+# to the latest, 3.0.3, is affected), and npm's only offered fix downgrades
+# eslint-config-next to 14.2.35, which is not taken. Founder, 2026-10-05.
+web GHSA-vfj7-8cjw-p6xm review=2026-11-05  # dev-only lint chain; no patched braces exists
