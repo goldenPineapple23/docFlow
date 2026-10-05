@@ -464,8 +464,17 @@ go, given for after PRs #38, #39 and #40 had merged (main `e2f53c3`).
   (D-190): once in 1,252 API tests across two runs, not reproduced.
   Supabase had an incident open across the run, "Intermittent latency in
   Eastern US". A real email that meets a 503 is sent again by Postmark,
-  10 times over about 10 hours 20 minutes (RUNBOOK 7.3). The project's
-  own Storage logs for the window are still to be read by the founder.
+  10 times over about 10 hours 20 minutes (RUNBOOK 7.3).
+- **The project's own Storage logs now back that up** (two exports by
+  the founder, read 2026-10-05; D-192; CHECKPOINTS.md, "The cutover").
+  Storage received the failed test's upload three times, 30 seconds
+  apart, and logged each as `ABORTED RES`; it logged queue errors of its
+  own from 17:30 to 17:36 UTC and none outside those minutes; the next
+  test's upload was aborted once and passed on the retry; no 5xx row in
+  524 requests. **One thing found on the way:** the timed-out upload
+  still landed half a minute later, so one file sits in the bucket with
+  no row pointing at it. Recorded, not changed; the founder's to decide
+  whether more is wanted.
 
 ### Stage 4 detailed design -- APPROVED WITH CHANGES (founder, 2026-10-02; three more changes 2026-10-05); nothing built before the Stage 3 checkpoint's "go"
 

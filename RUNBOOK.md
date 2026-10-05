@@ -957,6 +957,17 @@ the project's Storage logs. Nothing needs doing once Storage is back: the
 dispatcher sends each waiting document again every
 `STORAGE_WAIT_RETRY_MINUTES` (5), with no maximum.
 
+**Reading the Storage logs** (Supabase dashboard, Logs, Storage; learned
+on 2026-10-05, D-192). The dashboard shows local time. An export stops at
+500 rows, newest first (both exports that day did), so choose a range of
+20 minutes or less around the failure, and export a second range if the
+file has exactly 500 rows. Look for `ABORTED RES` on the upload's path:
+Storage received the request and the caller hung up before the answer (our
+client waits 30 seconds, up to three times). Look also for `[Queue Sender]
+Error` rows near it, which are Storage's own. **A timed-out upload can
+still be finished by Storage afterwards.** That file has no row pointing
+at it, so nothing can reach it, and it goes when the tenant is deleted.
+
 A `document_failed` alert with **DOC-026** is different: the stored original
 is missing or isn't the file that was received. That is never an outage. Ask
 the customer to upload the file again, and look for how the object went
