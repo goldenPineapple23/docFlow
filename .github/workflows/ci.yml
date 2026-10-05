@@ -269,9 +269,20 @@ jobs:
       # Founder's Q5 condition 2 (Stage 3e): the reverse script is tested, not
       # just checked in. Before the logins are turned on, since the reverse
       # drops the roles and forward creates them again.
-      - name: Migration 0036 forward -> reverse -> forward (against staging's pre-0036 snapshot)
+      # The forward state must equal supabase/reverse/0036_post_snapshot.json,
+      # the committed state a database shows once 0036 is applied (founder,
+      # 2026-10-05): the cutovers compare against that file (RUNBOOK 10.2).
+      - name: Migration 0036 forward -> reverse -> forward (against the committed pre- and post-0036 states)
         id: roundtrip
         run: python "${{ github.workspace }}/scripts/ci/migration_roundtrip.py"
+      # The state this run found, as a file, whether or not it matched.
+      - name: Keep the forward state CI found
+        if: success() || failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: 0036-forward-state
+          path: packages/core/0036-forward-state.json
+          if-no-files-found: warn
       - name: Turn on the four logins (migration 0036 creates them), as RUNBOOK 10.2 does
         id: app_role
         run: python "${{ github.workspace }}/scripts/ci/create_logins.py"
