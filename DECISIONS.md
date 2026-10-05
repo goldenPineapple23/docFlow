@@ -2952,3 +2952,27 @@ The evidence turned up a second thing. `record_worker_start` returned 7: the sui
 - **Two limits, recorded rather than fixed:** an outage longer than about 10 hours needs a manual retry from Postmark (added to RUNBOOK 7.3); and no Postmark account exists yet (D-027), so the retry has been read in its documentation, not seen.
 
 **Related:** Sections 7.8, 7.9; D-027, D-182 (3b, Storage), D-186, D-189; RUNBOOK 7.3 and 10.2.
+
+## D-191 — Context housekeeping: merged designs leave BUILD-STATUS, the status paragraph holds only the present, and how Claude reads and reports (founder, 2026-10-05)
+
+**Context:** `docs/BUILD-STATUS.md` had grown to 5,027 lines, about 3,500 of them the designs and build records of Stage 3 slices that are all merged, and its status line had become one 492-word paragraph that grew with every update. `CLAUDE.md` is loaded whole at the start of every session. The founder asked for a measured proposal first, with nothing changed until approved, and named what must not be touched: backup-first, the suite and merge bar, ask-first, design-before-build, the gate lists, and RUNBOOK 1.3, 1.4, 1.6, 9.2 and 10.2.
+
+**Decided (founder, item by item):**
+1. **Merged designs move out of BUILD-STATUS, word for word,** into `docs/designs/<stage>.md`. Each heading other files cite stays in BUILD-STATUS as a one-line stub linking to the new file; the PR shows a byte comparison. BUILD-STATUS keeps the status paragraph, the current stage, open decisions, the deploy gate list, the backup dates, and a link to each design. Stage 4's approved design stays until it is built and merged.
+2. **`CLAUDE.md` is not slimmed** (option (a) of two). Its header says Sections 0, 3, 7 and 10 are verbatim, and rule 0.9 requires that; paraphrasing them could change a rule without anyone seeing it.
+3. **Reporting rules, in a new section of `CLAUDE.md` outside the verbatim ones:** report only what changed; for each suite the last line, failures in full, and whatever RUNBOOK 1.3, 1.4 and 1.6 require; short status reports. The founder's first wording, "nothing else from the run", was changed at Claude's request because 1.3 and 1.4 require the commit and login beside the counts and an explanation when a count or skip changes.
+4. **Suites run quietly:** `pytest -q -rs` to a log file outside the repository, the tail and the failures read; skip reasons kept; `--durations=25` on the worker run. The same suites, one at a time, the same staging target.
+5. **Session start:** `CLAUDE.md` and the BUILD-STATUS status paragraph only, then named sections as a task needs them. The status paragraph is capped at the current state, and Claude's own state notes at one current entry. **Superseded status paragraphs and state-note entries are archived word for word, to files not read at session start. Nothing is deleted.**
+
+**As built:**
+- **Moved, 3,535 lines in seven blocks:** `docs/designs/stage-3a.md`, `stage-3b.md`, `stage-3c.md`, `stage-3d.md` (two blocks), `card-billing.md` and `stage-3e.md`. Each file is a short header, a marker line, then the text exactly as it stood. The moving script checked that each file's body equals the original lines and that every line not moved is still in BUILD-STATUS, in order; the line ranges and SHA-256s are in the PR.
+- **Card billing was moved too.** The founder's examples were 3b to 3e; card billing's design sat between 3d's and 3e's, is built and merged (D-181), and is cited by name from `DECISIONS.md` and migration `0031`, so it follows the same rule and has its own stub.
+- **Kept in BUILD-STATUS, in full and unchanged:** "Gates for the first worker deploy" (it stood inside "3d on staging"; `stage-3d.md` marks where), the 3d and 3e merge records with the backup dates, the open cost measurement before the first pilot, and everything recorded on 2026-10-05.
+- **19 stubs.** A stub keeps its heading's original words, including a status that was true when written ("PROPOSED", "IN PROGRESS"); the paragraph above them says all of it is merged. The five lettered sub-headings of the 3e design (A to E) are not stubbed one by one: they are cited as parts of "3e detailed design", which is.
+- **The status paragraph** is now about 110 words. The one it replaced is in `docs/status-history.md`, word for word.
+- **`CLAUDE.md`:** one new section at the end, "Working rules added by the founder". 20 lines added, none changed or removed.
+- **Claude's state notes** (outside the repository) were cut the same day from about 15,000 tokens to one current entry of about 2,000, the rest archived word for word.
+
+**Not changed:** any rule, any gate list, RUNBOOK 1.3, 1.4, 1.6, 9.2 or 10.2, any test, any code. BUILD-STATUS went from 5,027 lines to 1,552.
+
+**Related:** rule 0.9; D-186 (Stage 4's design stays in BUILD-STATUS until built); RUNBOOK 1.4; `docs/designs/`, `docs/status-history.md`.
