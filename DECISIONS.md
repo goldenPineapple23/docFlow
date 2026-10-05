@@ -2869,10 +2869,11 @@ The fresh backup challenge passed the step-up. The rotation then stopped at `QUA
 2. **Dev dependencies stay in the audit.** Not `--omit=dev`: that would hide every later advisory in the build and lint tools, not just this one.
 3. **The downgrade isn't taken.**
 4. **Every exception carries a reason and a review date, and ends on that date.** For this one: 2026-11-05. The job warns on every run from 2026-10-29, and from 2026-11-05 the advisory fails the web job again until the line is removed (a fix exists) or re-dated with a reason.
+5. **An exception is only for a dev-only advisory, and is held to that.** It is keyed by advisory id, not by how the package is reached, so the job also reads `npm audit --omit=dev --json`. If an excepted advisory appears in that runtime report (for instance `braces` arriving through a runtime dependency), the job fails with an error saying the exception's dev-only premise no longer holds, whatever the line's date. The second report can only add a failure.
 
 **Why:** `npm audit --audit-level=high` is all or nothing. One advisory with no fix either blocks every merge, docs included, or gets the audit switched off, which hides the next one. An exception that names one advisory and expires keeps the check meaningful for everything else and can't be forgotten.
 
-**Built** in its own CI-only PR (branch `ci/web-audit-exception`, from `main` `b90b1c4`). Tests: `packages/core/tests/test_npm_audit_exceptions.py`, on npm's own report of 2026-10-05: it passes with the exception, and fails with a planted high or critical advisory, without the exception, from the review date, and on an unreadable report. This entry is on the record branch, not in that PR, because both would otherwise append to the end of this file.
+**Built** in its own CI-only PR (branch `ci/web-audit-exception`, from `main` `b90b1c4`). Tests: `packages/core/tests/test_npm_audit_exceptions.py`, on npm's own report of 2026-10-05: it passes with the exception, and fails with a planted high or critical advisory, without the exception, from the review date, with a planted runtime path for `braces`, and on an unreadable report. This entry is on the record branch, not in that PR, because both would otherwise append to the end of this file.
 
 **To do before 2026-11-05:** look for a patched `braces`, or a Next lint chain without it; then remove the line, or give it a new date and say why.
 
