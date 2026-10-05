@@ -205,9 +205,59 @@ UTC). Steps 1 to 6 are done; step 7 is not.** The evidence files are in
        (its clock is UTC-4) and the run was in the early afternoon
        there. Supabase lists no Storage incident that day. **This fits
        the timeout; it does not prove it.**
-    2. **The project's own Storage logs for that window:** `[GAP: read
-       by the founder in the Supabase dashboard; Claude has no access to
-       them]`
+    2. **The project's own Storage logs for that window** (two exports
+       by the founder from the Supabase dashboard, 500 rows each, the
+       export's limit: 17:18:46 to 17:37:58 UTC and 17:37:05 to 18:04:33
+       UTC; read by Claude on 2026-10-05; D-192). **Storage received the
+       upload three times and answered none of them in time.** The rows
+       for the failed test's tenant, as logged (UTC):
+
+           17:32:37.367  PUT | ABORTED RES | tenants/2054f64b-.../uploads/c071aedf....txt
+           17:33:07.682  PUT | ABORTED RES | (the same key)
+           17:33:39.131  PUT | ABORTED RES | (the same key)
+           17:34:00.741  [Admin]: ObjectAdminDelete (the same key)
+           17:34:09.959  [Lifecycle]: ObjectCreated:Put (the same key)
+
+       The three rows are 30.3 and 31.4 seconds apart, which is the
+       client's 30-second wait and its three tries. `ABORTED RES` is read
+       here as "the caller hung up before the answer was sent": that is
+       Claude's reading of the label, and the timing fits it.
+       - **Storage was reporting trouble of its own in the same minutes:**
+         eight rows of `[Queue Sender] Error while sending job to queue,
+         sending synchronously`, from 17:30:20 to 17:35:41, and none
+         before or after in either export.
+       - **The next test was hit too, and the retry carried it:** its
+         first upload (tenant `00774d47`) is `ABORTED RES` at 17:34:18
+         and answered 200 at 17:35:11; that test passed. So "once in
+         1,252" is one failed test; two tests met the slow minutes.
+       - **Nothing else failed.** The two exports together, each row
+         counted once: 931 rows, 524 of them requests, of which 514
+         answered 200, one 204, five 404 (tests asking for a file that
+         is not there, as they mean to) and these four aborted uploads.
+         No 5xx row. Storage was answering in under a second again at
+         17:36. The run's first 92 seconds (17:17:14 to 17:18:46) are
+         before the exports.
+       - **After 17:39 the "object created" rows ran late:** 11 to 91
+         seconds behind their uploads until 17:51, under a second again
+         at 17:55 and 18:04. Every one of those uploads answered 200.
+       - **The exports are not a full record:** many objects have a
+         "created" row with no request row, and the reverse. A missing
+         row proves nothing; the rows above are there.
+       - **The timed-out upload still landed.** Storage finished it at
+         17:34:09, half a minute after the client had given up, and the
+         object is in the bucket now with no row pointing at it (listed
+         read-only on 2026-10-05: one object under `tenants/2054f64b-...`).
+         Nobody can reach it: no document row, so no signed URL; and a
+         tenant's deletion removes everything under its prefix
+         (`delete_tenant_storage`). Left in place with staging's other
+         test data. **For a real email this means a 503 can leave one
+         unreferenced file behind, and the re-sent email is stored under
+         a new key.** Recorded, not changed; whether to do more is the
+         founder's to decide (D-192).
+
+       **So the cause is on Supabase's side and lasted about six minutes
+       (17:30 to 17:36 UTC).** The logs do not say why; item 1's incident
+       is the likely reason and stays unproven.
     3. **What a real email meets when intake answers 503.** The whole
        email is rolled back, so nothing is half received, and Postmark
        sends it again. Its documentation ("Errors and retries",
@@ -298,7 +348,8 @@ UTC). Steps 1 to 6 are done; step 7 is not.** The evidence files are in
   repository; jobs cancelled by GitHub before they started, in the CI
   runs on `69a2970` and on `6cac1bd`; the pooled session after
   `NOLOGIN`. Each is explained above; the Storage timeout is
-  recorded as transient, with its evidence. **The first worker deploy
+  recorded as transient, with its evidence, the project's own Storage
+  logs included (D-192). **The first worker deploy
   has not been started and waits for the founder's go.**
 
 **The first worker deploy:** `[GAP: G; A4 against the real API and worker;

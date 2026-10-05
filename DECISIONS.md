@@ -2947,7 +2947,7 @@ The evidence turned up a second thing. `record_worker_start` returned 7: the sui
 
 **As found:**
 - **Status history:** one incident open across the window, "Intermittent latency in Eastern US" on Supabase's API Gateway (opened 2026-09-29; a fix announced at 18:45 UTC on 2026-10-05, about 40 minutes after the run). It fits the timeout and does not prove it. No Storage incident that day.
-- **The project's Storage logs:** not readable from this machine; the founder's to read in the dashboard. The gap is marked in CHECKPOINTS.md.
+- **The project's Storage logs:** not readable from this machine; the founder's to read in the dashboard. The gap is marked in CHECKPOINTS.md. (Read since, from the founder's exports: D-192.)
 - **A real email:** Postmark retries anything but a 200, stops at once on a 403, and makes 10 retries over 10 hours 21 minutes (1, 5, 10, 10, 10, 15 and 30 minutes, 1, 2 and 6 hours), after which the message shows as "Inbound Error" and can be retried by hand. Intake answers 503 for a Storage failure, never 403, after rolling the whole email back, and a second delivery is received once. So a single timeout delays one email by about a minute; nothing is lost.
 - **Two limits, recorded rather than fixed:** an outage longer than about 10 hours needs a manual retry from Postmark (added to RUNBOOK 7.3); and no Postmark account exists yet (D-027), so the retry has been read in its documentation, not seen.
 
@@ -2976,3 +2976,26 @@ The evidence turned up a second thing. `record_worker_start` returned 7: the sui
 **Not changed:** any rule, any gate list, RUNBOOK 1.3, 1.4, 1.6, 9.2 or 10.2, any test, any code. BUILD-STATUS went from 5,027 lines to 1,552.
 
 **Related:** rule 0.9; D-186 (Stage 4's design stays in BUILD-STATUS until built); RUNBOOK 1.4; `docs/designs/`, `docs/status-history.md`.
+
+## D-192 — The Storage timeout: what the project's own Storage logs show (closes D-190's gap; 2026-10-05)
+
+**Context:** D-190 closed the one Storage timeout in the API suite "with evidence, not by assertion" and left one piece open: the project's own Storage logs, which only the founder can read. The founder exported them twice from the Supabase dashboard on 2026-10-05 (500 rows each, the export's limit; 17:18:46 to 17:37:58 and 17:37:05 to 18:04:33 UTC) and Claude read both.
+
+**As found** (the rows are quoted in CHECKPOINTS.md, Stage 3, "The cutover"):
+- **Storage received the failed test's upload three times and answered none in time.** Three `PUT | ABORTED RES` rows on the same key for tenant `2054f64b`, at 17:32:37, 17:33:07 and 17:33:39 UTC: 30.3 and 31.4 seconds apart, the client's 30-second wait and three tries. Reading `ABORTED RES` as "the caller hung up before the answer was sent" is Claude's; the timing fits it.
+- **Storage logged trouble of its own in the same minutes:** eight `[Queue Sender] Error while sending job to queue, sending synchronously` rows from 17:30:20 to 17:35:41, and none outside them in either export.
+- **A second test met the same minutes and the retry carried it:** tenant `00774d47`, aborted at 17:34:18, answered 200 at 17:35:11; the test passed. So D-190's "once in 1,252" is one failed test, and two tests were touched.
+- **Nothing else failed:** 931 rows with each counted once, 524 of them requests: 514 answered 200, one 204, five 404 that the tests intend, four aborted. No 5xx. Under a second again from 17:36.
+- **The exports are not a full record** (many "created" rows have no request row, and the reverse), so a missing row proves nothing. The rows above are present.
+
+**Concluded:** the cause was on Supabase's side and lasted about six minutes (17:30 to 17:36 UTC). The logs do not say why; the incident in D-190 ("Intermittent latency in Eastern US") is the likely reason and stays unproven. D-190's decision stands: transient, and it does not hold the first worker deploy.
+
+**Found on the way, recorded and not changed:** the timed-out upload still landed. Storage logged `ObjectCreated:Put` for that key at 17:34:09, half a minute after the client had given up, and the object is in the bucket (listed read-only the same day) with no row pointing at it.
+- **What that means for a real email:** intake answers 503 and rolls the email's rows back, as D-190 says, but a file from that attempt can remain in the bucket, and the email Postmark sends again is stored under a new key. D-190's "nothing is half received" is true of the database and not always of the bucket.
+- **Why it is not a data risk:** no document row points at the file, so no signed URL can be made for it and no tenant or reviewer can reach it; it sits under that tenant's own prefix; and deleting the tenant removes everything under the prefix (`delete_tenant_storage`).
+- **Not decided here:** whether to do more (for example, a founder-run report of files no row references). Nothing is built for it; it is the founder's to decide.
+- **On staging:** the one object under `tenants/2054f64b-...` is left in place with the other test data.
+
+**Also recorded:** RUNBOOK 7.3 now says how to read the Storage logs (local time in the dashboard, 500 rows per export, what `ABORTED RES` and `[Queue Sender] Error` mean, and that a timed-out upload can still land).
+
+**Related:** Sections 7.5, 7.9, 7.10; D-182 (3b, Storage), D-190; RUNBOOK 7.3; CHECKPOINTS.md, Stage 3, "The cutover".
