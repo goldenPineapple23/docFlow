@@ -151,8 +151,7 @@ def main() -> int:
 
     forward = _take(url)
     # Kept as a CI artifact (ci.yml), whether or not it matches the committed one.
-    Path(FORWARD_FOUND).write_text(canonical(forward), encoding="utf-8", newline="
-")
+    Path(FORWARD_FOUND).write_bytes(canonical(forward).encode("utf-8"))
     _run(url, REVERSE)
     reversed_ = _take(url)
     _run(url, FORWARD)
