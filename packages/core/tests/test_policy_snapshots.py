@@ -32,7 +32,7 @@ MIGRATION = REPO / "supabase" / "migrations" / "0036_separate_logins.sql"
 
 # Changing either committed state is a visible change here too.
 PRE_SHA256 = "11f4ebefb1ce0e33c41c723dfe800694ff26657c38d3ae10439528b1242a9b2e"
-POST_SHA256 = "TO-BE-RECORDED-FROM-CI"
+POST_SHA256 = "81bd3359915120f6f948fb42026f7befdcfaf6ccb4acc15d2a044c597e615f9d"
 
 LOGINS = {"docflow_api", "docflow_admin", "docflow_worker", "docflow_stripe"}
 
