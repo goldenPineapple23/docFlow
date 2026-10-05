@@ -357,3 +357,23 @@ The intake address is unguessable (7.2) until the customer forwards it to a buye
 - Isolated parsing worker is a separate deployable service from the web API; Tier 2 conversion (LibreOffice headless, image libs, .msg parsing) runs inside it. Hosted on Fly.io (D-150). Each parse process runs in its own network namespace with no network access; the D-150 spike proved this network isolation only. Still to be built and tested in Stage 3: unprivileged user, per-file memory/CPU/time limits, one process per file, no keys in the parse service, /.fly hidden from the sandbox. See DECISIONS.md D-150 and D-003.
 - `users.tenant_id` is nullable to support platform-admin-only accounts — see `DECISIONS.md` D-004.
 - Setup fees default to automatic Stripe charge at go-live — see `DECISIONS.md` D-005.
+
+---
+
+## Working rules added by the founder (2026-10-05; not part of the Master Build Prompt)
+
+Sections 0, 3, 7 and 10 above are the prompt's own words and are unchanged. The rules below are the founder's, decided on 2026-10-05 (`DECISIONS.md` D-191). They change how Claude reads and reports, never what is checked. Backup-first, the suite and merge bar, ask-first, design-before-build, the gate lists, and RUNBOOK 1.3, 1.4, 1.6, 9.2 and 10.2 stand exactly as written. If following one of these rules would weaken any of those, stop and ask.
+
+### Reporting
+- Report only what changed since the last message. Don't repeat standing reminders (backup dates, the gate list, "nothing built until approved"): they live in `docs/BUILD-STATUS.md`, and the founder reads them there.
+- For each suite run, quote its last line as printed, plus any failures or errors in full, plus whatever RUNBOOK 1.3, 1.4 and 1.6 require: the commit and the login beside the line, an explanation when a count or a skip changes, and the suite's own evidence of the cause before anything is fixed.
+- Keep status reports short: what was done, the result, what is needed from the founder.
+
+### Running the suites
+- Run each suite as `pytest -q -rs` with its output to a log file outside the repository, then read the last lines and the failures, not the whole log. `-rs` keeps every skip's reason. Add `--durations=25` on the worker run.
+- This changes how the output is read, not what runs: the same suites, one at a time, against the same staging database (RUNBOOK 1.4).
+
+### Starting a session
+- Read this file and the status paragraph near the top of `docs/BUILD-STATUS.md` ("Status, as of ..."). Then read other files as the task needs them, a named section first, not the whole file.
+- The designs of merged slices are in `docs/designs/`, and earlier status paragraphs are in `docs/status-history.md`. Neither is read at session start.
+- Claude's own state notes hold one current entry. A superseded entry is archived word for word, never deleted.
