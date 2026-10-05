@@ -799,3 +799,4 @@ self-tests are as before (canary 5, S 5, B 17, A with only IPv6 NOT-RUN).
 the real-Celery fairness test and the dispatch-worker test. **The 3d merge
 gate is met:** CI green including those two, and the staging suites green.
 Next: the founder opens the PR; its own CI run must pass too.
+

@@ -214,3 +214,4 @@ row before the model call (D-163).** A worker that dies during the model call
 records nothing, so that call's cost is lost. `extraction_runs` is append-only
 with `succeeded NOT NULL`, so the fix needs a migration. **Agreed: its own item
 in 3c, designed and asked about before building.**
+
