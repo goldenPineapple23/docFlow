@@ -1215,6 +1215,9 @@ the same list as BUILD-STATUS "3d on staging"):
 - **the logins cutover done and verified** (section 10), the worker on
   `docflow_worker` and the API on its three.
 
+The order these are met in, who does each step and where the founder's
+word is needed: 9.7.
+
 **Straight after the worker starts, at the first deploy** (founder,
 2026-10-05; D-189): confirm that the start was recorded and that `/healthz`
 reflects it. No test commits a start on staging (the one that does runs
@@ -1570,6 +1573,191 @@ The Console's health strip shows the same heartbeat, red past
 | `HEARTBEAT_PING_MIN` | 5 | At most one heartbeat ping this often (3e) |
 | `HEARTBEAT_PING_TIMEOUT_SECONDS` | 5 | A ping's own time limit; a failed ping never fails a pass |
 | `DISPATCH_UNCLAIMED_ALERT_MIN` | 20 | Dispatched and unclaimed this long sends `/fail` (Q2; founder Q9: 20, above every non-document task's hard limit and below `STUCK_PROCESSING_TIMEOUT_MIN` (30), both pinned by a test) |
+
+### 9.7 The first worker deploy on staging: the procedure (founder, 2026-10-05; D-193)
+
+9.2 lists the gates. This is the order they are met in, who does each step,
+and where the founder's word is needed. It adds no gate and removes none.
+
+**Who does what.**
+- **The founder:** every secret (the parse token, the heartbeat URL, every
+  `fly secrets set`), the Healthchecks.io check, the SQL Editor queries, and
+  each **STOP**.
+- **Claude:** the deploy commands, the test runs, the measurements and the
+  record. Never sees or types a secret's value.
+
+**What each app is given** (names only): 3c's approved list, the logins as
+in 10.1, and what 3d and 3e added. A setting not in this table comes back
+to the founder before it is set.
+
+| App | Settings |
+|---|---|
+| parse | `PARSE_SERVICE_TOKEN`, nothing else |
+| worker | `PARSE_SERVICE_TOKEN` (the same value), `DATABASE_URL` (`docflow_worker`'s: the `.env` line `WORKER_DATABASE_URL`), `REDIS_URL`, `ANTHROPIC_API_KEY`, the four `STORAGE_S3_*`, `HEARTBEAT_URL`, `FOUNDER_ALERT_EMAIL` |
+| API | `DATABASE_URL` (`docflow_api`'s: the `.env` line `API_DATABASE_URL`), `ADMIN_DATABASE_URL`, `STRIPE_DATABASE_URL`, `REDIS_URL`, `SUPABASE_URL`, `CONSOLE_MFA_ENFORCED`, the four `STORAGE_S3_*` |
+
+Left off, and why:
+- **`SUPABASE_JWT_SECRET`** (founder: off unless the API fails without it).
+  The API checks this project's ES256 session tokens against the project's
+  published keys, using `SUPABASE_URL` alone (`apps/api/app/deps.py`;
+  D-088, D-174). It is blank on the founder's machine too.
+- **`EMAIL_PROVIDER_API_KEY`**, on both apps. No e-mail sender is built yet
+  (D-103: its own stage, before the first pilot). Unset, every e-mail is
+  written `held` and read in the Console's Outbox. Set, the rows would be
+  written `queued` and nothing would send them.
+- **The Stripe keys, the Postmark webhook pair, `SUPABASE_SERVICE_ROLE_KEY`,
+  `DOCUMENT_URL_SIGNING_SECRET`.** So Fly staging has no inbound e-mail, no
+  Stripe, no invites and no document viewer. No gate needs them.
+
+**Rules for the whole deploy** (founder, 2026-10-05).
+- **The real model reads every document**, the 500 + 1 included. A deployed
+  worker has no stand-in for the model.
+- **The Fly worker and beat are stopped at the end of every session**
+  (`fly scale count worker=0 beat=0 --app docflow-worker-staging`), and the
+  founder pauses the Healthchecks.io check while they are. Two reasons: one
+  stack against staging at a time (9.3), and a running dispatcher would
+  send the documents the staging test suites create to the real model.
+- **Spend.** The hard limit on model spend is the Anthropic account's
+  prepaid balance with auto-reload off (set by the founder; $40.97 on
+  2026-10-05). Claude stops the worker and reports when the deploy's total
+  spend (model, Fly, Redis) reaches **$40**. The per-tenant breaker ($50 a
+  day) is above both, so it is not the protection here. Fly and Upstash
+  bill by use with no cap that was found (3c, Q10).
+
+**The steps.**
+
+1. **Founder:** create the Healthchecks.io check (9.4, "Setting it up",
+   items 1 and 2). Keep the ping URL for step 3.
+2. **Claude:** confirm nothing else runs against staging: no local worker,
+   beat, API or test suite.
+3. **Founder:** set the secrets, in a new PowerShell window with history
+   off (8.1). `--stage` stores a value without starting anything.
+   ```powershell
+   Set-PSReadLineOption -HistorySaveStyle SaveNothing
+   $fly = "$env:USERPROFILE\.fly\bin\fly.exe"
+   python -c "import secrets; print(secrets.token_urlsafe(48))"   # the new parse token
+   & $fly redis status docflow-staging-redis                       # the private redis:// URL
+
+   & $fly secrets set --app docflow-parse-staging --stage `
+     PARSE_SERVICE_TOKEN=<the new token>
+
+   & $fly secrets set --app docflow-worker-staging --stage `
+     PARSE_SERVICE_TOKEN=<the same new token> `
+     DATABASE_URL=<the value of WORKER_DATABASE_URL in .env> `
+     REDIS_URL=<the private redis:// URL> `
+     ANTHROPIC_API_KEY=<as in .env> `
+     STORAGE_S3_ENDPOINT=<as in .env> `
+     STORAGE_S3_REGION=<as in .env> `
+     STORAGE_S3_ACCESS_KEY_ID=<as in .env> `
+     STORAGE_S3_SECRET_ACCESS_KEY=<as in .env> `
+     HEARTBEAT_URL=<the ping URL from step 1> `
+     FOUNDER_ALERT_EMAIL=<as in .env>
+
+   & $fly secrets set --app docflow-api-staging --stage `
+     DATABASE_URL=<the value of API_DATABASE_URL in .env> `
+     ADMIN_DATABASE_URL=<as in .env> `
+     STRIPE_DATABASE_URL=<as in .env> `
+     REDIS_URL=<the same Redis URL> `
+     SUPABASE_URL=<as in .env> `
+     CONSOLE_MFA_ENFORCED=<as in .env> `
+     STORAGE_S3_ENDPOINT=<as in .env> `
+     STORAGE_S3_REGION=<as in .env> `
+     STORAGE_S3_ACCESS_KEY_ID=<as in .env> `
+     STORAGE_S3_SECRET_ACCESS_KEY=<as in .env>
+   ```
+   **Three things must not happen:** the worker given `ADMIN_DATABASE_URL`,
+   `STRIPE_DATABASE_URL` or `API_DATABASE_URL` (it refuses to start); the
+   API given `PARSE_SERVICE_TOKEN` (it refuses to start); any app given a
+   `postgres` or service-role credential.
+4. **Claude:** `fly secrets list` on each app: names, never values. Report
+   the three lists and the time the token was set on each app.
+
+   **STOP 1.** The founder confirms the lists. No deploy command runs
+   before this.
+5. **Claude:** restart the parse service on its new token (the same image;
+   no parse code is deployed). Every line of the canary is PASS (8.3) and
+   `fly ips list` shows one private IPv6 address and nothing else.
+6. **Claude:** read `worker_starts_last_hour` (9.2, "Straight after the
+   worker starts", item 1).
+7. **Claude:** deploy the worker (`fly deploy`, rolling, one `worker`
+   machine and one `beat` machine; 9.3). **Founder:** the `worker_starts`
+   query in 9.2. **Claude:** `/healthz` moved by one; the launcher's log
+   shows both Celery workers up and the login check passed as
+   `docflow_worker`. **Founder:** the first ping shows in Healthchecks.io
+   within about 5 minutes. No row, two rows, or `/healthz` not moving by
+   one: stop and report (9.2).
+8. **Claude:** deploy the API (9.1: after the worker). `fly ips list` shows
+   no public address; `/healthz` over `fly proxy` reads `"stale":false`.
+
+   **STOP 2.** Claude reports steps 5 to 8. The founder says whether to go
+   on to the gates.
+9. **G** (3c's test table). G1: three uploads through the Fly API, the
+   queue, the Fly worker and the parse service to `needs_review`: the
+   golden fixture, a `.doc` and a scanned image. Record each document's
+   time and cost. G2: a catalog import by the same path. G3: Redis commands
+   in a timed idle hour and a timed busy one (3c, Q10: more than about
+   69,400 in the idle hour means the fixed $10 plan).
+10. **A4 against the real API and worker.** The parse self-test with a
+    targets file: the API's private address on port 8000, with the API
+    machine started first (a connection to its private address does not
+    wake it), and the worker's private address on **port 22**. The worker
+    listens on nothing of its own; port 22 is Fly's SSH service, which
+    every Fly machine runs (3c's evidence shows it on the parse machine).
+    Each control must reach its target from outside the sandbox, and the
+    same connection from inside a job must be blocked. NOT-RUN fails the
+    gate. **If the control cannot reach the worker's port 22** (founder):
+    the worker is recorded as "not tested: it accepts no connections",
+    never as passed, and the API half must pass in full. A pass on port 22
+    is recorded as "Fly's SSH port, not a DocFlow port".
+11. **Memory** (9.2, "Measuring the worker machine's memory").
+
+    **STOP 3.** The founder gets the numbers and chooses: a lower
+    per-process limit, or a 2 GB worker machine. Neither changes before.
+12. **The heartbeat drills** (9.4's pass marks), and the restart alert:
+    1. stop the worker: the Healthchecks.io e-mail within 12 minutes;
+    2. start it: the recovery e-mail after the first ping;
+    3. kill the documents worker three times within the hour:
+       `worker_restarting` is raised. **Pass mark (founder, 2026-10-05):**
+       the alert row and its held e-mail, read by the founder with the
+       query below, and recorded as "raised and held, not delivered". The
+       3e design said "the `worker_restarting` email"; DocFlow delivers no
+       e-mail until the sending stage is built, and delivery is proven
+       then.
+       ```sql
+       select a.type, a.severity, a.created_at, o.status as email_status
+       from founder_alerts a
+       left join email_outbox o on o.id = a.email_outbox_id
+       where a.type = 'worker_restarting'
+       order by a.created_at desc limit 3;
+       ```
+    4. stop the documents worker taking work with the dispatch process
+       running: the `/fail` e-mail after `DISPATCH_UNCLAIMED_ALERT_MIN`
+       plus one pass.
+13. **Claude:** the 500 + 1 budget again, with G1's measured cost and time
+    per document and G3's Redis count.
+
+    **STOP 4.** The founder signs off the number. The run does not start
+    before this.
+14. **The 500 + 1 run.** One Scale-tier test tenant sends 500 distinct
+    short text orders (so no allowance alert is raised); a second tenant
+    then sends 1. The script that makes and uploads them is shown to the
+    founder before it runs. To be seen: the single order is read ahead of
+    the backfill's queue. The slow case and the largest unclaimed age: 9.4.
+    **Stop the worker and report** on any `document_failed` or
+    `document_stuck` alert not explained at once, the tenant's cost breaker
+    tripping, or spend reaching $40.
+15. **Claude:** stop the machines; the founder pauses the check. Report the
+    Redis command count and what the $10 rule says.
+16. **Claude:** the record, by PR: CHECKPOINTS.md (the "first worker
+    deploy" gap), BUILD-STATUS, and this section if anything differed.
+
+**If something goes wrong.** Any step fails: stop the worker and report.
+Documents already received stay as they are; nothing is deleted. Going back
+entirely is stopping the three apps: staging is then as before, the local
+stack against the same database, and no migration is part of this deploy.
+If the parse service and the worker disagree on the token, documents wait
+and `parse_service_unavailable` is raised (8.4); set the same value on both
+again.
 
 ## 10. Database logins (Stage 3e, F-1)
 

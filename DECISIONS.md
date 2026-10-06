@@ -2999,3 +2999,30 @@ The evidence turned up a second thing. `record_worker_start` returned 7: the sui
 **Also recorded:** RUNBOOK 7.3 now says how to read the Storage logs (local time in the dashboard, 500 rows per export, what `ABORTED RES` and `[Queue Sender] Error` mean, and that a timed-out upload can still land).
 
 **Related:** Sections 7.5, 7.9, 7.10; D-182 (3b, Storage), D-190; RUNBOOK 7.3; CHECKPOINTS.md, Stage 3, "The cutover".
+
+## D-193 — The first worker deploy on staging: the plan, the budget and the founder's decisions (founder, 2026-10-05)
+
+**Context:** the first worker deploy is gated (RUNBOOK 9.2) and waits for the founder's own go. The founder asked for the procedure and the budget before anything was set, deployed or spent: who does each step, what needs approval, and the cost of the 500 + 1 run before it starts. Claude wrote both from RUNBOOK 8, 9 and 10 and the 3c, 3d and 3e designs, and read Fly's state the same day: the worker and API apps have no secrets and no machines, the parse app has one stopped machine and its 3c token, and the Upstash database exists.
+
+**Decision (the founder's answers to the plan's points):**
+1. **Who does what.** The founder types every secret, creates the Healthchecks.io check, runs the SQL Editor queries and gives each approval. Claude runs the deploy commands, the tests and the measurements, writes the record, and never sees or types a secret's value.
+2. **Settings beyond 3c's approved list.** The worker gets `HEARTBEAT_URL` and `FOUNDER_ALERT_EMAIL`. The API gets `ADMIN_DATABASE_URL`, `STRIPE_DATABASE_URL` and `CONSOLE_MFA_ENFORCED`. `SUPABASE_JWT_SECRET` stays off unless the API fails without it, and the API gets no e-mail settings: every extra secret on Fly is extra surface.
+3. **The 500 + 1 run uses the real model for all 501 documents.** 3d said "the real model on a few documents"; a deployed worker has no stand-in for the model, and building one would be new work that proves nothing real.
+4. **The Fly worker and beat are stopped whenever they are not being tested,** and the Healthchecks.io check is paused while they are. A running dispatcher would pick up the documents the staging test suites create and send them to the real model, which is the likeliest way to overspend.
+5. **The 500 documents come from a Scale-tier test tenant,** so the run raises no allowance alert.
+6. **Spend.** The hard limit on model spend is the Anthropic account's prepaid balance with auto-reload off, which the founder set ($40.97 on 2026-10-05; Claude cannot see the account). Claude stops the worker and reports when the deploy's total spend reaches $40. The per-tenant breaker, $50 a day, is above both and is not the protection here. The budget is redone with measured figures before the 500 + 1 run, and the founder signs off that number.
+7. **A4 on the worker.** The worker listens on no port of its own. The check aims at Fly's SSH service on port 22 of the worker's private address, which every Fly machine runs, and a pass is recorded as "Fly's SSH port, not a DocFlow port". If the control cannot reach it, the worker is recorded as "not tested: it accepts no connections", never as passed. The API half must pass in full either way.
+8. **The restart drill's pass mark.** The 3e design says killing the documents worker three times in the hour must produce "the `worker_restarting` email". The pass mark is the alert row and its held e-mail, read by the founder and recorded as "raised and held, not delivered". Delivery is proven when the e-mail sending stage is built.
+
+**Found while checking the answers against the code:**
+- **`SUPABASE_JWT_SECRET` is not needed.** The API verifies ES256 session tokens against the project's published keys with `SUPABASE_URL` alone (`apps/api/app/deps.py`; D-088, D-174), and the setting is blank on the founder's machine, where the API works against staging.
+- **Claude's draft was wrong about `EMAIL_PROVIDER_API_KEY`.** It said to copy the key to the worker from `.env`, where it is blank, and that the restart drill needed it. No e-mail sender exists (D-103's addendum: its own stage after 3e, before the first pilot). Unset, an e-mail row is written `held` and read in the Console's Outbox; set, it would be written `queued` and nothing would send it. So the key is set on neither app, and point 8 came back to the founder.
+- **The three Healthchecks.io e-mails are not affected:** Healthchecks.io sends them, not DocFlow.
+
+**The budget:** about $15 to $22 expected. The table, the time estimate and the limits are in BUILD-STATUS, "The plan and the budget for that deploy".
+
+**Not changed:** the gate list (RUNBOOK 9.2 and BUILD-STATUS), any pass mark other than point 8's, any code, any test. Nothing was set on Fly, deployed or spent when this was written. No deploy command runs before the founder confirms the secret names at STOP 1 (RUNBOOK 9.7).
+
+**Not verified:** Fly's prices were not re-read after 2026-09-30. Whether Upstash offers a spending limit on this database was not checked. That port 22 answers on the worker's private address is known from the parse machine's log (3c's evidence), not yet from the worker.
+
+**Related:** Sections 7.9, 7.11, 7.16.2; D-088, D-103, D-150, D-174, D-185, D-189, D-190; RUNBOOK 8, 9.2, 9.4, 9.7, 10.1; `docs/designs/stage-3c.md`, `stage-3d.md`, `stage-3e.md`.
