@@ -64,14 +64,34 @@ case "$STEP" in
       -e DOCFLOW_ENV=production -e PARSE_SERVICE_TOKEN="$TOKEN" "$IMAGE" >/dev/null
     for _ in $(seq 1 120); do
       if curl -fsS http://127.0.0.1:8100/health >/dev/null 2>&1; then
-        echo "----- E3: the startup log -----"
-        docker logs docflow-parse 2>&1
-        if ! docker logs docflow-parse 2>&1 | grep -q "canary: PASS"; then
-          echo "::error::E3 FAIL: healthy without a canary PASS line"
+        # The log is read into a variable and searched there, never piped
+        # into `grep -q`: under pipefail, grep leaving at its first match
+        # can end `docker logs` with SIGPIPE, and the pipeline then reads as
+        # "no match". And /health can answer a moment before Docker has the
+        # last startup lines, so the read is repeated for up to 10 seconds.
+        # The check itself is unchanged: no "canary: PASS" line, no pass.
+        # (2026-10-06: the API job failed here while the worker and parse
+        # jobs of the same run passed E3 on the same image. Job logs need a
+        # token we don't have, so the failure now says what it read.)
+        logs=""
+        for attempt in $(seq 1 10); do
+          logs=$(docker logs docflow-parse 2>&1)
+          if grep -q "canary: PASS" <<<"$logs"; then
+            break
+          fi
+          sleep 1
+        done
+        echo "----- E3: the startup log (read $attempt time(s)) -----"
+        echo "$logs"
+        if ! grep -q "canary: PASS" <<<"$logs"; then
+          seen=$(grep -cE "^RESULT canary" <<<"$logs")
+          listening=$(grep -c "listening on port" <<<"$logs")
+          last=$(tail -n 3 <<<"$logs" | cut -c1-200 | tr '\n' '|' | sed 's/|/%0A/g')
+          echo "::error title=E3 FAIL: healthy without a canary PASS line::read $attempt times over 10 s; $(wc -l <<<"$logs") log lines, $seen RESULT canary lines, $listening 'listening on port' lines. Last lines:%0A$last"
           exit 1
         fi
         echo "the parse service is up (production mode, isolation on)"
-        lines=$(docker logs docflow-parse 2>&1 | grep -E "^RESULT canary|^canary" | cut -c1-400 | tr '
+        lines=$(grep -E "^RESULT canary|^canary" <<<"$logs" | cut -c1-400 | tr '
 ' '|' | sed 's/|/%0A/g')
         echo "::notice title=E3 the canary at startup::$lines"
         exit 0
