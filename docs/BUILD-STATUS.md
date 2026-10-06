@@ -21,9 +21,11 @@ commit as the slice.
 **Status, as of 2026-10-05:** Phase 5.5, Stage 3. Slices 3a to 3e are all merged. The logins
 cutover (RUNBOOK 10.2) is done through step 6 on staging: `0036` applied, the four logins in use,
 `docflow_app` set `NOLOGIN` and refused, its URL gone from the root `.env` (CHECKPOINTS.md, Stage
-3, "The cutover"; D-188, D-189, D-190). **Next: the first worker deploy, which waits for the
-founder's go** ("Gates for the first worker deploy" below; RUNBOOK 9.2), then the Stage 3
-checkpoint. Nothing of Stage 4 is built before that checkpoint's "go". `backup_0034`,
+3, "The cutover"; D-188, D-189, D-190). **Next: the first worker deploy. The founder approved its
+plan and budget on 2026-10-05** (D-193; the procedure is RUNBOOK 9.7; "Gates for the first worker
+deploy" below). Nothing is set on Fly, deployed or spent yet. It starts with the founder's steps 1
+and 3, and no deploy command runs before the founder confirms the secret names at STOP 1. Then the
+Stage 3 checkpoint. Nothing of Stage 4 is built before that checkpoint's "go". `backup_0034`,
 `backup_0035`, `backup_3b` and the role `docflow_app` are dropped only after that deploy has
 processed real documents on staging (RUNBOOK 1.3; 10.2 step 7).
 
@@ -282,6 +284,44 @@ RUNBOOK 9.2 carries the same list):
 - **the logins cutover done and verified** (3e; RUNBOOK 10.2), and the
   external monitor is now **the Healthchecks.io heartbeat** (3e, Q1), set
   up and tested to its pass marks (RUNBOOK 9.4).
+
+**The plan and the budget for that deploy** (founder, 2026-10-05; D-193).
+The procedure, who does each step and the four STOP points are RUNBOOK 9.7.
+The list above is unchanged. Decided with it:
+- **Settings:** each app's list is in RUNBOOK 9.7. Beyond 3c's list: the
+  worker's `HEARTBEAT_URL` and `FOUNDER_ALERT_EMAIL`; the API's
+  `ADMIN_DATABASE_URL`, `STRIPE_DATABASE_URL` and `CONSOLE_MFA_ENFORCED`.
+  Left off: `SUPABASE_JWT_SECRET` (not needed) and `EMAIL_PROVIDER_API_KEY`
+  (no e-mail sender is built yet).
+- **The real model reads all 501 documents** of the 500 + 1 run.
+- **The Fly worker and beat are stopped between sessions**, the
+  Healthchecks.io check paused while they are.
+- **The 500 come from a Scale-tier test tenant.**
+- **A4 on the worker** aims at Fly's SSH port (22) on its private address.
+  If the control cannot reach it, the worker is recorded as not tested,
+  never as passed, and the API half must pass in full.
+- **The restart drill** passes on the `worker_restarting` alert row and its
+  held e-mail, recorded as "raised and held, not delivered".
+
+The budget, as estimated before any measurement (Fly's prices as read on
+2026-09-30; the model's cost per document from the Stage 2 checkpoint):
+
+| Item | Basis | Expected |
+|---|---|---|
+| Model: G and the memory documents | About 10 documents, some heavy; the build prompt's top figure is $0.35 each | up to $3.50 |
+| Model: the 500 + 1 run | 501 short text orders at $0.0170 each (measured $0.0141 to $0.0191) | $8.52 ($7.06 to $9.57) |
+| Fly machines | Parse $11.39, worker $5.70, API $3.19 a month if left running, beat about $1.94: about $0.031 an hour together | $1.50 for 48 hours running |
+| Redis (Upstash) | $0.20 per 100,000 commands; not known until G3 | $0 to $7 for 48 hours, or the fixed $10 plan |
+| Fly builds, storage, network | Three image builds | under $1 |
+| **Total** | | **about $15 to $22** |
+
+- **Time:** 3 to 6 hours for the run at an assumed 20 to 40 seconds a
+  document, until G1 measures it; one to two working days for the deploy.
+- **Limits:** the Anthropic account's prepaid balance with auto-reload off
+  is the hard limit on model spend ($40.97 on 2026-10-05, as the founder
+  set it). Claude stops the worker and reports at $40 of total spend.
+- **Before the run** the budget is redone with G1's and G3's measured
+  figures, and the founder signs off that number (RUNBOOK 9.7, STOP 4).
 
 **3d MERGED 2026-10-02 03:18 UTC (PR #33, main `4a2b907`).** At the merge
 the founder decided the open pre-merge item (question 2 above): **the two
