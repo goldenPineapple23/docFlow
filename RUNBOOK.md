@@ -262,6 +262,19 @@ prefix that the test filters on, or a transaction the test rolls back. The
 audit of the "count everything" tests is a Phase 5.5 Stage 5 item
 (`docs/BUILD-STATUS.md`).
 
+**Before the API suite: start the dev parse service** (SETUP.md step 7a:
+from `apps/parse`, `PARSE_ISOLATION=off`, no token, the default port 8100)
+and wait for `http://127.0.0.1:8100/health` to answer. This holds in any
+checkout, not only a worktree (1.3). The API suite's catalog imports call
+it and the suite starts none; the worker suite starts its own, and core
+needs none. Without it the suite still runs to the end, about 20 minutes
+slower, and the import tests fail with
+`parse_service_unavailable ... reason=no_connection` in their logs: on
+2026-10-06 at `cfbc18c` that read `33 failed, 592 passed` in 1:04:31, and
+`625 passed` in 45:32 once the service was up. Stop it afterwards by its
+two processes and check the port is free (1.3). Say in the report that
+the service was started by hand.
+
 How a run is reported:
 
 - Save each suite's full output to a file. Never cut it with `tail` or
