@@ -125,7 +125,7 @@ def main() -> int:
         return 1
     db.use_own_login("worker")
     try:
-        db.verify_logins(("worker",))
+        checked = db.verify_logins(("worker",))
     except db.WrongLoginError as exc:
         print(f"run_workers refused to start: {exc}", file=sys.stderr, flush=True)
         return 1
@@ -133,6 +133,11 @@ def main() -> int:
         print(
             f"run_workers: database unreachable at start ({type(exc).__name__})", file=sys.stderr, flush=True
         )
+    else:
+        # The role only, never the URL. The first deploy's check (RUNBOOK 9.7,
+        # step 7) reads this line; before D-194 a pass printed nothing.
+        for login in checked:
+            print(f"run_workers: login check passed as docflow_{login}", file=sys.stderr, flush=True)
     worker_starts.record_start()
     return supervise(commands())
 

@@ -18,16 +18,17 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-10-05:** Phase 5.5, Stage 3. Slices 3a to 3e are all merged. The logins
-cutover (RUNBOOK 10.2) is done through step 6 on staging: `0036` applied, the four logins in use,
-`docflow_app` set `NOLOGIN` and refused, its URL gone from the root `.env` (CHECKPOINTS.md, Stage
-3, "The cutover"; D-188, D-189, D-190). **Next: the first worker deploy. The founder approved its
-plan and budget on 2026-10-05** (D-193; the procedure is RUNBOOK 9.7; "Gates for the first worker
-deploy" below). Nothing is set on Fly, deployed or spent yet. It starts with the founder's steps 1
-and 3, and no deploy command runs before the founder confirms the secret names at STOP 1. Then the
-Stage 3 checkpoint. Nothing of Stage 4 is built before that checkpoint's "go". `backup_0034`,
-`backup_0035`, `backup_3b` and the role `docflow_app` are dropped only after that deploy has
-processed real documents on staging (RUNBOOK 1.3; 10.2 step 7).
+**Status, as of 2026-10-06:** Phase 5.5, Stage 3. Slices 3a to 3e are all merged and the logins
+cutover (RUNBOOK 10.2) is done through step 6. **The first worker deploy (RUNBOOK 9.7) is under
+way: steps 2 to 8 are done and passed.** The parse service, the worker and the API are deployed on
+Fly staging, one machine each, nothing public (D-194). No document has been processed and nothing
+is spent on the model. Step 7's log showed the worker writing its heartbeat URL on every ping:
+fixed here, with a line the launcher now prints when its login check passes (D-194). **Next:** the
+founder replaces the Healthchecks.io check (RUNBOOK 9.4), Claude deploys the fixed worker and
+repeats step 7's checks, then step 9 (G) on the founder's word. The Fly worker and beat are at 0
+whenever they are not being tested. Then the Stage 3 checkpoint; nothing of Stage 4 is built
+before its "go". `backup_0034`, `backup_0035`, `backup_3b` and the role `docflow_app` are dropped
+only after that deploy has processed real documents on staging (RUNBOOK 1.3; 10.2 step 7).
 
 **That paragraph is the current state only** (founder, 2026-10-05; D-191). When it changes, the
 paragraph it replaces moves, word for word, to the top of `docs/status-history.md`, which is not

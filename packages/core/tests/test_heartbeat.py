@@ -2,7 +2,9 @@
 The worker's external heartbeat (Stage 3e, part C; BUILD-STATUS "3e detailed
 design", E4). The ping server and the unclaimed reading are fakes here: what
 is proven is when a ping goes, which one, and that nothing about it can fail
-a pass or leak the URL. The unclaimed reading against the real database is
+a pass or leak the URL. One test sends real requests through httpx to a
+server on this machine, because a replaced `httpx.get` cannot show what httpx
+itself logs (D-194). The unclaimed reading against the real database is
 in apps/worker/tests/test_dispatch_db.py; the real Healthchecks.io check is
 proven at the first worker deploy (stop the worker, the email arrives).
 """
@@ -10,6 +12,8 @@ proven at the first worker deploy (stop the worker, the email arrives).
 from __future__ import annotations
 
 import logging
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import httpx
 import pytest
@@ -90,6 +94,70 @@ def test_a_ping_that_fails_never_fails_the_pass_and_never_logs_the_url(pings, mo
         heartbeat.httpx, "get", lambda url, timeout: httpx.Response(200, request=httpx.Request("GET", url))
     )
     assert heartbeat.after_pass(succeeded=True, now=30) == "success"
+
+
+@pytest.fixture
+def ping_server():
+    """A real HTTP server on this machine, so the ping goes through httpx
+    itself, its logging included. Yields its address and the paths it got."""
+    seen: list[str] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 -- the base class's name
+            seen.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", seen
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_a_real_ping_through_httpx_never_logs_the_url(ping_server, monkeypatch, caplog):
+    """Found at the first worker deploy (2026-10-06, D-194): httpx logs every
+    request's URL at INFO, the level Celery runs at, so each ping wrote the
+    URL to the worker's log. The tests above replace `httpx.get`, so httpx's
+    own logging never ran and they could not see it. This one sends real
+    requests, with a control that shows the log does catch a URL."""
+    base, seen = ping_server
+    url = f"{base}/acme-test-check-0000"
+    monkeypatch.setenv("HEARTBEAT_URL", url)
+    get_settings.cache_clear()
+    state: dict[str, int | None] = {"age": None}
+    monkeypatch.setattr(heartbeat, "unclaimed_age_seconds", lambda: state["age"])
+    heartbeat.reset()
+    httpx_level = logging.getLogger("httpx").level
+    try:
+        with caplog.at_level(logging.INFO):  # the root logger at INFO, as in the worker
+            httpx.get(f"{base}/acme-test-control", timeout=5)
+            assert heartbeat.after_pass(succeeded=True, now=0) == "success"
+            state["age"] = DISPATCH_UNCLAIMED_ALERT_MIN * 60 + 1
+            assert heartbeat.after_pass(succeeded=True, now=30) == "fail"
+            httpx.get(f"{base}/acme-test-control-after", timeout=5)
+    finally:
+        heartbeat.reset()
+        get_settings.cache_clear()
+
+    assert seen == [
+        "/acme-test-control",
+        "/acme-test-check-0000",
+        "/acme-test-check-0000/fail",
+        "/acme-test-control-after",
+    ]
+    # The control: httpx's request log is on, before the pings and after them.
+    assert "acme-test-control " in caplog.text and "acme-test-control-after" in caplog.text
+    assert "acme-test-check" not in caplog.text
+    assert logging.getLogger("httpx").level == httpx_level
 
 
 def test_an_error_answer_counts_as_a_failed_ping(pings):

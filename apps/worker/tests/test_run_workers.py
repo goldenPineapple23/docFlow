@@ -116,10 +116,12 @@ def launcher(request, monkeypatch, tmp_path):
     get_settings.cache_clear()
 
 
-def test_the_launcher_checks_its_login_records_the_start_then_runs_the_workers(launcher):
+def test_the_launcher_checks_its_login_records_the_start_then_runs_the_workers(launcher, capsys):
     run_workers, calls, _ = launcher
     assert run_workers.main() == 0
     assert calls == ["verify ('worker',)", "record", "supervise"]
+    # The line the first deploy's check reads (RUNBOOK 9.7, step 7; D-194).
+    assert capsys.readouterr().err.splitlines() == ["run_workers: login check passed as docflow_worker"]
 
 
 @pytest.mark.parametrize("setting", ["ADMIN_DATABASE_URL", "STRIPE_DATABASE_URL", "API_DATABASE_URL"])
@@ -159,7 +161,7 @@ def test_the_launcher_refuses_logins_held_in_the_env_file_as_it_does_in_the_envi
     assert all(name in err for name in OTHER_LOGINS) and "acme-test-not-a-real-url" not in err
 
 
-def test_the_launcher_refuses_a_url_that_connects_as_another_login(launcher):
+def test_the_launcher_refuses_a_url_that_connects_as_another_login(launcher, capsys):
     from docflow_core import db
 
     run_workers, calls, monkeypatch = launcher
@@ -170,9 +172,10 @@ def test_the_launcher_refuses_a_url_that_connects_as_another_login(launcher):
     monkeypatch.setattr(db, "verify_logins", wrong)
     assert run_workers.main() == 1
     assert calls == []
+    assert "login check passed" not in capsys.readouterr().err
 
 
-def test_the_launcher_starts_the_workers_when_the_database_is_unreachable(launcher):
+def test_the_launcher_starts_the_workers_when_the_database_is_unreachable(launcher, capsys):
     """Recording never stops the worker starting; the heartbeat reports it."""
     from docflow_core import db
 
@@ -184,3 +187,6 @@ def test_the_launcher_starts_the_workers_when_the_database_is_unreachable(launch
     monkeypatch.setattr(db, "verify_logins", unreachable)
     assert run_workers.main() == 0
     assert calls == ["record", "supervise"]
+    # Not checked is not passed: the line must not appear.
+    err = capsys.readouterr().err
+    assert "database unreachable at start (ConnectionError)" in err and "login check passed" not in err
