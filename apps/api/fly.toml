@@ -1,13 +1,17 @@
 # The API on Fly staging (Stage 3c; BUILD-STATUS "3c detailed design",
 # item 12). Private only: no public IP (N1/N2). Reached for the G tests over
-# `fly proxy 8000 --app docflow-api-staging`, or from other Fly apps at
-# http://docflow-api-staging.flycast. Stopped when idle, started on request.
+# `fly proxy 8000 --app docflow-api-staging`. Stopped when idle.
 #
 # Deploy from the repository root:
 #
 #     fly deploy --config apps/api/fly.toml --dockerfile apps/api/Dockerfile \
-#         --ignorefile apps/api/Dockerfile.dockerignore --no-public-ips .
-#     fly ips allocate-v6 --private --app docflow-api-staging   # once
+#         --ignorefile apps/api/Dockerfile.dockerignore --no-public-ips --ha=false .
+#
+# --ha=false: one machine, staging only (founder, 2026-10-06; D-194).
+# No Flycast address is allocated (the same decision): nothing on staging
+# calls the API from another Fly app, and an address would only make it
+# reachable from more places. So `fly ips list` is empty, and nothing wakes a
+# stopped machine: start it first (`fly machine start <id>`), then `fly proxy`.
 #
 # Secrets (set by the founder): DATABASE_URL (docflow_api), ADMIN_DATABASE_URL
 # (docflow_admin), STRIPE_DATABASE_URL (docflow_stripe) -- Stage 3e, RUNBOOK

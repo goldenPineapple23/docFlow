@@ -7,7 +7,12 @@
 # Deploy from the repository root:
 #
 #     fly deploy --config apps/worker/fly.toml --dockerfile apps/worker/Dockerfile \
-#         --ignorefile apps/worker/Dockerfile.dockerignore --no-public-ips .
+#         --ignorefile apps/worker/Dockerfile.dockerignore --no-public-ips --ha=false .
+#
+# --ha=false: exactly one `worker` machine and one `beat` machine. Without it
+# Fly adds a stopped spare beside each, and a spare beat is a second beat
+# waiting to start (founder, 2026-10-06; D-194). Staging only, as for the
+# parse app: production's machine count is a Phase 6 decision.
 #
 # Secrets (set by the founder): PARSE_SERVICE_TOKEN, DATABASE_URL (the
 # docflow_worker login, Stage 3e -- never docflow_app, never another login:

@@ -4,6 +4,20 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-06 (the first worker deploy's steps 2 to 8 done; D-194)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-05:** Phase 5.5, Stage 3. Slices 3a to 3e are all merged. The logins
+cutover (RUNBOOK 10.2) is done through step 6 on staging: `0036` applied, the four logins in use,
+`docflow_app` set `NOLOGIN` and refused, its URL gone from the root `.env` (CHECKPOINTS.md, Stage
+3, "The cutover"; D-188, D-189, D-190). **Next: the first worker deploy. The founder approved its
+plan and budget on 2026-10-05** (D-193; the procedure is RUNBOOK 9.7; "Gates for the first worker
+deploy" below). Nothing is set on Fly, deployed or spent yet. It starts with the founder's steps 1
+and 3, and no deploy command runs before the founder confirms the secret names at STOP 1. Then the
+Stage 3 checkpoint. Nothing of Stage 4 is built before that checkpoint's "go". `backup_0034`,
+`backup_0035`, `backup_3b` and the role `docflow_app` are dropped only after that deploy has
+processed real documents on staging (RUNBOOK 1.3; 10.2 step 7).
+
 ## Replaced on 2026-10-05 (later the same day, when the first worker deploy's plan was approved)
 
 <!-- the paragraph as it stood, starting on the next line -->

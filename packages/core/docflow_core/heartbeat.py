@@ -24,7 +24,8 @@ the model provider (`model_api_failure`).
 change between success and /fail goes at once. Healthchecks.io records no
 more than 5 pings a minute per check. The ping is a GET with no body: it
 carries nothing (Section 7.10). Its failure is logged by error type and never
-fails the pass. The URL is never logged.
+fails the pass. The URL is never logged: not by this module, and not by
+httpx, whose own request log is off while the ping is sent (D-194).
 
 Only the dispatch process calls this (`app.tasks.dispatch`), never the pass
 at the end of a document task: a documents worker pinging would hide a
@@ -35,6 +36,8 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import httpx
 from sqlalchemy import text
@@ -60,6 +63,21 @@ def reset() -> None:
     global _last_kind, _last_at
     _last_kind = None
     _last_at = None
+
+
+@contextmanager
+def _httpx_request_log_off() -> Iterator[None]:
+    """httpx logs every request's URL at INFO, the level the worker runs at,
+    and the ping URL is a secret (D-194: the first worker deploy wrote it to
+    Fly's log on every ping). Off for the ping only; every other request
+    keeps its log line."""
+    httpx_logger = logging.getLogger("httpx")
+    level = httpx_logger.level
+    httpx_logger.setLevel(logging.WARNING)
+    try:
+        yield
+    finally:
+        httpx_logger.setLevel(level)
 
 
 def unclaimed_age_seconds() -> int | None:
@@ -91,7 +109,8 @@ def after_pass(*, succeeded: bool, now: float | None = None) -> str | None:
         return None
     target = url.rstrip("/") + "/fail" if kind == "fail" else url
     try:
-        httpx.get(target, timeout=HEARTBEAT_PING_TIMEOUT_SECONDS).raise_for_status()
+        with _httpx_request_log_off():
+            httpx.get(target, timeout=HEARTBEAT_PING_TIMEOUT_SECONDS).raise_for_status()
     except Exception as exc:  # noqa: BLE001 -- never fails the pass
         logger.error("heartbeat_ping_failed kind=%s error_type=%s", kind, type(exc).__name__)
         return None

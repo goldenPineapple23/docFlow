@@ -3026,3 +3026,39 @@ The evidence turned up a second thing. `record_worker_start` returned 7: the sui
 **Not verified:** Fly's prices were not re-read after 2026-09-30. Whether Upstash offers a spending limit on this database was not checked. That port 22 answers on the worker's private address is known from the parse machine's log (3c's evidence), not yet from the worker.
 
 **Related:** Sections 7.9, 7.11, 7.16.2; D-088, D-103, D-150, D-174, D-185, D-189, D-190; RUNBOOK 8, 9.2, 9.4, 9.7, 10.1; `docs/designs/stage-3c.md`, `stage-3d.md`, `stage-3e.md`.
+
+## D-194 — The first worker deploy, steps 2 to 8: the heartbeat URL found in the worker's log, and four decisions (founder, 2026-10-06)
+
+**Context:** RUNBOOK 9.7 steps 2 to 8 were run on 2026-10-06 from `main` `8287bb3`. The parse service, the worker and the API are deployed on Fly staging and every check in those steps passed. Reading the worker's startup log for step 7 showed a defect the tests had not: the worker wrote the Healthchecks.io ping URL to its log on every ping. Three smaller points also needed the founder's word. No document was processed and nothing was spent on the model.
+
+**Found: the ping URL in the worker's log.**
+- `docflow_core.heartbeat` says "The URL is never logged", and its own code never logs it. But httpx logs every request's URL at INFO (`HTTP Request: GET <url> "HTTP/1.1 200 OK"`), and Celery runs the worker at INFO. So each ping, one every 5 minutes, wrote the full URL to Fly's log.
+- The URL is a secret (RUNBOOK 9.4): whoever holds it can mark the worker healthy, or send `/fail`.
+- **Where it went:** Fly's log for `docflow-worker-staging` (readable from the founder's Fly account), Claude's session transcript (Claude read the log, so D-193's "never sees a secret's value" was not kept for this one value), and a screenshot of the check's page the founder pasted into the same session. Claude's saved copies of the log were redacted.
+- **Why the tests missed it:** every heartbeat test replaced `httpx.get` with a fake, so httpx's own logging never ran. The test named "never logs the URL" proved it only for DocFlow's own log lines.
+- **The suite's evidence before the fix** (RUNBOOK 1.6): a new test sends real requests through httpx to a server on the same machine, with the root logger at INFO as in the worker, and a control request showing that the log does catch a URL. On the unfixed code: `1 failed, 9 passed`, the failure quoting httpx's line with the check's path in it. After the fix: `10 passed`.
+- **Checked, no other case:** the other httpx calls (the parse service, Stripe, Supabase's invite link) carry their secrets in headers, which httpx does not log; their URLs hold none.
+
+**Decided (founder, 2026-10-06, each by its own question):**
+1. **Fix it now, before G,** so the memory measurement, the drills and the 500 + 1 run are on the image that stays. The fix: httpx's request log is switched off for the ping only (`heartbeat._httpx_request_log_off`); every other request keeps its log line.
+2. **Replace the ping URL when the fixed worker is deployed.** The founder adds a new Healthchecks.io check with the same settings, sets its URL on the worker app, and deletes the old check once the new one has its first ping (RUNBOOK 9.4, "If the ping URL has been seen where it should not be"). The exposed URL then stops working.
+3. **One machine each: `--ha=false` on the worker and API deploys.** The commands in the two `fly.toml` files did not say, and Fly's default adds a stopped spare beside each machine: two `worker` and two `beat` machines, against RUNBOOK 9.7's "one `worker` machine and one `beat` machine" and 9.3's exactly one beat. Asked before the worker deploy, so no spare was ever created. Staging only, as for the parse app (RUNBOOK 8.2); production's count is a Phase 6 decision.
+4. **No Flycast address on the API.** `apps/api/fly.toml` listed `fly ips allocate-v6 --private`. It was not run: no gate calls the API from another Fly app, and an address would only make the API reachable from more places. `fly ips list` is empty. The API machine stops itself when idle and nothing wakes it, so it is started by hand before `fly proxy`.
+5. **The launcher says when its login check passes.** RUNBOOK 9.7 step 7 asks for a log showing "the login check passed as `docflow_worker`", but the launcher printed only refusals and "database unreachable at start". On 2026-10-06 the evidence was therefore indirect: neither line in the log, and the start recorded through the worker's login. From this change it prints `run_workers: login check passed as docflow_worker` (the role, never the URL), and prints nothing of the kind when the database was unreachable, because not checked is not passed.
+
+**Steps 2 to 8 as run (2026-10-06, UTC):**
+- **Step 2.** Nothing local against staging: no worker, beat, API, parse service or test run.
+- **Step 3.** The founder set the secrets, staged. **Step 4**, read at 15:27:10: one name on parse, ten on the worker, ten on the API, exactly RUNBOOK 9.7's table. The parse token's digest was the same on parse and worker and new; `REDIS_URL` and the four `STORAGE_S3_*` matched across worker and API; the four database URLs were four different values. This `fly` version (0.4.108) prints no time for a secret, so "the time the token was set" could not be reported. **STOP 1:** confirmed by the founder.
+- **Step 5.** `fly secrets deploy` on the parse app, 15:31:06 to 15:32:11, the same image (`sha256:acc99434e849...`). It left the machine stopped, so it was started by hand. Canary at 15:32:24: the five `RESULT` lines PASS, `canary: PASS`, cgroup v1. `fly ips list`: one private IPv6 address and nothing else. The machine stopped itself when idle.
+- **Step 6.** `/healthz` from the API run on the founder's machine against staging, 15:33:53: `"worker_starts_last_hour":0`. Documents waiting for the dispatcher: 0.
+- **Step 7.** Worker deployed, finished 15:40:56, image `deployment-01M48XVX369J0ST5W8AQ0T7ZTT`: `beat` machine `82d1e0df309238`, `worker` machine `8577296f440ee8`, no address. `dispatch@` and `documents@` ready at 15:41:08; the first pass sent 0 documents; the first ping answered 200 at 15:41:10. `/healthz` at 15:41:36: `"worker_starts_last_hour":1`, `"stale":false`. The founder's query: one new row, id 36, `started_at` 15:40:54, that machine, that image (the older `acme-test-machine-*` rows are D-189's). Healthchecks.io: first ping 15:41, the check went from new to up, pings every 5 minutes.
+- **Step 8.** API deployed, finished 15:56:23, image `deployment-01M48YSNPWSEXNDWZ3NEERM5QA`, one machine `8e7d7eb762d918`. `fly ips list` empty. `/healthz` over `fly proxy` at 15:57:00: `{"status":"ok","dispatcher":{"heartbeat_age_seconds":2,"stale":false},"worker_starts_last_hour":1}`.
+- **After STOP 2.** Worker and beat scaled to 0 at 16:04 (the machines are removed, so the next deploy creates new ones), so that the staging suites for this fix could run with no live dispatcher.
+
+**Not as expected, and harmless:** `fly secrets deploy` printed a DNS warning (a lookup from the founder's machine to 8.8.8.8 timed out; the parse app has no public name to resolve; exit 0). The parse app's health check read "failed" for 3 seconds while the canary ran, before the port opened.
+
+**Not changed:** the gate list, any pass mark, any limit or constant. Steps 9 to 14 are not started.
+
+**Not verified:** that the old ping URL stops answering once its check is deleted is to be seen at the redeploy, not assumed. Fly's log keeps the lines already written until Fly ages them out; how long that is was not checked.
+
+**Related:** Sections 7.9, 7.10; D-150, D-185, D-189, D-193; RUNBOOK 8.2, 9.2, 9.3, 9.4, 9.7; `packages/core/docflow_core/heartbeat.py`, `apps/worker/app/run_workers.py`, the two `fly.toml` files.

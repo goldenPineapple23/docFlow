@@ -262,6 +262,19 @@ prefix that the test filters on, or a transaction the test rolls back. The
 audit of the "count everything" tests is a Phase 5.5 Stage 5 item
 (`docs/BUILD-STATUS.md`).
 
+**Before the API suite: start the dev parse service** (SETUP.md step 7a:
+from `apps/parse`, `PARSE_ISOLATION=off`, no token, the default port 8100)
+and wait for `http://127.0.0.1:8100/health` to answer. This holds in any
+checkout, not only a worktree (1.3). The API suite's catalog imports call
+it and the suite starts none; the worker suite starts its own, and core
+needs none. Without it the suite still runs to the end, about 20 minutes
+slower, and the import tests fail with
+`parse_service_unavailable ... reason=no_connection` in their logs: on
+2026-10-06 at `cfbc18c` that read `33 failed, 592 passed` in 1:04:31, and
+`625 passed` in 45:32 once the service was up. Stop it afterwards by its
+two processes and check the port is free (1.3). Say in the report that
+the service was started by hand.
+
 How a run is reported:
 
 - Save each suite's full output to a file. Never cut it with `tail` or
@@ -1350,6 +1363,12 @@ document hanging inside a task (`document_stuck`), the parse service
    only, never the API.
 4. Production in Phase 6: its own check (`docflow-worker-prod`) and URL.
 
+**If the ping URL has been seen where it should not be** (it was on
+2026-10-06: the worker's own log, D-194): add a new check with the same
+settings, set its URL as in step 3, deploy or restart the worker, see the
+first ping arrive on the new check, then delete the old check. The check's
+page shows the URL in full, so crop it out of any screenshot.
+
 **Throttle.** At most one ping per `HEARTBEAT_PING_MIN` (5), so 288 a day;
 Healthchecks.io records at most 5 a minute per check. A change between
 success and `/fail` goes at once. Passes run every 30 s, so pings land 5:00
@@ -1686,8 +1705,19 @@ Left off, and why:
    `docflow_worker`. **Founder:** the first ping shows in Healthchecks.io
    within about 5 minutes. No row, two rows, or `/healthz` not moving by
    one: stop and report (9.2).
-8. **Claude:** deploy the API (9.1: after the worker). `fly ips list` shows
-   no public address; `/healthz` over `fly proxy` reads `"stale":false`.
+
+   The deploy command carries `--ha=false` (the command in
+   `apps/worker/fly.toml`): without it Fly adds a stopped spare beside
+   each machine (founder, 2026-10-06; D-194). The login line reads
+   `run_workers: login check passed as docflow_worker`. The launcher
+   prints it from D-194 on; on 2026-10-06 the first deploy ran the code
+   before it, where a pass printed nothing.
+8. **Claude:** deploy the API (9.1: after the worker), also with
+   `--ha=false`. `fly ips list` shows no public address; `/healthz` over
+   `fly proxy` reads `"stale":false`. The API gets no Flycast address
+   either (founder, 2026-10-06; D-194), so `fly ips list` is empty, and
+   the machine, which stops itself when idle, is started by hand before
+   `fly proxy` is used.
 
    **STOP 2.** Claude reports steps 5 to 8. The founder says whether to go
    on to the gates.
