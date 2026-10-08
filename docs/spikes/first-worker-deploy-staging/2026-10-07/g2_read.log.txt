@@ -1,0 +1,67 @@
+catalog_imports rows: 1
+{
+ "id": "03d27e3c-c439-4815-bfc1-a1c84ec1750b",
+ "kind": "catalog",
+ "rows": "<list len 4>",
+ "source": "upload",
+ "status": "committed",
+ "columns": "<list len 4>",
+ "mapping": "<dict len 5>",
+ "summary": "<dict len 8>",
+ "file_type": "xlsx",
+ "overrides": "<dict len 0>",
+ "parsed_at": "2026-10-07T14:05:40.671167+00:00",
+ "row_count": 4,
+ "tenant_id": "40594983-03ff-47b1-ac40-f636488b8de7",
+ "created_at": "2026-10-07T14:05:36.010094+00:00",
+ "created_by": "a800ecac-1570-4ac8-836e-50ac1bd8e56f",
+ "deleted_at": null,
+ "error_code": null,
+ "file_sha256": "a39ebc70927c4b24f6995f4bb499cda7d1285fa0e61452ae10003c5e3442a555",
+ "committed_at": "2026-10-07T14:05:51.831014+00:00",
+ "committed_by": "a800ecac-1570-4ac8-836e-50ac1bd8e56f",
+ "storage_path": "tenants/4059...",
+ "intake_file_id": null,
+ "header_row_number": 1,
+ "original_filename": "G2-test-catalog.xlsx",
+ "acting_as_tenant_id": "40594983-03ff-47b1-ac40-f636488b8de7"
+}
+summary: {"rows": 4, "flags": [], "insert": 4, "retire": 0, "update": 0, "mapping": {"sku": "SKU", "description": "Description", "unit_of_measure": "UOM"}, "reinstate": 0, "unchanged": 0}
+items: total 4, live 4, created 2026-10-07 14:05:51.831014+00:00 .. 2026-10-07 14:05:51.831014+00:00
+tenant: onboarding_status=catalog_loaded status=active
+admin_actions in the last 3 hours: 34
+  {"created_at": "2026-10-07T14:02:52.904599+00:00", "action": "read", "target_type": "dashboard"}
+  {"created_at": "2026-10-07T14:02:52.942689+00:00", "action": "read", "target_type": "alerts"}
+  {"created_at": "2026-10-07T14:02:53.020299+00:00", "action": "read", "target_type": "tenant_list"}
+  {"created_at": "2026-10-07T14:02:53.117464+00:00", "action": "read", "target_type": "alerts"}
+  {"created_at": "2026-10-07T14:02:53.224662+00:00", "action": "read", "target_type": "tenant_list"}
+  {"created_at": "2026-10-07T14:02:54.912118+00:00", "action": "read", "target_type": "dashboard"}
+  {"created_at": "2026-10-07T14:03:29.571304+00:00", "action": "read", "target_type": "tenant_list"}
+  {"created_at": "2026-10-07T14:03:29.757828+00:00", "action": "read", "target_type": "tenant_list"}
+  {"created_at": "2026-10-07T14:04:01.203505+00:00", "action": "read", "target_type": "tenant_overview"}
+  {"created_at": "2026-10-07T14:04:01.249463+00:00", "action": "read", "target_type": "email_outbox"}
+  {"created_at": "2026-10-07T14:04:01.426291+00:00", "action": "read", "target_type": "tenant_overview"}
+  {"created_at": "2026-10-07T14:04:01.433344+00:00", "action": "read", "target_type": "email_outbox"}
+  {"created_at": "2026-10-07T14:04:01.669073+00:00", "action": "read", "target_type": "test_batch"}
+  {"created_at": "2026-10-07T14:04:01.934491+00:00", "action": "read", "target_type": "test_batch"}
+  {"created_at": "2026-10-07T14:04:10.160962+00:00", "action": "read", "target_type": "tenant_overview"}
+  {"created_at": "2026-10-07T14:04:10.192402+00:00", "action": "read", "target_type": "catalog_imports"}
+  {"created_at": "2026-10-07T14:04:10.24455+00:00", "action": "read", "target_type": "tenant_intake_files"}
+  {"created_at": "2026-10-07T14:04:10.315139+00:00", "action": "read", "target_type": "tenant_overview"}
+  {"created_at": "2026-10-07T14:04:10.401796+00:00", "action": "read", "target_type": "tenant_intake_files"}
+  {"created_at": "2026-10-07T14:04:10.407845+00:00", "action": "read", "target_type": "catalog_imports"}
+  {"created_at": "2026-10-07T14:05:35.144251+00:00", "action": "catalog_import_upload", "target_type": "catalog_import"}
+  {"created_at": "2026-10-07T14:05:36.546962+00:00", "action": "read", "target_type": "catalog_import"}
+  {"created_at": "2026-10-07T14:05:36.778876+00:00", "action": "read", "target_type": "catalog_imports"}
+  {"created_at": "2026-10-07T14:05:36.808582+00:00", "action": "read", "target_type": "tenant_intake_files"}
+  {"created_at": "2026-10-07T14:05:37.777252+00:00", "action": "read", "target_type": "catalog_import"}
+  {"created_at": "2026-10-07T14:05:38.793504+00:00", "action": "read", "target_type": "catalog_import"}
+  {"created_at": "2026-10-07T14:05:39.778069+00:00", "action": "read", "target_type": "catalog_import"}
+  {"created_at": "2026-10-07T14:05:40.795703+00:00", "action": "read", "target_type": "catalog_import"}
+  {"created_at": "2026-10-07T14:05:41.0383+00:00", "action": "read", "target_type": "tenant_intake_files"}
+  {"created_at": "2026-10-07T14:05:41.042604+00:00", "action": "read", "target_type": "catalog_imports"}
+  {"created_at": "2026-10-07T14:05:51.817904+00:00", "action": "import_commit", "target_type": "catalog_import"}
+  {"created_at": "2026-10-07T14:05:52.108211+00:00", "action": "read", "target_type": "catalog_import"}
+  {"created_at": "2026-10-07T14:05:52.319862+00:00", "action": "read", "target_type": "catalog_imports"}
+  {"created_at": "2026-10-07T14:05:52.36136+00:00", "action": "read", "target_type": "tenant_intake_files"}
+founder_alerts in the last 3 hours: 0

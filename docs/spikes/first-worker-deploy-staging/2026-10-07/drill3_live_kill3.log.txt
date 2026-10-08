@@ -1,0 +1,170 @@
+2026-10-07T22:40:09Z app[845033a2e1e448] iad [info][2026-10-07 22:40:09,615: INFO/MainProcess] mingle: searching for neighbors
+2026-10-07T22:40:09Z app[845033a2e1e448] iad [info][2026-10-07 22:40:09,721: INFO/MainProcess] Connected to redis://<redacted>
+2026-10-07T22:40:09Z app[845033a2e1e448] iad [info][2026-10-07 22:40:09,752: INFO/MainProcess] mingle: searching for neighbors
+2026-10-07T22:40:10Z app[845033a2e1e448] iad [info][2026-10-07 22:40:10,782: INFO/MainProcess] mingle: all alone
+2026-10-07T22:40:10Z app[845033a2e1e448] iad [info][2026-10-07 22:40:10,886: INFO/MainProcess] mingle: all alone
+2026-10-07T22:40:11Z app[845033a2e1e448] iad [info][2026-10-07 22:40:11,002: INFO/MainProcess] dispatch@845033a2e1e448 ready.
+2026-10-07T22:40:11Z app[845033a2e1e448] iad [info][2026-10-07 22:40:11,112: INFO/MainProcess] documents@845033a2e1e448 ready.
+2026-10-07T22:40:25Z app[e2865577ef6386] iad [info][2026-10-07 22:40:25,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:40:25Z app[845033a2e1e448] iad [info][2026-10-07 22:40:25,581: INFO/MainProcess] Task docflow.dispatch[8a00c7b3-327e-46a8-bd39-eb193ca4affe] received
+2026-10-07T22:40:26Z app[845033a2e1e448] iad [info][2026-10-07 22:40:26,291: INFO/ForkPoolWorker-1] Task docflow.dispatch[8a00c7b3-327e-46a8-bd39-eb193ca4affe] succeeded in 0.7090607480000024s: 0
+2026-10-07T22:40:55Z app[e2865577ef6386] iad [info][2026-10-07 22:40:55,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:40:56Z app[845033a2e1e448] iad [info][2026-10-07 22:40:56,100: INFO/MainProcess] Task docflow.dispatch[26247e86-66aa-454d-8647-a2381221d310] received
+2026-10-07T22:40:56Z app[845033a2e1e448] iad [info][2026-10-07 22:40:56,245: INFO/ForkPoolWorker-1] Task docflow.dispatch[26247e86-66aa-454d-8647-a2381221d310] succeeded in 0.14436809899999758s: 0
+2026-10-07T22:41:25Z app[e2865577ef6386] iad [info][2026-10-07 22:41:25,466: INFO/MainProcess] Scheduler: Sending due task run-scheduled-jobs (docflow.run_scheduled_jobs)
+2026-10-07T22:41:25Z app[e2865577ef6386] iad [info][2026-10-07 22:41:25,492: INFO/MainProcess] Scheduler: Sending due task sweep-stuck-documents (docflow.sweep_stuck_documents)
+2026-10-07T22:41:25Z app[845033a2e1e448] iad [info][2026-10-07 22:41:25,495: INFO/MainProcess] Task docflow.run_scheduled_jobs[4ec1f122-3599-4aa0-b91d-ea12a3d8c40f] received
+2026-10-07T22:41:25Z app[e2865577ef6386] iad [info][2026-10-07 22:41:25,509: INFO/MainProcess] Scheduler: Sending due task run-lifecycle-sweep (docflow.run_lifecycle_sweep)
+2026-10-07T22:41:25Z app[e2865577ef6386] iad [info][2026-10-07 22:41:25,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:41:25Z app[845033a2e1e448] iad [info][2026-10-07 22:41:25,582: INFO/MainProcess] Task docflow.dispatch[b1c96d99-ed0d-475b-b0a6-30b05fec3dab] received
+2026-10-07T22:41:25Z app[845033a2e1e448] iad [info]2026/10/07 22:41:25 INFO New SSH session email=ndk1516@gmail.com verified=true
+2026-10-07T22:41:25Z app[845033a2e1e448] iad [info][2026-10-07 22:41:25,671: INFO/ForkPoolWorker-1] Task docflow.run_scheduled_jobs[4ec1f122-3599-4aa0-b91d-ea12a3d8c40f] succeeded in 0.17447200400000895s: 0
+2026-10-07T22:41:25Z app[845033a2e1e448] iad [info][2026-10-07 22:41:25,679: INFO/MainProcess] Task docflow.sweep_stuck_documents[25368174-6a25-4865-aa7a-d5d3197646f2] received
+2026-10-07T22:41:25Z app[845033a2e1e448] iad [info][2026-10-07 22:41:25,731: INFO/ForkPoolWorker-1] Task docflow.dispatch[b1c96d99-ed0d-475b-b0a6-30b05fec3dab] succeeded in 0.14573590899999544s: 0
+2026-10-07T22:41:26Z app[845033a2e1e448] iad [info]run_workers: documents exited; stopping the other
+2026-10-07T22:41:26Z app[845033a2e1e448] iad [info]worker: Warm shutdown (MainProcess)
+2026-10-07T22:41:26Z app[845033a2e1e448] iad [info] WARN Reaped child process with pid: 651 and signal: SIGKILL, core dumped? false
+2026-10-07T22:41:30Z app[845033a2e1e448] iad [info] INFO Main child exited normally with code: 1
+2026-10-07T22:41:30Z app[845033a2e1e448] iad [info] INFO Starting clean up.
+2026-10-07T22:41:30Z app[845033a2e1e448] iad [info][   88.010939] reboot: Restarting system
+2026-10-07T22:41:31Z app[845033a2e1e448] iad [info]2026-10-07T22:41:31.139853420 [01M4C85PQT2AC4DWF9KPNYEWDW:main] Running Firecracker v1.14.4
+2026-10-07T22:41:31Z app[845033a2e1e448] iad [info]2026-10-07T22:41:31.140031852 [01M4C85PQT2AC4DWF9KPNYEWDW:main] Listening on API socket ("/fc.sock").
+2026-10-07T22:41:31Z app[845033a2e1e448] iad [info] INFO Starting init (commit: 6172d83)...
+2026-10-07T22:41:32Z app[845033a2e1e448] iad [info] INFO Preparing to run: `python -m app.run_workers` as docflow
+2026-10-07T22:41:32Z app[845033a2e1e448] iad [info] INFO [fly api proxy] listening at /.fly/api
+2026-10-07T22:41:32Z runner[845033a2e1e448] iad [info]Machine started in 1.215s
+2026-10-07T22:41:32Z app[845033a2e1e448] iad [info]2026/10/07 22:41:32 INFO SSH listening listen_address=[fdaa:cb:76d5:a7b:88d:d53b:4bd:2]:22
+2026-10-07T22:41:33Z app[845033a2e1e448] iad [info]run_workers: login check passed as docflow_worker
+2026-10-07T22:41:33Z app[845033a2e1e448] iad [info]worker_restarting starts_last_hour=3
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info] -------------- dispatch@845033a2e1e448 v5.6.3 (recovery)
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]--- ***** -----
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]-- ******* ---- Linux-6.12.105-fly-x86_64-with-glibc2.41 2026-10-07 22:41:38
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]- *** --- * ---
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]- ** ---------- [config]
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]- ** ---------- .> app:         docflow_worker:0x7f43984daba0
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]- ** ---------- .> transport:   redis://<redacted>
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]- ** ---------- .> results:     redis://<redacted>
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]- *** --- * --- .> concurrency: 1 (prefork)
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]--- ***** -----
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info] -------------- [queues]
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]                .> dispatch         exchange=dispatch(direct) key=dispatch
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info][tasks]
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.dispatch
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.generate_export
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.parse_and_extract
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.parse_import
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.run_daily_rollup
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.run_lifecycle_sweep
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.run_scheduled_jobs
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.sweep_stuck_documents
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info] -------------- documents@845033a2e1e448 v5.6.3 (recovery)
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]--- ***** -----
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]-- ******* ---- Linux-6.12.105-fly-x86_64-with-glibc2.41 2026-10-07 22:41:38
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]- *** --- * ---
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]- ** ---------- [config]
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]- ** ---------- .> app:         docflow_worker:0x7f44204f6ba0
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]- ** ---------- .> transport:   redis://<redacted>
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]- ** ---------- .> results:     redis://<redacted>
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]- *** --- * --- .> concurrency: 1 (prefork)
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]--- ***** -----
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info] -------------- [queues]
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]                .> bulk             exchange=bulk(direct) key=bulk
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]                .> interactive      exchange=interactive(direct) key=interactive
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info][tasks]
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.dispatch
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.generate_export
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.parse_and_extract
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.parse_import
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.run_daily_rollup
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.run_lifecycle_sweep
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.run_scheduled_jobs
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info]  . docflow.sweep_stuck_documents
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info][2026-10-07 22:41:38,444: INFO/MainProcess] Connected to redis://<redacted>
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info][2026-10-07 22:41:38,450: INFO/MainProcess] Connected to redis://<redacted>
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info][2026-10-07 22:41:38,475: INFO/MainProcess] mingle: searching for neighbors
+2026-10-07T22:41:38Z app[845033a2e1e448] iad [info][2026-10-07 22:41:38,481: INFO/MainProcess] mingle: searching for neighbors
+2026-10-07T22:41:39Z app[845033a2e1e448] iad [info][2026-10-07 22:41:39,558: INFO/MainProcess] mingle: all alone
+2026-10-07T22:41:39Z app[845033a2e1e448] iad [info][2026-10-07 22:41:39,581: INFO/MainProcess] mingle: all alone
+2026-10-07T22:41:39Z app[845033a2e1e448] iad [info][2026-10-07 22:41:39,713: INFO/MainProcess] documents@845033a2e1e448 ready.
+2026-10-07T22:41:39Z app[845033a2e1e448] iad [info][2026-10-07 22:41:39,735: INFO/MainProcess] Task docflow.run_lifecycle_sweep[e79f6b72-f197-4cf0-ae38-396c7a3d92ef] received
+2026-10-07T22:41:39Z app[845033a2e1e448] iad [info][2026-10-07 22:41:39,847: INFO/MainProcess] dispatch@845033a2e1e448 ready.
+2026-10-07T22:41:42Z app[845033a2e1e448] iad [info][2026-10-07 22:41:42,252: INFO/ForkPoolWorker-1] lifecycle_sweep_complete cancels_retried=0 suspended=0 ready_alerted=1 addresses_retired=0 stopped_at_time_box=False
+2026-10-07T22:41:42Z app[845033a2e1e448] iad [info][2026-10-07 22:41:42,395: INFO/ForkPoolWorker-1] Task docflow.run_lifecycle_sweep[e79f6b72-f197-4cf0-ae38-396c7a3d92ef] succeeded in 2.6583334569999995s: {'cancels_retried': 0, 'suspended': 0, 'ready_alerted': 1, 'addresses_retired': 0, 'stopped_at_time_box': False}
+2026-10-07T22:41:55Z app[e2865577ef6386] iad [info][2026-10-07 22:41:55,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:41:55Z app[845033a2e1e448] iad [info][2026-10-07 22:41:55,545: INFO/MainProcess] Task docflow.dispatch[e2efe685-aea4-48ac-8401-c727cd898e1b] received
+2026-10-07T22:41:56Z app[845033a2e1e448] iad [info][2026-10-07 22:41:56,118: INFO/ForkPoolWorker-1] Task docflow.dispatch[e2efe685-aea4-48ac-8401-c727cd898e1b] succeeded in 0.5714444020000009s: 0
+2026-10-07T22:42:25Z app[e2865577ef6386] iad [info][2026-10-07 22:42:25,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:42:25Z app[845033a2e1e448] iad [info][2026-10-07 22:42:25,548: INFO/MainProcess] Task docflow.dispatch[150d4773-9a1b-46fe-af54-4fe9f566f446] received
+2026-10-07T22:42:25Z app[845033a2e1e448] iad [info][2026-10-07 22:42:25,700: INFO/ForkPoolWorker-1] Task docflow.dispatch[150d4773-9a1b-46fe-af54-4fe9f566f446] succeeded in 0.15158932199999953s: 0
+2026-10-07T22:42:35Z app[845033a2e1e448] iad [info]2026/10/07 22:42:35 INFO New SSH session email=ndk1516@gmail.com verified=true
+2026-10-07T22:42:36Z app[845033a2e1e448] iad [info]run_workers: documents exited; stopping the other
+2026-10-07T22:42:36Z app[845033a2e1e448] iad [info]worker: Warm shutdown (MainProcess)
+2026-10-07T22:42:40Z app[845033a2e1e448] iad [info] INFO Main child exited normally with code: 1
+2026-10-07T22:42:40Z app[845033a2e1e448] iad [info] INFO Starting clean up.
+2026-10-07T22:42:40Z app[845033a2e1e448] iad [info][   68.975284] reboot: Restarting system
+2026-10-07T22:42:41Z app[845033a2e1e448] iad [info]2026-10-07T22:42:41.099650496 [01M4C85PQT2AC4DWF9KPNYEWDW:main] Running Firecracker v1.14.4
+2026-10-07T22:42:41Z app[845033a2e1e448] iad [info]2026-10-07T22:42:41.099844499 [01M4C85PQT2AC4DWF9KPNYEWDW:main] Listening on API socket ("/fc.sock").
+2026-10-07T22:42:41Z app[845033a2e1e448] iad [info] INFO Starting init (commit: 6172d83)...
+2026-10-07T22:42:42Z app[845033a2e1e448] iad [info] INFO Preparing to run: `python -m app.run_workers` as docflow
+2026-10-07T22:42:42Z app[845033a2e1e448] iad [info] INFO [fly api proxy] listening at /.fly/api
+2026-10-07T22:42:42Z runner[845033a2e1e448] iad [info]Machine started in 1.219s
+2026-10-07T22:42:42Z app[845033a2e1e448] iad [info]2026/10/07 22:42:42 INFO SSH listening listen_address=[fdaa:cb:76d5:a7b:88d:d53b:4bd:2]:22
+2026-10-07T22:42:43Z app[845033a2e1e448] iad [info]run_workers: login check passed as docflow_worker
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info] -------------- dispatch@845033a2e1e448 v5.6.3 (recovery)
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]--- ***** -----
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]-- ******* ---- Linux-6.12.105-fly-x86_64-with-glibc2.41 2026-10-07 22:42:48
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- *** --- * ---
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- [config]
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- .> app:         docflow_worker:0x7f1dba6d6ba0
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- .> transport:   redis://<redacted>
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- .> results:     redis://<redacted>
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- *** --- * --- .> concurrency: 1 (prefork)
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]--- ***** -----
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info] -------------- [queues]
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]                .> dispatch         exchange=dispatch(direct) key=dispatch
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info][tasks]
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.dispatch
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.generate_export
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.parse_and_extract
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.parse_import
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.run_daily_rollup
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.run_lifecycle_sweep
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.run_scheduled_jobs
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.sweep_stuck_documents
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info] -------------- documents@845033a2e1e448 v5.6.3 (recovery)
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]--- ***** -----
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]-- ******* ---- Linux-6.12.105-fly-x86_64-with-glibc2.41 2026-10-07 22:42:48
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- *** --- * ---
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- [config]
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- .> app:         docflow_worker:0x7f7ce92f6ba0
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- .> transport:   redis://<redacted>
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- .> results:     redis://<redacted>
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- *** --- * --- .> concurrency: 1 (prefork)
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]--- ***** -----
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info] -------------- [queues]
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]                .> bulk             exchange=bulk(direct) key=bulk
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]                .> interactive      exchange=interactive(direct) key=interactive
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info][tasks]
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.dispatch
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.generate_export
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.parse_and_extract
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.parse_import
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.run_daily_rollup
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.run_lifecycle_sweep
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.run_scheduled_jobs
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.sweep_stuck_documents
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info][2026-10-07 22:42:48,418: INFO/MainProcess] Connected to redis://<redacted>
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info][2026-10-07 22:42:48,423: INFO/MainProcess] Connected to redis://<redacted>
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info][2026-10-07 22:42:48,438: INFO/MainProcess] mingle: searching for neighbors
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info][2026-10-07 22:42:48,459: INFO/MainProcess] mingle: searching for neighbors
+2026-10-07T22:42:49Z app[845033a2e1e448] iad [info][2026-10-07 22:42:49,493: INFO/MainProcess] mingle: all alone
+2026-10-07T22:42:49Z app[845033a2e1e448] iad [info][2026-10-07 22:42:49,508: INFO/MainProcess] mingle: all alone
+2026-10-07T22:42:49Z app[845033a2e1e448] iad [info][2026-10-07 22:42:49,619: INFO/MainProcess] documents@845033a2e1e448 ready.
+2026-10-07T22:42:49Z app[845033a2e1e448] iad [info][2026-10-07 22:42:49,691: INFO/MainProcess] dispatch@845033a2e1e448 ready.
+2026-10-07T22:42:55Z app[e2865577ef6386] iad [info][2026-10-07 22:42:55,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:42:55Z app[845033a2e1e448] iad [info][2026-10-07 22:42:55,568: INFO/MainProcess] Task docflow.dispatch[759227b2-ff97-4950-b2d9-d55afd2bd9a0] received
+2026-10-07T22:42:56Z app[845033a2e1e448] iad [info][2026-10-07 22:42:56,145: INFO/ForkPoolWorker-1] Task docflow.dispatch[759227b2-ff97-4950-b2d9-d55afd2bd9a0] succeeded in 0.5749677739999992s: 0

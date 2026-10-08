@@ -1,0 +1,19 @@
+== DRILL 4, 22:44:09Z / New York 22:44:09
+sh: 4: cannot open /proc/656/cmdline: No such file
+paused 2 documents-worker process(es) at 22:44:11.686Z on 845033a2e1e448
+  pid 635 S(sleeping) python -m app.run_workers ...
+  pid 646 T(stopped) /opt/worker/venv/bin/python -m celery -A...-Q interactive,bulk
+  pid 647 S(sleeping) /opt/worker/venv/bin/python -m celery -A...-Q dispatch
+  pid 650 S(sleeping) /opt/worker/venv/bin/python -m celery -A...-Q dispatch
+  pid 651 T(stopped) /opt/worker/venv/bin/python -m celery -A...-Q interactive,bulk
+22:44:31.508Z upload G3-1007-20.txt -> HTTP 200
+document 35aad4ce-c03d-41d5-b463-6e5b3274122f status pending
+22:44:36.847Z status=pending, dispatch_lane=interactive, dispatched_at=2026-10-07T22:44:31.526435+00:00, processing_attempts=0, processing_started_at=None
+22:44:42.164Z status=pending, dispatch_lane=interactive, dispatched_at=2026-10-07T22:44:31.526435+00:00, processing_attempts=0, processing_started_at=None
+22:44:47.481Z status=pending, dispatch_lane=interactive, dispatched_at=2026-10-07T22:44:31.526435+00:00, processing_attempts=0, processing_started_at=None
+22:44:52.798Z status=pending, dispatch_lane=interactive, dispatched_at=2026-10-07T22:44:31.526435+00:00, processing_attempts=0, processing_started_at=None
+22:44:58.117Z status=pending, dispatch_lane=interactive, dispatched_at=2026-10-07T22:44:31.526435+00:00, processing_attempts=0, processing_started_at=None
+22:45:03.439Z status=pending, dispatch_lane=interactive, dispatched_at=2026-10-07T22:44:31.526435+00:00, processing_attempts=0, processing_started_at=None
+22:45:08.766Z status=pending, dispatch_lane=interactive, dispatched_at=2026-10-07T22:44:31.526435+00:00, processing_attempts=0, processing_started_at=None
+22:45:14.082Z status=pending, dispatch_lane=interactive, dispatched_at=2026-10-07T22:44:31.526435+00:00, processing_attempts=0, processing_started_at=None
+== healthz 22:45:14Z: {"status":"ok","dispatcher":{"heartbeat_age_seconds":18,"stale":false},"worker_starts_last_hour":4}

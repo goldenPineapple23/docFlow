@@ -1,0 +1,8 @@
+issued 15:10:17.109 Z
+Updating machine 8e7d7eb762d918
+Machine 8e7d7eb762d918 updated successfully!
+
+Monitor machine status here:
+https://fly.io/apps/docflow-api-staging/machines/8e7d7eb762d918
+fly exit 0 at 15:10:21.602 Z
+after: 8e7d7eb762d918 state=stopped mem=512 autostop=false autostart=true min_running=0 image=deployment-01M48YSNPWSEXNDWZ3NEERM5QA

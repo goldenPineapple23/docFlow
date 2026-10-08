@@ -18,17 +18,17 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-10-06:** Phase 5.5, Stage 3. Slices 3a to 3e are all merged and the logins
-cutover (RUNBOOK 10.2) is done through step 6. **The first worker deploy (RUNBOOK 9.7) is under
-way: steps 2 to 8 are done and passed.** The parse service, the worker and the API are deployed on
-Fly staging, one machine each, nothing public (D-194). No document has been processed and nothing
-is spent on the model. Step 7's log showed the worker writing its heartbeat URL on every ping:
-fixed here, with a line the launcher now prints when its login check passes (D-194). **Next:** the
-founder replaces the Healthchecks.io check (RUNBOOK 9.4), Claude deploys the fixed worker and
-repeats step 7's checks, then step 9 (G) on the founder's word. The Fly worker and beat are at 0
-whenever they are not being tested. Then the Stage 3 checkpoint; nothing of Stage 4 is built
-before its "go". `backup_0034`, `backup_0035`, `backup_3b` and the role `docflow_app` are dropped
-only after that deploy has processed real documents on staging (RUNBOOK 1.3; 10.2 step 7).
+**Status, as of 2026-10-08:** Phase 5.5, Stage 3. Slices 3a to 3e are all merged and the logins
+cutover (RUNBOOK 10.2) is done through step 6. **The first worker deploy (RUNBOOK 9.7) is done
+through step 15: every gate passed, and the founder accepted the 500 + 1 run on 2026-10-08**
+(D-194, D-196; CHECKPOINTS.md, Stage 3, "The first worker deploy"). The deployed worker has read
+532 documents on Fly staging; recorded model spend is $6.91. The Fly worker and beat are at 0 and
+the Healthchecks.io check is paused. **Next:** two PRs proposed for the founder's review, neither
+merged without the founder: the recycle threshold at about 500 MiB, and a longer queue-poll
+interval with task-result storage off, followed by one idle hour measured again (D-196). Now due,
+the founder's actions: dropping `backup_0034`, `backup_0035`, `backup_3b` and the role
+`docflow_app` (RUNBOOK 1.3; 10.2 step 7). Then the Stage 3 checkpoint. Nothing of Stage 4 is
+built before its "go", and the model policy (D-195) waits for the same "go".
 
 **That paragraph is the current state only** (founder, 2026-10-05; D-191). When it changes, the
 paragraph it replaces moves, word for word, to the top of `docs/status-history.md`, which is not
@@ -285,6 +285,11 @@ RUNBOOK 9.2 carries the same list):
 - **the logins cutover done and verified** (3e; RUNBOOK 10.2), and the
   external monitor is now **the Healthchecks.io heartbeat** (3e, Q1), set
   up and tested to its pass marks (RUNBOOK 9.4).
+
+**All of these gates are met** (2026-10-06 to 2026-10-08; D-194, D-196;
+CHECKPOINTS.md, Stage 3, "The first worker deploy"; the files are in
+`docs/spikes/first-worker-deploy-staging/`). The list above is kept as it
+was agreed.
 
 **The plan and the budget for that deploy** (founder, 2026-10-05; D-193).
 The procedure, who does each step and the four STOP points are RUNBOOK 9.7.
@@ -1352,6 +1357,46 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   public, and the worker heartbeat says nothing about the API. Tool and
   settings chosen when production's API exists (Healthchecks.io can't poll;
   Better Stack's free plan is labelled "personal projects").
+
+**Phase 6 items from the first worker deploy** (2026-10-07 and 2026-10-08;
+D-196 has the evidence for each; nothing here is built):
+
+- **Watch: the rollup and the sweeps share the documents process** (founder,
+  2026-10-08): "the rollup and sweeps share the documents process; the
+  rollup took 2.22 s on staging data and will grow with tenants and
+  history. Time it as data grows; propose a separate queue if it passes a
+  few seconds." In the 500 + 1 run one document waited 4.34 s behind the
+  rollup and two sweeps.
+- **Watch: the documents process's memory over a long run** (founder,
+  2026-10-08): it grew from 104 to 168 MiB over 500 text orders. To be read
+  again after a longer run; the 500 MiB recycle threshold (proposed by its
+  own PR) contains it meanwhile.
+- **Production's worker is 2 GB** (founder, 2026-10-07). `apps/worker/fly.toml`
+  says 1 GB today; the change, and Fly's price read again, belong here.
+- **Large scans and the model's request limit:** a scanned PDF between
+  about 23.9 MB and the 25 MB intake cap is accepted and then fails
+  (DOC-008). The intake cap must sit below the model's limit after
+  encoding, or large scans are split or downsampled before sending
+  (founder). Proposed: downsample in the parse service, with a golden
+  re-run; until then refuse at intake with its own catalog code. DOC-008's
+  action ("upload the same file again") is wrong for this cause.
+- **The worker needs the web address** so that the Console link in an
+  alert e-mail is not `http://localhost:3000/admin`. A launch blocker.
+- **A tenant with no tier has no abuse ceiling.** Proposed:
+  `tenants.tier_id` NOT NULL, or no tier meaning the most restrictive.
+- **The API stopping with a request in flight:** verify it finishes
+  in-flight requests when stopped (`kill_signal`, `kill_timeout`); on
+  staging an upload was cut off when Fly stopped the idle-looking machine.
+- **Redis plan for production:** decided after the idle hour is measured
+  again with a longer queue-poll interval and task-result storage off
+  (proposed by its own PR). The rule and the corrected break-even, about
+  6,850 commands an hour for the $10 plan, are in D-196 and RUNBOOK 9.7.
+- **Upload time:** about 2.9 s an upload through `fly proxy` to the 512 MB
+  staging API, not looked into; to be measured on production's API.
+- **Open with the founder:** whether the catalog gets a price field (an
+  import keeps the column per item in `items.raw_data` meanwhile); two
+  rows of the UAT plan (TC-06 is stale, TC-07 should expect "reaches
+  `needs_review`").
 
 ---
 

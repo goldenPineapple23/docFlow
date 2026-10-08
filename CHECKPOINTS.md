@@ -352,11 +352,73 @@ UTC). Steps 1 to 6 are done; step 7 is not.** The evidence files are in
   logs included (D-192). **The first worker deploy
   has not been started and waits for the founder's go.**
 
-**The first worker deploy:** `[GAP: G; A4 against the real API and worker;
-the 500 + 1 run with its cost, its time, its slow case and the largest
-unclaimed age seen (back to the founder if it nears 20 minutes, Q9); the
-memory figures and the founder's choice; the heartbeat drill against its
-pass marks; the fresh token's set time on both apps]`
+**The first worker deploy** (RUNBOOK 9.7; steps 2 to 8 on 2026-10-06,
+D-194; steps 9 to 15 on 2026-10-07 and 2026-10-08, D-196; the files are in
+`docs/spikes/first-worker-deploy-staging/`). **Every gate passed, and the
+founder accepted the 500 + 1 run on 2026-10-08.** Times are UTC.
+
+- **G** (2026-10-07). G1: the golden text order, a legacy `.doc` and a
+  scanned image, each uploaded through the deployed API and read by the
+  deployed worker and parse service to `needs_review` (24.4 s, 25.3 s,
+  14.1 s; $0.0466); the golden document's stored values match Section 8.3
+  in 35 of 35 fields; the stopped parse machine woke on the first upload
+  in 3.55 s with its canary passing. G2: a catalog import by the same
+  path, committed, 4 rows. G3: 13,600 to 13,700 Redis commands in the
+  idle hour, and a busy hour (19 short orders) within noise of that.
+- **A4 against the real API and worker** (2026-10-07): from inside a parse
+  job the API's private address (port 8000) and the worker's (port 22,
+  Fly's SSH) are both blocked, while the same addresses answer from
+  outside the job; all 22 group-A self-tests passed.
+- **The 500 + 1 run** (2026-10-08, the real model, a 2 GB worker with one
+  document slot). **501 of 501 `needs_review`, each on its first attempt;
+  no alert; no stop.** Cost $6.2675: per document a median of $0.0125 and
+  at most $0.0179. Time: 500 documents in about 70.5 minutes, about 8.5 s
+  each. **The single order** was saved while 332 of the backfill waited,
+  was dispatched when the document being read finished, 6.2 s later, and
+  was processed 14.0 s after its save; **no backfill document was claimed
+  between its save and its claim.** **The slow case:** the founder pressed
+  the Console's "recompute" twice; the first press fell with two
+  five-minute sweeps and one document waited **4.34 s** to be claimed,
+  **the largest unclaimed age of the run**; the second, 3.15 s; the median
+  was 0.17 s. Far under 20 minutes, so `DISPATCH_UNCLAIMED_ALERT_MIN` stays
+  20 and nothing went back to the founder under Q9.
+- **Memory, and the founder's choice.** On the 1 GB worker (962 MiB
+  usable) a 22 MB scanned PDF took the documents process to 328 MiB and
+  the machine to 699 MiB; a 24.4 MB one took them to 466 and 831 MiB
+  before failing for another reason (below). **The founder chose a 2 GB
+  worker for production,** and a lower recycle threshold (about 500 MiB),
+  to be proposed by PR. On a 2 GB worker, two 22 MB scans back to back
+  peaked at 322 and 333 MiB (the process's own high-water mark: 359 MiB)
+  and the process held 330 MiB afterwards: the second did not add to the
+  first.
+- **The heartbeat drills against their pass marks** (2026-10-07). Worker
+  stopped: the "down" e-mail 10 minutes after the last ping (mark: 12).
+  Started again: the "up" e-mail at the first ping. Three starts in an
+  hour: `worker_restarting`, high, raised at the third, its e-mail held;
+  recorded as "raised and held, not delivered". Documents worker paused
+  with the dispatch process running: `/fail` sent at 20 min 24 s unclaimed
+  (mark: 20 minutes plus one pass), then "up" when it was resumed.
+- **The fresh token's set time on both apps:** not obtainable; this `fly`
+  version prints no time for a secret (D-194). What was shown instead: the
+  token's digest was new and the same on the parse app and the worker at
+  15:27:10 on 2026-10-06, and every document since has been parsed through
+  it.
+- **Found on the way, each recorded in D-196 for Phase 6 and none fixed
+  here:** a scanned PDF between about 23.9 MB and the 25 MB intake cap is
+  accepted and then fails at the model's request limit (DOC-008, whose
+  advice to upload it again cannot work for this cause); alert e-mails
+  from the worker link to `localhost`; a tenant with no tier has no abuse
+  ceiling; the rollup and the sweeps share the documents process (the
+  4.34 s above); the documents process grew from 104 to 168 MiB over 500
+  text orders; about half of the idle Redis commands are the workers'
+  once-a-second poll.
+- **Not obtained:** a `/healthz` reading before the first deploy of
+  2026-10-07; two login lines that day; the time of one Redis reading; a
+  Redis reading before the 500 + 1 run; the parse machine's memory during
+  the two scans of 2026-10-08. Each is in D-196.
+- **Now due, the founder's actions, not done here:** dropping
+  `backup_0034`, `backup_0035`, `backup_3b` and the role `docflow_app`
+  (D-186, D-190; RUNBOOK 1.3 and 10.2 step 7).
 
 **CI**, latest on `main` (`d004186`, run 37043224237, after 3e and the
 runner pin): core 745 tests, api 626, worker 180, parse unit 128 and HTTP
@@ -369,11 +431,11 @@ IPv6 isolation is proven on Fly). `[GAP: CI on the checkpoint commit]`
 | Finding | Draft verdict | Evidence so far | Still owed |
 |---|---|---|---|
 | **H5** (quick part, 3a) No time limits or memory cap on any task | **Closed** | A hard limit per task, one retry after a timeout, then DOC-022 (D-179). Worker `test_time_limits_prefork.py`, a real prefork worker in CI: `test_a_hung_task_is_killed_the_worker_carries_on_and_a_timeout_gets_one_retry`, `test_a_worker_killed_outright_records_no_timeout_and_takes_the_worker_stopped_path` | Nothing |
-| **H5** (3c) Parsers ran inside the worker, which held every key | **Closed on the parse service; end to end owed** | `apps/parse`: one sandboxed job per file, isolation confirmed by the job itself, no keys in the service (D-183). CI: canary, A, S and B self-tests in the real sandbox, D1 parity on every fixture through the real service. **Fly staging run 2 (2026-10-01): every item PASS**, including A-net IPv6, cgroup v1, A3 against real Upstash and A4 against a stand-in (`docs/spikes/3c-fly-staging/2026-10-01-sha256-acc99434/`). API `test_parse_token_boundary.py`: the API never holds the parse token | G, and A4 against the real API and worker |
+| **H5** (3c) Parsers ran inside the worker, which held every key | **Closed** | `apps/parse`: one sandboxed job per file, isolation confirmed by the job itself, no keys in the service (D-183). CI: canary, A, S and B self-tests in the real sandbox, D1 parity on every fixture through the real service. **Fly staging run 2 (2026-10-01): every item PASS**, including A-net IPv6, cgroup v1, A3 against real Upstash and A4 against a stand-in (`docs/spikes/3c-fly-staging/2026-10-01-sha256-acc99434/`). API `test_parse_token_boundary.py`: the API never holds the parse token. **End to end on Fly staging (2026-10-07, D-196):** G1, G2 and G3 through the deployed API, worker and parse service; A4 against the real API and worker PASS | Nothing |
 | **H6** Files on one machine's disk | **Closed** | Supabase Storage, a private bucket, the prefix check on read, write and delete (D-182). Core `test_storage.py` (25), including `test_tenant_a_cannot_read_a_tenant_b_path_and_storage_is_never_contacted`; `test_storage_bucket_live.py` against the real bucket: `test_the_bucket_has_no_public_url`, `test_the_anon_key_reaches_no_file`, `test_a_customers_own_signed_in_token_reaches_no_file`, `test_a_hard_delete_empties_the_tenants_folder_in_the_real_bucket`. API `test_storage_outage_api.py`. Staging rollout 2026-09-30: 89 files copied and verified by SHA-256; 14 rows flagged and left out by the founder's choice (seed and test data) | Nothing |
-| **H4** (fairness, 3d) One tenant's backfill starved every other tenant | **Closed in CI; scale owed** | The dispatcher takes turns between tenants with a per-tenant cap; providers' outages are waits, not failures (D-184). Worker `test_dispatch_real_worker.py`, a real Celery worker and queue: `test_a_newcomer_gets_the_next_slot_and_a_tenants_single_order_beats_its_own_backfill`, `test_the_dispatch_process_reads_only_its_queue_and_never_claims_a_document`; `test_dispatch_db.py` (22) on the real database. Staging suites 2026-10-01 green on 3d's final code | The 500 + 1 run |
+| **H4** (fairness, 3d) One tenant's backfill starved every other tenant | **Closed** | The dispatcher takes turns between tenants with a per-tenant cap; providers' outages are waits, not failures (D-184). Worker `test_dispatch_real_worker.py`, a real Celery worker and queue: `test_a_newcomer_gets_the_next_slot_and_a_tenants_single_order_beats_its_own_backfill`, `test_the_dispatch_process_reads_only_its_queue_and_never_claims_a_document`; `test_dispatch_db.py` (22) on the real database. Staging suites 2026-10-01 green on 3d's final code. **The 500 + 1 run on Fly staging (2026-10-08, D-196):** a second tenant's single order, saved while 332 of a 500-document backfill waited, was claimed before any further backfill document and processed 14.0 s after its save; 501 of 501 `needs_review`; largest unclaimed age 4.34 s | Nothing (the Phase 6 load test is its own item) |
 | **H4** (matching speed) | **Not Stage 3** | Stage 4 (design proposed alongside this draft) | -- |
-| **F-1** Flag policies keyed on settings any connection could set | **Closed in CI and on staging; the deployed apps owed** | Four logins, each flag policy `TO` one login, functions granted login by login (D-185). API `test_logins_db.py` (13 tests, some per login or per function), including `test_every_flag_policy_applies_to_exactly_its_login`, `test_a_flag_that_opens_tenants_opens_it_only_on_its_own_login`, `test_each_security_definer_function_is_callable_by_exactly_its_logins`. `0036` round-tripped in CI (forward, reverse, forward) against staging's pre-0036 snapshot. **On staging since 2026-10-05** ("The cutover", above): the snapshot equals the committed post-0036 state, the API suite with these tests passed as the four logins (`625 passed, 1 skipped, 3 deselected`), and `docflow_app` is `NOLOGIN` and refused | The worker and the API deployed on their own logins (the first worker deploy); step 7, dropping `docflow_app` |
+| **F-1** Flag policies keyed on settings any connection could set | **Closed in CI and on staging; the deployed apps owed** | Four logins, each flag policy `TO` one login, functions granted login by login (D-185). API `test_logins_db.py` (13 tests, some per login or per function), including `test_every_flag_policy_applies_to_exactly_its_login`, `test_a_flag_that_opens_tenants_opens_it_only_on_its_own_login`, `test_each_security_definer_function_is_callable_by_exactly_its_logins`. `0036` round-tripped in CI (forward, reverse, forward) against staging's pre-0036 snapshot. **On staging since 2026-10-05** ("The cutover", above): the snapshot equals the committed post-0036 state, the API suite with these tests passed as the four logins (`625 passed, 1 skipped, 3 deselected`), and `docflow_app` is `NOLOGIN` and refused. **Deployed (2026-10-06 to 2026-10-08, D-194, D-196):** the worker prints `login check passed as docflow_worker` at each start and has processed 532 documents on its own login (531 to `needs_review`, one failed at the model's request limit), each uploaded through the API on its own | Step 7, dropping `docflow_app` (now due; the founder's action) |
 | **D-173 residual risk** Any app code could call the Stripe event function | **Closed in CI and on staging** | Only `docflow_stripe` may execute it: `test_only_the_stripe_login_may_execute_the_function`, `test_the_api_login_is_refused_the_stripe_event_function`. Both passed on staging as the four logins on 2026-10-05, and the function's grant there is `docflow_stripe` alone (the post-0036 snapshot) | -- |
 | **D-163** A worker killed mid-call left the call uncosted | **Closed** | A `started` run row before every paid call (0034). Worker `test_stage3c_db.py`: `test_F3_a_worker_killed_during_the_model_call_leaves_the_call_on_the_cost_record`, `test_F3_a_finished_call_has_its_started_row_and_one_outcome`, `test_F3_the_database_refuses_a_started_row_that_claims_an_outcome`; core `test_D163_the_routing_call_has_a_started_row_before_it_and_its_outcome_points_at_it` | Nothing |
 | **M6** `rollup_stale` raised but never registered | **Closed** (fixed in 3d) | Registered; one test raises every registered type end to end | Nothing |

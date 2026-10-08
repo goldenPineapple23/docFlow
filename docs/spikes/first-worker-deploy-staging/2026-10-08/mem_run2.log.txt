@@ -1,0 +1,52 @@
+== start 16:49:59.616Z; recorded spend $6.7271
+== worker before:
+   usage 505331712
+   total_kB 2015876 used_kB 557220 avail_kB 1458656
+   proc 635 ppid 1 rss 70576 hwm 70576 python -m app.run_workers
+   proc 646 ppid 635 rss 120940 hwm 120940 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+   proc 647 ppid 635 rss 120680 hwm 120680 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+   proc 650 ppid 646 rss 171536 hwm 171536 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+   proc 651 ppid 647 rss 117820 hwm 117820 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+== parse before (empty if its machine is stopped):
+   uptime_s 4723.52
+   root_usage 102895616 root_max_usage 68489216
+   jobs_usage 13488128 jobs_max_usage 68489216
+   used_kB 213892 avail_kB 1801748
+   16:51:05.686Z mem-scan-1.pdf (22.07 MB) uploaded in 52.9s -> 483e8baa-40db-4f7c-959b-f5510a36a8fd
+   16:51:51.904Z mem-scan-2.pdf (22.07 MB) uploaded in 46.2s -> fb20dd3d-dda7-4d67-8f80-fa87a615dbdf
+   16:51:52.231Z 483e8baa needs_review
+   16:52:17.454Z fb20dd3d needs_review
+== worker 0s after the second document (16:52:21.196Z):
+   usage 677957632
+   total_kB 2015876 used_kB 720240 avail_kB 1295636
+   proc 635 ppid 1 rss 70576 hwm 70576 python -m app.run_workers
+   proc 646 ppid 635 rss 120944 hwm 120944 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+   proc 647 ppid 635 rss 120684 hwm 120684 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+   proc 650 ppid 646 rss 337956 hwm 367912 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+   proc 651 ppid 647 rss 118536 hwm 118536 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+== worker 60s after the second document (16:53:22.796Z):
+   usage 678072320
+   total_kB 2015876 used_kB 721004 avail_kB 1294872
+   proc 635 ppid 1 rss 70576 hwm 70576 python -m app.run_workers
+   proc 646 ppid 635 rss 120944 hwm 120944 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+   proc 647 ppid 635 rss 120684 hwm 120684 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+   proc 650 ppid 646 rss 337956 hwm 367912 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+   proc 651 ppid 647 rss 118536 hwm 118536 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+== worker 180s after the second document (16:55:25.091Z):
+   usage 678146048
+   total_kB 2015876 used_kB 721472 avail_kB 1294404
+   proc 635 ppid 1 rss 70576 hwm 70576 python -m app.run_workers
+   proc 646 ppid 635 rss 120948 hwm 120948 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+   proc 647 ppid 635 rss 120692 hwm 120692 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+   proc 650 ppid 646 rss 337956 hwm 367912 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+   proc 651 ppid 647 rss 118536 hwm 118536 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+== parse after:
+   Error: app docflow-parse-staging has no started VMs.
+   It may be unhealthy or not have been deployed yet.
+   Try the following command to verify:
+   fly status
+
+== 1500 samples
+mem-scan-1.pdf: needs_review, attempts 1, cost $0.0907; peaks: documents process 322 MiB, machine used 724 MiB, cgroup 636 MiB (224 samples)
+mem-scan-2.pdf: needs_review, attempts 1, cost $0.0932; peaks: documents process 333 MiB, machine used 737 MiB, cgroup 647 MiB (1006 samples)
+== end 16:55:27.426Z
