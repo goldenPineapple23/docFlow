@@ -1,0 +1,373 @@
+{
+  "started": "21:05:31.185Z",
+  "documents": [
+    {
+      "label": "legacy .doc",
+      "file": "po.doc",
+      "bytes": 25088,
+      "epoch_start": 1791407154.1405742,
+      "at": "21:05:54.140Z",
+      "upload_seconds": 2.2,
+      "http": 200,
+      "document_id": "a537f860-beae-49f6-8f10-04001f2f436b",
+      "status": "needs_review",
+      "seconds": 39.6,
+      "epoch_end": 1791407193.7499926,
+      "runs": [
+        {
+          "run_kind": "extraction",
+          "run_state": "started",
+          "succeeded": null,
+          "error_code": null,
+          "input_tokens": null,
+          "output_tokens": null,
+          "counted_input_tokens": 1024,
+          "cost": null,
+          "latency_ms": null,
+          "created_at": "2026-10-07 21:06:09.203627+00:00"
+        },
+        {
+          "run_kind": "extraction",
+          "run_state": "finished",
+          "succeeded": true,
+          "error_code": null,
+          "input_tokens": 2445,
+          "output_tokens": 2458,
+          "counted_input_tokens": null,
+          "cost": "0.0295",
+          "latency_ms": 22794,
+          "created_at": "2026-10-07 21:06:31.893982+00:00"
+        }
+      ],
+      "doc": {
+        "status": "needs_review",
+        "processing_attempts": 1,
+        "failure_code": null,
+        "parse_lost_attempts": [],
+        "quarantine_reason": null
+      },
+      "worker": [
+        "usage 477888512",
+        "used_kB 520476 avail_kB 464744",
+        "proc 636 ppid 1 rss 71104 hwm 71104 python -m app.run_workers",
+        "proc 647 ppid 636 rss 121016 hwm 121016 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+        "proc 648 ppid 636 rss 121068 hwm 121068 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch",
+        "proc 651 ppid 647 rss 144836 hwm 144836 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+        "proc 652 ppid 648 rss 119508 hwm 119508 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch"
+      ],
+      "parse": [
+        "uptime_s 63.23",
+        "root_usage 259543040 root_max_usage 315781120",
+        "jobs_usage 171724800 jobs_max_usage 315781120",
+        "used_kB 239652 avail_kB 1775988"
+      ]
+    },
+    {
+      "label": "scanned PDF, 1 page",
+      "file": "po-scanned.pdf",
+      "bytes": 50385,
+      "epoch_start": 1791407206.5302927,
+      "at": "21:06:46.530Z",
+      "upload_seconds": 2.2,
+      "http": 200,
+      "document_id": "69991612-48c2-40ae-badd-27c07038d422",
+      "status": "needs_review",
+      "seconds": 14.1,
+      "epoch_end": 1791407220.6437962,
+      "runs": [
+        {
+          "run_kind": "extraction",
+          "run_state": "started",
+          "succeeded": null,
+          "error_code": null,
+          "input_tokens": null,
+          "output_tokens": null,
+          "counted_input_tokens": 2433,
+          "cost": null,
+          "latency_ms": null,
+          "created_at": "2026-10-07 21:06:49.612508+00:00"
+        },
+        {
+          "run_kind": "extraction",
+          "run_state": "finished",
+          "succeeded": true,
+          "error_code": null,
+          "input_tokens": 3854,
+          "output_tokens": 914,
+          "counted_input_tokens": null,
+          "cost": "0.0168",
+          "latency_ms": 8829,
+          "created_at": "2026-10-07 21:06:58.377296+00:00"
+        }
+      ],
+      "doc": {
+        "status": "needs_review",
+        "processing_attempts": 1,
+        "failure_code": null,
+        "parse_lost_attempts": [],
+        "quarantine_reason": null
+      },
+      "worker": [
+        "usage 479473664",
+        "used_kB 521944 avail_kB 463276",
+        "proc 636 ppid 1 rss 71104 hwm 71104 python -m app.run_workers",
+        "proc 647 ppid 636 rss 121016 hwm 121016 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+        "proc 648 ppid 636 rss 121072 hwm 121072 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch",
+        "proc 651 ppid 647 rss 146124 hwm 146124 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+        "proc 652 ppid 648 rss 119508 hwm 119508 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch"
+      ],
+      "parse": [
+        "uptime_s 91.37",
+        "root_usage 270659584 root_max_usage 315781120",
+        "jobs_usage 182804480 jobs_max_usage 315781120",
+        "used_kB 240500 avail_kB 1775140"
+      ]
+    },
+    {
+      "label": "multi-page .tif",
+      "file": "po.tif",
+      "bytes": 1440288,
+      "epoch_start": 1791407235.092318,
+      "at": "21:07:15.092Z",
+      "upload_seconds": 4.6,
+      "http": 200,
+      "document_id": "4fcd73a9-3455-475d-a14c-eaaee9ddc9a4",
+      "status": "needs_review",
+      "seconds": 14.2,
+      "epoch_end": 1791407249.3013906,
+      "runs": [
+        {
+          "run_kind": "extraction",
+          "run_state": "started",
+          "succeeded": null,
+          "error_code": null,
+          "input_tokens": null,
+          "output_tokens": null,
+          "counted_input_tokens": 1499,
+          "cost": null,
+          "latency_ms": null,
+          "created_at": "2026-10-07 21:07:21.655345+00:00"
+        },
+        {
+          "run_kind": "extraction",
+          "run_state": "finished",
+          "succeeded": true,
+          "error_code": null,
+          "input_tokens": 2920,
+          "output_tokens": 775,
+          "counted_input_tokens": null,
+          "cost": "0.0136",
+          "latency_ms": 6918,
+          "created_at": "2026-10-07 21:07:28.498797+00:00"
+        }
+      ],
+      "doc": {
+        "status": "needs_review",
+        "processing_attempts": 1,
+        "failure_code": null,
+        "parse_lost_attempts": [],
+        "quarantine_reason": null
+      },
+      "worker": [
+        "usage 482955264",
+        "used_kB 526984 avail_kB 458236",
+        "proc 636 ppid 1 rss 71104 hwm 71104 python -m app.run_workers",
+        "proc 647 ppid 636 rss 121016 hwm 121016 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+        "proc 648 ppid 636 rss 121076 hwm 121076 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch",
+        "proc 651 ppid 647 rss 149404 hwm 149404 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+        "proc 652 ppid 648 rss 119516 hwm 119516 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch"
+      ],
+      "parse": [
+        "uptime_s 118.87",
+        "root_usage 277999616 root_max_usage 315781120",
+        "jobs_usage 190205952 jobs_max_usage 315781120",
+        "used_kB 241220 avail_kB 1774420"
+      ]
+    },
+    {
+      "label": "photo .jpg",
+      "file": "po.jpg",
+      "bytes": 28810,
+      "epoch_start": 1791407262.2071655,
+      "at": "21:07:42.207Z",
+      "upload_seconds": 1.9,
+      "http": 200,
+      "document_id": "af722c22-9a2c-4b5b-86d2-e3e74a244381",
+      "status": "needs_review",
+      "seconds": 11.5,
+      "epoch_end": 1791407273.7246666,
+      "runs": [
+        {
+          "run_kind": "extraction",
+          "run_state": "started",
+          "succeeded": null,
+          "error_code": null,
+          "input_tokens": null,
+          "output_tokens": null,
+          "counted_input_tokens": 1430,
+          "cost": null,
+          "latency_ms": null,
+          "created_at": "2026-10-07 21:07:44.840740+00:00"
+        },
+        {
+          "run_kind": "extraction",
+          "run_state": "finished",
+          "succeeded": true,
+          "error_code": null,
+          "input_tokens": 2851,
+          "output_tokens": 808,
+          "counted_input_tokens": null,
+          "cost": "0.0138",
+          "latency_ms": 7108,
+          "created_at": "2026-10-07 21:07:51.867462+00:00"
+        }
+      ],
+      "doc": {
+        "status": "needs_review",
+        "processing_attempts": 1,
+        "failure_code": null,
+        "parse_lost_attempts": [],
+        "quarantine_reason": null
+      },
+      "worker": [
+        "usage 484966400",
+        "used_kB 528992 avail_kB 456228",
+        "proc 636 ppid 1 rss 71104 hwm 71104 python -m app.run_workers",
+        "proc 647 ppid 636 rss 121016 hwm 121016 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+        "proc 648 ppid 636 rss 121076 hwm 121076 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch",
+        "proc 651 ppid 647 rss 151152 hwm 151152 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+        "proc 652 ppid 648 rss 119520 hwm 119520 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch"
+      ],
+      "parse": [
+        "uptime_s 143.37",
+        "root_usage 278249472 root_max_usage 315781120",
+        "jobs_usage 190218240 jobs_max_usage 315781120",
+        "used_kB 232436 avail_kB 1783204"
+      ]
+    },
+    {
+      "label": "scanned PDF, 24 pages, 22 MB",
+      "file": "mem-big-scanned.pdf",
+      "bytes": 23142179,
+      "epoch_start": 1791407286.9833431,
+      "at": "21:08:06.983Z",
+      "upload_seconds": 49.3,
+      "http": 200,
+      "document_id": "b8b9caf9-637a-48d4-9c91-13654bf71582",
+      "status": "needs_review",
+      "seconds": 75.2,
+      "epoch_end": 1791407362.1625495,
+      "runs": [
+        {
+          "run_kind": "extraction",
+          "run_state": "started",
+          "succeeded": null,
+          "error_code": null,
+          "input_tokens": null,
+          "output_tokens": null,
+          "counted_input_tokens": 38635,
+          "cost": null,
+          "latency_ms": null,
+          "created_at": "2026-10-07 21:09:03.145635+00:00"
+        },
+        {
+          "run_kind": "extraction",
+          "run_state": "finished",
+          "succeeded": true,
+          "error_code": null,
+          "input_tokens": 40056,
+          "output_tokens": 1456,
+          "counted_input_tokens": null,
+          "cost": "0.0947",
+          "latency_ms": 18638,
+          "created_at": "2026-10-07 21:09:20.527975+00:00"
+        }
+      ],
+      "doc": {
+        "status": "needs_review",
+        "processing_attempts": 1,
+        "failure_code": null,
+        "parse_lost_attempts": [],
+        "quarantine_reason": null
+      },
+      "worker": [
+        "usage 644988928",
+        "used_kB 683608 avail_kB 301612",
+        "proc 636 ppid 1 rss 71104 hwm 71104 python -m app.run_workers",
+        "proc 647 ppid 636 rss 121020 hwm 121020 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+        "proc 648 ppid 636 rss 121076 hwm 121076 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch",
+        "proc 651 ppid 647 rss 306648 hwm 335872 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+        "proc 652 ppid 648 rss 120252 hwm 120252 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch"
+      ],
+      "parse": [
+        "uptime_s 232.45",
+        "root_usage 310628352 root_max_usage 356368384",
+        "jobs_usage 190230528 jobs_max_usage 356368384",
+        "used_kB 264812 avail_kB 1750828"
+      ]
+    },
+    {
+      "label": "scanned PDF, 24 pages, 24.4 MB",
+      "file": "mem-cap-scanned.pdf",
+      "bytes": 25600390,
+      "epoch_start": 1791407375.697967,
+      "at": "21:09:35.697Z",
+      "upload_seconds": 57.4,
+      "http": 200,
+      "document_id": "6b4e887c-5ee8-449a-ba1c-f19873f4d413",
+      "status": "failed",
+      "seconds": 64.7,
+      "epoch_end": 1791407440.4085345,
+      "runs": [
+        {
+          "run_kind": "extraction",
+          "run_state": "started",
+          "succeeded": null,
+          "error_code": null,
+          "input_tokens": null,
+          "output_tokens": null,
+          "counted_input_tokens": null,
+          "cost": null,
+          "latency_ms": null,
+          "created_at": "2026-10-07 21:10:39.297242+00:00"
+        },
+        {
+          "run_kind": "extraction",
+          "run_state": "finished",
+          "succeeded": false,
+          "error_code": "DOC-008",
+          "input_tokens": null,
+          "output_tokens": null,
+          "counted_input_tokens": null,
+          "cost": null,
+          "latency_ms": 1273,
+          "created_at": "2026-10-07 21:10:39.917636+00:00"
+        }
+      ],
+      "doc": {
+        "status": "failed",
+        "processing_attempts": 1,
+        "failure_code": "DOC-008",
+        "parse_lost_attempts": [],
+        "quarantine_reason": null
+      },
+      "worker": [
+        "usage 751411200",
+        "used_kB 819284 avail_kB 165936",
+        "proc 636 ppid 1 rss 71104 hwm 71104 python -m app.run_workers",
+        "proc 647 ppid 636 rss 121024 hwm 121024 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+        "proc 648 ppid 636 rss 121084 hwm 121084 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch",
+        "proc 651 ppid 647 rss 410468 hwm 477028 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+        "proc 652 ppid 648 rss 120256 hwm 120256 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch"
+      ],
+      "parse": [
+        "uptime_s 310.38",
+        "root_usage 344481792 root_max_usage 372297728",
+        "jobs_usage 190226432 jobs_max_usage 372297728",
+        "used_kB 341164 avail_kB 1674476"
+      ]
+    }
+  ],
+  "ended": "21:10:43.815Z",
+  "spent": "0.1684"
+}

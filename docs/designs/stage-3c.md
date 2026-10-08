@@ -554,6 +554,11 @@ Every check that needs a control had one beside it (RUNBOOK 1.7).
   count x 720 costs more than $10 a month at $0.20 per 100k commands
   (that is, more than about 69,400 commands in the idle hour), switch to
   the fixed $10 plan.**
+  *(Correction, 2026-10-08, D-196: "about 69,400" was an arithmetic error,
+  ten times too high. $10 a month at $0.20 per 100,000 commands is
+  5,000,000 commands a month: about 6,940 an hour over 720 hours, about
+  6,850 over 730. The founder restated the rule with 730 hours; it is in
+  D-196 and RUNBOOK 9.7. The sentence above is left as it was written.)*
 
 **Fly secrets, the founder's commands** (PowerShell; placeholders in
 `<...>`):

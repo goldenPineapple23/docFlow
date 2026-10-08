@@ -1,0 +1,127 @@
+{
+  "tenant_id": "40594983-03ff-47b1-ac40-f636488b8de7",
+  "tenant_name": "Acme Test G1 2a60cc",
+  "auth_user_id": "3b37de3d-6f33-46ea-b83a-3f491f747162",
+  "email": "g1-2a60cc@example.test",
+  "documents": [
+    {
+      "label": "golden fixture",
+      "document_id": "df8f713b-a018-430b-8e98-be2d88e8c930",
+      "final": "needs_review",
+      "seconds": 24.4,
+      "upload_seconds": 3.84,
+      "transitions": [
+        [
+          "pending",
+          4.2
+        ],
+        [
+          "processing",
+          6.0
+        ],
+        [
+          "needs_review",
+          24.4
+        ]
+      ],
+      "runs": [
+        {
+          "model_id": "claude-sonnet-5",
+          "in": null,
+          "out": null,
+          "cost": null,
+          "latency_ms": null,
+          "ok": null,
+          "err": null
+        },
+        {
+          "model_id": "claude-sonnet-5",
+          "in": 2621,
+          "out": 882,
+          "cost": "0.0141",
+          "latency_ms": 12502,
+          "ok": true,
+          "err": null
+        }
+      ]
+    },
+    {
+      "label": "legacy .doc",
+      "document_id": "d29da4e8-0ab2-4890-8c9d-8341a29ad784",
+      "final": "needs_review",
+      "seconds": 25.3,
+      "upload_seconds": 2.83,
+      "transitions": [
+        [
+          "processing",
+          3.3
+        ],
+        [
+          "needs_review",
+          25.3
+        ]
+      ],
+      "runs": [
+        {
+          "model_id": "claude-sonnet-5",
+          "in": null,
+          "out": null,
+          "cost": null,
+          "latency_ms": null,
+          "ok": null,
+          "err": null
+        },
+        {
+          "model_id": "claude-sonnet-5",
+          "in": 2445,
+          "out": 1268,
+          "cost": "0.0176",
+          "latency_ms": 11751,
+          "ok": true,
+          "err": null
+        }
+      ]
+    },
+    {
+      "label": "scanned image",
+      "document_id": "737c4442-41ef-4d69-88d2-8e0a8b4a631e",
+      "final": "needs_review",
+      "seconds": 14.1,
+      "upload_seconds": 2.81,
+      "transitions": [
+        [
+          "pending",
+          3.1
+        ],
+        [
+          "processing",
+          5.0
+        ],
+        [
+          "needs_review",
+          14.1
+        ]
+      ],
+      "runs": [
+        {
+          "model_id": "claude-sonnet-5",
+          "in": null,
+          "out": null,
+          "cost": null,
+          "latency_ms": null,
+          "ok": null,
+          "err": null
+        },
+        {
+          "model_id": "claude-sonnet-5",
+          "in": 2851,
+          "out": 923,
+          "cost": "0.0149",
+          "latency_ms": 8427,
+          "ok": true,
+          "err": null
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+Connecting to fdaa:cb:76d5:a7b:268:6a10:d63d:2...
+== machine: 6e82dd555b2287 date: 2026-10-07T20:32:17Z
+usage_in_bytes:     416227328
+max_usage_in_bytes: 0
+MemTotal:         985220 kB
+MemAvailable:     512800 kB
+SwapTotal:             0 kB
+== ps (rss in KiB)
+== per process: pid ppid VmRSS VmHWM (KiB) cmd
+636 1 71104 71104 python -m app.run_workers 
+647 636 120884 120884 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interactive,bulk --concurren
+648 636 120952 120952 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch --concurrency=1 -n 
+651 647 107296 107296 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interactive,bulk --concurren
+652 648 114360 114360 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch --concurrency=1 -n 

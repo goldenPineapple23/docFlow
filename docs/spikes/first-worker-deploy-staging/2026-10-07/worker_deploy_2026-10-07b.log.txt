@@ -1,0 +1,123 @@
+fly : ==> Verifying app config
+At line:3 char:1
++ fly deploy --config apps/worker/fly.toml --dockerfile apps/worker/Doc ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (==> Verifying app config:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+--> Verified app config
+Validating apps/worker/fly.toml
+✓ Configuration is valid
+==> Building image
+Waiting for depot builder...
+
+==> Building image with Depot
+--> build:  (​)
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 2.61kB 0.1s done
+#1 DONE 0.1s
+
+#2 [internal] load metadata for 
+docker.io/library/debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+#2 DONE 0.2s
+
+#3 [ 1/10] FROM 
+docker.io/library/debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+#3 resolve 
+docker.io/library/debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a done
+#3 DONE 0.0s
+
+#4 [internal] load build context
+#4 transferring context: 6.52kB 0.1s done
+#4 DONE 0.1s
+
+#5 [ 4/10] COPY apps/worker/requirements.lock.txt /opt/worker/requirements.lock.txt
+#5 CACHED
+
+#6 [ 5/10] RUN python3 -m venv /opt/worker/venv  && /opt/worker/venv/bin/pip install --no-cache-dir --no-deps -r 
+/opt/worker/requirements.lock.txt
+#6 CACHED
+
+#7 [ 7/10] COPY packages/core/docflow_core /opt/worker/src/core/docflow_core
+#7 CACHED
+
+#8 [ 8/10] RUN /opt/worker/venv/bin/pip install --no-cache-dir --no-deps /opt/worker/src/core
+#8 CACHED
+
+#9 [ 3/10] RUN groupadd --system --gid 10100 docflow  && useradd --system --uid 10100 --gid 10100 --no-create-home 
+--shell /usr/sbin/nologin docflow
+#9 CACHED
+
+#10 [ 6/10] COPY packages/core/pyproject.toml /opt/worker/src/core/pyproject.toml
+#10 CACHED
+
+#11 [ 2/10] RUN sed -i       -e 
+"s#http://deb.debian.org/debian-security#http://snapshot.debian.org/archive/debian-security/20261001T000000Z#"       
+-e "s#http://deb.debian.org/debian$#http://snapshot.debian.org/archive/debian/20261001T000000Z#"       
+/etc/apt/sources.list.d/debian.sources  && ! grep -q deb.debian.org /etc/apt/sources.list.d/debian.sources  && apt-get 
+-o Acquire::Check-Valid-Until=false -o Acquire::Retries=5 update  && apt-get -o Acquire::Retries=5 -y upgrade  && 
+apt-get -o Acquire::Retries=5 install -y --no-install-recommends python3 python3-venv ca-certificates  && rm -rf 
+/var/lib/apt/lists/*
+#11 CACHED
+
+#12 [ 9/10] COPY apps/worker/app /opt/worker/app
+#12 CACHED
+
+#13 [10/10] WORKDIR /opt/worker
+#13 CACHED
+
+#14 exporting to image
+#14 exporting layers done
+#14 exporting manifest sha256:851a7a9b22491a49ebb406085252a21617963afc0042c8640096481f65f9a48b done
+#14 exporting config sha256:8d4b2646ca13cf81086b7a42f17ce101878553ccd3048df18302730926e41a04 done
+#14 pushing layers for registry.fly.io/docflow-worker-staging:deployment-01M4C0DCEDY90A2MYTJY6A1XMT@sha256:851a7a9b2249
+1a49ebb406085252a21617963afc0042c8640096481f65f9a48b
+#14 pushing layer sha256:8d4b2646ca13cf81086b7a42f17ce101878553ccd3048df18302730926e41a04
+#14 pushing layer sha256:2c1ce468d9f3d941396801f6e3afc8921466650dd05430fe644cd3537713d27f 0.1s done
+#14 pushing layer sha256:5fadecf4477837cd9800498de2b9c05e0dddc644efaaa5476d9f59760119cb9e
+#14 pushing layer sha256:ce068d8928f7c66128d8cde29570396dd3fe16db9bf5596dff399fddc50d171d
+#14 pushing layer sha256:a8d1371fbcea36874f983ab482d8de93fd24089cd4b25b26ffac4bac37a94835 0.1s done
+#14 pushing layer sha256:a11cf75664bc133464030126d6162ce35f27807de294e3765c0a492dbd11c6cb
+#14 pushing layer sha256:893bd5e57c2d9311b20c98bb5674240d5851ee4a43afbb21a45546e3b98fd0ee
+#14 pushing layer sha256:c5fb7632bdd287ef83eaf4be66e7078c35e36611bc3a249867fb0251bc43ddef
+#14 pushing layer sha256:8e288a4c8dae3d7f26ae20993ce6d1fd4c2b7866757dd34864606d5767f80f14
+#14 pushing layer sha256:a7292a49f249ddcb146895b5613ce1e89f9fe159570e26853ea6e5edea8511f7
+#14 pushing layer sha256:37ea4a5bcae91128da6311d31078d387e7c620971d4054960057183e804ef776
+#14 pushing layer sha256:8e288a4c8dae3d7f26ae20993ce6d1fd4c2b7866757dd34864606d5767f80f14 0.3s done
+#14 pushing layer sha256:8d4b2646ca13cf81086b7a42f17ce101878553ccd3048df18302730926e41a04 0.7s done
+#14 pushing layer sha256:5fadecf4477837cd9800498de2b9c05e0dddc644efaaa5476d9f59760119cb9e 0.8s done
+#14 pushing layer sha256:ce068d8928f7c66128d8cde29570396dd3fe16db9bf5596dff399fddc50d171d 0.8s done
+#14 pushing layer sha256:893bd5e57c2d9311b20c98bb5674240d5851ee4a43afbb21a45546e3b98fd0ee 0.8s done
+#14 pushing layer sha256:c5fb7632bdd287ef83eaf4be66e7078c35e36611bc3a249867fb0251bc43ddef 0.8s done
+#14 pushing layer sha256:37ea4a5bcae91128da6311d31078d387e7c620971d4054960057183e804ef776 0.8s done
+#14 pushing layer sha256:a7292a49f249ddcb146895b5613ce1e89f9fe159570e26853ea6e5edea8511f7 1.1s done
+#14 pushing layers for registry.fly.io/docflow-worker-staging:deployment-01M4C0DCEDY90A2MYTJY6A1XMT@sha256:851a7a9b2249
+1a49ebb406085252a21617963afc0042c8640096481f65f9a48b 2.1s done
+#14 pushing layer sha256:a11cf75664bc133464030126d6162ce35f27807de294e3765c0a492dbd11c6cb 2.1s done
+#14 pushing manifest for registry.fly.io/docflow-worker-staging:deployment-01M4C0DCEDY90A2MYTJY6A1XMT@sha256:851a7a9b22
+491a49ebb406085252a21617963afc0042c8640096481f65f9a48b
+#14 pushing manifest for registry.fly.io/docflow-worker-staging:deployment-01M4C0DCEDY90A2MYTJY6A1XMT@sha256:851a7a9b22
+491a49ebb406085252a21617963afc0042c8640096481f65f9a48b 0.1s done
+#14 DONE 2.3s
+--> Build Summary:  (​)
+--> Building image done
+image: registry.fly.io/docflow-worker-staging:deployment-01M4C0DCEDY90A2MYTJY6A1XMT
+image size: 132 MB
+
+Watch your deployment at https://fly.io/apps/docflow-worker-staging/monitoring
+
+Process groups have changed. This will:
+ * create 1 "beat" machine
+ * create 1 "worker" machine
+
+> [1/2] Launching new machine
+No machines in group beat, launching a new machine
+> [1/2] Machine e2865577ef6386 [beat] was created
+✔ [1/2] Machine e2865577ef6386 [beat] update finished: success
+> [2/2] Launching new machine
+No machines in group worker, launching a new machine
+> [2/2] Machine 6e82dd555b2287 [worker] was created
+✔ [2/2] Machine 6e82dd555b2287 [worker] update finished: success
+Finished launching new machines
+
+Your app is deployed but does not have a public or private IP address

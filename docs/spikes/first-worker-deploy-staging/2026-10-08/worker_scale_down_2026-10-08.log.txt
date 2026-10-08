@@ -1,0 +1,6 @@
+App 'docflow-worker-staging' is going to be scaled according to this plan:
+  -1 machines for group 'beat' on region 'iad' of size 'shared-cpu-1x'
+  -1 machines for group 'worker' on region 'iad' of size 'shared-cpu-1x'
+Executing scale plan
+  Destroyed 819e72b99d4548 group:beat region:iad size:shared-cpu-1x
+  Destroyed 8747927f4945e8 group:worker region:iad size:shared-cpu-1x

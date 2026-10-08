@@ -1,0 +1,33 @@
+tenant 40594983-03ff-47b1-ac40-f636488b8de7 (Acme Test G1 2a60cc) created 13:43:00.100Z
+signed in 13:43:00.610Z
+
+== golden fixture: sample_po.txt, 809 bytes
+   upload 13:43:04.467Z -> HTTP 200 in 3.84s
+   document df8f713b-a018-430b-8e98-be2d88e8c930 status pending
+   13:43:04.804Z +   4.2s  pending
+   13:43:06.625Z +   6.0s  processing
+   13:43:25.022Z +  24.4s  needs_review
+   run: model=claude-sonnet-5 in=None out=None cost=$None latency_ms=None ok=None err=None
+   run: model=claude-sonnet-5 in=2621 out=882 cost=$0.0141 latency_ms=12502 ok=True err=None
+   final needs_review after 24.4s; 2 run(s); 4 line(s); 3 check(s)
+
+== legacy .doc: po.doc, 25088 bytes
+   upload 13:43:28.262Z -> HTTP 200 in 2.83s
+   document d29da4e8-0ab2-4890-8c9d-8341a29ad784 status pending
+   13:43:28.707Z +   3.3s  processing
+   13:43:50.749Z +  25.3s  needs_review
+   run: model=claude-sonnet-5 in=None out=None cost=$None latency_ms=None ok=None err=None
+   run: model=claude-sonnet-5 in=2445 out=1268 cost=$0.0176 latency_ms=11751 ok=True err=None
+   final needs_review after 25.3s; 2 run(s); 4 line(s); 5 check(s)
+
+== scanned image: po.png, 20869 bytes
+   upload 13:43:54.092Z -> HTTP 200 in 2.81s
+   document 737c4442-41ef-4d69-88d2-8e0a8b4a631e status pending
+   13:43:54.409Z +   3.1s  pending
+   13:43:56.241Z +   5.0s  processing
+   13:44:05.436Z +  14.1s  needs_review
+   run: model=claude-sonnet-5 in=None out=None cost=$None latency_ms=None ok=None err=None
+   run: model=claude-sonnet-5 in=2851 out=923 cost=$0.0149 latency_ms=8427 ok=True err=None
+   final needs_review after 14.1s; 2 run(s); 4 line(s); 5 check(s)
+
+G1 done 13:44:05.792Z

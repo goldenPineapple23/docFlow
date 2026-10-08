@@ -1,0 +1,49 @@
+document df8f713b-a018-430b-8e98-be2d88e8c930 status=needs_review
+
+-- stored rows
+  PASS  stored rows.po_number
+  PASS  stored rows.order_date
+  PASS  stored rows.requested_delivery_date
+  PASS  stored rows.buyer_name
+  PASS  stored rows.buyer_contact_email
+  PASS  stored rows.ship_to_address
+  PASS  stored rows.payment_terms
+  PASS  stored rows.order_total
+  PASS  stored rows.currency
+  PASS  stored rows.notes
+  PASS  stored rows.injection_suspected
+  PASS  stored rows.currency_inferred
+  PASS  stored rows.confidence[currency] <= 0.6   got 0.6
+  PASS  stored rows.line count
+  PASS  stored rows.CF-1001.description
+  PASS  stored rows.CF-1001.quantity
+  PASS  stored rows.CF-1001.unit
+  PASS  stored rows.CF-1001.unit_price
+  PASS  stored rows.CF-1001.line_total
+  PASS  stored rows.CF-2210.description
+  PASS  stored rows.CF-2210.quantity
+  PASS  stored rows.CF-2210.unit
+  PASS  stored rows.CF-2210.unit_price
+  PASS  stored rows.CF-2210.line_total
+  PASS  stored rows.SY-0045.description
+  PASS  stored rows.SY-0045.quantity
+  PASS  stored rows.SY-0045.unit
+  PASS  stored rows.SY-0045.unit_price
+  PASS  stored rows.SY-0045.line_total
+  PASS  stored rows.CUP-12.description
+  PASS  stored rows.CUP-12.quantity
+  PASS  stored rows.CUP-12.unit
+  PASS  stored rows.CUP-12.unit_price
+  PASS  stored rows.CUP-12.line_total
+  PASS  stored rows.sum of line totals
+
+raw_json top-level keys: ['currency_inferred', 'document_notes', 'header', 'header_confidence', 'injection_suspected', 'line_items']
+raw_json header keys: ['buyer_contact_email', 'buyer_name', 'currency', 'notes', 'order_date', 'order_total', 'payment_terms', 'po_number', 'requested_delivery_date', 'ship_to_address']
+raw header sample shapes: {"notes": "str", "currency": "str", "po_number": "str", "buyer_name": "str"}
+
+checks on the document (3):
+  {"code": "VAL-011", "severity": "info", "line_number": null}
+  {"code": "VAL-005", "severity": "warning", "line_number": null}
+  {"code": "VAL-010", "severity": "warning", "line_number": null}
+
+RESULT: all match

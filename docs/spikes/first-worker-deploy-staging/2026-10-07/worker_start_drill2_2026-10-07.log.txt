@@ -1,0 +1,100 @@
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]--- ***** -----
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]-- ******* ---- Linux-6.12.105-fly-x86_64-with-glibc2.41 2026-10-07 22:36:49
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]- *** --- * ---
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]- ** ---------- [config]
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]- ** ---------- .> app:         docflow_worker:0x7feeb20f6ba0
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]- ** ---------- .> transport:   redis://<redacted>
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]- ** ---------- .> results:     redis://<redacted>
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]- *** --- * --- .> concurrency: 1 (prefork)
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]--- ***** -----
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info] -------------- [queues]
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]                .> bulk             exchange=bulk(direct) key=bulk
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]                .> interactive      exchange=interactive(direct) key=interactive
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info][tasks]
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]  . docflow.dispatch
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]  . docflow.generate_export
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]  . docflow.parse_and_extract
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]  . docflow.parse_import
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]  . docflow.run_daily_rollup
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]  . docflow.run_lifecycle_sweep
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]  . docflow.run_scheduled_jobs
+2026-10-07T22:36:49Z app[845033a2e1e448] iad [info]  . docflow.sweep_stuck_documents
+2026-10-07T22:36:50Z app[845033a2e1e448] iad [info][2026-10-07 22:36:50,028: INFO/MainProcess] Connected to redis://<redacted>
+2026-10-07T22:36:50Z app[845033a2e1e448] iad [info][2026-10-07 22:36:50,032: INFO/MainProcess] Connected to redis://<redacted>
+2026-10-07T22:36:50Z app[845033a2e1e448] iad [info][2026-10-07 22:36:50,066: INFO/MainProcess] mingle: searching for neighbors
+2026-10-07T22:36:50Z app[845033a2e1e448] iad [info][2026-10-07 22:36:50,083: INFO/MainProcess] mingle: searching for neighbors
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,147: INFO/MainProcess] mingle: all alone
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,174: INFO/MainProcess] mingle: all alone
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,233: INFO/MainProcess] dispatch@845033a2e1e448 ready.
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,241: INFO/MainProcess] Task docflow.dispatch[03e9be74-dd0c-48d8-9550-3266c749dabc] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,241: INFO/MainProcess] Discarding revoked task: docflow.dispatch[03e9be74-dd0c-48d8-9550-3266c749dabc]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,283: INFO/MainProcess] Task docflow.dispatch[80a7dda2-dbe6-4a4e-8c2e-9b41b2d8812c] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,283: INFO/MainProcess] Discarding revoked task: docflow.dispatch[80a7dda2-dbe6-4a4e-8c2e-9b41b2d8812c]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,285: INFO/MainProcess] documents@845033a2e1e448 ready.
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,299: INFO/MainProcess] Task docflow.run_scheduled_jobs[be9be215-c109-4bea-a43b-01f568e35c53] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,302: INFO/MainProcess] Task docflow.dispatch[8d28a3d0-a2ec-4a4f-8a57-512b687262ab] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,305: INFO/MainProcess] Discarding revoked task: docflow.dispatch[8d28a3d0-a2ec-4a4f-8a57-512b687262ab]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,322: INFO/MainProcess] Task docflow.dispatch[2d0042f6-012d-42d2-a2e9-975eb3b7a3b2] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,322: INFO/MainProcess] Discarding revoked task: docflow.dispatch[2d0042f6-012d-42d2-a2e9-975eb3b7a3b2]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,342: INFO/MainProcess] Task docflow.dispatch[33d52d34-aa55-4938-af20-01ab936102d3] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,342: INFO/MainProcess] Discarding revoked task: docflow.dispatch[33d52d34-aa55-4938-af20-01ab936102d3]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,362: INFO/MainProcess] Task docflow.dispatch[dc4bd699-4a01-46b5-ae3c-bf8520e7d690] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,362: INFO/MainProcess] Discarding revoked task: docflow.dispatch[dc4bd699-4a01-46b5-ae3c-bf8520e7d690]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,380: INFO/MainProcess] Task docflow.dispatch[1e107481-8d16-4d24-a8ce-079e9571fea1] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,382: INFO/MainProcess] Discarding revoked task: docflow.dispatch[1e107481-8d16-4d24-a8ce-079e9571fea1]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,398: INFO/MainProcess] Task docflow.dispatch[b7c93f2a-c990-4251-923f-750c23391455] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,398: INFO/MainProcess] Discarding revoked task: docflow.dispatch[b7c93f2a-c990-4251-923f-750c23391455]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,415: INFO/MainProcess] Task docflow.dispatch[156f9e2e-ca3f-471a-b76f-d6373b1cc88a] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,416: INFO/MainProcess] Discarding revoked task: docflow.dispatch[156f9e2e-ca3f-471a-b76f-d6373b1cc88a]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,439: INFO/MainProcess] Task docflow.dispatch[25899c00-0237-4d57-84c3-529c6f289776] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,439: INFO/MainProcess] Discarding revoked task: docflow.dispatch[25899c00-0237-4d57-84c3-529c6f289776]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,458: INFO/MainProcess] Task docflow.dispatch[f940cc97-2fe2-4b5e-a856-6087955637c2] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,458: INFO/MainProcess] Discarding revoked task: docflow.dispatch[f940cc97-2fe2-4b5e-a856-6087955637c2]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,477: INFO/MainProcess] Task docflow.dispatch[fcc01d8d-3059-4697-ba67-2fc5c70637ae] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,477: INFO/MainProcess] Discarding revoked task: docflow.dispatch[fcc01d8d-3059-4697-ba67-2fc5c70637ae]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,497: INFO/ForkPoolWorker-1] Task docflow.run_scheduled_jobs[be9be215-c109-4bea-a43b-01f568e35c53] succeeded in 0.19565637400000035s: 0
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,498: INFO/MainProcess] Task docflow.dispatch[93785155-9755-48d3-a108-2584cc4bde71] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,498: INFO/MainProcess] Discarding revoked task: docflow.dispatch[93785155-9755-48d3-a108-2584cc4bde71]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,525: INFO/MainProcess] Task docflow.sweep_stuck_documents[0f8e870c-b241-465e-947c-cade577cabab] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,526: INFO/MainProcess] Task docflow.dispatch[829cf6cb-4665-4ce0-baec-5ebf54bfec2f] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,526: INFO/MainProcess] Discarding revoked task: docflow.dispatch[829cf6cb-4665-4ce0-baec-5ebf54bfec2f]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,552: INFO/MainProcess] Task docflow.dispatch[2d1019bc-36b2-42f2-8b28-8a08210632c4] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,552: INFO/MainProcess] Discarding revoked task: docflow.dispatch[2d1019bc-36b2-42f2-8b28-8a08210632c4]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,580: INFO/MainProcess] Task docflow.dispatch[537f0906-c151-4fbe-8f02-f374e7fe1c99] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,581: INFO/MainProcess] Discarding revoked task: docflow.dispatch[537f0906-c151-4fbe-8f02-f374e7fe1c99]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,598: INFO/MainProcess] Task docflow.dispatch[5df05b23-d1ac-4ce4-99c1-888a46f45f63] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,598: INFO/MainProcess] Discarding revoked task: docflow.dispatch[5df05b23-d1ac-4ce4-99c1-888a46f45f63]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,614: INFO/MainProcess] Task docflow.dispatch[ed48d7e5-9cc1-4ff3-881f-4fe17ca40d76] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,614: INFO/MainProcess] Discarding revoked task: docflow.dispatch[ed48d7e5-9cc1-4ff3-881f-4fe17ca40d76]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,630: INFO/MainProcess] Task docflow.dispatch[a46cc3bc-7e8f-41d9-b135-0989a979c7ff] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,630: INFO/MainProcess] Discarding revoked task: docflow.dispatch[a46cc3bc-7e8f-41d9-b135-0989a979c7ff]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,651: INFO/MainProcess] Task docflow.dispatch[b2f9f435-f384-4e8c-a252-707289e8710f] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,651: INFO/MainProcess] Discarding revoked task: docflow.dispatch[b2f9f435-f384-4e8c-a252-707289e8710f]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,684: INFO/MainProcess] Task docflow.dispatch[da5f21e7-0a8a-4ee0-87b6-1a36d0c33121] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,684: INFO/MainProcess] Discarding revoked task: docflow.dispatch[da5f21e7-0a8a-4ee0-87b6-1a36d0c33121]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,703: INFO/MainProcess] Task docflow.dispatch[5797b547-93fe-4c25-b767-1dd6dafcb65d] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,703: INFO/MainProcess] Discarding revoked task: docflow.dispatch[5797b547-93fe-4c25-b767-1dd6dafcb65d]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,722: INFO/MainProcess] Task docflow.dispatch[20f37242-9ad3-4229-ad30-170188095b09] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,722: INFO/MainProcess] Discarding revoked task: docflow.dispatch[20f37242-9ad3-4229-ad30-170188095b09]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,740: INFO/MainProcess] Task docflow.dispatch[06015cc7-21d6-4bf4-bd93-6dd0ce4ff352] received
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,741: INFO/MainProcess] Discarding revoked task: docflow.dispatch[06015cc7-21d6-4bf4-bd93-6dd0ce4ff352]
+2026-10-07T22:36:51Z app[845033a2e1e448] iad [info][2026-10-07 22:36:51,760: INFO/MainProcess] Task docflow.dispatch[c922fb78-b538-4504-90f5-d536bc7cf410] received
+2026-10-07T22:36:52Z app[845033a2e1e448] iad [info][2026-10-07 22:36:52,390: INFO/ForkPoolWorker-1] Task docflow.dispatch[c922fb78-b538-4504-90f5-d536bc7cf410] succeeded in 0.62905561s: 0
+2026-10-07T22:36:54Z app[845033a2e1e448] iad [info][2026-10-07 22:36:54,090: INFO/ForkPoolWorker-1] Task docflow.sweep_stuck_documents[0f8e870c-b241-465e-947c-cade577cabab] succeeded in 2.562811732s: None
+2026-10-07T22:36:54Z app[845033a2e1e448] iad [info][2026-10-07 22:36:54,112: INFO/MainProcess] Task docflow.run_lifecycle_sweep[90a170e1-3fff-4184-b115-e861d3c883c6] received
+2026-10-07T22:36:55Z app[e2865577ef6386] iad [info][2026-10-07 22:36:55,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:36:55Z app[845033a2e1e448] iad [info][2026-10-07 22:36:55,542: INFO/MainProcess] Task docflow.dispatch[5f0ab84d-3355-4eca-9a8b-4b81b35e5f6e] received
+2026-10-07T22:36:55Z app[845033a2e1e448] iad [info][2026-10-07 22:36:55,692: INFO/ForkPoolWorker-1] Task docflow.dispatch[5f0ab84d-3355-4eca-9a8b-4b81b35e5f6e] succeeded in 0.14921921100000013s: 0
+2026-10-07T22:36:56Z app[845033a2e1e448] iad [info][2026-10-07 22:36:56,504: INFO/ForkPoolWorker-1] lifecycle_sweep_complete cancels_retried=0 suspended=0 ready_alerted=1 addresses_retired=0 stopped_at_time_box=False
+2026-10-07T22:36:56Z app[845033a2e1e448] iad [info][2026-10-07 22:36:56,513: INFO/ForkPoolWorker-1] Task docflow.run_lifecycle_sweep[90a170e1-3fff-4184-b115-e861d3c883c6] succeeded in 2.399881035s: {'cancels_retried': 0, 'suspended': 0, 'ready_alerted': 1, 'addresses_retired': 0, 'stopped_at_time_box': False}
+2026-10-07T22:36:56Z app[845033a2e1e448] iad [info][2026-10-07 22:36:56,538: INFO/MainProcess] Task docflow.run_scheduled_jobs[6c3b4334-2bf5-4ccb-83b0-eae13de14c76] received
+2026-10-07T22:36:56Z app[845033a2e1e448] iad [info][2026-10-07 22:36:56,622: INFO/ForkPoolWorker-1] Task docflow.run_scheduled_jobs[6c3b4334-2bf5-4ccb-83b0-eae13de14c76] succeeded in 0.08365391999999972s: 0
+2026-10-07T22:36:56Z app[845033a2e1e448] iad [info][2026-10-07 22:36:56,653: INFO/MainProcess] Task docflow.sweep_stuck_documents[977700e7-782c-4e38-ab8d-26857590bf5d] received
+2026-10-07T22:36:59Z app[845033a2e1e448] iad [info][2026-10-07 22:36:59,147: INFO/ForkPoolWorker-1] Task docflow.sweep_stuck_documents[977700e7-782c-4e38-ab8d-26857590bf5d] succeeded in 2.4937420590000006s: None
+2026-10-07T22:36:59Z app[845033a2e1e448] iad [info][2026-10-07 22:36:59,167: INFO/MainProcess] Task docflow.run_lifecycle_sweep[4ac8217e-e84e-4927-bc47-928d75583d57] received
+2026-10-07T22:37:01Z app[845033a2e1e448] iad [info][2026-10-07 22:37:01,671: INFO/ForkPoolWorker-1] lifecycle_sweep_complete cancels_retried=0 suspended=0 ready_alerted=1 addresses_retired=0 stopped_at_time_box=False
+2026-10-07T22:37:01Z app[845033a2e1e448] iad [info][2026-10-07 22:37:01,691: INFO/ForkPoolWorker-1] Task docflow.run_lifecycle_sweep[4ac8217e-e84e-4927-bc47-928d75583d57] succeeded in 2.523118943s: {'cancels_retried': 0, 'suspended': 0, 'ready_alerted': 1, 'addresses_retired': 0, 'stopped_at_time_box': False}
+2026-10-07T22:37:01Z app[845033a2e1e448] iad [info][2026-10-07 22:37:01,720: INFO/MainProcess] Task docflow.run_scheduled_jobs[fc8a0263-6f80-4f3c-a63c-7ac264a7b4e6] received
+2026-10-07T22:37:01Z app[845033a2e1e448] iad [info][2026-10-07 22:37:01,861: INFO/ForkPoolWorker-1] Task docflow.run_scheduled_jobs[fc8a0263-6f80-4f3c-a63c-7ac264a7b4e6] succeeded in 0.14049223700000013s: 0
+2026-10-07T22:37:01Z app[845033a2e1e448] iad [info][2026-10-07 22:37:01,883: INFO/MainProcess] Task docflow.sweep_stuck_documents[aae6872e-a3d3-4701-b568-f5197d0ad258] received

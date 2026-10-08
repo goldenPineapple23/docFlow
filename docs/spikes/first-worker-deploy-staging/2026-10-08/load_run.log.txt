@@ -1,0 +1,9 @@
+start 15:38:18.153Z (database clock 2026-10-08 15:38:21.227357+00:00); /healthz {'status': 'ok', 'dispatcher': {'heartbeat_age_seconds': 0, 'stale': False}, 'worker_starts_last_hour': 2}
+backfill tenant 57231a4e-3fbb-4457-9cd6-0fb2a773f92e (Acme Test Load 473e40): 4 live catalog item(s)
+recorded model spend since 2026-10-06: $0.4596; this run stops at $15.00 total
+15:39:36.954Z uploaded 25/500 in 73s; run spend $0.1002
+15:40:51.722Z uploaded 50/500 in 148s; run spend $0.2023
+15:42:05.754Z uploaded 75/500 in 222s; run spend $0.3147
+15:43:17.205Z uploaded 100/500 in 293s; run spend $0.4165
+15:44:30.616Z uploaded 125/500 in 367s; run spend $0.5412
+exit code -1
