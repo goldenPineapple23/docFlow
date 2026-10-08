@@ -1387,6 +1387,34 @@ D-196 has the evidence for each; nothing here is built):
 - **The API stopping with a request in flight:** verify it finishes
   in-flight requests when stopped (`kill_signal`, `kill_timeout`); on
   staging an upload was cut off when Fly stopped the idle-looking machine.
+- **The worker stopping with a document being read** (founder,
+  2026-10-08): "A document cut off mid-read stays in processing and blocks
+  dispatch for every tenant (global, 1 slot) until the stuck sweep
+  re-queues it 30 to 35 minutes after the claim. Any worker deploy or
+  restart during a read longer than kill_timeout triggers it. Launch
+  blocker."
+  - Where it comes from: `dispatch_candidates` (migration 0035) counts
+    every `processing` document as in flight, with no age limit; the
+    dispatch pass adds that up over all tenants and compares it with the
+    worker's slots (`DISPATCH_IN_FLIGHT_TARGET`, 1). Recorded by
+    `test_a_stale_processing_document_holds_the_one_slot_against_every_other_tenant`.
+    Nothing alerts while it lasts, and each cut uses one of the
+    document's three tries.
+  - **A fix to evaluate, not built:** on worker start, re-queue the
+    documents a previous worker instance left in `processing`.
+    *With one worker* this looks safe: the launcher starts before any
+    task runs and no other worker exists, so every `processing` document
+    at that moment belongs to an instance that is gone; clearing its
+    claim stamp (as `release_claim` does for a lost parse) and sending it
+    again goes through the same claim and the same resumed-job path the
+    stuck sweep uses today. To be checked first: that Fly never runs the
+    old and the new machine at once during a deploy, and that the try
+    stays counted. *With more than one worker* it is not safe as
+    described: a starting worker cannot tell a dead instance's claim
+    from a live one's, and re-queueing a live read would start a second
+    read of the same document. The claim would have to name the worker
+    instance that made it, and only claims of an instance known to have
+    ended could be re-queued.
 - **Redis plan for production:** decided after the idle hour is measured
   again with a longer queue-poll interval and task-result storage off
   (proposed by its own PR). The rule and the corrected break-even, about

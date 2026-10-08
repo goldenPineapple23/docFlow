@@ -277,6 +277,51 @@ def test_the_target_counts_what_is_already_in_flight(clean_provider):
             recorder.put_back_others()
 
 
+def test_a_stale_processing_document_holds_the_one_slot_against_every_other_tenant(clean_provider):
+    """Today's behaviour, recorded (founder, 2026-10-08; a launch blocker in
+    BUILD-STATUS): tenant A's document was claimed and its worker is gone, so
+    its claim is older than the stuck timeout; tenant B has one order waiting.
+    With one slot, B's order is not sent while A's document is still
+    `processing`: the in-flight count has no age limit and is summed over
+    every tenant. The control: once A's document has left `processing`, the
+    same one slot is free again and goes to B."""
+    with WorkerTestTenant("Acme Test Stale Claim") as a, WorkerTestTenant("Acme Test Waiting Behind") as b:
+        cut_off = _waiting(a, 1, minutes_ago=180)[0]
+        _set(
+            cut_off,
+            "status = 'processing', processing_attempts = 1, dispatched_at = now() - interval '2 hours', "
+            "processing_started_at = now() - interval '2 hours'",
+        )
+        waiting = _waiting(b, 1, minutes_ago=5)[0]
+        with dispatcher_session() as session:
+            others = session.execute(
+                text(
+                    "SELECT coalesce(sum(in_flight), 0) AS in_flight, count(document_id) AS ready "
+                    "FROM (SELECT DISTINCT tenant_id, in_flight, document_id "
+                    "FROM public.dispatch_candidates(1)) x "
+                    "WHERE tenant_id <> ALL(CAST(string_to_array(:t, ',') AS uuid[]))"
+                ),
+                {"t": f"{a.tenant_id},{b.tenant_id}"},
+            ).mappings().one()
+        # One slot for these two tenants, whatever else this database holds.
+        one_slot = int(others["in_flight"]) + 1
+        recorder = _Recorder(a, b)
+        try:
+            _pass(recorder, target=one_slot)
+            assert recorder.sent == [], recorder.sent
+            held_back = _row(waiting)
+            assert (held_back["status"], held_back["dispatched_at"]) == ("pending", None)
+            assert _row(cut_off)["status"] == "processing"
+
+            _set(cut_off, "status = 'failed', failure_code = 'DOC-022', processed_at = now()")
+            _pass(recorder, target=one_slot)
+            assert len(recorder.sent) == 1, recorder.sent
+            if not others["ready"]:  # nobody else was waiting for the slot
+                assert recorder.sent == [(b.tenant_id, waiting)]
+        finally:
+            recorder.put_back_others()
+
+
 def test_twenty_concurrent_passes_dispatch_every_document_exactly_once(clean_provider):
     """The advisory lock and the compare-and-set: passes never overlap, and
     a document is marked dispatched once."""

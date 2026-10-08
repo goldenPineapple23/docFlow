@@ -312,9 +312,31 @@ How a run is reported:
   minutes before). Earlier: 571 at 3b (`aefd428`), 424 at Stage 1, 562 after
   card billing, 568 on `e3e8641`.
   **From the Redis idle change (2026-10-08, RUNBOOK 9.8):** the worker
-  suite reads `187 passed, 7 skipped` (three tests added to
-  `test_celery_app.py`) and the API suite `626 passed, 1 skipped, 3
-  deselected` (one added, `test_celery_client.py`).
+  suite reads `188 passed, 7 skipped` (three tests added to
+  `test_celery_app.py`, one to `test_dispatch_db.py`) and the API suite
+  `626 passed, 1 skipped, 3 deselected` (one added,
+  `test_celery_client.py`). The core suite is unchanged: `806 passed, 1
+  skipped`.
+  **What CI reports for the same code, side by side** (founder,
+  2026-10-08). CI runs every test, so each line must also read `0 failed,
+  0 skipped, 0 unapproved`:
+
+  | Suite | This machine, against staging | CI |
+  |---|---|---|
+  | core | 806 passed, 1 skipped | 807 tests |
+  | worker | 188 passed, 7 skipped | 195 tests |
+  | API | 626 passed, 1 skipped, 3 deselected | 627 tests |
+
+  The difference in each row is exactly the skips named here, which need
+  Linux, CI's containers or a secret this machine does not hold. A CI
+  count that differs from this table, or a skip in CI, is to be explained
+  before a merge.
+  **The API suite needs the local Redis running** (Memurai, port 6379):
+  three tests in `test_email_intake_auth.py` make a real send. Memurai's
+  developer licence shuts it down 10 days after each start (it did at
+  2026-10-08 15:50:51Z), and with it down the suite reads `3 failed`.
+  Check the service before the run and after it; starting it needs
+  administrator rights (`Start-Service Memurai`).
   If the count is *lower* than the number written here, find out what
   stopped running before calling the run green.
   The 3 deselected are the `live_api` tests, which only run at checkpoints
