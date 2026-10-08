@@ -1358,6 +1358,15 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
 ## Known open items (across phases)
 
 - IIF export not yet validated against real QuickBooks Desktop (Phase 4).
+- **Model policy, decided and not yet applied (founder, 2026-10-08; D-195):** routing moves from
+  `claude-haiku-4-5` to `claude-haiku-5-5`; extraction stays on `claude-sonnet-5`. Model IDs move
+  to one config module read from the environment, with a versioned price table, a startup check,
+  a CI guard and one migration on `extraction_runs` (proposed to the founder first). No code
+  changes before the founder's "go" at the Stage 3 checkpoint, and no later than 2026-11-16.
+  `claude-haiku-4-5`'s retirement floor is 2026-10-15; it is not deprecated and no notice has
+  been given. On or after 2026-10-16, Claude reads Anthropic's model-deprecations page again and
+  reports. A notice for Haiku 4.5, or a checkpoint more than two to three weeks away, goes to the
+  founder to decide on an earlier "go".
 - **CI runner pinned to `ubuntu-24.04` (2026-10-02, founder's review of PR #35; merged as PR #36, main `d004186`):**
   `ubuntu-latest` moves to Ubuntu 26 from 2026-10-19, and the parse sandbox
   tests depend on the runner's cgroup v2 and network setup. Both workflows now
