@@ -816,7 +816,7 @@ which starts a real prefork worker in CI (Linux). On Windows it skips.
 | `SCHEDULED_JOBS_TASK_TIME_LIMIT_SECONDS` | 10 min | Check-ins, reminders, digests. |
 | `LIFECYCLE_SWEEP_TASK_TIME_LIMIT_SECONDS` / `LIFECYCLE_SWEEP_TIME_BOX_SECONDS` | 10 min / 4 min | Past the time box the sweep takes no new tenant; the next tick takes the rest. |
 | `STUCK_SWEEP_TASK_TIME_LIMIT_SECONDS` | 4 min | The stuck sweep. |
-| `WORKER_MAX_MEMORY_PER_CHILD_KIB` | 700 MiB | A worker process is replaced after a task that took it past this. It isn't a cap during a task (the parse service's limits are, from 3c). |
+| `WORKER_MAX_MEMORY_PER_CHILD_KIB` | 500 MiB | A worker process is replaced after a task that took it past this. It isn't a cap during a task (the parse service's limits are, from 3c). 700 MiB until 2026-10-08; lowered by the founder after the memory measurement at the first worker deploy (D-196). |
 | `STUCK_PROCESSING_TIMEOUT_MIN` | 30 | A document in `processing` this long is retried or failed (DOC-022). An export still `pending`, or an import still `parsing`, this long after it was created is failed (EXP-009 / IMP-009). |
 | `MAX_PROCESSING_ATTEMPTS` | 3 | Tries before a document whose worker stopped is failed (DOC-022, cause `worker_stopped`). A timeout gets one retry only (cause `timeout`). |
 | `EXPORTS_NOT_FINISHED_ALERT_PER_DAY` | 3 | A tenant with more EXP-009s than this in one UTC day raises one `exports_not_finishing` alert. |
@@ -1275,6 +1275,13 @@ grep VmHWM /proc/<pid>/status                        # each process, its own pea
    real documents stay well under it), or a 2 GB worker machine and its
    monthly cost. **Change neither until the founder chooses.** Record the
    numbers and the choice in BUILD-STATUS.
+   *(Measured 2026-10-07 and 2026-10-08, D-196. The founder chose both: a
+   2 GB worker for production, and the per-process threshold lowered from
+   700 to 500 MiB. The largest file a tenant can upload took a document
+   process to 466 MiB; a 22 MB scan to about 330 to 360 MiB. With the
+   threshold at 500 MiB, the four other processes (about 420 MiB together
+   at idle) and one document slot, a 1 GB machine is still tight and a
+   2 GB one has room.)*
 
 **When the worker keeps restarting.** `fly.toml` sets the `worker` group's
 restart policy to `on-failure`, 10 retries. Fly counts those within a

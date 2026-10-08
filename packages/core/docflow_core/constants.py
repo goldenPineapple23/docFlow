@@ -82,9 +82,15 @@ LIFECYCLE_SWEEP_TIME_BOX_SECONDS = 4 * 60
 # A worker process is replaced after the task that took it past this much
 # memory (Celery's worker_max_memory_per_child, in KiB). Not a cap during a
 # task: the machine's memory is the ceiling until the parse service's
-# per-file limits (Stage 3c). About 70% of the 1 GB worker machine priced
-# for staging.
-WORKER_MAX_MEMORY_PER_CHILD_KIB = 700 * 1024
+# per-file limits (Stage 3c).
+# 500 MiB since 2026-10-08 (founder, at the first worker deploy; D-196); it
+# was 700, about 70% of a 1 GB machine. Measured on Fly staging: a document
+# process idles near 105 MiB, a 22 MB scanned PDF takes it to about 330 to
+# 360 MiB (and it keeps about 330 afterwards), a 24.4 MB one to 466 MiB, and
+# 500 text orders in a row took it from 104 to 168 MiB. So nothing measured
+# reaches 500 in one task, and slow growth over a long run ends in a fresh
+# process, not in a full machine.
+WORKER_MAX_MEMORY_PER_CHILD_KIB = 500 * 1024
 STAGING_TTL_DAYS = 90
 FIRST_WEEK_CHECKIN_DAYS = 7
 ROLLUP_STALE_HOURS = 36
