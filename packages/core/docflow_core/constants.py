@@ -83,8 +83,9 @@ LIFECYCLE_SWEEP_TIME_BOX_SECONDS = 4 * 60
 # memory (Celery's worker_max_memory_per_child, in KiB). Not a cap during a
 # task: the machine's memory is the ceiling until the parse service's
 # per-file limits (Stage 3c).
-# 500 MiB since 2026-10-08 (founder, at the first worker deploy; D-196); it
-# was 700, about 70% of a 1 GB machine. Measured on Fly staging: a document
+# The unit is KiB: 500 * 1024 = 512000 KiB = 500 MiB, since 2026-10-08
+# (founder, at the first worker deploy; D-196). It was 700 MiB (716800 KiB),
+# about 70% of a 1 GB machine. Measured on Fly staging: a document
 # process idles near 105 MiB, a 22 MB scanned PDF takes it to about 330 to
 # 360 MiB (and it keeps about 330 afterwards), a 24.4 MB one to 466 MiB, and
 # 500 text orders in a row took it from 104 to 168 MiB. So nothing measured
