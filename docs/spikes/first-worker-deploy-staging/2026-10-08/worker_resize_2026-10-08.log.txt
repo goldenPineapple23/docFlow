@@ -1,0 +1,8 @@
+resize issued 15:12:22.775 Z
+Updating machine 8747927f4945e8
+No health checks found
+Machine 8747927f4945e8 updated successfully!
+Scaled VM Type for 'worker' to 'shared-cpu-1x'
+      CPU Cores: 1
+         Memory: 2048 MB
+resize exit 0 at 15:12:33.041 Z

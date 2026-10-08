@@ -820,7 +820,7 @@ which starts a real prefork worker in CI (Linux). On Windows it skips.
 | `SCHEDULED_JOBS_TASK_TIME_LIMIT_SECONDS` | 10 min | Check-ins, reminders, digests. |
 | `LIFECYCLE_SWEEP_TASK_TIME_LIMIT_SECONDS` / `LIFECYCLE_SWEEP_TIME_BOX_SECONDS` | 10 min / 4 min | Past the time box the sweep takes no new tenant; the next tick takes the rest. |
 | `STUCK_SWEEP_TASK_TIME_LIMIT_SECONDS` | 4 min | The stuck sweep. |
-| `WORKER_MAX_MEMORY_PER_CHILD_KIB` | 700 MiB | A worker process is replaced after a task that took it past this. It isn't a cap during a task (the parse service's limits are, from 3c). |
+| `WORKER_MAX_MEMORY_PER_CHILD_KIB` | 500 MiB | A worker process is replaced after a task that took it past this. It isn't a cap during a task (the parse service's limits are, from 3c). 700 MiB until 2026-10-08; lowered by the founder after the memory measurement at the first worker deploy (D-196). |
 | `STUCK_PROCESSING_TIMEOUT_MIN` | 30 | A document in `processing` this long is retried or failed (DOC-022). An export still `pending`, or an import still `parsing`, this long after it was created is failed (EXP-009 / IMP-009). |
 | `MAX_PROCESSING_ATTEMPTS` | 3 | Tries before a document whose worker stopped is failed (DOC-022, cause `worker_stopped`). A timeout gets one retry only (cause `timeout`). |
 | `EXPORTS_NOT_FINISHED_ALERT_PER_DAY` | 3 | A tenant with more EXP-009s than this in one UTC day raises one `exports_not_finishing` alert. |
@@ -1279,6 +1279,13 @@ grep VmHWM /proc/<pid>/status                        # each process, its own pea
    real documents stay well under it), or a 2 GB worker machine and its
    monthly cost. **Change neither until the founder chooses.** Record the
    numbers and the choice in BUILD-STATUS.
+   *(Measured 2026-10-07 and 2026-10-08, D-196. The founder chose both: a
+   2 GB worker for production, and the per-process threshold lowered from
+   700 to 500 MiB. The largest file a tenant can upload took a document
+   process to 466 MiB; a 22 MB scan to about 330 to 360 MiB. With the
+   threshold at 500 MiB, the four other processes (about 420 MiB together
+   at idle) and one document slot, a 1 GB machine is still tight and a
+   2 GB one has room.)*
 
 **When the worker keeps restarting.** `fly.toml` sets the `worker` group's
 restart policy to `on-failure`, 10 retries. Fly counts those within a
@@ -1730,7 +1737,10 @@ Left off, and why:
    golden fixture, a `.doc` and a scanned image. Record each document's
    time and cost. G2: a catalog import by the same path. G3: Redis commands
    in a timed idle hour and a timed busy one (3c, Q10: more than about
-   69,400 in the idle hour means the fixed $10 plan).
+   6,850 in the idle hour means the fixed $10 plan. *Corrected 2026-10-08,
+   D-196: this said "about 69,400", an arithmetic error ten times too
+   high; $10 a month at $0.20 per 100,000 commands over 730 hours is about
+   6,850 an hour.*).
 10. **A4 against the real API and worker.** The parse self-test with a
     targets file: the API's private address on port 8000, with the API
     machine started first (a connection to its private address does not
@@ -1784,6 +1794,42 @@ Left off, and why:
     Redis command count and what the $10 rule says.
 16. **Claude:** the record, by PR: CHECKPOINTS.md (the "first worker
     deploy" gap), BUILD-STATUS, and this section if anything differed.
+
+**As run, 2026-10-07 and 2026-10-08 (D-196). What differed from the steps
+above, and what to do the same way next time:**
+- **Before any session's first upload, in this order:** nothing local
+  against staging; start the API machine (`fly machine start`), then open
+  `fly proxy` (it refuses while the machine is stopped); read `/healthz`
+  *before* the deploy; deploy the worker with a live `fly logs` capture
+  running, so the `login check passed as docflow_worker` line is kept (Fly
+  returns only its last 100 lines afterwards); read `/healthz` after; then
+  the founder un-pauses the check and runs the `worker_starts` query.
+- **The staging API stops itself about 6 minutes after a start,** since
+  `fly proxy` traffic does not count as activity. For a long run:
+  `fly machine update <id> --autostop=off --yes`, and
+  `--autostop=stop --yes` straight after, each read back from
+  `fly machine list --json`.
+- **Step 9, G3, and step 15: the rule, restated by the founder.** For an
+  always-on worker, switch to a fixed plan when idle commands an hour x 730
+  x $0.000002 exceeds the cheapest fixed plan that fits the data (Fly's
+  Upstash: 250 MB at $10 a month). The founder reads Upstash's count
+  **before and after** every timed period, with the time of each reading;
+  on 2026-10-08 no reading was taken before the run, and its share could
+  only be estimated.
+- **Step 14.** The stop was $15 of total recorded spend, not $40 (STOP 4).
+  The worker was resized for the run (`fly scale memory 2048
+  --process-group worker`, a second recorded start) and the API's
+  auto-stop was off for the session. The backfill's tenant got the fixture
+  catalog first, imported by the founder in the Console: catalog imports
+  exist only on the Console's routes, so a script cannot do it. The slow
+  case was the founder pressing "recompute" at about a quarter and a half
+  of the run; the sweeps come by themselves every five minutes.
+- **A long run is started as a detached process** (`Start-Process` with
+  its output to files), never as a terminal call with a time limit. The
+  script kept in `docs/spikes/first-worker-deploy-staging/2026-10-08/` has
+  a `--resume` mode for a watching process that ends early.
+- **`fly redis status` is never run:** it prints the URL with its
+  password. The founder reads Upstash's pages instead.
 
 **If something goes wrong.** Any step fails: stop the worker and report.
 Documents already received stay as they are; nothing is deleted. Going back

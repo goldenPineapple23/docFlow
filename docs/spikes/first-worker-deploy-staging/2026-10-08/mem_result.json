@@ -1,0 +1,118 @@
+{
+  "started": "16:49:59.616Z",
+  "tenant": "57231a4e-3fbb-4457-9cd6-0fb2a773f92e",
+  "prior_spend": "6.7271",
+  "documents": [
+    {
+      "file": "mem-scan-1.pdf",
+      "bytes": 23142201,
+      "document_id": "483e8baa-40db-4f7c-959b-f5510a36a8fd",
+      "upload_seconds": 52.9,
+      "uploaded_at": "16:51:05.685Z",
+      "status": "needs_review",
+      "attempts": 1,
+      "dispatched_epoch": 1791478265.78989,
+      "claimed_epoch": 1791478265.991047,
+      "runs": [
+        {
+          "in": null,
+          "out": null,
+          "cost": null,
+          "latency_ms": null,
+          "ok": null
+        },
+        {
+          "in": 40056,
+          "out": 1060,
+          "cost": "0.0907",
+          "latency_ms": 16141,
+          "ok": true
+        }
+      ],
+      "peak_machine_used_MiB": 724,
+      "peak_cgroup_MiB": 636,
+      "peak_documents_process_rss_MiB": 322,
+      "samples": 224
+    },
+    {
+      "file": "mem-scan-2.pdf",
+      "bytes": 23142303,
+      "document_id": "fb20dd3d-dda7-4d67-8f80-fa87a615dbdf",
+      "upload_seconds": 46.2,
+      "uploaded_at": "16:51:51.903Z",
+      "status": "needs_review",
+      "attempts": 1,
+      "dispatched_epoch": 1791478311.953393,
+      "claimed_epoch": 1791478313.452904,
+      "runs": [
+        {
+          "in": null,
+          "out": null,
+          "cost": null,
+          "latency_ms": null,
+          "ok": null
+        },
+        {
+          "in": 40056,
+          "out": 1312,
+          "cost": "0.0932",
+          "latency_ms": 18083,
+          "ok": true
+        }
+      ],
+      "peak_machine_used_MiB": 737,
+      "peak_cgroup_MiB": 647,
+      "peak_documents_process_rss_MiB": 333,
+      "samples": 1006
+    }
+  ],
+  "worker_before": [
+    "usage 505331712",
+    "total_kB 2015876 used_kB 557220 avail_kB 1458656",
+    "proc 635 ppid 1 rss 70576 hwm 70576 python -m app.run_workers",
+    "proc 646 ppid 635 rss 120940 hwm 120940 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+    "proc 647 ppid 635 rss 120680 hwm 120680 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch",
+    "proc 650 ppid 646 rss 171536 hwm 171536 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+    "proc 651 ppid 647 rss 117820 hwm 117820 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch"
+  ],
+  "parse_before": [
+    "uptime_s 4723.52",
+    "root_usage 102895616 root_max_usage 68489216",
+    "jobs_usage 13488128 jobs_max_usage 68489216",
+    "used_kB 213892 avail_kB 1801748"
+  ],
+  "worker_after_0s": [
+    "usage 677957632",
+    "total_kB 2015876 used_kB 720240 avail_kB 1295636",
+    "proc 635 ppid 1 rss 70576 hwm 70576 python -m app.run_workers",
+    "proc 646 ppid 635 rss 120944 hwm 120944 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+    "proc 647 ppid 635 rss 120684 hwm 120684 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch",
+    "proc 650 ppid 646 rss 337956 hwm 367912 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+    "proc 651 ppid 647 rss 118536 hwm 118536 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch"
+  ],
+  "worker_after_60s": [
+    "usage 678072320",
+    "total_kB 2015876 used_kB 721004 avail_kB 1294872",
+    "proc 635 ppid 1 rss 70576 hwm 70576 python -m app.run_workers",
+    "proc 646 ppid 635 rss 120944 hwm 120944 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+    "proc 647 ppid 635 rss 120684 hwm 120684 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch",
+    "proc 650 ppid 646 rss 337956 hwm 367912 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+    "proc 651 ppid 647 rss 118536 hwm 118536 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch"
+  ],
+  "worker_after_180s": [
+    "usage 678146048",
+    "total_kB 2015876 used_kB 721472 avail_kB 1294404",
+    "proc 635 ppid 1 rss 70576 hwm 70576 python -m app.run_workers",
+    "proc 646 ppid 635 rss 120948 hwm 120948 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+    "proc 647 ppid 635 rss 120692 hwm 120692 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch",
+    "proc 650 ppid 646 rss 337956 hwm 367912 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact",
+    "proc 651 ppid 647 rss 118536 hwm 118536 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch"
+  ],
+  "parse_after": [
+    "Error: app docflow-parse-staging has no started VMs.",
+    "It may be unhealthy or not have been deployed yet.",
+    "Try the following command to verify:",
+    "fly status"
+  ],
+  "ended": "16:55:27.426Z"
+}

@@ -1,0 +1,139 @@
+launched 15:26:08Z; proxy listeners on 18000: 1
+busy hour starts 15:26:11.811Z
+ 1 15:26:31.110Z a8363eea-b512-4bdd-a809-1ba5549242d0 needs_review in 19.1s cost $0.0120 cold_start 12.21 spent $0.0120
+ 2 15:29:17.791Z e96d5970-085f-4440-909d-340fba3b9eca needs_review in 13.1s cost $0.0113 cold_start None spent $0.0233
+ 3 15:32:18.588Z 65a1d05e-e590-443c-9dae-266f4ad74335 needs_review in 13.9s cost $0.0129 cold_start None spent $0.0362
+ 4 15:35:32.458Z f957c4a4-7322-4708-8ce0-0d24f7cbfe9c needs_review in 19.2s cost $0.0115 cold_start 13.15 spent $0.0477
+ 5 15:38:19.372Z 7268c438-c484-43be-8abc-119b5a6766cb needs_review in 14.4s cost $0.0119 cold_start None spent $0.0596
+ 6 15:41:18.789Z c660f7f6-607f-428d-9dae-48dc4d7c7736 needs_review in 13.9s cost $0.0134 cold_start None spent $0.0730
+ 7 15:44:33.398Z 4969637f-ae4a-4005-ac5c-97a80165b64f needs_review in 18.1s cost $0.0110 cold_start 13.02 spent $0.0840
+ 8 15:47:18.566Z 0d1d21ff-5418-40c9-b132-5de8796f3da3 needs_review in 13.8s cost $0.0124 cold_start None spent $0.0964
+ 9 15:50:18.609Z e611d911-ff0b-4bd8-ac6d-5d99bccbb72e needs_review in 16.1s cost $0.0140 cold_start None spent $0.1104
+10 15:53:31.924Z 7f071e9b-bd62-41da-ae3f-45e3b620139f needs_review in 16.7s cost $0.0106 cold_start 12.87 spent $0.1210
+11 15:56:18.600Z 525c87dc-8cd2-4618-ae26-cd3f93a4c73d needs_review in 13.8s cost $0.0129 cold_start None spent $0.1339
+12 15:59:17.744Z 719d45c5-7961-4253-9936-f6f149105592 needs_review in 17.9s cost $0.0134 cold_start None spent $0.1473
+13 16:02:30.426Z aba93beb-8df6-4455-859f-33604ed7c0ce needs_review in 14.2s cost $0.0121 cold_start 10.98 spent $0.1594
+14 16:05:17.965Z 6fcde831-037c-421e-99c3-424c04724cd3 needs_review in 13.4s cost $0.0127 cold_start None spent $0.1721
+15 16:08:17.816Z c1e1d0fe-9cc0-44d8-b7b6-15dfe01b351f needs_review in 13.1s cost $0.0123 cold_start None spent $0.1844
+16 16:11:30.911Z 6226cbe0-c2d2-4757-910c-26f22c0d3e56 needs_review in 14.3s cost $0.0104 cold_start 12.15 spent $0.1948
+17 16:14:17.792Z 9dbdaf66-bb1c-468e-bd97-982e639d8eb8 needs_review in 13.2s cost $0.0127 cold_start None spent $0.2075
+18 16:17:31.298Z 37c427a8-aed3-4914-baf2-7a56d0d07cbf needs_review in 19.4s cost $0.0138 cold_start 12.01 spent $0.2213
+19 16:20:17.830Z c06d2a23-0c59-4dc7-9ee7-9948ab3a36b5 needs_review in 13.5s cost $0.0116 cold_start None spent $0.2329
+python.exe : Traceback (most recent call last):
+At line:1 char:780
++ ... y_run.log"; & "apps\api\.venv\Scripts\python.exe" "$sp\g3_busy_hour.p ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+Engine\apps\api\.venv\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+Engine\apps\api\.venv\Lib\site-packages\httpx\_transports\default.py", line 250, in handle_request
+    resp = self._pool.handle_request(req)
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+Engine\apps\api\.venv\Lib\site-packages\httpcore\_sync\connection_pool.py", line 256, in handle_request
+    raise exc from None
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+Engine\apps\api\.venv\Lib\site-packages\httpcore\_sync\connection_pool.py", line 236, in handle_request
+    response = connection.handle_request(
+        pool_request.request
+    )
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+Engine\apps\api\.venv\Lib\site-packages\httpcore\_sync\connection.py", line 103, in handle_request
+    return self._connection.handle_request(request)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+Engine\apps\api\.venv\Lib\site-packages\httpcore\_sync\http11.py", line 136, in handle_request
+    raise exc
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+Engine\apps\api\.venv\Lib\site-packages\httpcore\_sync\http11.py", line 106, in handle_request
+    ) = self._receive_response_headers(**kwargs)
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+Engine\apps\api\.venv\Lib\site-packages\httpcore\_sync\http11.py", line 177, in _receive_response_headers
+    event = self._receive_event(timeout=timeout)
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+Engine\apps\api\.venv\Lib\site-packages\httpcore\_sync\http11.py", line 217, in _receive_event
+    data = self._network_stream.read(
+        self.READ_NUM_BYTES, timeout=timeout
+    )
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+Engine\apps\api\.venv\Lib\site-packages\httpcore\_backends\sync.py", line 126, in read
+    with map_exceptions(exc_map):
+         ~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Python313\Lib\contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+Engine\apps\api\.venv\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ReadError: [WinError 10054] An existing connection was forcibly closed by the remote host
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\NK\AppData\Local\Temp\claude\c--Users-NK-Agentic-Workflow-Port-DocFlow-IDP-Engine\59c2f3cb-4e4a-4560-9
+d20-90a2dafde4f2\scratchpad\g3_busy_hour.py", line 224, in <module>
+    run(sys.argv[2])
+    ~~~^^^^^^^^^^^^^
+  File "C:\Users\NK\AppData\Local\Temp\claude\c--Users-NK-Agentic-Workflow-Port-DocFlow-IDP-Engine\59c2f3cb-4e4a-4560-9
+d20-90a2dafde4f2\scratchpad\g3_busy_hour.py", line 168, in run
+    up = httpx.post(f"{API}/documents/upload", headers=bearer(),
+                    files={"file": (fname, text.encode(), "text/plain")},
+                    data={"batch_size": "1"}, timeout=120)
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_api.py", line 
+304, in post
+    return request(
+        "POST",
+    ...<13 lines>...
+        trust_env=trust_env,
+    )
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_api.py", line 
+109, in request
+    return client.request(
+           ~~~~~~~~~~~~~~^
+        method=method,
+        ^^^^^^^^^^^^^^
+    ...<8 lines>...
+        follow_redirects=follow_redirects,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_client.py", line 
+825, in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_client.py", line 
+914, in send
+    response = self._send_handling_auth(
+        request,
+    ...<2 lines>...
+        history=[],
+    )
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_client.py", line 
+942, in _send_handling_auth
+    response = self._send_handling_redirects(
+        request,
+        follow_redirects=follow_redirects,
+        history=history,
+    )
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_client.py", line 
+979, in _send_handling_redirects
+    response = self._send_single_request(request)
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_client.py", line 
+1014, in _send_single_request
+    response = transport.handle_request(request)
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+Engine\apps\api\.venv\Lib\site-packages\httpx\_transports\default.py", line 249, in handle_request
+    with map_httpcore_exceptions():
+         ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Python313\Lib\contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+Engine\apps\api\.venv\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ReadError: [WinError 10054] An existing connection was forcibly closed by the remote host
+exit: 1

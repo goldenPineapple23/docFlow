@@ -1,0 +1,9 @@
+issued 16:56:15.089 Z
+Updating machine 8e7d7eb762d918
+No health checks found
+Machine 8e7d7eb762d918 updated successfully!
+
+Monitor machine status here:
+https://fly.io/apps/docflow-api-staging/machines/8e7d7eb762d918
+fly exit 0 at 16:56:20.708 Z
+read back: 8e7d7eb762d918 state=started autostop=true autostart=true min_running=0

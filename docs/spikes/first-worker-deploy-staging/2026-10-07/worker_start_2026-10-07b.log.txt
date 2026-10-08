@@ -1,0 +1,100 @@
+2026-10-07T16:33:11Z app[811d655b216148] iad [info] INFO Sending signal SIGINT to main child process w/ PID 636
+2026-10-07T16:33:11Z app[811d655b216148] iad [info]worker: Hitting Ctrl+C again will initiate cold shutdown, terminating all running tasks!
+2026-10-07T16:33:11Z app[811d655b216148] iad [info]worker: Warm shutdown (MainProcess)
+2026-10-07T16:33:11Z app[811d655b216148] iad [info]worker: Hitting Ctrl+C again will initiate cold shutdown, terminating all running tasks!
+2026-10-07T16:33:11Z app[811d655b216148] iad [info]worker: Warm shutdown (MainProcess)
+2026-10-07T16:33:11Z app[83d1652f496d58] iad [info] INFO Sending signal SIGINT to main child process w/ PID 634
+2026-10-07T16:33:12Z app[83d1652f496d58] iad [info] INFO Main child exited normally with code: 0
+2026-10-07T16:33:12Z app[83d1652f496d58] iad [info] INFO Starting clean up.
+2026-10-07T16:33:12Z app[83d1652f496d58] iad [info][11743.201327] reboot: Restarting system
+2026-10-07T16:33:15Z app[811d655b216148] iad [info] INFO Main child exited normally with code: 0
+2026-10-07T16:33:15Z app[811d655b216148] iad [info] INFO Starting clean up.
+2026-10-07T16:33:15Z app[811d655b216148] iad [info][11736.187552] reboot: Restarting system
+2026-10-07T20:21:17Z runner[e2865577ef6386] iad [info]Pulling container image registry.fly.io/docflow-worker-staging@sha256:851a7a9b22491a49ebb406085252a21617963afc0042c8640096481f65f9a48b
+2026-10-07T20:21:21Z runner[e2865577ef6386] iad [info]Successfully prepared image registry.fly.io/docflow-worker-staging@sha256:851a7a9b22491a49ebb406085252a21617963afc0042c8640096481f65f9a48b (4.235501086s)
+2026-10-07T20:21:21Z runner[e2865577ef6386] iad [info]Configuring firecracker
+2026-10-07T20:21:22Z app[e2865577ef6386] iad [info]2026-10-07T20:21:22.100626179 [01M4C0E2PJ7HVKEDYY3TMQXF3A:main] Running Firecracker v1.14.4
+2026-10-07T20:21:22Z app[e2865577ef6386] iad [info]2026-10-07T20:21:22.100760864 [01M4C0E2PJ7HVKEDYY3TMQXF3A:main] Listening on API socket ("/fc.sock").
+2026-10-07T20:21:22Z app[e2865577ef6386] iad [info] INFO Starting init (commit: 8b221cb)...
+2026-10-07T20:21:22Z app[e2865577ef6386] iad [info] INFO Preparing to run: `celery -A app.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule` as docflow
+2026-10-07T20:21:22Z app[e2865577ef6386] iad [info] INFO [fly api proxy] listening at /.fly/api
+2026-10-07T20:21:22Z app[e2865577ef6386] iad [info]2026/10/07 20:21:22 INFO SSH listening listen_address=[fdaa:cb:76d5:a7b:26d:8267:f20e:2]:22
+2026-10-07T20:21:23Z runner[e2865577ef6386] iad [info]Machine created and started in 5.683s
+2026-10-07T20:21:24Z app[e2865577ef6386] iad [info]celery beat v5.6.3 (recovery) is starting.
+2026-10-07T20:21:25Z app[e2865577ef6386] iad [info]__    -    ... __   -        _
+2026-10-07T20:21:25Z app[e2865577ef6386] iad [info]LocalTime -> 2026-10-07 20:21:25
+2026-10-07T20:21:25Z app[e2865577ef6386] iad [info]Configuration ->
+2026-10-07T20:21:25Z app[e2865577ef6386] iad [info]    . broker -> redis://<redacted>
+2026-10-07T20:21:25Z app[e2865577ef6386] iad [info]    . loader -> celery.loaders.app.AppLoader
+2026-10-07T20:21:25Z app[e2865577ef6386] iad [info]    . scheduler -> celery.beat.PersistentScheduler
+2026-10-07T20:21:25Z app[e2865577ef6386] iad [info]    . db -> /tmp/celerybeat-schedule
+2026-10-07T20:21:25Z app[e2865577ef6386] iad [info]    . logfile -> [stderr]@%INFO
+2026-10-07T20:21:25Z app[e2865577ef6386] iad [info]    . maxinterval -> 5.00 minutes (300s)
+2026-10-07T20:21:25Z app[e2865577ef6386] iad [info][2026-10-07 20:21:25,446: INFO/MainProcess] beat: Starting...
+2026-10-07T20:21:28Z runner[6e82dd555b2287] iad [info]Pulling container image registry.fly.io/docflow-worker-staging@sha256:851a7a9b22491a49ebb406085252a21617963afc0042c8640096481f65f9a48b
+2026-10-07T20:21:32Z runner[6e82dd555b2287] iad [info]Successfully prepared image registry.fly.io/docflow-worker-staging@sha256:851a7a9b22491a49ebb406085252a21617963afc0042c8640096481f65f9a48b (4.067591183s)
+2026-10-07T20:21:32Z runner[6e82dd555b2287] iad [info]Configuring firecracker
+2026-10-07T20:21:33Z app[6e82dd555b2287] iad [info]2026-10-07T20:21:33.006679733 [01M4C0EDBKK4PM1RSVSSP15RR5:main] Running Firecracker v1.14.4
+2026-10-07T20:21:33Z app[6e82dd555b2287] iad [info]2026-10-07T20:21:33.006819721 [01M4C0EDBKK4PM1RSVSSP15RR5:main] Listening on API socket ("/fc.sock").
+2026-10-07T20:21:33Z app[6e82dd555b2287] iad [info] INFO Starting init (commit: 8b221cb)...
+2026-10-07T20:21:33Z app[6e82dd555b2287] iad [info] INFO Preparing to run: `python -m app.run_workers` as docflow
+2026-10-07T20:21:33Z app[6e82dd555b2287] iad [info] INFO [fly api proxy] listening at /.fly/api
+2026-10-07T20:21:33Z app[6e82dd555b2287] iad [info]2026/10/07 20:21:33 INFO SSH listening listen_address=[fdaa:cb:76d5:a7b:268:6a10:d63d:2]:22
+2026-10-07T20:21:33Z runner[6e82dd555b2287] iad [info]Machine created and started in 5.688s
+2026-10-07T20:21:35Z app[6e82dd555b2287] iad [info]run_workers: login check passed as docflow_worker
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info] -------------- documents@6e82dd555b2287 v5.6.3 (recovery)
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]--- ***** -----
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]-- ******* ---- Linux-6.12.105-fly-x86_64-with-glibc2.41 2026-10-07 20:21:38
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]- *** --- * ---
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]- ** ---------- [config]
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]- ** ---------- .> app:         docflow_worker:0x7fba9f0feba0
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]- ** ---------- .> transport:   redis://<redacted>
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]- ** ---------- .> results:     redis://<redacted>
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]- *** --- * --- .> concurrency: 1 (prefork)
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]--- ***** -----
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info] -------------- [queues]
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]                .> bulk             exchange=bulk(direct) key=bulk
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]                .> interactive      exchange=interactive(direct) key=interactive
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info][tasks]
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.dispatch
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.generate_export
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.parse_and_extract
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.parse_import
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.run_daily_rollup
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.run_lifecycle_sweep
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.run_scheduled_jobs
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.sweep_stuck_documents
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info] -------------- dispatch@6e82dd555b2287 v5.6.3 (recovery)
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]--- ***** -----
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]-- ******* ---- Linux-6.12.105-fly-x86_64-with-glibc2.41 2026-10-07 20:21:39
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]- *** --- * ---
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]- ** ---------- [config]
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]- ** ---------- .> app:         docflow_worker:0x7f8acc2f6ba0
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]- ** ---------- .> transport:   redis://<redacted>
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]- ** ---------- .> results:     redis://<redacted>
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]- *** --- * --- .> concurrency: 1 (prefork)
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]--- ***** -----
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info] -------------- [queues]
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]                .> dispatch         exchange=dispatch(direct) key=dispatch
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info][tasks]
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.dispatch
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.generate_export
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.parse_and_extract
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.parse_import
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.run_daily_rollup
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.run_lifecycle_sweep
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.run_scheduled_jobs
+2026-10-07T20:21:39Z app[6e82dd555b2287] iad [info]  . docflow.sweep_stuck_documents
+2026-10-07T20:21:41Z app[6e82dd555b2287] iad [info][2026-10-07 20:21:41,517: INFO/MainProcess] Connected to redis://<redacted>
+2026-10-07T20:21:41Z app[6e82dd555b2287] iad [info][2026-10-07 20:21:41,524: INFO/MainProcess] Connected to redis://<redacted>
+2026-10-07T20:21:41Z app[6e82dd555b2287] iad [info][2026-10-07 20:21:41,555: INFO/MainProcess] mingle: searching for neighbors
+2026-10-07T20:21:41Z app[6e82dd555b2287] iad [info][2026-10-07 20:21:41,558: INFO/MainProcess] mingle: searching for neighbors
+2026-10-07T20:21:42Z app[6e82dd555b2287] iad [info][2026-10-07 20:21:42,660: INFO/MainProcess] mingle: all alone
+2026-10-07T20:21:42Z app[6e82dd555b2287] iad [info][2026-10-07 20:21:42,694: INFO/MainProcess] mingle: all alone
+2026-10-07T20:21:42Z app[6e82dd555b2287] iad [info][2026-10-07 20:21:42,794: INFO/MainProcess] documents@6e82dd555b2287 ready.
+2026-10-07T20:21:42Z app[6e82dd555b2287] iad [info][2026-10-07 20:21:42,817: INFO/MainProcess] dispatch@6e82dd555b2287 ready.
+2026-10-07T20:21:57Z app[e2865577ef6386] iad [info][2026-10-07 20:21:57,498: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T20:21:57Z app[6e82dd555b2287] iad [info][2026-10-07 20:21:57,544: INFO/MainProcess] Task docflow.dispatch[731b4807-42f9-4990-863a-4da045c987ef] received
+2026-10-07T20:21:58Z app[6e82dd555b2287] iad [info][2026-10-07 20:21:58,375: INFO/ForkPoolWorker-1] Task docflow.dispatch[731b4807-42f9-4990-863a-4da045c987ef] succeeded in 0.829754659999999s: 0

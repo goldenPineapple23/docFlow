@@ -1,0 +1,84 @@
+RESUMING 15:45:31.301Z: first start 15:38:18.153Z, 142 of the backfill already uploaded
+start 15:38:18.153Z (database clock 2026-10-08 15:38:21.227357+00:00); /healthz {'status': 'ok', 'dispatcher': {'heartbeat_age_seconds': 5, 'stale': False}, 'worker_starts_last_hour': 2}
+backfill tenant 57231a4e-3fbb-4457-9cd6-0fb2a773f92e (Acme Test Load 473e40): 4 live catalog item(s)
+recorded model spend since 2026-10-06: $0.4596; this run stops at $15.00 total
+15:45:57.643Z uploaded 150/500 in 25s; run spend $0.6672
+15:47:10.060Z uploaded 175/500 in 97s; run spend $0.7777
+15:48:21.559Z uploaded 200/500 in 169s; run spend $0.8304
+15:49:33.237Z uploaded 225/500 in 240s; run spend $0.8916
+15:50:44.851Z uploaded 250/500 in 312s; run spend $0.9959
+15:51:56.773Z uploaded 275/500 in 384s; run spend $1.1079
+15:53:08.022Z uploaded 300/500 in 455s; run spend $1.2194
+15:54:19.527Z uploaded 325/500 in 527s; run spend $1.3218
+15:55:32.291Z uploaded 350/500 in 599s; run spend $1.4458
+15:56:43.743Z uploaded 375/500 in 671s; run spend $1.5485
+15:57:59.862Z uploaded 400/500 in 747s; run spend $1.6601
+15:59:10.519Z uploaded 425/500 in 818s; run spend $1.7733
+16:00:23.609Z uploaded 450/500 in 891s; run spend $1.8706
+16:01:37.160Z uploaded 475/500 in 964s; run spend $1.9829
+16:02:49.567Z uploaded 500/500 in 1037s; run spend $2.0940
+16:02:53.535Z + 1 uploaded: 9dab3c8a-12b1-4a20-bad5-c230dbe36f54; 332 of the backfill still waiting undispatched
+16:03:08.532Z + 1 is needs_review 18.6s after its upload (this process's clock)
+16:03:56.229Z done 174/501; run spend $2.1858; largest unclaimed age seen live 0.0s; dispatcher {'heartbeat_age_seconds': 0, 'stale': False}
+16:04:58.907Z done 181/501; run spend $2.2732; largest unclaimed age seen live 0.0s; dispatcher {'heartbeat_age_seconds': 8, 'stale': False}
+16:06:01.026Z done 189/501; run spend $2.3707; largest unclaimed age seen live 0.0s; dispatcher {'heartbeat_age_seconds': 4, 'stale': False}
+16:07:03.247Z done 196/501; run spend $2.4579; largest unclaimed age seen live 1.1s; dispatcher {'heartbeat_age_seconds': 4, 'stale': False}
+16:08:05.382Z done 203/501; run spend $2.5427; largest unclaimed age seen live 1.1s; dispatcher {'heartbeat_age_seconds': 0, 'stale': False}
+16:09:05.474Z done 211/501; run spend $2.6419; largest unclaimed age seen live 1.1s; dispatcher {'heartbeat_age_seconds': 4, 'stale': False}
+16:10:07.786Z done 218/501; run spend $2.7284; largest unclaimed age seen live 1.1s; dispatcher {'heartbeat_age_seconds': 1, 'stale': False}
+16:11:08.236Z done 226/501; run spend $2.8303; largest unclaimed age seen live 1.1s; dispatcher {'heartbeat_age_seconds': 4, 'stale': False}
+16:12:09.086Z done 233/501; run spend $2.9173; largest unclaimed age seen live 1.1s; dispatcher {'heartbeat_age_seconds': 8, 'stale': False}
+16:13:10.784Z done 240/501; run spend $3.0067; largest unclaimed age seen live 1.1s; dispatcher {'heartbeat_age_seconds': 4, 'stale': False}
+16:14:11.203Z done 247/501; run spend $3.0946; largest unclaimed age seen live 1.1s; dispatcher {'heartbeat_age_seconds': 6, 'stale': False}
+16:15:13.819Z done 254/501; run spend $3.1835; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 0, 'stale': False}
+16:16:16.032Z done 262/501; run spend $3.2842; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 5, 'stale': False}
+16:17:16.262Z done 269/501; run spend $3.3715; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 7, 'stale': False}
+16:18:18.943Z done 276/501; run spend $3.4594; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 1, 'stale': False}
+16:19:19.699Z done 284/501; run spend $3.5607; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 2, 'stale': False}
+16:20:20.671Z done 291/501; run spend $3.6610; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 4, 'stale': False}
+16:21:22.648Z done 299/501; run spend $3.7581; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 2, 'stale': False}
+16:22:25.086Z done 306/501; run spend $3.8377; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 7, 'stale': False}
+16:23:25.591Z done 313/501; run spend $3.9251; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 1, 'stale': False}
+16:24:27.628Z done 321/501; run spend $4.0277; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 5, 'stale': False}
+16:25:30.213Z done 329/501; run spend $4.1249; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 2, 'stale': False}
+16:26:30.698Z done 335/501; run spend $4.1987; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 13, 'stale': False}
+16:27:33.593Z done 342/501; run spend $4.2970; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 3, 'stale': False}
+16:28:36.558Z done 350/501; run spend $4.3951; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 2, 'stale': False}
+16:29:38.949Z done 358/501; run spend $4.4822; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 0, 'stale': False}
+16:30:41.354Z done 366/501; run spend $4.5833; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 3, 'stale': False}
+16:31:42.933Z done 373/501; run spend $4.6718; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 0, 'stale': False}
+16:32:43.123Z done 380/501; run spend $4.7585; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 0, 'stale': False}
+16:33:45.223Z done 388/501; run spend $4.8590; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 5, 'stale': False}
+16:34:47.445Z done 396/501; run spend $4.9588; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 0, 'stale': False}
+16:35:49.702Z done 404/501; run spend $5.0571; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 2, 'stale': False}
+16:36:51.263Z done 411/501; run spend $5.1435; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 0, 'stale': False}
+16:37:53.176Z done 418/501; run spend $5.2334; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 0, 'stale': False}
+16:38:55.217Z done 426/501; run spend $5.3322; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 5, 'stale': False}
+16:39:57.249Z done 434/501; run spend $5.4302; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 6, 'stale': False}
+16:40:59.211Z done 442/501; run spend $5.5300; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 3, 'stale': False}
+16:42:00.133Z done 449/501; run spend $5.6171; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 4, 'stale': False}
+16:43:02.105Z done 456/501; run spend $5.7074; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 4, 'stale': False}
+16:44:04.224Z done 464/501; run spend $5.8066; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 3, 'stale': False}
+16:45:04.695Z done 472/501; run spend $5.9052; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 3, 'stale': False}
+16:46:07.417Z done 480/501; run spend $6.0018; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 5, 'stale': False}
+16:47:09.402Z done 487/501; run spend $6.0962; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 5, 'stale': False}
+16:48:11.619Z done 495/501; run spend $6.1935; largest unclaimed age seen live 1.6s; dispatcher {'heartbeat_age_seconds': 3, 'stale': False}
+
+== 500 + 1 ended 16:49:00.427Z
+documents: 501; by status {'needs_review': 501}; lanes [('40594983', 'interactive'), ('57231a4e', 'bulk')]
+uploads: 1036.6s for 500
+backfill: first upload 2026-10-08 15:38:26.712815+00:00, last claim 2026-10-08 16:48:49.673157+00:00
+runs costed: 501; total $6.2675; per run $0.0103-$0.0179; tokens in 1282634 out 370204; model latency ms p50 6835 p95 8796
+cost per document: p50 $0.0125 p95 $0.0143 max $0.0179
+documents with processing_attempts other than 1: 0 []
+unclaimed age (claim minus dispatch): largest 4.34s; five largest 4.34s 093dd4e6 dispatched 15:56:51, 3.15s 637e8ddf dispatched 16:15:06, 2.50s 76b6e98a dispatched 16:00:01, 2.39s 970acfb2 dispatched 16:02:00, 2.39s deb93fc5 dispatched 15:47:00
+largest unclaimed age seen live while watching: 1.6s
+longest wait before dispatch (the backfill's own queue): 2763s
+allowance for the backfill's tenant: Allowance(used=500, allowance=3000, tier_name='Scale', next_tier_name=None, next_tier_allowance=None, month='2026-10')
+founder alerts since the start: none
+
++ 1 (9dab3c8a-12b1-4a20-bad5-c230dbe36f54): needs_review, lane interactive, attempts 1
+   saved 2026-10-08 16:02:53.356397+00:00  dispatched 2026-10-08 16:02:59.557345+00:00  claimed 2026-10-08 16:02:59.682476+00:00
+   backfill documents claimed between its save and its claim: 0 (pass mark 0) -> PASS
+   processed 2026-10-08 16:03:07.392424+00:00; save to processed, database stamps: 14.0s; upload request to seen done, this process's clock: 18.6s
+   needs_review in 14.0s (expected within 60s) -> PASS

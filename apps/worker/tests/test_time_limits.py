@@ -80,6 +80,9 @@ def test_every_task_has_its_hard_limit_and_none_has_a_soft_limit():
         assert (tasks[name].time_limit, tasks[name].soft_time_limit) == (limit, None), name
     assert celery_app.conf.task_soft_time_limit is None
     assert celery_app.conf.task_time_limit is None
+    # The threshold is in KiB, the unit Celery's worker_max_memory_per_child
+    # takes: 512000 KiB = 500 MiB (founder, 2026-10-07; D-196).
+    assert constants.WORKER_MAX_MEMORY_PER_CHILD_KIB == 512000
     assert celery_app.conf.worker_max_memory_per_child == constants.WORKER_MAX_MEMORY_PER_CHILD_KIB
 
 

@@ -1,0 +1,230 @@
+2026-10-07T22:41:39Z app[845033a2e1e448] iad [info][2026-10-07 22:41:39,735: INFO/MainProcess] Task docflow.run_lifecycle_sweep[e79f6b72-f197-4cf0-ae38-396c7a3d92ef] received
+2026-10-07T22:41:39Z app[845033a2e1e448] iad [info][2026-10-07 22:41:39,847: INFO/MainProcess] dispatch@845033a2e1e448 ready.
+2026-10-07T22:41:42Z app[845033a2e1e448] iad [info][2026-10-07 22:41:42,252: INFO/ForkPoolWorker-1] lifecycle_sweep_complete cancels_retried=0 suspended=0 ready_alerted=1 addresses_retired=0 stopped_at_time_box=False
+2026-10-07T22:41:42Z app[845033a2e1e448] iad [info][2026-10-07 22:41:42,395: INFO/ForkPoolWorker-1] Task docflow.run_lifecycle_sweep[e79f6b72-f197-4cf0-ae38-396c7a3d92ef] succeeded in 2.6583334569999995s: {'cancels_retried': 0, 'suspended': 0, 'ready_alerted': 1, 'addresses_retired': 0, 'stopped_at_time_box': False}
+2026-10-07T22:41:55Z app[e2865577ef6386] iad [info][2026-10-07 22:41:55,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:41:55Z app[845033a2e1e448] iad [info][2026-10-07 22:41:55,545: INFO/MainProcess] Task docflow.dispatch[e2efe685-aea4-48ac-8401-c727cd898e1b] received
+2026-10-07T22:41:56Z app[845033a2e1e448] iad [info][2026-10-07 22:41:56,118: INFO/ForkPoolWorker-1] Task docflow.dispatch[e2efe685-aea4-48ac-8401-c727cd898e1b] succeeded in 0.5714444020000009s: 0
+2026-10-07T22:42:25Z app[e2865577ef6386] iad [info][2026-10-07 22:42:25,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:42:25Z app[845033a2e1e448] iad [info][2026-10-07 22:42:25,548: INFO/MainProcess] Task docflow.dispatch[150d4773-9a1b-46fe-af54-4fe9f566f446] received
+2026-10-07T22:42:25Z app[845033a2e1e448] iad [info][2026-10-07 22:42:25,700: INFO/ForkPoolWorker-1] Task docflow.dispatch[150d4773-9a1b-46fe-af54-4fe9f566f446] succeeded in 0.15158932199999953s: 0
+2026-10-07T22:42:35Z app[845033a2e1e448] iad [info]2026/10/07 22:42:35 INFO New SSH session email=ndk1516@gmail.com verified=true
+2026-10-07T22:42:36Z app[845033a2e1e448] iad [info]run_workers: documents exited; stopping the other
+2026-10-07T22:42:36Z app[845033a2e1e448] iad [info]worker: Warm shutdown (MainProcess)
+2026-10-07T22:42:40Z app[845033a2e1e448] iad [info] INFO Main child exited normally with code: 1
+2026-10-07T22:42:40Z app[845033a2e1e448] iad [info] INFO Starting clean up.
+2026-10-07T22:42:40Z app[845033a2e1e448] iad [info][   68.975284] reboot: Restarting system
+2026-10-07T22:42:41Z app[845033a2e1e448] iad [info]2026-10-07T22:42:41.099650496 [01M4C85PQT2AC4DWF9KPNYEWDW:main] Running Firecracker v1.14.4
+2026-10-07T22:42:41Z app[845033a2e1e448] iad [info]2026-10-07T22:42:41.099844499 [01M4C85PQT2AC4DWF9KPNYEWDW:main] Listening on API socket ("/fc.sock").
+2026-10-07T22:42:41Z app[845033a2e1e448] iad [info] INFO Starting init (commit: 6172d83)...
+2026-10-07T22:42:42Z app[845033a2e1e448] iad [info] INFO Preparing to run: `python -m app.run_workers` as docflow
+2026-10-07T22:42:42Z app[845033a2e1e448] iad [info] INFO [fly api proxy] listening at /.fly/api
+2026-10-07T22:42:42Z runner[845033a2e1e448] iad [info]Machine started in 1.219s
+2026-10-07T22:42:42Z app[845033a2e1e448] iad [info]2026/10/07 22:42:42 INFO SSH listening listen_address=[fdaa:cb:76d5:a7b:88d:d53b:4bd:2]:22
+2026-10-07T22:42:43Z app[845033a2e1e448] iad [info]run_workers: login check passed as docflow_worker
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info] -------------- dispatch@845033a2e1e448 v5.6.3 (recovery)
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]--- ***** -----
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]-- ******* ---- Linux-6.12.105-fly-x86_64-with-glibc2.41 2026-10-07 22:42:48
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- *** --- * ---
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- [config]
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- .> app:         docflow_worker:0x7f1dba6d6ba0
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- .> transport:   redis://<redacted>
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- .> results:     redis://<redacted>
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- *** --- * --- .> concurrency: 1 (prefork)
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]--- ***** -----
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info] -------------- [queues]
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]                .> dispatch         exchange=dispatch(direct) key=dispatch
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info][tasks]
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.dispatch
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.generate_export
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.parse_and_extract
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.parse_import
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.run_daily_rollup
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.run_lifecycle_sweep
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.run_scheduled_jobs
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.sweep_stuck_documents
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info] -------------- documents@845033a2e1e448 v5.6.3 (recovery)
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]--- ***** -----
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]-- ******* ---- Linux-6.12.105-fly-x86_64-with-glibc2.41 2026-10-07 22:42:48
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- *** --- * ---
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- [config]
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- .> app:         docflow_worker:0x7f7ce92f6ba0
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- .> transport:   redis://<redacted>
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- ** ---------- .> results:     redis://<redacted>
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]- *** --- * --- .> concurrency: 1 (prefork)
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]--- ***** -----
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info] -------------- [queues]
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]                .> bulk             exchange=bulk(direct) key=bulk
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]                .> interactive      exchange=interactive(direct) key=interactive
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info][tasks]
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.dispatch
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.generate_export
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.parse_and_extract
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.parse_import
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.run_daily_rollup
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.run_lifecycle_sweep
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.run_scheduled_jobs
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info]  . docflow.sweep_stuck_documents
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info][2026-10-07 22:42:48,418: INFO/MainProcess] Connected to redis://<redacted>
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info][2026-10-07 22:42:48,423: INFO/MainProcess] Connected to redis://<redacted>
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info][2026-10-07 22:42:48,438: INFO/MainProcess] mingle: searching for neighbors
+2026-10-07T22:42:48Z app[845033a2e1e448] iad [info][2026-10-07 22:42:48,459: INFO/MainProcess] mingle: searching for neighbors
+2026-10-07T22:42:49Z app[845033a2e1e448] iad [info][2026-10-07 22:42:49,493: INFO/MainProcess] mingle: all alone
+2026-10-07T22:42:49Z app[845033a2e1e448] iad [info][2026-10-07 22:42:49,508: INFO/MainProcess] mingle: all alone
+2026-10-07T22:42:49Z app[845033a2e1e448] iad [info][2026-10-07 22:42:49,619: INFO/MainProcess] documents@845033a2e1e448 ready.
+2026-10-07T22:42:49Z app[845033a2e1e448] iad [info][2026-10-07 22:42:49,691: INFO/MainProcess] dispatch@845033a2e1e448 ready.
+2026-10-07T22:42:55Z app[e2865577ef6386] iad [info][2026-10-07 22:42:55,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:42:55Z app[845033a2e1e448] iad [info][2026-10-07 22:42:55,568: INFO/MainProcess] Task docflow.dispatch[759227b2-ff97-4950-b2d9-d55afd2bd9a0] received
+2026-10-07T22:42:56Z app[845033a2e1e448] iad [info][2026-10-07 22:42:56,145: INFO/ForkPoolWorker-1] Task docflow.dispatch[759227b2-ff97-4950-b2d9-d55afd2bd9a0] succeeded in 0.5749677739999992s: 0
+2026-10-07T22:43:25Z app[e2865577ef6386] iad [info][2026-10-07 22:43:25,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:43:25Z app[845033a2e1e448] iad [info][2026-10-07 22:43:25,542: INFO/MainProcess] Task docflow.dispatch[42009df4-a3df-4a4e-9069-c789b2fe075e] received
+2026-10-07T22:43:25Z app[845033a2e1e448] iad [info][2026-10-07 22:43:25,682: INFO/ForkPoolWorker-1] Task docflow.dispatch[42009df4-a3df-4a4e-9069-c789b2fe075e] succeeded in 0.1380513650000026s: 0
+2026-10-07T22:43:55Z app[e2865577ef6386] iad [info][2026-10-07 22:43:55,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:43:55Z app[845033a2e1e448] iad [info][2026-10-07 22:43:55,546: INFO/MainProcess] Task docflow.dispatch[a0b738ad-8135-4fb5-b103-6a26575f7596] received
+2026-10-07T22:43:55Z app[845033a2e1e448] iad [info][2026-10-07 22:43:55,736: INFO/ForkPoolWorker-1] Task docflow.dispatch[a0b738ad-8135-4fb5-b103-6a26575f7596] succeeded in 0.1888608799999929s: 0
+2026-10-07T22:44:10Z app[845033a2e1e448] iad [info]2026/10/07 22:44:10 INFO New SSH session email=ndk1516@gmail.com verified=true
+2026-10-07T22:44:14Z app[845033a2e1e448] iad [info][2026-10-07 22:44:14,605: INFO/MainProcess] missed heartbeat from documents@845033a2e1e448
+2026-10-07T22:44:25Z app[e2865577ef6386] iad [info][2026-10-07 22:44:25,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:44:25Z app[845033a2e1e448] iad [info][2026-10-07 22:44:25,541: INFO/MainProcess] Task docflow.dispatch[00b00adc-2f24-4254-a4a9-56eea6cac52c] received
+2026-10-07T22:44:25Z app[845033a2e1e448] iad [info][2026-10-07 22:44:25,687: INFO/ForkPoolWorker-1] Task docflow.dispatch[00b00adc-2f24-4254-a4a9-56eea6cac52c] succeeded in 0.14525190999999893s: 0
+2026-10-07T22:44:31Z app[845033a2e1e448] iad [info][2026-10-07 22:44:31,520: INFO/MainProcess] Task docflow.dispatch[9a6afcf0-0bdd-4d1d-92c6-37f1581f3610] received
+2026-10-07T22:44:31Z app[845033a2e1e448] iad [info][2026-10-07 22:44:31,762: INFO/ForkPoolWorker-1] dispatch_pass sent=1 send_failed=0 holding=False probe=False
+2026-10-07T22:44:31Z app[845033a2e1e448] iad [info][2026-10-07 22:44:31,882: INFO/ForkPoolWorker-1] Task docflow.dispatch[9a6afcf0-0bdd-4d1d-92c6-37f1581f3610] succeeded in 0.36149222200000963s: 1
+2026-10-07T22:44:55Z app[e2865577ef6386] iad [info][2026-10-07 22:44:55,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:44:55Z app[845033a2e1e448] iad [info][2026-10-07 22:44:55,541: INFO/MainProcess] Task docflow.dispatch[fbb62949-48f2-4337-aeb6-d137bffc1cc3] received
+2026-10-07T22:44:55Z app[845033a2e1e448] iad [info][2026-10-07 22:44:55,693: INFO/ForkPoolWorker-1] Task docflow.dispatch[fbb62949-48f2-4337-aeb6-d137bffc1cc3] succeeded in 0.1507333019999919s: 0
+2026-10-07T22:45:25Z app[e2865577ef6386] iad [info][2026-10-07 22:45:25,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:45:25Z app[845033a2e1e448] iad [info][2026-10-07 22:45:25,542: INFO/MainProcess] Task docflow.dispatch[e944eb93-23cf-4ca6-abb4-78371c5fc69d] received
+2026-10-07T22:45:25Z app[845033a2e1e448] iad [info][2026-10-07 22:45:25,700: INFO/ForkPoolWorker-1] Task docflow.dispatch[e944eb93-23cf-4ca6-abb4-78371c5fc69d] succeeded in 0.15765977499998485s: 0
+2026-10-07T22:45:55Z app[845033a2e1e448] iad [info][2026-10-07 22:45:55,546: INFO/MainProcess] Task docflow.dispatch[576c5d6b-51f4-4dcf-9e16-37b90ed833b7] received
+2026-10-07T22:45:55Z app[845033a2e1e448] iad [info][2026-10-07 22:45:55,700: INFO/ForkPoolWorker-1] Task docflow.dispatch[576c5d6b-51f4-4dcf-9e16-37b90ed833b7] succeeded in 0.15359009299999116s: 0
+2026-10-07T22:45:55Z app[e2865577ef6386] iad [info][2026-10-07 22:45:55,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:46:25Z app[e2865577ef6386] iad [info][2026-10-07 22:46:25,466: INFO/MainProcess] Scheduler: Sending due task run-scheduled-jobs (docflow.run_scheduled_jobs)
+2026-10-07T22:46:25Z app[e2865577ef6386] iad [info][2026-10-07 22:46:25,492: INFO/MainProcess] Scheduler: Sending due task sweep-stuck-documents (docflow.sweep_stuck_documents)
+2026-10-07T22:46:25Z app[e2865577ef6386] iad [info][2026-10-07 22:46:25,512: INFO/MainProcess] Scheduler: Sending due task run-lifecycle-sweep (docflow.run_lifecycle_sweep)
+2026-10-07T22:46:25Z app[e2865577ef6386] iad [info][2026-10-07 22:46:25,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:46:25Z app[845033a2e1e448] iad [info][2026-10-07 22:46:25,569: INFO/MainProcess] Task docflow.dispatch[25bb191b-7168-4708-b7ff-76c868f870d6] received
+2026-10-07T22:46:25Z app[845033a2e1e448] iad [info][2026-10-07 22:46:25,725: INFO/ForkPoolWorker-1] Task docflow.dispatch[25bb191b-7168-4708-b7ff-76c868f870d6] succeeded in 0.15470094400001244s: 0
+2026-10-07T22:46:55Z app[e2865577ef6386] iad [info][2026-10-07 22:46:55,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:46:55Z app[845033a2e1e448] iad [info][2026-10-07 22:46:55,542: INFO/MainProcess] Task docflow.dispatch[ca311864-bb43-4993-ba6e-9cb1b700a9b3] received
+2026-10-07T22:46:55Z app[845033a2e1e448] iad [info][2026-10-07 22:46:55,697: INFO/ForkPoolWorker-1] Task docflow.dispatch[ca311864-bb43-4993-ba6e-9cb1b700a9b3] succeeded in 0.15426274300000387s: 0
+2026-10-07T22:47:25Z app[e2865577ef6386] iad [info][2026-10-07 22:47:25,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:47:25Z app[845033a2e1e448] iad [info][2026-10-07 22:47:25,542: INFO/MainProcess] Task docflow.dispatch[8b10ca5c-b004-45f9-85a9-cd6fbaa42b04] received
+2026-10-07T22:47:25Z app[845033a2e1e448] iad [info][2026-10-07 22:47:25,944: INFO/ForkPoolWorker-1] Task docflow.dispatch[8b10ca5c-b004-45f9-85a9-cd6fbaa42b04] succeeded in 0.40177039100001366s: 0
+2026-10-07T22:47:55Z app[e2865577ef6386] iad [info][2026-10-07 22:47:55,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:47:55Z app[845033a2e1e448] iad [info][2026-10-07 22:47:55,561: INFO/MainProcess] Task docflow.dispatch[b57d036f-efbe-4e07-ba31-58617c731064] received
+2026-10-07T22:47:55Z app[845033a2e1e448] iad [info][2026-10-07 22:47:55,711: INFO/ForkPoolWorker-1] Task docflow.dispatch[b57d036f-efbe-4e07-ba31-58617c731064] succeeded in 0.14943036100004292s: 0
+2026-10-07T22:48:25Z app[e2865577ef6386] iad [info][2026-10-07 22:48:25,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:48:25Z app[845033a2e1e448] iad [info][2026-10-07 22:48:25,599: INFO/MainProcess] Task docflow.dispatch[01cd2721-4ce1-4598-adf0-002b4d8ae609] received
+2026-10-07T22:48:26Z app[845033a2e1e448] iad [info][2026-10-07 22:48:26,028: INFO/ForkPoolWorker-1] Task docflow.dispatch[01cd2721-4ce1-4598-adf0-002b4d8ae609] succeeded in 0.4285835140000245s: 0
+2026-10-07T22:48:55Z app[e2865577ef6386] iad [info][2026-10-07 22:48:55,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:48:55Z app[845033a2e1e448] iad [info][2026-10-07 22:48:55,541: INFO/MainProcess] Task docflow.dispatch[aa9733fb-787a-444a-b581-5aa245a60247] received
+2026-10-07T22:48:55Z app[845033a2e1e448] iad [info][2026-10-07 22:48:55,684: INFO/ForkPoolWorker-1] Task docflow.dispatch[aa9733fb-787a-444a-b581-5aa245a60247] succeeded in 0.14161787799997683s: 0
+2026-10-07T22:49:25Z app[e2865577ef6386] iad [info][2026-10-07 22:49:25,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:49:25Z app[845033a2e1e448] iad [info][2026-10-07 22:49:25,549: INFO/MainProcess] Task docflow.dispatch[bc0b4a30-b9ce-48c5-93f2-1fda1a5fc8f7] received
+2026-10-07T22:49:25Z app[845033a2e1e448] iad [info][2026-10-07 22:49:25,693: INFO/ForkPoolWorker-1] Task docflow.dispatch[bc0b4a30-b9ce-48c5-93f2-1fda1a5fc8f7] succeeded in 0.14333622800000967s: 0
+2026-10-07T22:49:55Z app[e2865577ef6386] iad [info][2026-10-07 22:49:55,532: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:49:55Z app[845033a2e1e448] iad [info][2026-10-07 22:49:55,541: INFO/MainProcess] Task docflow.dispatch[9b599640-d7eb-4bc7-a204-5720287b8dde] received
+2026-10-07T22:49:55Z app[845033a2e1e448] iad [info][2026-10-07 22:49:55,680: INFO/ForkPoolWorker-1] Task docflow.dispatch[9b599640-d7eb-4bc7-a204-5720287b8dde] succeeded in 0.13852797599997757s: 0
+2026-10-07T22:50:25Z app[e2865577ef6386] iad [info][2026-10-07 22:50:25,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:50:25Z app[845033a2e1e448] iad [info][2026-10-07 22:50:25,569: INFO/MainProcess] Task docflow.dispatch[e6c7fde5-3ccf-4b7f-ba41-423fd8f3504e] received
+2026-10-07T22:50:25Z app[845033a2e1e448] iad [info][2026-10-07 22:50:25,709: INFO/ForkPoolWorker-1] Task docflow.dispatch[e6c7fde5-3ccf-4b7f-ba41-423fd8f3504e] succeeded in 0.13878844600003504s: 0
+2026-10-07T22:50:55Z app[e2865577ef6386] iad [info][2026-10-07 22:50:55,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:50:55Z app[845033a2e1e448] iad [info][2026-10-07 22:50:55,542: INFO/MainProcess] Task docflow.dispatch[e36baaec-ee53-4b3b-b67d-c6b181df5563] received
+2026-10-07T22:50:55Z app[845033a2e1e448] iad [info][2026-10-07 22:50:55,678: INFO/ForkPoolWorker-1] Task docflow.dispatch[e36baaec-ee53-4b3b-b67d-c6b181df5563] succeeded in 0.13434246400004213s: 0
+2026-10-07T22:51:25Z app[e2865577ef6386] iad [info][2026-10-07 22:51:25,466: INFO/MainProcess] Scheduler: Sending due task run-scheduled-jobs (docflow.run_scheduled_jobs)
+2026-10-07T22:51:25Z app[e2865577ef6386] iad [info][2026-10-07 22:51:25,492: INFO/MainProcess] Scheduler: Sending due task sweep-stuck-documents (docflow.sweep_stuck_documents)
+2026-10-07T22:51:25Z app[e2865577ef6386] iad [info][2026-10-07 22:51:25,512: INFO/MainProcess] Scheduler: Sending due task run-lifecycle-sweep (docflow.run_lifecycle_sweep)
+2026-10-07T22:51:25Z app[e2865577ef6386] iad [info][2026-10-07 22:51:25,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:51:25Z app[845033a2e1e448] iad [info][2026-10-07 22:51:25,545: INFO/MainProcess] Task docflow.dispatch[67b48aa5-c61f-4f64-9429-67764f371a7d] received
+2026-10-07T22:51:25Z app[845033a2e1e448] iad [info][2026-10-07 22:51:25,676: INFO/ForkPoolWorker-1] Task docflow.dispatch[67b48aa5-c61f-4f64-9429-67764f371a7d] succeeded in 0.13006669200001397s: 0
+2026-10-07T22:51:55Z app[e2865577ef6386] iad [info][2026-10-07 22:51:55,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:51:55Z app[845033a2e1e448] iad [info][2026-10-07 22:51:55,547: INFO/MainProcess] Task docflow.dispatch[5240ef0d-3fe9-4a13-8710-5966c8abbdb7] received
+2026-10-07T22:51:55Z app[845033a2e1e448] iad [info][2026-10-07 22:51:55,710: INFO/ForkPoolWorker-1] Task docflow.dispatch[5240ef0d-3fe9-4a13-8710-5966c8abbdb7] succeeded in 0.1622945480000908s: 0
+2026-10-07T22:52:25Z app[e2865577ef6386] iad [info][2026-10-07 22:52:25,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:52:25Z app[845033a2e1e448] iad [info][2026-10-07 22:52:25,542: INFO/MainProcess] Task docflow.dispatch[a1d17165-70e8-4fcd-adf6-b7d20095877a] received
+2026-10-07T22:52:25Z app[845033a2e1e448] iad [info][2026-10-07 22:52:25,679: INFO/ForkPoolWorker-1] Task docflow.dispatch[a1d17165-70e8-4fcd-adf6-b7d20095877a] succeeded in 0.13571715399996265s: 0
+2026-10-07T22:52:55Z app[e2865577ef6386] iad [info][2026-10-07 22:52:55,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:52:55Z app[845033a2e1e448] iad [info][2026-10-07 22:52:55,544: INFO/MainProcess] Task docflow.dispatch[464076ef-4936-43f6-ac7f-ba7f822515a7] received
+2026-10-07T22:52:55Z app[845033a2e1e448] iad [info][2026-10-07 22:52:55,671: INFO/ForkPoolWorker-1] Task docflow.dispatch[464076ef-4936-43f6-ac7f-ba7f822515a7] succeeded in 0.12645497000005435s: 0
+2026-10-07T22:53:25Z app[e2865577ef6386] iad [info][2026-10-07 22:53:25,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:53:25Z app[845033a2e1e448] iad [info][2026-10-07 22:53:25,543: INFO/MainProcess] Task docflow.dispatch[5edd5244-0853-487c-a6f4-939126b423a8] received
+2026-10-07T22:53:26Z app[845033a2e1e448] iad [info][2026-10-07 22:53:26,069: INFO/ForkPoolWorker-1] Task docflow.dispatch[5edd5244-0853-487c-a6f4-939126b423a8] succeeded in 0.5259832209999331s: 0
+2026-10-07T22:53:55Z app[845033a2e1e448] iad [info][2026-10-07 22:53:55,546: INFO/MainProcess] Task docflow.dispatch[5f956787-adda-4720-882a-87c9cb4aedaf] received
+2026-10-07T22:53:55Z app[845033a2e1e448] iad [info][2026-10-07 22:53:55,697: INFO/ForkPoolWorker-1] Task docflow.dispatch[5f956787-adda-4720-882a-87c9cb4aedaf] succeeded in 0.15026287199998478s: 0
+2026-10-07T22:53:55Z app[e2865577ef6386] iad [info][2026-10-07 22:53:55,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:54:25Z app[e2865577ef6386] iad [info][2026-10-07 22:54:25,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:54:25Z app[845033a2e1e448] iad [info][2026-10-07 22:54:25,553: INFO/MainProcess] Task docflow.dispatch[39c7b22c-0b45-4cf8-b774-39c0391e6bbc] received
+2026-10-07T22:54:25Z app[845033a2e1e448] iad [info][2026-10-07 22:54:25,691: INFO/ForkPoolWorker-1] Task docflow.dispatch[39c7b22c-0b45-4cf8-b774-39c0391e6bbc] succeeded in 0.13710386499997185s: 0
+2026-10-07T22:54:55Z app[e2865577ef6386] iad [info][2026-10-07 22:54:55,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:54:55Z app[845033a2e1e448] iad [info][2026-10-07 22:54:55,543: INFO/MainProcess] Task docflow.dispatch[71ae7e0d-4133-40db-a320-981c315fd495] received
+2026-10-07T22:54:55Z app[845033a2e1e448] iad [info][2026-10-07 22:54:55,693: INFO/ForkPoolWorker-1] Task docflow.dispatch[71ae7e0d-4133-40db-a320-981c315fd495] succeeded in 0.1498342219999813s: 0
+2026-10-07T22:55:25Z app[845033a2e1e448] iad [info][2026-10-07 22:55:25,543: INFO/MainProcess] Task docflow.dispatch[d163252a-d7b7-4dfb-9240-4f7c296083be] received
+2026-10-07T22:55:25Z app[845033a2e1e448] iad [info][2026-10-07 22:55:25,677: INFO/ForkPoolWorker-1] Task docflow.dispatch[d163252a-d7b7-4dfb-9240-4f7c296083be] succeeded in 0.13402238399999078s: 0
+2026-10-07T22:55:25Z app[e2865577ef6386] iad [info][2026-10-07 22:55:25,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:55:55Z app[e2865577ef6386] iad [info][2026-10-07 22:55:55,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:55:55Z app[845033a2e1e448] iad [info][2026-10-07 22:55:55,542: INFO/MainProcess] Task docflow.dispatch[8889b89b-a943-4d59-8721-9e43782818a4] received
+2026-10-07T22:55:55Z app[845033a2e1e448] iad [info][2026-10-07 22:55:55,681: INFO/ForkPoolWorker-1] Task docflow.dispatch[8889b89b-a943-4d59-8721-9e43782818a4] succeeded in 0.13870841699997527s: 0
+2026-10-07T22:56:25Z app[e2865577ef6386] iad [info][2026-10-07 22:56:25,466: INFO/MainProcess] Scheduler: Sending due task run-scheduled-jobs (docflow.run_scheduled_jobs)
+2026-10-07T22:56:25Z app[e2865577ef6386] iad [info][2026-10-07 22:56:25,492: INFO/MainProcess] Scheduler: Sending due task sweep-stuck-documents (docflow.sweep_stuck_documents)
+2026-10-07T22:56:25Z app[e2865577ef6386] iad [info][2026-10-07 22:56:25,512: INFO/MainProcess] Scheduler: Sending due task run-lifecycle-sweep (docflow.run_lifecycle_sweep)
+2026-10-07T22:56:25Z app[e2865577ef6386] iad [info][2026-10-07 22:56:25,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:56:25Z app[845033a2e1e448] iad [info][2026-10-07 22:56:25,560: INFO/MainProcess] Task docflow.dispatch[d364c11d-790c-4933-9caf-6954b8d612de] received
+2026-10-07T22:56:25Z app[845033a2e1e448] iad [info][2026-10-07 22:56:25,709: INFO/ForkPoolWorker-1] Task docflow.dispatch[d364c11d-790c-4933-9caf-6954b8d612de] succeeded in 0.14736916999993355s: 0
+2026-10-07T22:56:55Z app[e2865577ef6386] iad [info][2026-10-07 22:56:55,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:56:55Z app[845033a2e1e448] iad [info][2026-10-07 22:56:55,557: INFO/MainProcess] Task docflow.dispatch[d8b54c40-2fd7-4eae-a6c1-e9e64e017bbc] received
+2026-10-07T22:56:55Z app[845033a2e1e448] iad [info][2026-10-07 22:56:55,705: INFO/ForkPoolWorker-1] Task docflow.dispatch[d8b54c40-2fd7-4eae-a6c1-e9e64e017bbc] succeeded in 0.1481782609999982s: 0
+2026-10-07T22:57:25Z app[e2865577ef6386] iad [info][2026-10-07 22:57:25,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:57:25Z app[845033a2e1e448] iad [info][2026-10-07 22:57:25,543: INFO/MainProcess] Task docflow.dispatch[9074d92f-b544-4a6b-95b9-de0d4c9af44e] received
+2026-10-07T22:57:25Z app[845033a2e1e448] iad [info][2026-10-07 22:57:25,671: INFO/ForkPoolWorker-1] Task docflow.dispatch[9074d92f-b544-4a6b-95b9-de0d4c9af44e] succeeded in 0.12732766099998116s: 0
+2026-10-07T22:57:55Z app[e2865577ef6386] iad [info][2026-10-07 22:57:55,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:57:55Z app[845033a2e1e448] iad [info][2026-10-07 22:57:55,541: INFO/MainProcess] Task docflow.dispatch[80a93eee-0990-40eb-afa2-21579eb3566a] received
+2026-10-07T22:57:55Z app[845033a2e1e448] iad [info][2026-10-07 22:57:55,677: INFO/ForkPoolWorker-1] Task docflow.dispatch[80a93eee-0990-40eb-afa2-21579eb3566a] succeeded in 0.1353102850000596s: 0
+2026-10-07T22:58:25Z app[e2865577ef6386] iad [info][2026-10-07 22:58:25,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:58:25Z app[845033a2e1e448] iad [info][2026-10-07 22:58:25,542: INFO/MainProcess] Task docflow.dispatch[bf0c1714-61d8-4cc3-9a2b-a9ff60d8bc2c] received
+2026-10-07T22:58:25Z app[845033a2e1e448] iad [info][2026-10-07 22:58:25,695: INFO/ForkPoolWorker-1] Task docflow.dispatch[bf0c1714-61d8-4cc3-9a2b-a9ff60d8bc2c] succeeded in 0.15247421300000497s: 0
+2026-10-07T22:58:55Z app[e2865577ef6386] iad [info][2026-10-07 22:58:55,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:58:55Z app[845033a2e1e448] iad [info][2026-10-07 22:58:55,565: INFO/MainProcess] Task docflow.dispatch[f26fa952-084e-4480-a292-9bc47a21a78c] received
+2026-10-07T22:58:56Z app[845033a2e1e448] iad [info][2026-10-07 22:58:56,028: INFO/ForkPoolWorker-1] Task docflow.dispatch[f26fa952-084e-4480-a292-9bc47a21a78c] succeeded in 0.4619498910000175s: 0
+2026-10-07T22:59:25Z app[e2865577ef6386] iad [info][2026-10-07 22:59:25,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:59:25Z app[845033a2e1e448] iad [info][2026-10-07 22:59:25,610: INFO/MainProcess] Task docflow.dispatch[09c95b3a-acd6-4eac-89cc-10ace140a249] received
+2026-10-07T22:59:25Z app[845033a2e1e448] iad [info][2026-10-07 22:59:25,752: INFO/ForkPoolWorker-1] Task docflow.dispatch[09c95b3a-acd6-4eac-89cc-10ace140a249] succeeded in 0.14194041799999013s: 0
+2026-10-07T22:59:55Z app[e2865577ef6386] iad [info][2026-10-07 22:59:55,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T22:59:55Z app[845033a2e1e448] iad [info][2026-10-07 22:59:55,543: INFO/MainProcess] Task docflow.dispatch[2ab2e580-bd17-4017-8d25-76c666714091] received
+2026-10-07T22:59:55Z app[845033a2e1e448] iad [info][2026-10-07 22:59:55,706: INFO/ForkPoolWorker-1] Task docflow.dispatch[2ab2e580-bd17-4017-8d25-76c666714091] succeeded in 0.16192144700016797s: 0
+2026-10-07T23:00:25Z app[e2865577ef6386] iad [info][2026-10-07 23:00:25,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T23:00:25Z app[845033a2e1e448] iad [info][2026-10-07 23:00:25,554: INFO/MainProcess] Task docflow.dispatch[f63830f2-5c81-461e-8326-3e53d505f1fa] received
+2026-10-07T23:00:25Z app[845033a2e1e448] iad [info][2026-10-07 23:00:25,741: INFO/ForkPoolWorker-1] Task docflow.dispatch[f63830f2-5c81-461e-8326-3e53d505f1fa] succeeded in 0.18600840900012372s: 0
+2026-10-07T23:00:55Z app[e2865577ef6386] iad [info][2026-10-07 23:00:55,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T23:00:55Z app[845033a2e1e448] iad [info][2026-10-07 23:00:55,543: INFO/MainProcess] Task docflow.dispatch[1dd7e281-40fe-4037-a742-cea88a497ec8] received
+2026-10-07T23:00:55Z app[845033a2e1e448] iad [info][2026-10-07 23:00:55,675: INFO/ForkPoolWorker-1] Task docflow.dispatch[1dd7e281-40fe-4037-a742-cea88a497ec8] succeeded in 0.1312787429999389s: 0
+2026-10-07T23:01:25Z app[e2865577ef6386] iad [info][2026-10-07 23:01:25,466: INFO/MainProcess] Scheduler: Sending due task run-scheduled-jobs (docflow.run_scheduled_jobs)
+2026-10-07T23:01:25Z app[e2865577ef6386] iad [info][2026-10-07 23:01:25,492: INFO/MainProcess] Scheduler: Sending due task sweep-stuck-documents (docflow.sweep_stuck_documents)
+2026-10-07T23:01:25Z app[e2865577ef6386] iad [info][2026-10-07 23:01:25,512: INFO/MainProcess] Scheduler: Sending due task run-lifecycle-sweep (docflow.run_lifecycle_sweep)
+2026-10-07T23:01:25Z app[e2865577ef6386] iad [info][2026-10-07 23:01:25,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T23:01:25Z app[845033a2e1e448] iad [info][2026-10-07 23:01:25,562: INFO/MainProcess] Task docflow.dispatch[ab3bcbbe-447a-45a4-96d1-25e4dbda93c5] received
+2026-10-07T23:01:25Z app[845033a2e1e448] iad [info][2026-10-07 23:01:25,738: INFO/ForkPoolWorker-1] Task docflow.dispatch[ab3bcbbe-447a-45a4-96d1-25e4dbda93c5] succeeded in 0.17530887299994902s: 0
+2026-10-07T23:01:55Z app[e2865577ef6386] iad [info][2026-10-07 23:01:55,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T23:01:55Z app[845033a2e1e448] iad [info][2026-10-07 23:01:55,544: INFO/MainProcess] Task docflow.dispatch[36b1b539-8857-436d-ab60-6c6f6d49201a] received
+2026-10-07T23:01:55Z app[845033a2e1e448] iad [info][2026-10-07 23:01:55,697: INFO/ForkPoolWorker-1] Task docflow.dispatch[36b1b539-8857-436d-ab60-6c6f6d49201a] succeeded in 0.15176397300001554s: 0
+2026-10-07T23:02:25Z app[e2865577ef6386] iad [info][2026-10-07 23:02:25,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T23:02:25Z app[845033a2e1e448] iad [info][2026-10-07 23:02:25,544: INFO/MainProcess] Task docflow.dispatch[0289bb62-8aff-44e5-91a7-160774754f8b] received
+2026-10-07T23:02:25Z app[845033a2e1e448] iad [info][2026-10-07 23:02:25,703: INFO/ForkPoolWorker-1] Task docflow.dispatch[0289bb62-8aff-44e5-91a7-160774754f8b] succeeded in 0.1583223850000195s: 0
+2026-10-07T23:02:55Z app[e2865577ef6386] iad [info][2026-10-07 23:02:55,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T23:02:55Z app[845033a2e1e448] iad [info][2026-10-07 23:02:55,575: INFO/MainProcess] Task docflow.dispatch[a4e7cd75-5b05-43bc-ac3c-df2048d15378] received
+2026-10-07T23:02:55Z app[845033a2e1e448] iad [info][2026-10-07 23:02:55,714: INFO/ForkPoolWorker-1] Task docflow.dispatch[a4e7cd75-5b05-43bc-ac3c-df2048d15378] succeeded in 0.13889389599989954s: 0
+2026-10-07T23:03:25Z app[e2865577ef6386] iad [info][2026-10-07 23:03:25,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T23:03:25Z app[845033a2e1e448] iad [info][2026-10-07 23:03:25,557: INFO/MainProcess] Task docflow.dispatch[5e9bc5e7-be53-420a-b81f-2cc73ea8e30e] received
+2026-10-07T23:03:25Z app[845033a2e1e448] iad [info][2026-10-07 23:03:25,699: INFO/ForkPoolWorker-1] Task docflow.dispatch[5e9bc5e7-be53-420a-b81f-2cc73ea8e30e] succeeded in 0.14030744699994102s: 0
+2026-10-07T23:03:55Z app[e2865577ef6386] iad [info][2026-10-07 23:03:55,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T23:03:55Z app[845033a2e1e448] iad [info][2026-10-07 23:03:55,543: INFO/MainProcess] Task docflow.dispatch[36bace54-1df0-4555-bbf7-f0c903c5889f] received
+2026-10-07T23:03:55Z app[845033a2e1e448] iad [info][2026-10-07 23:03:55,739: INFO/ForkPoolWorker-1] Task docflow.dispatch[36bace54-1df0-4555-bbf7-f0c903c5889f] succeeded in 0.19480292299999746s: 0
+2026-10-07T23:04:25Z app[e2865577ef6386] iad [info][2026-10-07 23:04:25,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T23:04:25Z app[845033a2e1e448] iad [info][2026-10-07 23:04:25,551: INFO/MainProcess] Task docflow.dispatch[e8af62d1-b371-4a8a-b768-99946250ce01] received
+2026-10-07T23:04:26Z app[845033a2e1e448] iad [info][2026-10-07 23:04:26,012: INFO/ForkPoolWorker-1] Task docflow.dispatch[e8af62d1-b371-4a8a-b768-99946250ce01] succeeded in 0.4609362500000316s: 0
+2026-10-07T23:04:55Z app[845033a2e1e448] iad [info][2026-10-07 23:04:55,546: INFO/MainProcess] Task docflow.dispatch[1ecef4e6-534a-4aa5-ad2f-f6d079b4ca36] received
+2026-10-07T23:04:55Z app[e2865577ef6386] iad [info][2026-10-07 23:04:55,533: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+2026-10-07T23:04:55Z app[845033a2e1e448] iad [info][2026-10-07 23:04:55,995: ERROR/ForkPoolWorker-1] heartbeat_fail_sent unclaimed_age_seconds=1224
+2026-10-07T23:04:56Z app[845033a2e1e448] iad [info][2026-10-07 23:04:56,011: INFO/ForkPoolWorker-1] Task docflow.dispatch[1ecef4e6-534a-4aa5-ad2f-f6d079b4ca36] succeeded in 0.46420242099998177s: 0

@@ -1,0 +1,35 @@
+sh: 4: cannot open /proc/863/cmdline: No such file
+resumed 2 documents-worker process(es) at 23:05:37.428Z on 845033a2e1e448
+  pid 635 S(sleeping) run_workers
+  pid 646 S(sleeping) -Q interactive,bulk
+  pid 647 S(sleeping) -Q dispatch
+  pid 650 S(sleeping) -Q dispatch
+  pid 651 S(sleeping) -Q interactive,bulk
+23:05:44Z document: processing attempts 1 cost None
+23:05:49Z document: processing attempts 1 cost None
+23:05:55Z document: needs_review attempts 1 cost 0.0117
+== log since the resume
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]2026/10/07 23:05:36 INFO New SSH session email=ndk1516@gmail.com verified=true
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info][2026-10-07 23:05:36,413: INFO/MainProcess] missed heartbeat from dispatch@845033a2e1e448
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info][2026-10-07 23:05:36,420: WARNING/MainProcess] consumer: Connection to broker lost. Trying to re-establish the connection...
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]Traceback (most recent call last):
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]  File "/opt/worker/venv/lib/python3.13/site-packages/redis/connection.py", line 592, in send_packed_command
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]    self._sock.sendall(item)
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]    ~~~~~~~~~~~~~~~~~~^^^^^^
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]ConnectionResetError: [Errno 104] Connection reset by peer
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]During handling of the above exception, another exception occurred:
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]Traceback (most recent call last):
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]  File "/opt/worker/venv/lib/python3.13/site-packages/celery/worker/consumer/consumer.py", line 346, in start
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]    blueprint.start(self)
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]    ~~~~~~~~~~~~~~~^^^^^^
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]  File "/opt/worker/venv/lib/python3.13/site-packages/celery/bootsteps.py", line 116, in start
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]    step.start(parent)
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]    ~~~~~~~~~~^^^^^^^^
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]  File "/opt/worker/venv/lib/python3.13/site-packages/celery/worker/consumer/consumer.py", line 788, in start
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]    c.loop(*c.loop_args())
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]    ~~~~~~^^^^^^^^^^^^^^^^
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]  File "/opt/worker/venv/lib/python3.13/site-packages/celery/worker/loops.py", line 97, in asynloop
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]    next(loop)
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]    ~~~~^^^^^^
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]  File "/opt/worker/venv/lib/python3.13/site-packages/kombu/asynchronous/hub.py", line 377, in create_loop
+2026-10-07T23:05:36Z app[845033a2e1e448] iad [info]    cb(*cbargs)
