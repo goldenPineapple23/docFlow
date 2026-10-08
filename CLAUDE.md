@@ -377,3 +377,7 @@ Sections 0, 3, 7 and 10 above are the prompt's own words and are unchanged. The 
 - Read this file and the status paragraph near the top of `docs/BUILD-STATUS.md` ("Status, as of ..."). Then read other files as the task needs them, a named section first, not the whole file.
 - The designs of merged slices are in `docs/designs/`, and earlier status paragraphs are in `docs/status-history.md`. Neither is read at session start.
 - Claude's own state notes hold one current entry. A superseded entry is archived word for word, never deleted.
+
+### Models (founder, 2026-10-08; `DECISIONS.md` D-195)
+- Section 7.1's "Temperature 0" cannot be sent on the extraction call. `claude-sonnet-5` and the three 5.5 models refuse a temperature other than the default (HTTP 400; the 5.5 models were checked live on 2026-10-08), and the Python SDK has no such parameter (D-021). No request sets a temperature. The strict schema and the null-for-missing rule are what hold a value to the page.
+- The founder's model policy of 2026-10-08 is D-195. Once applied it supersedes Section 3's "Extraction model" bullet. No code changes for it before the founder's "go" at the Stage 3 checkpoint.
