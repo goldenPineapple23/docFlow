@@ -172,3 +172,73 @@ def test_only_the_dispatch_task_is_ever_sent_to_the_dispatch_queue_and_it_nowher
     for where, name, queue in sends:
         to_dispatch = queue in ("DISPATCH_QUEUE", "dispatch")
         assert to_dispatch == (name == "docflow.dispatch"), (where, name, queue)
+
+
+def test_an_idle_worker_asks_redis_for_work_every_ten_seconds_not_every_second():
+    """Founder, 2026-10-08 (D-196): at kombu's default of 1 s the two worker
+    processes sent about 7,200 BRPOP commands an hour, half of an idle
+    worker's Redis bill. The option is read by kombu's own Redis transport
+    here, not only compared with the constant: `brpop_timeout` is what it
+    puts on the wire."""
+    from app.celery_app import BROKER_POLL_SECONDS
+
+    assert BROKER_POLL_SECONDS == 10
+    assert celery_app.conf.broker_transport_options["polling_interval"] == BROKER_POLL_SECONDS
+    transport = celery_app.connection_for_read().transport
+    assert type(transport).__module__ == "kombu.transport.redis"
+    assert transport.brpop_timeout == BROKER_POLL_SECONDS
+
+
+def test_fly_gives_a_stopping_worker_longer_than_the_read_it_has_open():
+    """A stopping worker waits for its open BRPOP to return (kombu's
+    `Channel.close`), so shutdown takes up to BROKER_POLL_SECONDS more than
+    the roughly 4 s measured at a 1 s poll. Fly's default `kill_timeout` is
+    5 s; fly.toml must say more, with room for the rest of the shutdown."""
+    import tomllib
+    from pathlib import Path
+
+    from app.celery_app import BROKER_POLL_SECONDS
+
+    config = tomllib.loads((Path(__file__).resolve().parents[1] / "fly.toml").read_text(encoding="utf-8"))
+    # The launcher (app.run_workers) turns SIGINT into a warm stop of both workers.
+    assert config["kill_signal"] == "SIGINT"
+    assert isinstance(config["kill_timeout"], int)  # seconds
+    assert config["kill_timeout"] >= BROKER_POLL_SECONDS + 15
+    assert config["kill_timeout"] <= 300  # Fly's maximum
+
+
+def test_no_task_result_is_stored_and_nothing_reads_one():
+    """Founder, 2026-10-08 (D-196): no result backend on the worker or on the
+    two senders, and the reason that is safe: every `send_task` in the API,
+    the worker and core is a statement whose return value is dropped, and
+    nothing names Celery's AsyncResult."""
+    import ast
+    from pathlib import Path
+
+    assert type(celery_app.backend).__name__ == "DisabledBackend"
+    assert celery_app.conf.result_backend is None
+    assert celery_app.conf.task_ignore_result is True
+
+    repo = Path(__file__).resolve().parents[3]
+    roots = [repo / "apps/api/app", repo / "apps/worker/app", repo / "packages/core/docflow_core"]
+    apps_made, sends, kept = [], 0, []
+    for root in roots:
+        for path in root.rglob("*.py"):
+            source = path.read_text(encoding="utf-8")
+            where = str(path.relative_to(repo))
+            assert "AsyncResult" not in source, where
+            tree = ast.parse(source)
+            dropped = {id(node.value) for node in ast.walk(tree) if isinstance(node, ast.Expr)}
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                if getattr(node.func, "id", None) == "Celery":
+                    apps_made.append(where)
+                    assert "backend" not in {k.arg for k in node.keywords}, where
+                if getattr(node.func, "attr", None) == "send_task":
+                    sends += 1
+                    if id(node) not in dropped:
+                        kept.append((where, node.lineno))
+    assert len(apps_made) == 3, apps_made  # the worker, the API's client, the e-mail intake client
+    assert sends >= 8  # the scan found the senders
+    assert kept == [], f"a send_task result is kept here: {kept}"

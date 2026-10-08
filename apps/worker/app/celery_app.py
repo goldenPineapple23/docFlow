@@ -41,7 +41,10 @@ db.use_own_login("worker")
 celery_app = Celery(
     "docflow_worker",
     broker=settings.redis_url,
-    backend=settings.redis_url,
+    # No result backend (founder, 2026-10-08; D-196). Nothing reads a task's
+    # result: every send is a bare `send_task`, and what a task did is in the
+    # database. With a backend, each of the roughly 156 scheduled tasks an
+    # hour stored a result in Redis for a day that nobody fetched.
     # Without this a worker started as `celery -A app.celery_app worker`
     # registers no tasks at all, and every enqueued document is rejected as
     # an unregistered task and sits in `pending` forever (DECISIONS.md D-095).
@@ -78,6 +81,20 @@ STUCK_SWEEP_SECONDS = 300
 # redelivered). Longer than any task should run; a redelivery that arrives
 # anyway is a no-op, because the task claims its document first (H3, D-158).
 BROKER_VISIBILITY_TIMEOUT_SECONDS = 2 * 60 * 60
+# How long a worker's blocking read on its queues waits before it asks Redis
+# again (kombu's `polling_interval` option, which sets its BRPOP timeout; 1 s
+# by default). The read returns the moment a job arrives, so this is not a
+# delay before a document is picked up: it is how often an idle worker
+# repeats the question. At 1 s the two worker processes sent about 7,200
+# commands an hour, half of everything Upstash billed for an idle worker
+# (measured at the first worker deploy; D-196). Two things follow from it:
+#   * a stopping worker waits for the read it has open, so shutdown takes up
+#     to this long more: `kill_timeout` in fly.toml must stay well above it
+#     (tests/test_celery_app.py holds the two together);
+#   * without the event loop (the `solo` pool on Windows, local development)
+#     kombu also sleeps after an empty read, for up to about 2 s. The
+#     deployed prefork worker has the event loop and does not.
+BROKER_POLL_SECONDS = 10
 
 celery_app.conf.update(
     task_default_queue="interactive",
@@ -101,7 +118,14 @@ celery_app.conf.update(
     # Celery's prefork pool, which production runs: the `solo` pool used on
     # Windows ignores them.
     worker_max_memory_per_child=WORKER_MAX_MEMORY_PER_CHILD_KIB,
-    broker_transport_options={"visibility_timeout": BROKER_VISIBILITY_TIMEOUT_SECONDS},
+    broker_transport_options={
+        "visibility_timeout": BROKER_VISIBILITY_TIMEOUT_SECONDS,
+        "polling_interval": BROKER_POLL_SECONDS,
+    },
+    # With no backend there is nowhere to store a result; this says so for
+    # every task as well, so configuring a backend later stores nothing
+    # until someone decides a task's result is wanted.
+    task_ignore_result=True,
     beat_schedule={
         "run-scheduled-jobs": {
             "task": "docflow.run_scheduled_jobs",

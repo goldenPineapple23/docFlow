@@ -311,6 +311,10 @@ How a run is reported:
   parse service with a token and runs in CI; it took 42:52, against about 34
   minutes before). Earlier: 571 at 3b (`aefd428`), 424 at Stage 1, 562 after
   card billing, 568 on `e3e8641`.
+  **From the Redis idle change (2026-10-08, RUNBOOK 9.8):** the worker
+  suite reads `187 passed, 7 skipped` (three tests added to
+  `test_celery_app.py`) and the API suite `626 passed, 1 skipped, 3
+  deselected` (one added, `test_celery_client.py`).
   If the count is *lower* than the number written here, find out what
   stopped running before calling the run green.
   The 3 deselected are the `live_api` tests, which only run at checkpoints
@@ -1788,6 +1792,49 @@ stack against the same database, and no migration is part of this deploy.
 If the parse service and the worker disagree on the token, documents wait
 and `parse_service_unavailable` is raised (8.4); set the same value on both
 again.
+
+### 9.8 What an idle worker costs on Redis (founder, 2026-10-08; D-196)
+
+Upstash bills by the command, and an idle worker sends commands all day.
+Measured at the first worker deploy (2026-10-07, staging, one worker
+machine and beat, nothing to read): **13,600 to 13,700 commands an hour**.
+A busy hour was within noise of that, and the 500 + 1 run added roughly 16
+commands a document. So the idle rate is the bill.
+
+Three settings follow from that measurement:
+
+| Setting | Where | Value | Why |
+|---|---|---|---|
+| `BROKER_POLL_SECONDS` | `apps/worker/app/celery_app.py` (kombu's `polling_interval`, which sets its BRPOP timeout) | 10 (kombu's default is 1) | Each of the two worker processes keeps one blocking read open on its queues and repeats it when it times out: at 1 s, about 7,200 commands an hour between them (Upstash showed about 6,700), half of idle. The read returns the moment a job arrives, so pickup is no slower. |
+| No result backend | the three `Celery(...)` objects: the worker, `apps/api/app/celery_client.py`, `docflow_core/email_intake.py`; and `task_ignore_result` on the worker | off | Every task's result was stored in Redis for a day and nothing ever read one. About 156 scheduled tasks an hour: the roughly 150 new keys an hour seen on Upstash. |
+| `kill_timeout` | `apps/worker/fly.toml` | 30 s (Fly's default is 5) | A stopping worker waits for the read it has open (kombu's `Channel.close`), so shutdown takes up to `BROKER_POLL_SECONDS` longer. An idle worker's shutdown took about 4 s at the 1 s read (2026-10-08, Fly's log). `tests/test_celery_app.py` fails if `kill_timeout` drops below the poll plus 15 s. |
+
+**Not measured yet, and owed before production's Redis plan is chosen:**
+1. **One idle hour on staging with these settings.** The founder reads
+   Upstash's command count before and after, with the time of each
+   reading, and the "Top commands" view. Expected, as an estimate only:
+   about 7,000 an hour (the measured rate less about 6,500 BRPOP and a few
+   hundred result commands). Against the rule in 9.7: the $10 fixed plan
+   breaks even at about 6,850 an hour.
+2. **The worker's shutdown time at the 10 s read,** at the same deploy:
+   scale the worker to 0 and read, in `fly logs`, the time from `Sending
+   signal SIGINT to main child process` to `Main child exited normally with
+   code: 0`. It passes if the worker exits by itself, with code 0, inside
+   `kill_timeout`. If it is cut off instead, that goes to the founder
+   before anything is changed.
+
+**On this Windows machine** the local worker runs without Celery's event
+loop (the `solo` pool), and there kombu also sleeps after an empty read:
+up to about 2 s before the next look at the queue. Local runs can feel
+that; the deployed prefork worker is not affected.
+
+**Not changed, and a question for the founder if the idle hour is still
+above the break-even:** by default Celery's workers also exchange
+heartbeat and gossip messages through the broker, and can run without
+them (`--without-gossip --without-mingle --without-heartbeat`); nothing in
+DocFlow reads them. How much of the other half of the idle commands they
+are is not known: Upstash's "Top commands" view after the idle hour will
+show. Not part of this change.
 
 ## 10. Database logins (Stage 3e, F-1)
 

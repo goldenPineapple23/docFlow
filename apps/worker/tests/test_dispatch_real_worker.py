@@ -137,6 +137,12 @@ def test_a_newcomer_gets_the_next_slot_and_a_tenants_single_order_beats_its_own_
         assert claims == [backfill[0], newcomer, single, *backfill[1:]], claims
         assert len(set(claims)) == 7  # each claimed once
 
+        # No task result is stored (founder, 2026-10-08; D-196): a real worker
+        # has run these tasks against the real Redis, and Redis holds no
+        # result key. With a result backend there was one per finished task.
+        stored = redis.Redis.from_url(get_settings().redis_url).keys("celery-task-meta-*")
+        assert stored == [], f"{len(stored)} task results were stored in Redis"
+
 
 @pytest.fixture
 def dispatch_worker() -> Iterator[tuple[str, str]]:
