@@ -4,6 +4,21 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-08 (the first worker deploy's steps 9 to 15 done, the 500 + 1 run accepted; D-196)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-06:** Phase 5.5, Stage 3. Slices 3a to 3e are all merged and the logins
+cutover (RUNBOOK 10.2) is done through step 6. **The first worker deploy (RUNBOOK 9.7) is under
+way: steps 2 to 8 are done and passed.** The parse service, the worker and the API are deployed on
+Fly staging, one machine each, nothing public (D-194). No document has been processed and nothing
+is spent on the model. Step 7's log showed the worker writing its heartbeat URL on every ping:
+fixed here, with a line the launcher now prints when its login check passes (D-194). **Next:** the
+founder replaces the Healthchecks.io check (RUNBOOK 9.4), Claude deploys the fixed worker and
+repeats step 7's checks, then step 9 (G) on the founder's word. The Fly worker and beat are at 0
+whenever they are not being tested. Then the Stage 3 checkpoint; nothing of Stage 4 is built
+before its "go". `backup_0034`, `backup_0035`, `backup_3b` and the role `docflow_app` are dropped
+only after that deploy has processed real documents on staging (RUNBOOK 1.3; 10.2 step 7).
+
 ## Replaced on 2026-10-06 (the first worker deploy's steps 2 to 8 done; D-194)
 
 <!-- the paragraph as it stood, starting on the next line -->

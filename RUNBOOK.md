@@ -1733,7 +1733,10 @@ Left off, and why:
    golden fixture, a `.doc` and a scanned image. Record each document's
    time and cost. G2: a catalog import by the same path. G3: Redis commands
    in a timed idle hour and a timed busy one (3c, Q10: more than about
-   69,400 in the idle hour means the fixed $10 plan).
+   6,850 in the idle hour means the fixed $10 plan. *Corrected 2026-10-08,
+   D-196: this said "about 69,400", an arithmetic error ten times too
+   high; $10 a month at $0.20 per 100,000 commands over 730 hours is about
+   6,850 an hour.*).
 10. **A4 against the real API and worker.** The parse self-test with a
     targets file: the API's private address on port 8000, with the API
     machine started first (a connection to its private address does not
@@ -1787,6 +1790,42 @@ Left off, and why:
     Redis command count and what the $10 rule says.
 16. **Claude:** the record, by PR: CHECKPOINTS.md (the "first worker
     deploy" gap), BUILD-STATUS, and this section if anything differed.
+
+**As run, 2026-10-07 and 2026-10-08 (D-196). What differed from the steps
+above, and what to do the same way next time:**
+- **Before any session's first upload, in this order:** nothing local
+  against staging; start the API machine (`fly machine start`), then open
+  `fly proxy` (it refuses while the machine is stopped); read `/healthz`
+  *before* the deploy; deploy the worker with a live `fly logs` capture
+  running, so the `login check passed as docflow_worker` line is kept (Fly
+  returns only its last 100 lines afterwards); read `/healthz` after; then
+  the founder un-pauses the check and runs the `worker_starts` query.
+- **The staging API stops itself about 6 minutes after a start,** since
+  `fly proxy` traffic does not count as activity. For a long run:
+  `fly machine update <id> --autostop=off --yes`, and
+  `--autostop=stop --yes` straight after, each read back from
+  `fly machine list --json`.
+- **Step 9, G3, and step 15: the rule, restated by the founder.** For an
+  always-on worker, switch to a fixed plan when idle commands an hour x 730
+  x $0.000002 exceeds the cheapest fixed plan that fits the data (Fly's
+  Upstash: 250 MB at $10 a month). The founder reads Upstash's count
+  **before and after** every timed period, with the time of each reading;
+  on 2026-10-08 no reading was taken before the run, and its share could
+  only be estimated.
+- **Step 14.** The stop was $15 of total recorded spend, not $40 (STOP 4).
+  The worker was resized for the run (`fly scale memory 2048
+  --process-group worker`, a second recorded start) and the API's
+  auto-stop was off for the session. The backfill's tenant got the fixture
+  catalog first, imported by the founder in the Console: catalog imports
+  exist only on the Console's routes, so a script cannot do it. The slow
+  case was the founder pressing "recompute" at about a quarter and a half
+  of the run; the sweeps come by themselves every five minutes.
+- **A long run is started as a detached process** (`Start-Process` with
+  its output to files), never as a terminal call with a time limit. The
+  script kept in `docs/spikes/first-worker-deploy-staging/2026-10-08/` has
+  a `--resume` mode for a watching process that ends early.
+- **`fly redis status` is never run:** it prints the URL with its
+  password. The founder reads Upstash's pages instead.
 
 **If something goes wrong.** Any step fails: stop the worker and report.
 Documents already received stay as they are; nothing is deleted. Going back

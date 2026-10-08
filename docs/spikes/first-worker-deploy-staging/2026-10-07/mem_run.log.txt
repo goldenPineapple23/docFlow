@@ -1,0 +1,144 @@
+== start 21:05:31.185Z
+== worker before:
+   usage 424132608
+   used_kB 479108 avail_kB 506112
+   proc 636 ppid 1 rss 71104 hwm 71104 python -m app.run_workers
+   proc 647 ppid 636 rss 121008 hwm 121008 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+   proc 648 ppid 636 rss 121064 hwm 121064 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+   proc 651 ppid 647 rss 107516 hwm 107516 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+   proc 652 ppid 648 rss 119384 hwm 119384 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+== parse before:
+   uptime_s 10.40
+   root_usage 90947584 root_max_usage 68493312
+   jobs_usage 1490944 jobs_max_usage 68493312
+   used_kB 233916 avail_kB 1781724
+
+== legacy .doc: po.doc, 25088 bytes (0.02 MB)
+   21:05:56.298Z uploaded in 2.2s -> a537f860-beae-49f6-8f10-04001f2f436b pending possible_duplicate_of d29da4e8-0ab2-4890-8c9d-8341a29ad784
+   21:05:56.630Z +   2.5s pending
+   21:06:01.258Z +   7.1s processing
+   21:06:33.749Z +  39.6s needs_review
+   run extraction state=started ok=None err=None in=None out=None counted=1024 cost=$None latency_ms=None
+   run extraction state=finished ok=True err=None in=2445 out=2458 counted=None cost=$0.0295 latency_ms=22794
+   final needs_review after 39.6s; document fields {'status': 'needs_review', 'processing_attempts': 1, 'failure_code': None, 'parse_lost_attempts': [], 'quarantine_reason': None}; spent so far $0.0295
+   worker after:
+      usage 477888512
+      used_kB 520476 avail_kB 464744
+      proc 636 ppid 1 rss 71104 hwm 71104 python -m app.run_workers
+      proc 647 ppid 636 rss 121016 hwm 121016 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+      proc 648 ppid 636 rss 121068 hwm 121068 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+      proc 651 ppid 647 rss 144836 hwm 144836 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+      proc 652 ppid 648 rss 119508 hwm 119508 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+   parse after:
+      uptime_s 63.23
+      root_usage 259543040 root_max_usage 315781120
+      jobs_usage 171724800 jobs_max_usage 315781120
+      used_kB 239652 avail_kB 1775988
+
+== scanned PDF, 1 page: po-scanned.pdf, 50385 bytes (0.05 MB)
+   21:06:48.729Z uploaded in 2.2s -> 69991612-48c2-40ae-badd-27c07038d422 pending
+   21:06:49.045Z +   2.5s processing
+   21:07:00.643Z +  14.1s needs_review
+   run extraction state=started ok=None err=None in=None out=None counted=2433 cost=$None latency_ms=None
+   run extraction state=finished ok=True err=None in=3854 out=914 counted=None cost=$0.0168 latency_ms=8829
+   final needs_review after 14.1s; document fields {'status': 'needs_review', 'processing_attempts': 1, 'failure_code': None, 'parse_lost_attempts': [], 'quarantine_reason': None}; spent so far $0.0463
+   worker after:
+      usage 479473664
+      used_kB 521944 avail_kB 463276
+      proc 636 ppid 1 rss 71104 hwm 71104 python -m app.run_workers
+      proc 647 ppid 636 rss 121016 hwm 121016 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+      proc 648 ppid 636 rss 121072 hwm 121072 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+      proc 651 ppid 647 rss 146124 hwm 146124 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+      proc 652 ppid 648 rss 119508 hwm 119508 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+   parse after:
+      uptime_s 91.37
+      root_usage 270659584 root_max_usage 315781120
+      jobs_usage 182804480 jobs_max_usage 315781120
+      used_kB 240500 avail_kB 1775140
+
+== multi-page .tif: po.tif, 1440288 bytes (1.37 MB)
+   21:07:19.694Z uploaded in 4.6s -> 4fcd73a9-3455-475d-a14c-eaaee9ddc9a4 pending
+   21:07:20.007Z +   4.9s processing
+   21:07:29.301Z +  14.2s needs_review
+   run extraction state=started ok=None err=None in=None out=None counted=1499 cost=$None latency_ms=None
+   run extraction state=finished ok=True err=None in=2920 out=775 counted=None cost=$0.0136 latency_ms=6918
+   final needs_review after 14.2s; document fields {'status': 'needs_review', 'processing_attempts': 1, 'failure_code': None, 'parse_lost_attempts': [], 'quarantine_reason': None}; spent so far $0.0599
+   worker after:
+      usage 482955264
+      used_kB 526984 avail_kB 458236
+      proc 636 ppid 1 rss 71104 hwm 71104 python -m app.run_workers
+      proc 647 ppid 636 rss 121016 hwm 121016 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+      proc 648 ppid 636 rss 121076 hwm 121076 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+      proc 651 ppid 647 rss 149404 hwm 149404 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+      proc 652 ppid 648 rss 119516 hwm 119516 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+   parse after:
+      uptime_s 118.87
+      root_usage 277999616 root_max_usage 315781120
+      jobs_usage 190205952 jobs_max_usage 315781120
+      used_kB 241220 avail_kB 1774420
+
+== photo .jpg: po.jpg, 28810 bytes (0.03 MB)
+   21:07:44.110Z uploaded in 1.9s -> af722c22-9a2c-4b5b-86d2-e3e74a244381 pending
+   21:07:44.454Z +   2.2s processing
+   21:07:53.724Z +  11.5s needs_review
+   run extraction state=started ok=None err=None in=None out=None counted=1430 cost=$None latency_ms=None
+   run extraction state=finished ok=True err=None in=2851 out=808 counted=None cost=$0.0138 latency_ms=7108
+   final needs_review after 11.5s; document fields {'status': 'needs_review', 'processing_attempts': 1, 'failure_code': None, 'parse_lost_attempts': [], 'quarantine_reason': None}; spent so far $0.0737
+   worker after:
+      usage 484966400
+      used_kB 528992 avail_kB 456228
+      proc 636 ppid 1 rss 71104 hwm 71104 python -m app.run_workers
+      proc 647 ppid 636 rss 121016 hwm 121016 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+      proc 648 ppid 636 rss 121076 hwm 121076 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+      proc 651 ppid 647 rss 151152 hwm 151152 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+      proc 652 ppid 648 rss 119520 hwm 119520 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+   parse after:
+      uptime_s 143.37
+      root_usage 278249472 root_max_usage 315781120
+      jobs_usage 190218240 jobs_max_usage 315781120
+      used_kB 232436 avail_kB 1783204
+
+== scanned PDF, 24 pages, 22 MB: mem-big-scanned.pdf, 23142179 bytes (22.07 MB)
+   21:08:56.292Z uploaded in 49.3s -> b8b9caf9-637a-48d4-9c91-13654bf71582 pending
+   21:08:56.609Z +  49.6s processing
+   21:09:22.162Z +  75.2s needs_review
+   run extraction state=started ok=None err=None in=None out=None counted=38635 cost=$None latency_ms=None
+   run extraction state=finished ok=True err=None in=40056 out=1456 counted=None cost=$0.0947 latency_ms=18638
+   final needs_review after 75.2s; document fields {'status': 'needs_review', 'processing_attempts': 1, 'failure_code': None, 'parse_lost_attempts': [], 'quarantine_reason': None}; spent so far $0.1684
+   worker after:
+      usage 644988928
+      used_kB 683608 avail_kB 301612
+      proc 636 ppid 1 rss 71104 hwm 71104 python -m app.run_workers
+      proc 647 ppid 636 rss 121020 hwm 121020 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+      proc 648 ppid 636 rss 121076 hwm 121076 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+      proc 651 ppid 647 rss 306648 hwm 335872 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+      proc 652 ppid 648 rss 120252 hwm 120252 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+   parse after:
+      uptime_s 232.45
+      root_usage 310628352 root_max_usage 356368384
+      jobs_usage 190230528 jobs_max_usage 356368384
+      used_kB 264812 avail_kB 1750828
+
+== scanned PDF, 24 pages, 24.4 MB: mem-cap-scanned.pdf, 25600390 bytes (24.41 MB)
+   21:10:33.143Z uploaded in 57.4s -> 6b4e887c-5ee8-449a-ba1c-f19873f4d413 pending
+   21:10:33.458Z +  57.8s processing
+   21:10:40.408Z +  64.7s failed
+   run extraction state=started ok=None err=None in=None out=None counted=None cost=$None latency_ms=None
+   run extraction state=finished ok=False err=DOC-008 in=None out=None counted=None cost=$None latency_ms=1273
+   final failed after 64.7s; document fields {'status': 'failed', 'processing_attempts': 1, 'failure_code': 'DOC-008', 'parse_lost_attempts': [], 'quarantine_reason': None}; spent so far $0.1684
+   worker after:
+      usage 751411200
+      used_kB 819284 avail_kB 165936
+      proc 636 ppid 1 rss 71104 hwm 71104 python -m app.run_workers
+      proc 647 ppid 636 rss 121024 hwm 121024 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+      proc 648 ppid 636 rss 121084 hwm 121084 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+      proc 651 ppid 647 rss 410468 hwm 477028 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q interact
+      proc 652 ppid 648 rss 120256 hwm 120256 /opt/worker/venv/bin/python -m celery -A app.celery_app worker --loglevel=info -Q dispatch
+   parse after:
+      uptime_s 310.38
+      root_usage 344481792 root_max_usage 372297728
+      jobs_usage 190226432 jobs_max_usage 372297728
+      used_kB 341164 avail_kB 1674476
+
+== end 21:10:43.815Z spent $0.1684
+exit: 0

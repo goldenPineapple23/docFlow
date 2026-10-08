@@ -1,0 +1,367 @@
+{
+  "tenant_id": "40594983-03ff-47b1-ac40-f636488b8de7",
+  "started": "15:26:11.811Z",
+  "orders": [
+    {
+      "n": 1,
+      "file": "G3-1007-01.txt",
+      "at": "15:26:31.110Z",
+      "api_cold_start_s": 12.21,
+      "http": 200,
+      "document_id": "a8363eea-b512-4bdd-a809-1ba5549242d0",
+      "status": "needs_review",
+      "seconds": 19.1,
+      "cost": "0.0120",
+      "runs": [
+        {
+          "in": 2524,
+          "out": 695,
+          "cost": "0.0120",
+          "latency_ms": 6816
+        }
+      ]
+    },
+    {
+      "n": 2,
+      "file": "G3-1007-02.txt",
+      "at": "15:29:17.791Z",
+      "api_cold_start_s": null,
+      "http": 200,
+      "document_id": "e96d5970-085f-4440-909d-340fba3b9eca",
+      "status": "needs_review",
+      "seconds": 13.1,
+      "cost": "0.0113",
+      "runs": [
+        {
+          "in": 2559,
+          "out": 616,
+          "cost": "0.0113",
+          "latency_ms": 5756
+        }
+      ]
+    },
+    {
+      "n": 3,
+      "file": "G3-1007-03.txt",
+      "at": "15:32:18.588Z",
+      "api_cold_start_s": null,
+      "http": 200,
+      "document_id": "65a1d05e-e590-443c-9dae-266f4ad74335",
+      "status": "needs_review",
+      "seconds": 13.9,
+      "cost": "0.0129",
+      "runs": [
+        {
+          "in": 2597,
+          "out": 769,
+          "cost": "0.0129",
+          "latency_ms": 6800
+        }
+      ]
+    },
+    {
+      "n": 4,
+      "file": "G3-1007-04.txt",
+      "at": "15:35:32.458Z",
+      "api_cold_start_s": 13.15,
+      "http": 200,
+      "document_id": "f957c4a4-7322-4708-8ce0-0d24f7cbfe9c",
+      "status": "needs_review",
+      "seconds": 19.2,
+      "cost": "0.0115",
+      "runs": [
+        {
+          "in": 2524,
+          "out": 643,
+          "cost": "0.0115",
+          "latency_ms": 6616
+        }
+      ]
+    },
+    {
+      "n": 5,
+      "file": "G3-1007-05.txt",
+      "at": "15:38:19.372Z",
+      "api_cold_start_s": null,
+      "http": 200,
+      "document_id": "7268c438-c484-43be-8abc-119b5a6766cb",
+      "status": "needs_review",
+      "seconds": 14.4,
+      "cost": "0.0119",
+      "runs": [
+        {
+          "in": 2560,
+          "out": 682,
+          "cost": "0.0119",
+          "latency_ms": 6547
+        }
+      ]
+    },
+    {
+      "n": 6,
+      "file": "G3-1007-06.txt",
+      "at": "15:41:18.789Z",
+      "api_cold_start_s": null,
+      "http": 200,
+      "document_id": "c660f7f6-607f-428d-9dae-48dc4d7c7736",
+      "status": "needs_review",
+      "seconds": 13.9,
+      "cost": "0.0134",
+      "runs": [
+        {
+          "in": 2599,
+          "out": 824,
+          "cost": "0.0134",
+          "latency_ms": 7535
+        }
+      ]
+    },
+    {
+      "n": 7,
+      "file": "G3-1007-07.txt",
+      "at": "15:44:33.398Z",
+      "api_cold_start_s": 13.02,
+      "http": 200,
+      "document_id": "4969637f-ae4a-4005-ac5c-97a80165b64f",
+      "status": "needs_review",
+      "seconds": 18.1,
+      "cost": "0.0110",
+      "runs": [
+        {
+          "in": 2519,
+          "out": 596,
+          "cost": "0.0110",
+          "latency_ms": 6348
+        }
+      ]
+    },
+    {
+      "n": 8,
+      "file": "G3-1007-08.txt",
+      "at": "15:47:18.566Z",
+      "api_cold_start_s": null,
+      "http": 200,
+      "document_id": "0d1d21ff-5418-40c9-b132-5de8796f3da3",
+      "status": "needs_review",
+      "seconds": 13.8,
+      "cost": "0.0124",
+      "runs": [
+        {
+          "in": 2562,
+          "out": 725,
+          "cost": "0.0124",
+          "latency_ms": 7105
+        }
+      ]
+    },
+    {
+      "n": 9,
+      "file": "G3-1007-09.txt",
+      "at": "15:50:18.609Z",
+      "api_cold_start_s": null,
+      "http": 200,
+      "document_id": "e611d911-ff0b-4bd8-ac6d-5d99bccbb72e",
+      "status": "needs_review",
+      "seconds": 16.1,
+      "cost": "0.0140",
+      "runs": [
+        {
+          "in": 2601,
+          "out": 875,
+          "cost": "0.0140",
+          "latency_ms": 8767
+        }
+      ]
+    },
+    {
+      "n": 10,
+      "file": "G3-1007-10.txt",
+      "at": "15:53:31.924Z",
+      "api_cold_start_s": 12.87,
+      "http": 200,
+      "document_id": "7f071e9b-bd62-41da-ae3f-45e3b620139f",
+      "status": "needs_review",
+      "seconds": 16.7,
+      "cost": "0.0106",
+      "runs": [
+        {
+          "in": 2524,
+          "out": 556,
+          "cost": "0.0106",
+          "latency_ms": 5604
+        }
+      ]
+    },
+    {
+      "n": 11,
+      "file": "G3-1007-11.txt",
+      "at": "15:56:18.600Z",
+      "api_cold_start_s": null,
+      "http": 200,
+      "document_id": "525c87dc-8cd2-4618-ae26-cd3f93a4c73d",
+      "status": "needs_review",
+      "seconds": 13.8,
+      "cost": "0.0129",
+      "runs": [
+        {
+          "in": 2557,
+          "out": 775,
+          "cost": "0.0129",
+          "latency_ms": 7730
+        }
+      ]
+    },
+    {
+      "n": 12,
+      "file": "G3-1007-12.txt",
+      "at": "15:59:17.744Z",
+      "api_cold_start_s": null,
+      "http": 200,
+      "document_id": "719d45c5-7961-4253-9936-f6f149105592",
+      "status": "needs_review",
+      "seconds": 17.9,
+      "cost": "0.0134",
+      "runs": [
+        {
+          "in": 2597,
+          "out": 823,
+          "cost": "0.0134",
+          "latency_ms": 7558
+        }
+      ]
+    },
+    {
+      "n": 13,
+      "file": "G3-1007-13.txt",
+      "at": "16:02:30.426Z",
+      "api_cold_start_s": 10.98,
+      "http": 200,
+      "document_id": "aba93beb-8df6-4455-859f-33604ed7c0ce",
+      "status": "needs_review",
+      "seconds": 14.2,
+      "cost": "0.0121",
+      "runs": [
+        {
+          "in": 2522,
+          "out": 706,
+          "cost": "0.0121",
+          "latency_ms": 7044
+        }
+      ]
+    },
+    {
+      "n": 14,
+      "file": "G3-1007-14.txt",
+      "at": "16:05:17.965Z",
+      "api_cold_start_s": null,
+      "http": 200,
+      "document_id": "6fcde831-037c-421e-99c3-424c04724cd3",
+      "status": "needs_review",
+      "seconds": 13.4,
+      "cost": "0.0127",
+      "runs": [
+        {
+          "in": 2563,
+          "out": 754,
+          "cost": "0.0127",
+          "latency_ms": 7473
+        }
+      ]
+    },
+    {
+      "n": 15,
+      "file": "G3-1007-15.txt",
+      "at": "16:08:17.816Z",
+      "api_cold_start_s": null,
+      "http": 200,
+      "document_id": "c1e1d0fe-9cc0-44d8-b7b6-15dfe01b351f",
+      "status": "needs_review",
+      "seconds": 13.1,
+      "cost": "0.0123",
+      "runs": [
+        {
+          "in": 2600,
+          "out": 710,
+          "cost": "0.0123",
+          "latency_ms": 6754
+        }
+      ]
+    },
+    {
+      "n": 16,
+      "file": "G3-1007-16.txt",
+      "at": "16:11:30.911Z",
+      "api_cold_start_s": 12.15,
+      "http": 200,
+      "document_id": "6226cbe0-c2d2-4757-910c-26f22c0d3e56",
+      "status": "needs_review",
+      "seconds": 14.3,
+      "cost": "0.0104",
+      "runs": [
+        {
+          "in": 2522,
+          "out": 537,
+          "cost": "0.0104",
+          "latency_ms": 5694
+        }
+      ]
+    },
+    {
+      "n": 17,
+      "file": "G3-1007-17.txt",
+      "at": "16:14:17.792Z",
+      "api_cold_start_s": null,
+      "http": 200,
+      "document_id": "9dbdaf66-bb1c-468e-bd97-982e639d8eb8",
+      "status": "needs_review",
+      "seconds": 13.2,
+      "cost": "0.0127",
+      "runs": [
+        {
+          "in": 2559,
+          "out": 760,
+          "cost": "0.0127",
+          "latency_ms": 7860
+        }
+      ]
+    },
+    {
+      "n": 18,
+      "file": "G3-1007-18.txt",
+      "at": "16:17:31.298Z",
+      "api_cold_start_s": 12.01,
+      "http": 200,
+      "document_id": "37c427a8-aed3-4914-baf2-7a56d0d07cbf",
+      "status": "needs_review",
+      "seconds": 19.4,
+      "cost": "0.0138",
+      "runs": [
+        {
+          "in": 2597,
+          "out": 859,
+          "cost": "0.0138",
+          "latency_ms": 7802
+        }
+      ]
+    },
+    {
+      "n": 19,
+      "file": "G3-1007-19.txt",
+      "at": "16:20:17.830Z",
+      "api_cold_start_s": null,
+      "http": 200,
+      "document_id": "c06d2a23-0c59-4dc7-9ee7-9948ab3a36b5",
+      "status": "needs_review",
+      "seconds": 13.5,
+      "cost": "0.0116",
+      "runs": [
+        {
+          "in": 2523,
+          "out": 653,
+          "cost": "0.0116",
+          "latency_ms": 6757
+        }
+      ]
+    }
+  ]
+}
