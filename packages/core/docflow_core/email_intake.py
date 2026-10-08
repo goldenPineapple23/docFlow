@@ -64,8 +64,9 @@ FREE_MAIL_DOMAINS = frozenset(
 # module-level object so tests can monkeypatch
 # `docflow_core.email_intake.celery_client` exactly as
 # apps/api/tests/test_documents_upload.py already does for the upload router.
+# No result backend, as there: it only sends (founder, 2026-10-08; D-196).
 _settings = get_settings()
-celery_client = Celery("docflow_email_intake", broker=_settings.redis_url, backend=_settings.redis_url)
+celery_client = Celery("docflow_email_intake", broker=_settings.redis_url)
 
 
 class MalformedPayloadError(Exception):

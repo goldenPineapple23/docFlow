@@ -1387,6 +1387,34 @@ D-196 has the evidence for each; nothing here is built):
 - **The API stopping with a request in flight:** verify it finishes
   in-flight requests when stopped (`kill_signal`, `kill_timeout`); on
   staging an upload was cut off when Fly stopped the idle-looking machine.
+- **The worker stopping with a document being read** (founder,
+  2026-10-08): "A document cut off mid-read stays in processing and blocks
+  dispatch for every tenant (global, 1 slot) until the stuck sweep
+  re-queues it 30 to 35 minutes after the claim. Any worker deploy or
+  restart during a read longer than kill_timeout triggers it. Launch
+  blocker."
+  - Where it comes from: `dispatch_candidates` (migration 0035) counts
+    every `processing` document as in flight, with no age limit; the
+    dispatch pass adds that up over all tenants and compares it with the
+    worker's slots (`DISPATCH_IN_FLIGHT_TARGET`, 1). Recorded by
+    `test_a_stale_processing_document_holds_the_one_slot_against_every_other_tenant`.
+    Nothing alerts while it lasts, and each cut uses one of the
+    document's three tries.
+  - **A fix to evaluate, not built:** on worker start, re-queue the
+    documents a previous worker instance left in `processing`.
+    *With one worker* this looks safe: the launcher starts before any
+    task runs and no other worker exists, so every `processing` document
+    at that moment belongs to an instance that is gone; clearing its
+    claim stamp (as `release_claim` does for a lost parse) and sending it
+    again goes through the same claim and the same resumed-job path the
+    stuck sweep uses today. To be checked first: that Fly never runs the
+    old and the new machine at once during a deploy, and that the try
+    stays counted. *With more than one worker* it is not safe as
+    described: a starting worker cannot tell a dead instance's claim
+    from a live one's, and re-queueing a live read would start a second
+    read of the same document. The claim would have to name the worker
+    instance that made it, and only claims of an instance known to have
+    ended could be re-queued.
 - **Redis plan for production:** decided after the idle hour is measured
   again with a longer queue-poll interval and task-result storage off
   (proposed by its own PR). The rule and the corrected break-even, about
@@ -1635,6 +1663,7 @@ D-196 has the evidence for each; nothing here is built):
   earlier steps' outcomes (`CI_STEPS`) and says which one failed.
 - **Before the first real customer:** an email provider (the founder is setting one up with the domain). Until then every invite, notice and digest waits in the Console Outbox and must be sent by hand, and the inbound intake address cannot receive real mail.
 - Digest opt-out per person: decided yes, but later (needs a settings page).
+- **An idle worker's Redis commands: three settings changed, one idle hour still to measure** (founder, 2026-10-08; D-196; RUNBOOK 9.8). The worker's queue read waits 10 s, not 1 (`BROKER_POLL_SECONDS`); no task result is stored (no result backend on the worker, the API's client or the e-mail intake client; nothing ever read one); and `apps/worker/fly.toml` gives a stopping worker 30 s (`kill_timeout`; Fly's default is 5), because a stopping worker waits for its open read. Proven in the suites: kombu's own transport takes the 10 s, the three clients have no backend, no `send_task` result is kept anywhere, and in CI a real worker leaves no result key in Redis. **Not proven until the staging deploy:** the idle hour's command count against the $10 break-even (about 6,850 an hour), and the worker's real shutdown time at the 10 s read. Production's Redis plan is decided on that hour. Local runs on Windows may pause up to about 2 s before picking up a job.
 - `RUNBOOK.md` exists since Phase 5.5 with the migration backup procedure (section 1). Still to add in Phase 6: the constants (CLAUDE.md 7.15.4; `constants.py` is their single home until then), tier price changes (`scripts/new_tier_version.py`, D-137), the restore drill and the parser-upgrade process.
 - **Stripe setting, before the first real customer:** the account currently cancels a subscription after 90 days of an unpaid invoice (seen on Acme Test Prospect: "Auto-cancels Dec 18"). Policy is that the founder decides suspension (D-125), so set it to leave the subscription past due, **both for invoices sent to customers and for failed card payments** (card billing, decided 2026-09-29). Only the founder can change it. Now on the RUNBOOK section 3 checklist ("Once, before the first real customer").
 - Sandbox leftover: Acme Test Prospect's founding coupon was created before the invoice-count fix (D-138) and discounts one extra invoice (19 Dec). Test data only; correct it in Stripe or leave it.

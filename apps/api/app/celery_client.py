@@ -18,7 +18,9 @@ from docflow_core.constants import DISPATCH_QUEUE
 
 settings = get_settings()
 
-celery_client = Celery("docflow_api_client", broker=settings.redis_url, backend=settings.redis_url)
+# No result backend: the API only sends, and never reads a task's result
+# (founder, 2026-10-08; D-196; apps/worker/app/celery_app.py).
+celery_client = Celery("docflow_api_client", broker=settings.redis_url)
 
 
 def nudge_dispatcher() -> None:

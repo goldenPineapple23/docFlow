@@ -23,6 +23,21 @@
 app = "docflow-worker-staging"
 primary_region = "iad"
 
+# How Fly stops a machine (a deploy, a scale-down, `fly machine stop`): it
+# sends kill_signal, waits kill_timeout seconds, then ends the machine whether
+# or not the process has finished. Fly's defaults are SIGINT and 5 seconds
+# (its configuration reference, read 2026-10-08); the maximum is 300.
+# SIGINT is written down because app.run_workers depends on it (below).
+# 30 seconds (proposed 2026-10-08, D-196): a stopping worker first waits for
+# the read it has open on its queues, up to BROKER_POLL_SECONDS (10, in
+# app/celery_app.py), and an idle worker's shutdown measured about 4 seconds
+# at a 1-second read. 5 seconds would cut every shutdown short. 30 also lets a
+# short document that is being read finish; a longer one is cut off as before
+# and the stuck sweep returns it (RUNBOOK 5). tests/test_celery_app.py keeps
+# this above the read's timeout.
+kill_signal = "SIGINT"
+kill_timeout = 30
+
 [env]
   DOCFLOW_ENV = "staging"
   PARSE_SERVICE_URL = "http://docflow-parse-staging.flycast"
