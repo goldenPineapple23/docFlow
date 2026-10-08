@@ -3101,7 +3101,8 @@ The evidence turned up a second thing. `record_worker_start` returned 7: the sui
 7. **The token count taken before a call is well below what is billed** (1,200 counted against 2,621 billed for the extraction request; the output schema is the difference). D-163 already calls it a lower bound; this is how low.
 
 **Decided (founder, 2026-10-08):**
-- **Routing moves to `claude-haiku-5-5`. Extraction stays on `claude-sonnet-5` for now:** no move to `claude-sonnet-5-5`. Never a cheaper model for final extraction.
+- **Extraction stays on `claude-sonnet-5`. There is no move to `claude-sonnet-5-5`:** the input tokens are the same, one sample cost about 18% more from extra thinking output, and thinking cannot be disabled on Sonnet 5.5. Revisit before `claude-sonnet-5`'s retirement floor (2027-06-30), or if Anthropic posts a deprecation notice for it. Never a cheaper model for final extraction.
+- **Routing moves from `claude-haiku-4-5` to `claude-haiku-5-5`.** The reason is staying ahead of the retirement clock, not savings: about $0.0008 a document (a routing call was $0.0009 on Haiku 4.5 in the live runs recorded in `CHECKPOINTS.md`, and $0.0001 on Haiku 5.5 in the live call above). The measured tokenizer effect is +35% tokens on a text order and +3.5% on a scanned PDF.
 - **`claude-opus-5-5` gets a config slot, `DOCFLOW_ESCALATE_MODEL`, empty meaning off, and no code path uses it.** Secondary-model verification stays deferred (Section 3).
 - **Model IDs live in one config module, set by environment variables** (the existing `DOCFLOW_EXTRACTION_MODEL` and `DOCFLOW_ROUTING_MODEL`), with no model-ID literal elsewhere. A CI test fails on a model ID outside that module and the test fixtures. It matches model-ID patterns in code directories, not every "claude-" string (comments and `apps/web/src/app/login/page.tsx` name the build prompt's file).
 - **No auto-upgrade, ever:** never "latest", never a model chosen from the API's list, never a different model on error. Anthropic's server-side fallback for refusals is not enabled; a refusal fails the document with a catalog code.
@@ -3110,19 +3111,23 @@ The evidence turned up a second thing. `record_worker_start` returned 7: the sui
 - **Each `extraction_runs` row records** the model requested, the model the API reports, token counts including thinking tokens, `est_cost_usd` and the price-table version. The new columns and a wider `est_cost_usd` (it is `numeric(10,4)`, and a Haiku 5.5 routing call costs about $0.0001) go in one migration, proposed to the founder first (backup first, RUNBOOK 1.3).
 - **Tests:** the cost function at exactly 100,000 and 100,001 input tokens on Haiku 5.5; spot checks for Sonnet and Opus 5.5; startup validation; recorded golden answers keyed by model ID, so a model change forces a re-record and a live run.
 - **RUNBOOK gains "Upgrading a model":** verify the ID and price on the docs, change the env var on staging only, run the live golden fixture, the extended golden set and the contamination test, compare field by field with the previous model's approved results and the correction rate, then production. The previous ID stays documented for rollback. A recurring reminder to read the model-deprecations page.
-- **The routing change must disable thinking or raise `max_tokens`, and must add the `stop_reason` check on routing** (finding 4).
+- **The routing change disables thinking on the routing call, raises `max_tokens` as headroom, and keeps the `stop_reason` check on routing** (finding 4). The check itself goes in with the first change, before the model moves.
 - **`docs/parse_pos_v2.py` is ported from the founder's description** (env-driven model IDs, a per-model price table, tiered pricing), since the file is not in the repository. Its floats are not ported.
-- **The temperature finding is accepted** and recorded here and in CLAUDE.md's founder block. Sections 0, 3, 7 and 10 stay verbatim; this policy supersedes Section 3's "Extraction model" bullet once it is applied.
+- **Temperature 0 is not applicable.** It is rejected on all three 5.5 models and has not been sent since D-021. Reproducibility rests on structured outputs, the recorded replay in CI, the live golden at every checkpoint, and mandatory human review. Recorded here and in CLAUDE.md's founder block. Sections 0, 3, 7 and 10 stay verbatim; this policy supersedes Section 3's "Extraction model" bullet once it is applied.
 - **The tech-stack document's per-document cost estimates predate this.** Measured cost from the cost log is the truth; the document's update is pending.
 
 **Planned, after "go", as two changes so that the refactor and the model change are never one diff:**
 1. The config module, the price table, the startup check, the CI guard, the tests, the keyed recordings, the `end_turn`-only rule on extraction, the `stop_reason` check on routing and the RUNBOOK section, with the model IDs unchanged. Then the migration.
-2. Routing to `claude-haiku-5-5`: on staging only first, then the live runs above, then production.
+2. Routing to `claude-haiku-5-5`, and nothing else. The env change on staging only, then a re-record, then the live golden fixture, the extended golden set and the contamination test. The live golden goes through the worker and the streamed path, which the verification calls above did not use. The routing answers (buyer pre-identification and its confidence) of Haiku 4.5 and Haiku 5.5 are compared on the golden and extended sets, and any disagreement is reported to the founder before production is touched.
 
-**At the same checkpoint, report only:** the golden fixture and the extended golden set on `claude-haiku-5-5` and `claude-sonnet-5-5`, with field-level differences, confidence calibration and cost per document. The rule "never a cheaper model for final extraction" does not change by this; the founder decides afterwards.
+Neither change starts before the founder's "go".
+
+**At the same checkpoint, report only:** the golden fixture and the extended golden set on `claude-haiku-5-5` and `claude-sonnet-5` for final extraction, with field-level differences and cost per document. The rule "never a cheaper model for final extraction" does not change by this; the founder decides afterwards.
+
+**What moves the "go" earlier:** a deprecation notice for `claude-haiku-4-5`, or a Stage 3 checkpoint more than two to three weeks away. Claude tells the founder, who decides. On or after 2026-10-16 Claude reads Anthropic's model-deprecations page again for Haiku 4.5 and reports.
 
 **Not verified:**
-- Which usage fields count toward Haiku 5.5's 100,000-token threshold. The docs say "prompts over 100,000 tokens". The app uses no prompt caching, so `input_tokens` is the whole prompt today.
+- Which usage fields count toward Haiku 5.5's 100,000-token threshold. The docs say "prompts over 100,000 tokens". The app uses no prompt caching, so `input_tokens` is the whole prompt today, and a routing prompt is one to two thousand tokens, so the higher tier is not reached.
 - Whether Haiku 5.5 ever thinks on a routing request: one call is not evidence that it never does.
 - The live calls did not go through the worker or the streamed path. They used the same prompts, schemas and content blocks as `docflow_core.extraction`, sent directly.
 - The `.docx` documents were not searched for model names.
