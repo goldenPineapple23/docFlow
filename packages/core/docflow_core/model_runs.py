@@ -97,6 +97,27 @@ def record_started(
     return run_id
 
 
+def set_document_cost(session: Session, document_id: UUID) -> None:
+    """
+    The document's own est_cost_usd, set from the cost record: the sum of its
+    finished runs (outcome rows only, D-163), NULL while none has a cost.
+    Called in the transaction that writes an outcome row, so the figure the
+    Console, the rollup and cost per document read can never drop a paid call
+    -- a lost one, a failed one, an earlier try's. Never set it any other way.
+    """
+    session.execute(
+        text(
+            """
+            UPDATE documents
+               SET est_cost_usd = (SELECT sum(r.est_cost_usd) FROM extraction_runs r
+                                    WHERE r.document_id = :id AND r.run_state = 'finished')
+             WHERE id = :id
+            """
+        ),
+        {"id": str(document_id)},
+    )
+
+
 LOST_CALL_CODE = "worker_lost_during_call"
 
 
@@ -107,8 +128,9 @@ def close_lost_runs(session: Session, tenant_id: UUID, document_id: UUID) -> Dec
     counted input priced as a lower bound, `cost_complete: false` (the output
     written before the death is unknown, as for a dropped stream). Called by
     the stuck sweep when it takes the document over, and by the next claim.
-    Adds the cost to the document's own est_cost_usd and returns it. Safe to
-    run twice: one outcome per start (unique index), ON CONFLICT does nothing.
+    Puts the cost on the document's own est_cost_usd (`set_document_cost`)
+    and returns it. Safe to run twice: one outcome per start (unique index),
+    ON CONFLICT does nothing.
     """
     rows = session.execute(
         text(
@@ -162,10 +184,7 @@ def close_lost_runs(session: Session, tenant_id: UUID, document_id: UUID) -> Dec
             added += cost
     if added:
         # The document's own cost (cost per document, the rollup) sees it too.
-        session.execute(
-            text("UPDATE documents SET est_cost_usd = coalesce(est_cost_usd, 0) + :c WHERE id = :id"),
-            {"c": str(added), "id": str(document_id)},
-        )
+        set_document_cost(session, document_id)
     return added
 
 

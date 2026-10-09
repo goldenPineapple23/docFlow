@@ -259,10 +259,15 @@ def _record_runs(
     """The extraction call's outcome row (D-142), pointing at its started row
     (D-163). The routing read, when there was one, is already on record:
     `example_prompting.plan` writes it the moment it returns, so a failure
-    after it can't lose it."""
-    return model_runs.record_extraction(
+    after it can't lose it. The document's own cost is then set from the
+    whole record, in the same transaction, so every path that records an
+    outcome -- saved, failed, waiting on the provider -- keeps every paid
+    call on it."""
+    run_id = model_runs.record_extraction(
         session, tenant_id, document_id, result, started_run_id=started_run_id
     )
+    model_runs.set_document_cost(session, document_id)
+    return run_id
 
 
 def _record_unsaved_extraction(
@@ -278,29 +283,11 @@ def _record_unsaved_extraction(
     Logged, never raised: the document must still end `failed`."""
     try:
         with tenant_session(tenant_id) as session:
-            model_runs.record_extraction(
-                session, tenant_id, document_id, result, started_run_id=started_run_id
-            )
-            session.execute(
-                text("UPDATE documents SET est_cost_usd = :cost WHERE id = :id"),
-                {"id": str(document_id), "cost": _money(_total_cost(plan, result))},
-            )
+            _record_runs(session, tenant_id, document_id, plan, result, started_run_id)
     except Exception as exc:  # noqa: BLE001 -- see the docstring
         logger.error(
             "extraction_run_not_recorded document_id=%s error_type=%s", document_id, type(exc).__name__
         )
-
-
-def _total_cost(plan: ExamplePlan, result: ExtractionResult) -> Decimal | None:
-    """The document's whole model bill: extraction plus the routing read, so
-    cost per document and margin on the dashboard stay honest."""
-    routing_cost = plan.routing.est_cost_usd if plan.routing is not None else None
-    costs = [c for c in (result.est_cost_usd, routing_cost) if c is not None]
-    return sum(costs, Decimal("0")) if costs else None
-
-
-def _money(value: Decimal | None) -> str | None:
-    return str(value) if value is not None else None
 
 
 def _mark_failed(tenant_id: UUID, document_id: UUID, *, raw_response: dict | None = None) -> None:
@@ -771,7 +758,6 @@ def _parse_and_extract(tid: UUID, did: UUID) -> None:
                     "prompt_hash": result.prompt_hash,
                     "schema_version": result.schema_version,
                     "raw_json": result.raw_response,
-                    "est_cost_usd": _money(_total_cost(plan, result)),
                     "failure_code": result.error_code or "DOC-008",
                     "processed_at": document_status.NOW,
                     **document_status.WAIT_CLEARED,
@@ -813,7 +799,7 @@ def _save_extraction(
                 UPDATE documents
                 SET model_id = :model_id, prompt_hash = :prompt_hash,
                     schema_version = :schema_version, input_tokens = :input_tokens,
-                    output_tokens = :output_tokens, est_cost_usd = :est_cost_usd,
+                    output_tokens = :output_tokens,
                     injection_suspected = :injection_suspected,
                     overall_confidence = :overall_confidence, raw_json = :raw_json,
                     field_schema_version = :field_schema_version,
@@ -829,7 +815,6 @@ def _save_extraction(
                 "field_schema_version": schema.version or None,
                 "input_tokens": result.input_tokens,
                 "output_tokens": result.output_tokens,
-                "est_cost_usd": _money(_total_cost(plan, result)),
                 "run_id": str(run_id),
                 "injection_suspected": result.injection_suspected,
                 "overall_confidence": str(overall_confidence),

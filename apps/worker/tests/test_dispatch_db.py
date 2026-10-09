@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import threading
 from collections.abc import Iterator
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -562,6 +563,75 @@ def test_waiting_never_costs_a_try_and_the_wait_is_cleared_on_success(monkeypatc
         assert row["status"] == "needs_review", row["failure_code"]
         assert row["processing_attempts"] == 1 and list(row["timeout_attempts"] or []) == []
         assert (row["waiting_since"], row["wait_cause"], row["retry_at"]) == (None, None, None)
+
+
+class _DroppedStream:
+    """An answer that had started -- its input is billed and reported -- when
+    the connection was lost."""
+
+    current_message_snapshot = SimpleNamespace(usage=SimpleNamespace(input_tokens=1000, output_tokens=0))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return None
+
+    def __iter__(self):
+        import httpx2
+
+        raise httpx2.RemoteProtocolError("peer closed connection mid-body")
+        yield  # a generator: the error comes at the first event
+
+
+class _DropsMidAnswerThenUp(_ProviderDownThenUp):
+    """The first `failures` answers start and are cut off; then one arrives."""
+
+    def stream(self, **kwargs):
+        if self.left > 0:
+            self.left -= 1
+            return _DroppedStream()
+        return self.answer.stream(**kwargs)
+
+
+def test_a_paid_call_that_ended_in_a_provider_wait_stays_on_the_documents_cost(monkeypatch, clean_provider):
+    """D-163: a call cut off mid-answer was paid for. Its run is recorded when
+    the document goes to wait, and the document's own est_cost_usd holds it
+    then and still holds it after the retry is saved."""
+    import app.tasks.parse_and_extract as task_module
+
+    def cost_and_runs() -> tuple:
+        with platform_session() as session:
+            runs = session.execute(
+                text(
+                    "SELECT succeeded, est_cost_usd FROM extraction_runs "
+                    "WHERE document_id = :d AND run_state = 'finished' ORDER BY created_at"
+                ),
+                {"d": str(document_id)},
+            ).all()
+        return _row(document_id)["est_cost_usd"], [(r[0], r[1]) for r in runs]
+
+    monkeypatch.setattr(task_module, "dispatch_after_task", lambda: None)
+    monkeypatch.setattr(model_provider, "record_failure", lambda error: False)
+    with WorkerTestTenant("Acme Test Paid Then Waits") as tenant:
+        document_id = tenant.create_pending_document()
+        client = _DropsMidAnswerThenUp(1, model_payload(lines=[{}]))
+        monkeypatch.setattr(task_module.anthropic, "Anthropic", client)
+        task_module.parse_and_extract(str(tenant.tenant_id), str(document_id))
+
+        row = _row(document_id)
+        assert (row["status"], row["wait_cause"]) == ("pending", "model_provider"), row["failure_code"]
+        cost, runs = cost_and_runs()
+        assert [succeeded for succeeded, _ in runs] == [False]
+        assert runs[0][1] is not None and runs[0][1] > 0
+        assert cost == runs[0][1]
+
+        _set(document_id, "retry_at = NULL")  # the backoff, passed
+        run_extraction(monkeypatch, tenant, document_id, model_payload(lines=[{}]))
+        assert _row(document_id)["status"] == "needs_review", _row(document_id)["failure_code"]
+        cost, runs = cost_and_runs()
+        assert [succeeded for succeeded, _ in runs] == [False, True]
+        assert cost == sum(run_cost for _, run_cost in runs)
 
 
 def test_one_401_puts_the_order_in_the_provider_wait_and_marks_the_provider_down_at_once(

@@ -317,6 +317,10 @@ How a run is reported:
   `626 passed, 1 skipped, 3 deselected` (one added,
   `test_celery_client.py`). The core suite is unchanged: `806 passed, 1
   skipped`.
+  **From the document-cost fix (2026-10-09, D-163's addendum):** the
+  worker suite reads `191 passed, 7 skipped` (two tests added to
+  `test_stage3c_db.py`, one to `test_dispatch_db.py`). Core and API are
+  unchanged.
   **What CI reports for the same code, side by side** (founder,
   2026-10-08). CI runs every test, so each line must also read `0 failed,
   0 skipped, 0 unapproved`:
@@ -324,7 +328,7 @@ How a run is reported:
   | Suite | This machine, against staging | CI |
   |---|---|---|
   | core | 806 passed, 1 skipped | 807 tests |
-  | worker | 188 passed, 7 skipped | 195 tests |
+  | worker | 191 passed, 7 skipped | 198 tests |
   | API | 626 passed, 1 skipped, 3 deselected | 627 tests |
 
   The difference in each row is exactly the skips named here, which need
