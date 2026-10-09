@@ -4,6 +4,21 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-09 (the stop drills and the second idle hour done, three PRs merged; D-197)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-08:** Phase 5.5, Stage 3. Slices 3a to 3e are all merged and the logins
+cutover (RUNBOOK 10.2) is done through step 6. **The first worker deploy (RUNBOOK 9.7) is done
+through step 15: every gate passed, and the founder accepted the 500 + 1 run on 2026-10-08**
+(D-194, D-196; CHECKPOINTS.md, Stage 3, "The first worker deploy"). The deployed worker has read
+532 documents on Fly staging; recorded model spend is $6.91. The Fly worker and beat are at 0 and
+the Healthchecks.io check is paused. **Next:** two PRs proposed for the founder's review, neither
+merged without the founder: the recycle threshold at about 500 MiB, and a longer queue-poll
+interval with task-result storage off, followed by one idle hour measured again (D-196). Now due,
+the founder's actions: dropping `backup_0034`, `backup_0035`, `backup_3b` and the role
+`docflow_app` (RUNBOOK 1.3; 10.2 step 7). Then the Stage 3 checkpoint. Nothing of Stage 4 is
+built before its "go", and the model policy (D-195) waits for the same "go".
+
 ## Replaced on 2026-10-08 (the first worker deploy's steps 9 to 15 done, the 500 + 1 run accepted; D-196)
 
 <!-- the paragraph as it stood, starting on the next line -->

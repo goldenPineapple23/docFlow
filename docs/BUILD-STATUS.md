@@ -18,17 +18,20 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-10-08:** Phase 5.5, Stage 3. Slices 3a to 3e are all merged and the logins
-cutover (RUNBOOK 10.2) is done through step 6. **The first worker deploy (RUNBOOK 9.7) is done
-through step 15: every gate passed, and the founder accepted the 500 + 1 run on 2026-10-08**
-(D-194, D-196; CHECKPOINTS.md, Stage 3, "The first worker deploy"). The deployed worker has read
-532 documents on Fly staging; recorded model spend is $6.91. The Fly worker and beat are at 0 and
-the Healthchecks.io check is paused. **Next:** two PRs proposed for the founder's review, neither
-merged without the founder: the recycle threshold at about 500 MiB, and a longer queue-poll
-interval with task-result storage off, followed by one idle hour measured again (D-196). Now due,
-the founder's actions: dropping `backup_0034`, `backup_0035`, `backup_3b` and the role
-`docflow_app` (RUNBOOK 1.3; 10.2 step 7). Then the Stage 3 checkpoint. Nothing of Stage 4 is
-built before its "go", and the model policy (D-195) waits for the same "go".
+**Status, as of 2026-10-09:** Phase 5.5, Stage 3. Slices 3a to 3e are all merged and the logins
+cutover (RUNBOOK 10.2) is done through step 6. The first worker deploy (RUNBOOK 9.7) is done
+through step 15 and the founder accepted the 500 + 1 run (D-194, D-196). **Merged since:** the
+recycle threshold at 500 MiB (PR #52), the Redis idle change (PR #53) and the document-cost fix
+(PR #54; D-163's addendum). **The stop drills and the second idle hour are done (D-197):** an idle
+hour is 6,205 Redis commands, so production stays on Pay as You Go; a deploy during a short read
+lets the read finish; a worker killed during a read held another tenant's order for 31 minutes 16
+seconds, which is the Phase 6 launch blocker, measured. The deployed worker has read 537 documents
+on Fly staging; recorded model spend is $6.97. The Fly worker and beat are at 0 and the
+Healthchecks.io check is paused. **Next:** the founder's actions, now due: dropping `backup_0034`,
+`backup_0035`, `backup_3b` and the role `docflow_app` (RUNBOOK 1.3; 10.2 step 7). Then the Stage 3
+checkpoint, whose list now also holds the three `live_api` tests and the test leftovers' cleanup
+(CHECKPOINTS.md). Nothing of Stage 4 is built before its "go", and the model policy (D-195) waits
+for the same "go".
 
 **That paragraph is the current state only** (founder, 2026-10-05; D-191). When it changes, the
 paragraph it replaces moves, word for word, to the top of `docs/status-history.md`, which is not
@@ -1415,16 +1418,44 @@ D-196 has the evidence for each; nothing here is built):
     read of the same document. The claim would have to name the worker
     instance that made it, and only claims of an instance known to have
     ended could be re-queued.
-- **Redis plan for production:** decided after the idle hour is measured
-  again with a longer queue-poll interval and task-result storage off
-  (proposed by its own PR). The rule and the corrected break-even, about
-  6,850 commands an hour for the $10 plan, are in D-196 and RUNBOOK 9.7.
+  - **Measured on Fly staging, 2026-10-08 (D-197): 31 minutes 16 seconds
+    from the cut-off claim to tenant A's dispatch.** The documents worker
+    was killed during tenant B's read; tenant A's order, already saved,
+    waited until the stuck sweep returned B's document. Nothing alerted.
+  - **What a deploy does to a short read** (2026-10-09, D-197): the read
+    finished 8 s after the signal and the worker exited by itself; no
+    document was cut off. A read longer than `kill_timeout` (30 s) has not
+    been tested on a deploy.
+- **Redis plan for production: Pay as You Go** (founder, 2026-10-09;
+  D-197). The idle hour measured again with the 10 s queue read and no
+  stored results: 6,205 commands, about $9.06 a month for an always-on
+  worker, under the $10 line. Re-check against the first production bill
+  and switch to the Fixed 250 MB plan if it goes over $10. The rule is in
+  D-196 and RUNBOOK 9.7; the measurement, in RUNBOOK 9.8.
+- **Production's Redis endpoint is reachable only over Fly's private
+  network: confirm it** (founder, 2026-10-09). TLS is disabled on the
+  Upstash endpoint.
 - **Upload time:** about 2.9 s an upload through `fly proxy` to the 512 MB
   staging API, not looked into; to be measured on production's API.
 - **Open with the founder:** whether the catalog gets a price field (an
   import keeps the column per item in `items.raw_data` meanwhile); two
   rows of the UAT plan (TC-06 is stale, TC-07 should expect "reaches
   `needs_review`").
+
+**Phase 6 items from the drills of 2026-10-08 and 2026-10-09** (D-197;
+nothing here is built):
+
+- **Pilot blocker (founder, 2026-10-08):** "The production API must refuse
+  to start with console MFA enforcement off unless an explicit override is
+  set. Today nothing stops it. The default is off and the only safeguard is
+  RUNBOOK 4.2's manual check."
+- **Error logging names the cause of a connection failure** (founder,
+  2026-10-09). The API's unhandled-error log prints an error's type and
+  never its message, which on 2026-10-08 hid that the local Redis was
+  down. Log the driver's own message for a named list of connection-error
+  types (broker, database, storage) only, never the wrapped text: a
+  database error's full text can carry SQL parameters with customer
+  values. Type-only stays for everything else (Section 7.10).
 
 ---
 
@@ -1629,6 +1660,12 @@ D-196 has the evidence for each; nothing here is built):
     preferred over a lost one (at-least-once).** The founder is setting up
     the Postmark sending domain now (steps given in chat, 2026-09-30), so
     DNS verification isn't on the stage's critical path.
+    **For that stage (founder, 2026-10-08; the number updated 2026-10-09;
+    D-197):** "Rows in held status written before the sender exists must
+    never be sent. The sender stage adds a mechanism that enforces this (a
+    cancelled status, or a cutoff timestamp the sender respects), not a
+    convention. Today staging has 76 held rows as of 2026-10-09, and worker
+    alert rows carry the localhost link."
 - **Security upgrades, 2026-09-30 (branch `phase55/security-pyjwt-next`,
   founder-approved as its own PR before 3b merges). MERGED 2026-09-30 (PR
   #30, main `166896e`), before 3b.** CI's dependency audit
@@ -1663,7 +1700,10 @@ D-196 has the evidence for each; nothing here is built):
   earlier steps' outcomes (`CI_STEPS`) and says which one failed.
 - **Before the first real customer:** an email provider (the founder is setting one up with the domain). Until then every invite, notice and digest waits in the Console Outbox and must be sent by hand, and the inbound intake address cannot receive real mail.
 - Digest opt-out per person: decided yes, but later (needs a settings page).
-- **An idle worker's Redis commands: three settings changed, one idle hour still to measure** (founder, 2026-10-08; D-196; RUNBOOK 9.8). The worker's queue read waits 10 s, not 1 (`BROKER_POLL_SECONDS`); no task result is stored (no result backend on the worker, the API's client or the e-mail intake client; nothing ever read one); and `apps/worker/fly.toml` gives a stopping worker 30 s (`kill_timeout`; Fly's default is 5), because a stopping worker waits for its open read. Proven in the suites: kombu's own transport takes the 10 s, the three clients have no backend, no `send_task` result is kept anywhere, and in CI a real worker leaves no result key in Redis. **Not proven until the staging deploy:** the idle hour's command count against the $10 break-even (about 6,850 an hour), and the worker's real shutdown time at the 10 s read. Production's Redis plan is decided on that hour. Local runs on Windows may pause up to about 2 s before picking up a job.
+- **An idle worker's Redis commands: three settings changed, and the idle hour measured again on 2026-10-09** (founder, 2026-10-08; D-196, D-197; RUNBOOK 9.8). The worker's queue read waits 10 s, not 1 (`BROKER_POLL_SECONDS`); no task result is stored (no result backend on the worker, the API's client or the e-mail intake client; nothing ever read one); and `apps/worker/fly.toml` gives a stopping worker 30 s (`kill_timeout`; Fly's default is 5), because a stopping worker waits for its open read. Proven in the suites: kombu's own transport takes the 10 s, the three clients have no backend, no `send_task` result is kept anywhere, and in CI a real worker leaves no result key in Redis. **Measured on Fly staging since (2026-10-08 and 2026-10-09; D-197, RUNBOOK 9.8):** the idle hour is 6,205 commands, under the $10 break-even (about 6,850 an hour), so production stays on Pay as You Go; an idle worker scaled to 0 exits by itself in 10 s; a deploy during a short read lets the read finish. **Found by the same runs:** for about 10 s after every worker start each Celery worker receives nothing. The fix to evaluate, starting the workers without mingle and without gossip, is its own PR after Stage 3's open work; not built. Local runs on Windows may pause up to about 2 s before picking up a job.
+- **For Stage 4, an observation not explained (D-197):** one dispatch pass took 2.79 s on Fly staging on 2026-10-08, for the first document after a quiet period (2.61 s once on 2026-10-07; 0.12 to 0.30 s for other such documents; 0.13 s when warm).
+- **For Stage 5, log wording (D-197):** the lifecycle sweep's log line `ready_alerted=1` counts tenants visited and reads as if an alert were raised on every pass, when nothing is written.
+- **A finding from the code, not yet seen (D-197):** the `tenant_ready_to_delete` alert is deduplicated only against an unacknowledged one, so it returns within five minutes of each acknowledgement, with a new held e-mail row, until the tenant is deleted or reactivated. The founder will acknowledge the one on staging and say whether it came back; what to do about it is decided then.
 - `RUNBOOK.md` exists since Phase 5.5 with the migration backup procedure (section 1). Still to add in Phase 6: the constants (CLAUDE.md 7.15.4; `constants.py` is their single home until then), tier price changes (`scripts/new_tier_version.py`, D-137), the restore drill and the parser-upgrade process.
 - **Stripe setting, before the first real customer:** the account currently cancels a subscription after 90 days of an unpaid invoice (seen on Acme Test Prospect: "Auto-cancels Dec 18"). Policy is that the founder decides suspension (D-125), so set it to leave the subscription past due, **both for invoices sent to customers and for failed card payments** (card billing, decided 2026-09-29). Only the founder can change it. Now on the RUNBOOK section 3 checklist ("Once, before the first real customer").
 - Sandbox leftover: Acme Test Prospect's founding coupon was created before the invoice-count fix (D-138) and discounts one extra invoice (19 Dec). Test data only; correct it in Stripe or leave it.

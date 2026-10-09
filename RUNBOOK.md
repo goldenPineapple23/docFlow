@@ -321,6 +321,10 @@ How a run is reported:
   worker suite reads `191 passed, 7 skipped` (two tests added to
   `test_stage3c_db.py`, one to `test_dispatch_db.py`). Core and API are
   unchanged.
+  **A change to `packages/core` needs all three suites** (2026-10-09,
+  D-197): the API and the worker both install it. On that day a fix in
+  `docflow_core/model_runs.py` was first taken to be worker-only and the
+  API suite was left out; it was run once that was noticed.
   **What CI reports for the same code, side by side** (founder,
   2026-10-08). CI runs every test, so each line must also read `0 failed,
   0 skipped, 0 unapproved`:
@@ -1857,6 +1861,24 @@ above, and what to do the same way next time:**
 - **`fly redis status` is never run:** it prints the URL with its
   password. The founder reads Upstash's pages instead.
 
+**Rules and notes added after the drills of 2026-10-08 and 2026-10-09
+(D-197):**
+- **A deploy that has started is never stopped** (founder, 2026-10-08). If
+  the script around it fails, leave the deploy to finish and report the
+  result. A release that looks stuck or half-applied is reported, not
+  repaired. On 2026-10-08 a deploy stopped 21 s in had already updated
+  both machines and never marked its release complete: that release (v7 on
+  the staging worker) still reads `running`, which is cosmetic, and the
+  next deploy went past it without a warning.
+- **A paused Healthchecks.io check un-pauses at the worker's next ping,**
+  so a pause only holds while the worker is down. Pause it after the
+  worker has stopped, not before, and resume it when the worker is
+  deployed again.
+- **`fly` or `flyctl`:** on 2026-10-09 flyctl updated itself (to v0.4.115)
+  and the `fly` command name disappeared from `C:\Users\NK\.fly\bin` on
+  the founder's machine. `flyctl` is the same program and takes the same
+  commands.
+
 **If something goes wrong.** Any step fails: stop the worker and report.
 Documents already received stay as they are; nothing is deleted. Going back
 entirely is stopping the three apps: staging is then as before, the local
@@ -1877,11 +1899,43 @@ Three settings follow from that measurement:
 
 | Setting | Where | Value | Why |
 |---|---|---|---|
-| `BROKER_POLL_SECONDS` | `apps/worker/app/celery_app.py` (kombu's `polling_interval`, which sets its BRPOP timeout) | 10 (kombu's default is 1) | Each of the two worker processes keeps one blocking read open on its queues and repeats it when it times out: at 1 s, about 7,200 commands an hour between them (Upstash showed about 6,700), half of idle. The read returns the moment a job arrives, so pickup is no slower. |
+| `BROKER_POLL_SECONDS` | `apps/worker/app/celery_app.py` (kombu's `polling_interval`, which sets its BRPOP timeout) | 10 (kombu's default is 1) | Each of the two worker processes keeps one blocking read open on its queues and repeats it when it times out: at 1 s, about 7,200 commands an hour between them (Upstash showed about 6,700), half of idle. Once a worker is running, the read returns the moment a job arrives, so pickup is no slower (measured: 4 ms from the send to the worker). **Not so for about 10 s after a worker starts** (below; corrected 2026-10-09, D-197: this row said "pickup is no slower" without the exception). |
 | No result backend | the three `Celery(...)` objects: the worker, `apps/api/app/celery_client.py`, `docflow_core/email_intake.py`; and `task_ignore_result` on the worker | off | Every task's result was stored in Redis for a day and nothing ever read one. About 156 scheduled tasks an hour: the roughly 150 new keys an hour seen on Upstash. |
 | `kill_timeout` | `apps/worker/fly.toml` | 30 s (Fly's default is 5) | A stopping worker waits for the read it has open (kombu's `Channel.close`), so shutdown takes up to `BROKER_POLL_SECONDS` longer. An idle worker's shutdown took about 4 s at the 1 s read (2026-10-08, Fly's log). `tests/test_celery_app.py` fails if `kill_timeout` drops below the poll plus 15 s. |
 
-**Not measured yet, and owed before production's Redis plan is chosen:**
+**Measured on Fly staging, 2026-10-08 and 2026-10-09 (D-197):**
+- **The idle hour: 6,205 commands** (2026-10-09, 14:14 to 15:14; Upstash
+  read by the founder before and after: 221,696 and 227,901). That is
+  about $9.06 a month for an always-on worker, under the $10 line.
+  **Production stays on Pay as You Go** (founder). Re-check against the
+  first production bill and switch to the Fixed 250 MB plan if it goes
+  over $10. Staging stays on Pay as You Go.
+- **Before production's Redis is used** (founder): confirm its endpoint is
+  reachable only over Fly's private network. TLS is disabled on the
+  Upstash endpoint.
+- **An idle worker's shutdown at the 10 s read: 10 s, by itself, exit 0**
+  (scaled to 0 on 2026-10-08). Fly sent `SIGTERM` 5 s after the `SIGINT`
+  and the worker survived it. That `SIGTERM` belongs to `fly scale count`,
+  which destroys the machine with `Kill: true` (Claude's reading of
+  flyctl's source, not proven); a deploy sent none (below). **A scale-down
+  is not a stand-in for a deploy.**
+- **A deploy during a read** (2026-10-09): `SIGINT`, the read finished 8 s
+  later, the worker exited by itself 12 s after the signal, no `SIGTERM`.
+  **Not tested on a deploy: a read longer than `kill_timeout`.** To land
+  the signal inside a read, build and push the image first
+  (`fly deploy --build-only --push`), upload, and start
+  `fly deploy --image <that image>` once the document is `processing`: a
+  plain `fly deploy` spends about 20 s building before it signals, longer
+  than a short read.
+- **About 10 s after every worker start, each Celery worker receives
+  nothing** (four starts of four at the 10 s read; about 1 s at the old
+  1 s read): a job already in the queue was received 8.9 s after `ready`.
+  Read, not proven, as Celery's start-up neighbour search (mingle) leaving
+  a blocking read open for the poll time. The fix to evaluate is starting
+  the workers without mingle and without gossip: its own PR after Stage
+  3's open work, not built.
+
+**What was owed, as written before those measurements:**
 1. **One idle hour on staging with these settings.** The founder reads
    Upstash's command count before and after, with the time of each
    reading, and the "Top commands" view. Expected, as an estimate only:

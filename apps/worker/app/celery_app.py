@@ -83,9 +83,13 @@ STUCK_SWEEP_SECONDS = 300
 BROKER_VISIBILITY_TIMEOUT_SECONDS = 2 * 60 * 60
 # How long a worker's blocking read on its queues waits before it asks Redis
 # again (kombu's `polling_interval` option, which sets its BRPOP timeout; 1 s
-# by default). The read returns the moment a job arrives, so this is not a
-# delay before a document is picked up: it is how often an idle worker
-# repeats the question. At 1 s the two worker processes sent about 7,200
+# by default). Once a worker is running, the read returns the moment a job
+# arrives, so this is not a delay before a document is picked up: it is how
+# often an idle worker repeats the question. The exception is a worker's
+# start: for about this long after `ready` it received nothing, a job already
+# in the queue included (measured on Fly staging at four starts of four,
+# 2026-10-08; D-197. The cause is read as Celery's start-up neighbour search,
+# mingle, and is not proven). At 1 s the two worker processes sent about 7,200
 # commands an hour, half of everything Upstash billed for an idle worker
 # (measured at the first worker deploy; D-196). Two things follow from it:
 #   * a stopping worker waits for the read it has open, so shutdown takes up
