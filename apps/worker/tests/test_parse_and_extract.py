@@ -570,11 +570,20 @@ def test_the_routing_read_is_its_own_run_and_its_cost_is_part_of_the_document(mo
     runs = [params for sql, params in session.statements if "INSERT INTO extraction_runs" in sql]
     # The routing read is recorded by example_prompting.plan the moment it
     # returns (D-163; test_example_prompting.py) -- stubbed out here -- so the
-    # worker writes only the extraction run. The document's cost still sums both.
+    # worker writes only the extraction run.
     assert [r["run_kind"] for r in runs] == ["extraction"]
     assert captured["examples"] == []
-    costs = [params["v_est_cost_usd"] for params in _to(session, "failed")]
-    assert costs == ["0.0111"]
+    # The document's cost is set from the whole cost record straight after the
+    # outcome row (model_runs.set_document_cost), never carried on the status
+    # change. That the sum holds both calls is proved against the database:
+    # test_stage3c_db.py, "counts the routing read with the extraction".
+    order = [
+        "run" if "INSERT INTO extraction_runs" in sql else "cost"
+        for sql, _params in session.statements
+        if "INSERT INTO extraction_runs" in sql or "SET est_cost_usd" in sql
+    ]
+    assert order == ["run", "cost"]
+    assert all("v_est_cost_usd" not in params for params in _to(session, "failed"))
 
 
 def test_a_planning_failure_means_no_examples_never_a_lost_document(monkeypatch):

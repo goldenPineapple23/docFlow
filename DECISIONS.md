@@ -2160,6 +2160,13 @@ Remaining limits, named rather than hidden:
 - **Main-branch failure found by the baseline run:** `test_tenant_audit_api.py::test_changes_are_listed_newest_first_and_views_only_when_asked` failed on `main` (`1 failed, 390 passed, 3 deselected, 425 warnings`).
   - Cause: the Console Audit tab merges two tables with two clocks. `admin_actions.created_at` is the application server's `datetime.now()`; `tenant_lifecycle_events.created_at` is the database's `clock_timestamp()`. When the server clock lags the database's, events appear out of order.
   - Decision (founder): fixed in the named-system-actors PR. Console actions are stamped by the database clock, and the tab orders by timestamp, then id, so ties are stable.
+- **Addendum, 2026-10-09 (founder; no new decision number): the document's own cost is the sum of its finished runs.**
+  - Found on Fly staging on 2026-10-08 (drill C2): a worker was killed during the model call, the stuck sweep put the lost call's cost on the document, and the re-read then replaced the document's `est_cost_usd` with its own bill. Document `eb86df8c` reads $0.0120; its runs sum to $0.0142. The cost record itself (`extraction_runs`) was complete, so the daily cost breaker was never short.
+  - Who reads the document's figure: the Console's "AI cost this month", the health strip's spend today and yesterday, the nightly rollup (gross margin after AI, cost per document) and the test-batch panel.
+  - Fix: `model_runs.set_document_cost` sets `documents.est_cost_usd` to the sum of the document's finished runs. It is called in the transaction that writes an outcome row: by the worker's `_record_runs` (an answer saved, a failed answer, a wait on the provider, an answer whose save failed) and by `close_lost_runs`. Nothing else writes the field.
+  - The provider-wait path recorded its run and never touched the document's cost, so a call cut off mid-answer was missing from it until the retry, and after it. It now goes through the same helper.
+  - Tests, against the real database: the re-read after a lost call (failed before the fix: `0.0040` against `0.0065`), a paid call that ended in a provider wait, and the routing read counted with the extraction (`test_stage3c_db.py`, `test_dispatch_db.py`).
+  - **No backfill** (founder). `eb86df8c` on staging stays as a known short figure.
 
 ## D-164 -- The Audit tab runs on one clock: Console actions are stamped by the database; ties ordered by id
 

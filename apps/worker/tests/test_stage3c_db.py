@@ -67,31 +67,35 @@ def _backdate_claim(document_id: UUID) -> None:
 # ── F3: D-163, a worker killed during the model call ────────────────────────
 
 
+def _kill_a_worker_during_the_model_call(tenant: WorkerTestTenant, document_id: UUID) -> None:
+    marker = Path(tempfile.mkdtemp()) / "reached"
+    child = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "tests.kill_runner",
+            str(tenant.tenant_id),
+            str(document_id),
+            str(marker),
+            "model",
+        ],
+        cwd=WORKER_ROOT,
+    )
+    try:
+        deadline = time.monotonic() + 180
+        while not marker.exists():
+            assert child.poll() is None, "the child exited before reaching the model call"
+            assert time.monotonic() < deadline, "the child never reached the model call"
+            time.sleep(0.5)
+    finally:
+        child.kill()  # SIGKILL / TerminateProcess: no cleanup runs
+        child.wait(timeout=30)
+
+
 def test_F3_a_worker_killed_during_the_model_call_leaves_the_call_on_the_cost_record():
     with WorkerTestTenant("Acme Test Killed Mid Call") as tenant:
         document_id = tenant.create_pending_document()
-        marker = Path(tempfile.mkdtemp()) / "reached"
-        child = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "tests.kill_runner",
-                str(tenant.tenant_id),
-                str(document_id),
-                str(marker),
-                "model",
-            ],
-            cwd=WORKER_ROOT,
-        )
-        try:
-            deadline = time.monotonic() + 180
-            while not marker.exists():
-                assert child.poll() is None, "the child exited before reaching the model call"
-                assert time.monotonic() < deadline, "the child never reached the model call"
-                time.sleep(0.5)
-        finally:
-            child.kill()  # SIGKILL / TerminateProcess: no cleanup runs
-            child.wait(timeout=30)
+        _kill_a_worker_during_the_model_call(tenant, document_id)
 
         runs = _runs(document_id)
         assert [(r["run_kind"], r["run_state"], r["succeeded"]) for r in runs] == [
@@ -127,6 +131,85 @@ def test_F3_a_worker_killed_during_the_model_call_leaves_the_call_on_the_cost_re
         with tenant_session(tenant.tenant_id) as session:
             assert model_runs.close_lost_runs(session, tenant.tenant_id, document_id) == Decimal(0)
         assert len(_runs(document_id)) == 2
+
+
+def test_F3_the_reread_after_a_lost_call_keeps_the_lost_call_on_the_documents_cost(monkeypatch):
+    """D-163: every paid call stays on the cost record. The document's own
+    est_cost_usd (cost per document, the rollup, the Console's AI cost) must
+    still hold the lost call once the re-read has saved its answer."""
+    from tests.db_helpers import model_payload, run_extraction
+
+    with WorkerTestTenant("Acme Test Reread After Lost Call") as tenant:
+        document_id = tenant.create_pending_document()
+        _kill_a_worker_during_the_model_call(tenant, document_id)
+        _backdate_claim(document_id)
+        stuck_documents.sweep_tenant(tenant.tenant_id, lambda _t, _d: None)
+        after_sweep = _row("SELECT est_cost_usd FROM documents WHERE id = :id", id=str(document_id))
+        assert after_sweep["est_cost_usd"] > 0, "the sweep did not put the lost call on the document"
+
+        # The retry the sweep asked for: the real task reads the document again.
+        run_extraction(
+            monkeypatch,
+            tenant,
+            document_id,
+            model_payload(
+                header={"order_total": "570.00"},
+                lines=[{"quantity": "12", "unit_price": "47.50", "line_total": "570.00"}],
+            ),
+        )
+
+        document = _row("SELECT status, est_cost_usd FROM documents WHERE id = :id", id=str(document_id))
+        assert document["status"] == "needs_review"
+        finished = [r for r in _runs(document_id) if r["run_state"] == "finished"]
+        assert [(r["succeeded"], r["error_code"]) for r in finished] == [
+            (False, model_runs.LOST_CALL_CODE),
+            (True, None),
+        ]
+        assert all(r["est_cost_usd"] > 0 for r in finished)
+        # Both calls were paid for: the document's cost is their sum, not the last one's.
+        assert document["est_cost_usd"] == sum(r["est_cost_usd"] for r in finished)
+
+
+def test_F3_the_documents_cost_counts_the_routing_read_with_the_extraction(monkeypatch):
+    """The routing read is its own run, on the record before the extraction
+    starts (example_prompting.plan). The document's cost is the whole record:
+    both calls."""
+    from docflow_core.extraction import ROUTING_MODEL, ROUTING_SCHEMA_VERSION, RoutingResult
+
+    from tests.db_helpers import model_payload, run_extraction
+
+    routing = RoutingResult(
+        ok=True,
+        model_id=ROUTING_MODEL,
+        prompt_hash="r",
+        schema_version=ROUTING_SCHEMA_VERSION,
+        raw_response={},
+        input_tokens=900,
+        output_tokens=40,
+        est_cost_usd=Decimal("0.0011"),
+    )
+    with WorkerTestTenant("Acme Test Routing On The Cost") as tenant:
+        document_id = tenant.create_pending_document()
+        with tenant_session(tenant.tenant_id) as session:
+            model_runs.record_routing(session, tenant.tenant_id, document_id, routing)
+        run_extraction(
+            monkeypatch,
+            tenant,
+            document_id,
+            model_payload(
+                header={"order_total": "570.00"},
+                lines=[{"quantity": "12", "unit_price": "47.50", "line_total": "570.00"}],
+            ),
+        )
+
+        finished = [r for r in _runs(document_id) if r["run_state"] == "finished"]
+        assert [(r["run_kind"], r["succeeded"]) for r in finished] == [
+            ("buyer_routing", True),
+            ("extraction", True),
+        ]
+        document = _row("SELECT est_cost_usd FROM documents WHERE id = :id", id=str(document_id))
+        assert finished[1]["est_cost_usd"] > 0
+        assert document["est_cost_usd"] == Decimal("0.0011") + finished[1]["est_cost_usd"]
 
 
 def test_F3_a_finished_call_has_its_started_row_and_one_outcome(monkeypatch):
