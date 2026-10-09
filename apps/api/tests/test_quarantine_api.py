@@ -33,6 +33,7 @@ from docflow_core.db import platform_session, tenant_session
 from sqlalchemy import text
 
 from tests.conftest import intake_webhook_headers, requires_database
+from tests.tenant_cleanup import purge_test_tenant, register_test_tenant
 from tests.test_console_api import JWT_SECRET, _Console, _environment, stripe  # noqa: F401
 from tests.test_email_intake import _pm_attachment, _pm_payload
 
@@ -79,22 +80,6 @@ def celery(monkeypatch):
     return fake
 
 
-_CLEAN_TABLES = (
-    "extraction_runs",
-    "document_lines",
-    "document_headers",
-    "documents",
-    "buyers",
-    "intake_rejections",
-    "raw_emails",
-    "allowance_notices",
-    "founder_alerts",
-    "email_outbox",
-    "tenant_lifecycle_events",
-    "intake_addresses",
-)
-
-
 class _Tenant:
     """A throwaway live tenant on the cheapest current tier, with an owner who
     can sign in, and cleanup of everything it creates."""
@@ -108,6 +93,7 @@ class _Tenant:
         self.users: dict[str, tuple[UUID, str]] = {}  # role -> (user_id, auth_user_id)
 
     def __enter__(self):
+        register_test_tenant(self.tenant_id)
         with platform_session() as session:
             tier = (
                 session.execute(
@@ -272,21 +258,7 @@ class _Tenant:
             return usage.month_used(session, self.tenant_id)
 
     def __exit__(self, *exc):
-        tid = str(self.tenant_id)
-        with platform_session() as session:
-            session.execute(text("UPDATE tenants SET status = 'active' WHERE id = :t"), {"t": tid})
-            # A document points at its current run (D-142); runs go first below.
-            session.execute(
-                text("UPDATE documents SET current_extraction_run_id = NULL WHERE tenant_id = :t"), {"t": tid}
-            )
-            for table in _CLEAN_TABLES:
-                session.execute(text(f"DELETE FROM {table} WHERE tenant_id = :t"), {"t": tid})
-            session.execute(text("DELETE FROM admin_actions WHERE target_tenant_id = :t"), {"t": tid})
-            session.execute(
-                text("UPDATE documents SET released_by_user_id = NULL WHERE tenant_id = :t"), {"t": tid}
-            )
-            session.execute(text("DELETE FROM users WHERE tenant_id = :t"), {"t": tid})
-            session.execute(text("DELETE FROM tenants WHERE id = :t"), {"t": tid})
+        purge_test_tenant(self.tenant_id)
 
 
 def _email(client, tenant: _Tenant, sender: str, *, n: int = 1, token: str | None = None):

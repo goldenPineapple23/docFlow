@@ -33,6 +33,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from tests.conftest import requires_console_schema
+from tests.tenant_cleanup import purge_test_tenant, register_test_tenant
 
 pytestmark = requires_console_schema
 
@@ -105,9 +106,10 @@ def two_tenants() -> Iterator[tuple[str, str]]:
                 ),
                 {"id": tenant_id, "name": f"Acme Test Logins {i} {tenant_id[:8]}"},
             )
+            register_test_tenant(tenant_id)
     yield ids
-    with platform_session() as session:
-        session.execute(text(f"DELETE FROM tenants WHERE {_THESE}"), {"ids": ",".join(ids)})
+    for tenant_id in ids:
+        purge_test_tenant(tenant_id)
 
 
 @pytest.mark.parametrize("login", LOGINS)

@@ -33,6 +33,7 @@ from docflow_core.validation import validate_document
 from sqlalchemy import text
 
 from tests.conftest import requires_console_schema, requires_review_schema
+from tests.tenant_cleanup import purge_test_tenant
 from tests.test_console_api import _Console, _environment  # noqa: F401 -- fixtures
 from tests.test_review_api import CLEAN_LINES, _ReviewTenant, _secrets  # noqa: F401 -- fixture
 
@@ -74,9 +75,7 @@ def _base(tenant) -> str:
 
 
 def _cleanup(tenant_id) -> None:
-    with platform_session() as session:
-        session.execute(text("DELETE FROM tenant_field_schemas WHERE tenant_id = :t"), {"t": str(tenant_id)})
-        session.execute(text("DELETE FROM admin_actions WHERE target_tenant_id = :t"), {"t": str(tenant_id)})
+    purge_test_tenant(tenant_id)
 
 
 def _warning_codes(document_id: UUID) -> set[str]:

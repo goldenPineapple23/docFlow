@@ -31,8 +31,11 @@ Healthchecks.io check is paused. **Dropped by the founder on 2026-10-09,** each 
 by Claude before and afterwards: `backup_0034`, `backup_0035` and `backup_3b` (RUNBOOK 1.3; no
 backup schema is left on staging), and the old role `docflow_app` (RUNBOOK 10.2 step 7, with the
 SQL as run). Going back past `0036` now means recreating that role first (RUNBOOK 10.2, "Going
-back", step 2). **Next:** the Stage 3 checkpoint, whose list now also holds the three `live_api` tests and the test leftovers' cleanup
-(CHECKPOINTS.md). Nothing of Stage 4 is built before its "go", and the model policy (D-195) waits
+back", step 2). **Built for the checkpoint's list:** one purge for every throwaway tenant the API
+suite makes (files, rows, the tenant; it refuses a tenant the run did not create) and a printed
+count of what a run left behind (RUNBOOK 1.4; four tests added, API 631 in CI). **Next:** the
+Stage 3 checkpoint, whose list also holds the three `live_api` tests and the test leftovers'
+cleanup (CHECKPOINTS.md). Nothing of Stage 4 is built before its "go", and the model policy (D-195) waits
 for the same "go".
 
 **That paragraph is the current state only** (founder, 2026-10-05; D-191). When it changes, the

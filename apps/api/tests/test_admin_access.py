@@ -16,6 +16,7 @@ from docflow_core.db import platform_session
 from sqlalchemy import text
 
 from tests.conftest import requires_console_schema, requires_database
+from tests.tenant_cleanup import purge_test_tenant, register_test_tenant
 
 
 def test_admin_route_404_without_any_auth_header(client):
@@ -116,6 +117,7 @@ def test_platform_admin_can_create_tenant_and_admin_action_is_recorded(client, m
         )
         assert response.status_code == 200
         tenant_id = response.json()["tenant_id"]
+        register_test_tenant(tenant_id)
 
         with platform_session() as session:
             action_row = session.execute(
@@ -128,19 +130,9 @@ def test_platform_admin_can_create_tenant_and_admin_action_is_recorded(client, m
         assert action_row is not None
         assert str(action_row["platform_admin_user_id"]) == str(admin_local_user_id)
     finally:
+        if tenant_id:
+            purge_test_tenant(tenant_id)
         with platform_session() as session:
-            if tenant_id:
-                session.execute(
-                    text("DELETE FROM admin_actions WHERE target_tenant_id = :tid"), {"tid": tenant_id}
-                )
-                session.execute(
-                    text("DELETE FROM tenant_lifecycle_events WHERE tenant_id = :tid"), {"tid": tenant_id}
-                )
-                session.execute(
-                    text("DELETE FROM intake_addresses WHERE tenant_id = :tid"), {"tid": tenant_id}
-                )
-                session.execute(text("DELETE FROM users WHERE tenant_id = :tid"), {"tid": tenant_id})
-                session.execute(text("DELETE FROM tenants WHERE id = :tid"), {"tid": tenant_id})
             session.execute(
                 text("DELETE FROM platform_admins WHERE user_id = :uid"), {"uid": str(admin_local_user_id)}
             )

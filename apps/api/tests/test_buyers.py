@@ -23,6 +23,7 @@ from docflow_core.db import platform_session, tenant_session
 from sqlalchemy import text
 
 from tests.conftest import requires_matching_schema
+from tests.tenant_cleanup import purge_test_tenant, register_test_tenant
 
 
 class _TestBuyerTenant:
@@ -33,6 +34,7 @@ class _TestBuyerTenant:
         self.tenant_id = uuid4()
 
     def __enter__(self):
+        register_test_tenant(self.tenant_id)
         with platform_session() as session:
             session.execute(
                 text(
@@ -139,14 +141,7 @@ class _TestBuyerTenant:
         return UUID(str(row["buyer_id"])) if row and row["buyer_id"] else None
 
     def __exit__(self, *exc):
-        tid = str(self.tenant_id)
-        with platform_session() as session:
-            session.execute(text("DELETE FROM buyer_merge_candidates WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM document_lines WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM document_headers WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM buyers WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM documents WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM tenants WHERE id = :tid"), {"tid": tid})
+        purge_test_tenant(self.tenant_id)
 
 
 @requires_matching_schema
