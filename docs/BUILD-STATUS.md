@@ -27,8 +27,9 @@ hour is 6,205 Redis commands, so production stays on Pay as You Go; a deploy dur
 lets the read finish; a worker killed during a read held another tenant's order for 31 minutes 16
 seconds, which is the Phase 6 launch blocker, measured. The deployed worker has read 537 documents
 on Fly staging; recorded model spend is $6.97. The Fly worker and beat are at 0 and the
-Healthchecks.io check is paused. **Next:** the founder's actions, now due: dropping `backup_0034`,
-`backup_0035`, `backup_3b` and the role `docflow_app` (RUNBOOK 1.3; 10.2 step 7). Then the Stage 3
+Healthchecks.io check is paused. **Dropped by the founder on 2026-10-09,** each checked read-only
+by Claude afterwards: `backup_0034` and `backup_0035` (RUNBOOK 1.3). **Next:** the founder's
+remaining actions: dropping `backup_3b` and the role `docflow_app` (RUNBOOK 1.3; 10.2 step 7). Then the Stage 3
 checkpoint, whose list now also holds the three `live_api` tests and the test leftovers' cleanup
 (CHECKPOINTS.md). Nothing of Stage 4 is built before its "go", and the model policy (D-195) waits
 for the same "go".

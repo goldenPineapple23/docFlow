@@ -137,6 +137,11 @@ follow-up, PR #29) merged. Since then:
   ```
 
   and the date is recorded here and in BUILD-STATUS.
+  **Dropped 2026-10-09** by the founder with the commands above, between
+  18:15:34 and 18:20:11 UTC. Claude's read-only comparison of the two reads
+  (as `docflow_admin`): the schema and its two tables gone, and nothing
+  else changed -- the other backups, every other schema's object counts,
+  `public`'s columns, policies and grants, and the six `docflow*` roles.
 - **`backup_0035`** (documents 105, founder_alerts 15, email_outbox 73;
   live = backup), taken 2026-10-01 before `0035`. **Founder, 2026-10-01:
   the same rule as `backup_0034`.** It is dropped after 3d has run cleanly
@@ -158,6 +163,10 @@ follow-up, PR #29) merged. Since then:
   ```
 
   The date is recorded here and in BUILD-STATUS.
+  **Dropped 2026-10-09** by the founder with the commands above, between
+  18:20:11 and 18:23:33 UTC. The same read-only comparison: the schema and
+  its three tables gone, and nothing else changed (`backup_3b`, `public`
+  and the six `docflow*` roles included).
 - **Decided (founder, 2026-10-05): `backup_0034`, `backup_0035` and
   `backup_3b` are kept until the first worker deploy has processed real
   documents on staging.** This replaces "3 days after the merge" for
