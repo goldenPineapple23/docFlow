@@ -46,7 +46,7 @@ Supabase gives us the database, login system, and file storage in one place. We'
       ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO docflow_app;
       ```
    3. Go to **Project Settings → Database → Connection string**, copy the string under **"Connection pooling"** (transaction mode), then edit it: replace the username (`postgres` or `postgres.xxxxxxxx`) with `docflow_app` and the password with the one you just chose. This edited string — logging in as `docflow_app`, not `postgres` — is what goes in `.env` as `DATABASE_URL`.
-   4. This is a one-time step per Supabase project (repeat it for `docflow-prod` in Phase 6).
+   4. This was a one-time step on `docflow-staging`, done before `0036`. **Don't repeat it for `docflow-prod`:** production is created straight into the four logins (RUNBOOK 10.2, "Production (Phase 6)") and never has `docflow_app`. No migration creates the role; the ones that mention it grant to it only if it exists.
 7. **Turn off public signup — don't skip this either.** Go to **Authentication → Sign In / Providers** (on some accounts, **Authentication → Settings → User Signups**), switch **"Allow new users to sign up"** off, and click **Save**. DocFlow has no public signup (every account is created by an invite or by `scripts/seed_platform_admin.py`, both of which use Supabase's admin API and are unaffected), but Supabase allows it by default, and the public key that ships in the browser would let anyone create an account. Check it took: `GET {Project URL}/auth/v1/settings` with your publishable key as the `apikey` header must show `"disable_signup": true`. Repeat for `docflow-prod` in Phase 6. (Review finding M16.)
 
 You'll paste all of these into `.env` in Step 4 below.

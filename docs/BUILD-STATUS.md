@@ -19,7 +19,7 @@ find your way around; go to the linked file for the detail.
 commit as the slice.
 
 **Status, as of 2026-10-09:** Phase 5.5, Stage 3. Slices 3a to 3e are all merged and the logins
-cutover (RUNBOOK 10.2) is done through step 6. The first worker deploy (RUNBOOK 9.7) is done
+cutover (RUNBOOK 10.2) is done, step 7 included. The first worker deploy (RUNBOOK 9.7) is done
 through step 15 and the founder accepted the 500 + 1 run (D-194, D-196). **Merged since:** the
 recycle threshold at 500 MiB (PR #52), the Redis idle change (PR #53) and the document-cost fix
 (PR #54; D-163's addendum). **The stop drills and the second idle hour are done (D-197):** an idle
@@ -27,9 +27,11 @@ hour is 6,205 Redis commands, so production stays on Pay as You Go; a deploy dur
 lets the read finish; a worker killed during a read held another tenant's order for 31 minutes 16
 seconds, which is the Phase 6 launch blocker, measured. The deployed worker has read 537 documents
 on Fly staging; recorded model spend is $6.97. The Fly worker and beat are at 0 and the
-Healthchecks.io check is paused. **Next:** the founder's actions, now due: dropping `backup_0034`,
-`backup_0035`, `backup_3b` and the role `docflow_app` (RUNBOOK 1.3; 10.2 step 7). Then the Stage 3
-checkpoint, whose list now also holds the three `live_api` tests and the test leftovers' cleanup
+Healthchecks.io check is paused. **Dropped by the founder on 2026-10-09,** each checked read-only
+by Claude before and afterwards: `backup_0034`, `backup_0035` and `backup_3b` (RUNBOOK 1.3; no
+backup schema is left on staging), and the old role `docflow_app` (RUNBOOK 10.2 step 7, with the
+SQL as run). Going back past `0036` now means recreating that role first (RUNBOOK 10.2, "Going
+back", step 2). **Next:** the Stage 3 checkpoint, whose list now also holds the three `live_api` tests and the test leftovers' cleanup
 (CHECKPOINTS.md). Nothing of Stage 4 is built before its "go", and the model policy (D-195) waits
 for the same "go".
 
@@ -509,6 +511,8 @@ go, given for after PRs #38, #39 and #40 had merged (main `e2f53c3`).
   2026-10-05; D-190, the backups' trigger). **The first worker deploy
   waits for the founder's go**: the cutover turned up several things that
   were not expected, each listed in CHECKPOINTS.md.
+  **Step 7 was done on 2026-10-09** (RUNBOOK 10.2 step 7 has the SQL as
+  run and what was read before and after).
 - **The one Storage timeout in the API suite is recorded as transient**
   (D-190): once in 1,252 API tests across two runs, not reproduced.
   Supabase had an incident open across the run, "Intermittent latency in

@@ -19,6 +19,15 @@
 -- only then are the apps given docflow_app's URL and started, since the four
 -- logins stop existing here.
 --
+-- Once docflow_app has been dropped (RUNBOOK 10.2 step 7), going back past
+-- 0036 needs the role recreated FIRST, with its table grants: the SQL in
+-- SETUP.md Step 1.6, run as the project owner. This script does not create
+-- it. Without the role the script still runs, but it grants the 13 functions
+-- to nobody and drops the four logins, so no login is left for the apps, and
+-- the result does not equal 0036_pre_snapshot.json. 0028's 5-minute idle cap
+-- is a setting on the role, so it goes with the drop as well and is set again
+-- by hand: alter role docflow_app set idle_in_transaction_session_timeout = '5min';
+--
 -- Run as one transaction, in the Supabase SQL Editor.
 
 -- 0036 section 3: EXECUTE back to docflow_app.

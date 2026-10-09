@@ -2,10 +2,10 @@
 #
 # CI runs `supabase start`, which applies every file in supabase/migrations/
 # in order as the `postgres` role, exactly as the founder does by hand in the
-# staging SQL Editor. scripts/ci/create_app_role.py then creates `docflow_app`
-# (NOBYPASSRLS) the way SETUP.md Step 1.6 does, and the Python suites connect
-# as that role -- so RLS, the Supabase roles and the `auth` schema behave as
-# they do on docflow-staging.
+# staging SQL Editor. Migration 0036 creates the four logins without passwords;
+# scripts/ci/create_logins.py then turns each on the way RUNBOOK 10.2 does
+# (all NOBYPASSRLS), and the Python suites connect as those logins -- so RLS,
+# the Supabase roles and the `auth` schema behave as they do on docflow-staging.
 #
 # Staging and prod are configured in the Supabase dashboard, not here. Only
 # the services the test suites need are switched on.
