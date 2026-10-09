@@ -2084,22 +2084,57 @@ The founder's conditions (2026-10-02, Q5) are steps 0, 1 and 6.
    run cleanly on staging for 3 days", which proves nothing while no
    worker is deployed), and after Claude reports the check:
    ```sql
-   REVOKE ALL ON ALL TABLES IN SCHEMA public FROM docflow_app;
-   REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM docflow_app;
-   ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM docflow_app;
-   ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM docflow_app;
-   REVOKE USAGE ON SCHEMA public FROM docflow_app;
-   DROP ROLE docflow_app;
+   begin;
+
+   -- table and sequence grants (38 tables, 2 sequences in public)
+   revoke all on all tables in schema public from docflow_app;
+   revoke all on all sequences in schema public from docflow_app;
+
+   -- function grants (none exist today; 0036 removed them)
+   revoke all on all functions in schema public from docflow_app;
+
+   -- default privileges (both entries were set by postgres)
+   alter default privileges for role postgres in schema public revoke all on tables from docflow_app;
+   alter default privileges for role postgres in schema public revoke all on sequences from docflow_app;
+
+   -- schema usage
+   revoke usage on schema public from docflow_app;
+
+   drop role docflow_app;
+
+   commit;
    ```
    The date is recorded here and in BUILD-STATUS.
+
+   **Done on `docflow-staging`, 2026-10-09**, by the founder in the SQL
+   Editor, between 18:32:25 and 18:36:42 UTC, with the SQL above, which is
+   what ran. It differs from what this step held until then (five
+   statements and the `DROP ROLE`) in three ways the founder approved
+   beforehand: the function revoke (it changed nothing: the role held no
+   function grant); `for role postgres` on the two default-privilege lines
+   (without it the statement acts only on entries set by whoever runs it);
+   and `begin` / `commit`, so a refused `drop role` would have undone the
+   revokes. Before it, Claude read (as `docflow_admin`, read-only) that
+   nothing else named the role anywhere on the server: the dependency
+   record `drop role` itself consults, and every access list, owner and
+   role reference in every schema, database privileges included. It was
+   named by 38 tables and 2 sequences in `public`, by `public` itself and
+   by `postgres`'s two default-privilege entries, and by nothing else.
+   After it: the role is gone and nothing names it; `public`'s columns,
+   policies, function grants and the other grantees' table, schema and
+   default privileges are unchanged; the four logins and `docflow_tables`
+   are unchanged, and each login connects as itself and reads a table; the
+   Fly worker and beat kept running. `postgres`'s membership of the role and
+   the role's 5-minute idle setting went with it.
 
 **Done on `docflow-staging`, 2026-10-05 (UTC):** step 1 at 15:52; steps 2
 to 4 by the founder at about 16:50; step 5's snapshot at 16:52 (SHA-256
 `81bd33599151...`) and again at 21:27 after the last suite run; step 6's
 `NOLOGIN` at about 21:32, the refusal verified at 21:35, the old URL
-removed from the root `.env` then. Step 7 is not done: it waits for the
-first worker deploy to have processed real documents. The record is in
-CHECKPOINTS.md (Stage 3, "The cutover").
+removed from the root `.env` then. Step 7 was done on 2026-10-09 (above);
+until then it waited for the first worker deploy to have processed real
+documents. The record of steps 1 to 6 is in CHECKPOINTS.md (Stage 3, "The
+cutover").
 
 **Stop condition before the first worker deploy** (founder, 2026-10-02).
 The first worker deploy (9.2) is scheduled straight after steps 1-6 are
@@ -2138,8 +2173,26 @@ going back also needs a new one.
 
 1. **Stop the API and the worker.** On Fly, scale each app to zero
    (`fly scale count 0 --app <app>`); on this machine, stop them.
-2. **The founder gives `docflow_app` a new password**, generated as in
-   step 3 (typed, never pasted into a chat), in the SQL Editor:
+2. **The founder recreates `docflow_app`, then gives it a new password.**
+   The role was dropped on staging on 2026-10-09 (step 7), so it is made
+   again first, with its table grants as SETUP.md Step 1.6 made them and
+   the idle cap `0028` set on it, in the SQL Editor:
+   ```sql
+   CREATE ROLE docflow_app NOLOGIN NOBYPASSRLS;
+   GRANT USAGE ON SCHEMA public TO docflow_app;
+   GRANT ALL ON ALL TABLES IN SCHEMA public TO docflow_app;
+   GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO docflow_app;
+   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO docflow_app;
+   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO docflow_app;
+   ALTER ROLE docflow_app SET idle_in_transaction_session_timeout = '5min';
+   ```
+   Without the role, step 3's script still runs, but it grants the 13
+   functions to nobody and drops the four logins, so no login is left for
+   the apps and the snapshot can't match (the script's header says the
+   same). This recreate has not been run on staging: CI's round trip makes
+   the role without the table grants, since its snapshots hold policies and
+   function grants only. Then the password, generated as in step 3 (typed,
+   never pasted into a chat):
    ```sql
    ALTER ROLE docflow_app WITH LOGIN PASSWORD '...';
    ```
