@@ -39,6 +39,7 @@ from docflow_core.matching import (
 from sqlalchemy import text
 
 from tests.conftest import requires_matching_schema, requires_sku_matching_schema
+from tests.tenant_cleanup import purge_test_tenant, register_test_tenant
 
 
 class _TestMatchingTenant:
@@ -50,6 +51,7 @@ class _TestMatchingTenant:
         self.user_id = uuid4()
 
     def __enter__(self):
+        register_test_tenant(self.tenant_id)
         with platform_session() as session:
             session.execute(
                 text(
@@ -245,19 +247,7 @@ class _TestMatchingTenant:
         return [dict(row) for row in rows]
 
     def __exit__(self, *exc):
-        tid = str(self.tenant_id)
-        with platform_session() as session:
-            session.execute(text("DELETE FROM learned_rules WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM document_lines WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM document_headers WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(
-                text("DELETE FROM buyer_merge_candidates WHERE tenant_id = :tid"), {"tid": tid}
-            )
-            session.execute(text("DELETE FROM buyers WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM items WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM documents WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM users WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM tenants WHERE id = :tid"), {"tid": tid})
+        purge_test_tenant(self.tenant_id)
 
 
 def _candidates(line: dict) -> list[dict]:

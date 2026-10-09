@@ -46,11 +46,8 @@ from docflow_core.validation import (
 )
 from sqlalchemy import text
 
-from tests.conftest import (
-    exports_schema_available,
-    requires_validation_schema,
-    review_schema_available,
-)
+from tests.conftest import requires_validation_schema
+from tests.tenant_cleanup import purge_test_tenant, register_test_tenant
 
 # What a fixture document carries in raw_json. Since migration 0027 a
 # document can only be reviewable with the model's answer on it (Section 7.1),
@@ -68,6 +65,7 @@ class _TestValidationTenant:
         self.user_id = uuid4()
 
     def __enter__(self):
+        register_test_tenant(self.tenant_id)
         with platform_session() as session:
             session.execute(
                 text(
@@ -284,39 +282,7 @@ class _TestValidationTenant:
         return [w for w in self.warnings(document_id) if w["deleted_at"] is None]
 
     def __exit__(self, *exc):
-        tid = str(self.tenant_id)
-        with platform_session() as session:
-            # 0010's exports reference snapshots, so they go first.
-            if exports_schema_available():
-                session.execute(text("DELETE FROM exports WHERE tenant_id = :tid"), {"tid": tid})
-            # 0007's tables, when it has been applied. Snapshots reference
-            # review_actions and warnings reference them too, so both go
-            # before review_actions itself.
-            if review_schema_available():
-                session.execute(
-                    text("DELETE FROM document_snapshots WHERE tenant_id = :tid"), {"tid": tid}
-                )
-            session.execute(text("DELETE FROM document_warnings WHERE tenant_id = :tid"), {"tid": tid})
-            if review_schema_available():
-                session.execute(
-                    text("DELETE FROM review_actions WHERE tenant_id = :tid"), {"tid": tid}
-                )
-            session.execute(text("DELETE FROM learned_rules WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM document_lines WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM document_headers WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(
-                text("DELETE FROM buyer_merge_candidates WHERE tenant_id = :tid"), {"tid": tid}
-            )
-            session.execute(text("DELETE FROM buyers WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM items WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(
-                text("UPDATE documents SET duplicate_of_document_id = NULL, "
-                     "change_order_of_document_id = NULL WHERE tenant_id = :tid"),
-                {"tid": tid},
-            )
-            session.execute(text("DELETE FROM documents WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM users WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM tenants WHERE id = :tid"), {"tid": tid})
+        purge_test_tenant(self.tenant_id)
 
 
 def _as_text(value) -> str | None:

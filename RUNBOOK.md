@@ -340,6 +340,30 @@ How a run is reported:
   D-197): the API and the worker both install it. On that day a fix in
   `docflow_core/model_runs.py` was first taken to be worker-only and the
   API suite was left out; it was run once that was noticed.
+  **From the test-tenant purge (2026-10-09; the Stage 3 checkpoint's
+  list, D-197):** the API suite gains four tests, all in
+  `test_tenant_cleanup.py`, and loses none: CI reads `631 tests`. On this
+  machine against staging that is expected to read `630 passed, 1
+  skipped, 3 deselected`; **it has not been run there yet** (the first
+  run is the Stage 3 checkpoint's run of record). Core and worker are
+  unchanged.
+  - **Every throwaway tenant the API suite makes now ends in one purge**
+    (`apps/api/tests/tenant_cleanup.py`): the tenant's files in the bucket,
+    every row that points at it, and the tenant row. Before, nine helpers
+    and four cleanup functions each had a delete list, and only some
+    removed a tenant's founder alerts, e-mails and scheduled jobs.
+  - **The purge refuses any tenant the run did not create.** A helper
+    registers the id when it makes the tenant; an unregistered id raises
+    `NotThisRunsTenant`, whatever the tenant is called. Nothing in the
+    product imports the purge (a test checks).
+  - **The run prints what it left behind**, just above pytest's last
+    line: `left behind by this run (before -> after): tenants N -> N (+0),
+    founder alerts ..., e-mails ..., scheduled jobs ..., platform-admin
+    rows ..., users with no tenant ...`. In CI the same line is a notice
+    annotation, `api leftover count`. **Printed, not a failure, for now**
+    (founder, 2026-10-09): it becomes a failure in the first PR after a
+    staging run of record reads `+0` on every count. A killed run prints
+    nothing and cleans nothing.
   **What CI reports for the same code, side by side** (founder,
   2026-10-08). CI runs every test, so each line must also read `0 failed,
   0 skipped, 0 unapproved`:
@@ -348,7 +372,7 @@ How a run is reported:
   |---|---|---|
   | core | 806 passed, 1 skipped | 807 tests |
   | worker | 191 passed, 7 skipped | 198 tests |
-  | API | 626 passed, 1 skipped, 3 deselected | 627 tests |
+  | API | 630 passed, 1 skipped, 3 deselected (expected; not yet run, see above) | 631 tests |
 
   The difference in each row is exactly the skips named here, which need
   Linux, CI's containers or a secret this machine does not hold. A CI

@@ -39,16 +39,9 @@ from tests.test_quarantine_api import _Tenant as _BaseTenant
 
 
 class _Tenant(_BaseTenant):
-    """The quarantine tests' throwaway tenant, plus removal of the example
-    text files these tests write under the tenant's storage prefix."""
-
-    def __exit__(self, *exc):
-        from docflow_core.storage import delete_tenant_storage
-
-        try:
-            super().__exit__(*exc)
-        finally:
-            delete_tenant_storage(self.tenant_id)
+    """The quarantine tests' throwaway tenant. The example text files these
+    tests write under the tenant's storage prefix go with it: the shared
+    purge removes a test tenant's files (tests/tenant_cleanup.py)."""
 
 
 def _schema_available() -> bool:

@@ -39,6 +39,7 @@ from docflow_core.db import platform_session
 from sqlalchemy import text
 
 from tests.conftest import requires_console_schema
+from tests.tenant_cleanup import purge_test_tenant
 from tests.test_catalog_import_api import CATALOG_V1, _commit, _import
 from tests.test_console_api import (  # noqa: F401 -- fixtures
     _Console,
@@ -163,8 +164,7 @@ def _approve_all_test_documents(tenant_id, approver) -> None:
 
 
 def _cleanup_jobs_and_alerts(tenant_id) -> None:
-    with platform_session() as session:
-        session.execute(text("DELETE FROM scheduled_jobs WHERE tenant_id = :t"), {"t": tenant_id})
+    purge_test_tenant(tenant_id)
 
 
 def _events(tenant_id) -> list[str]:

@@ -34,6 +34,7 @@ from docflow_core.db import platform_session, tenant_session
 from sqlalchemy import text
 
 from tests.conftest import requires_console_schema
+from tests.tenant_cleanup import purge_test_tenant, register_test_tenant
 
 JWT_SECRET = "test-only-secret-for-ci"
 CATALOG_CSV = b"sku,description,unit_of_measure\nTEST-1001,Test Beans 5lb,CS\nTEST-1002,Test Cups,BOX\n"
@@ -126,41 +127,19 @@ class _Console:
         return {"Authorization": f"Bearer {token}"}
 
     def __exit__(self, *exc):
-        # The bucket first, while the ids are still known.
+        # Each tenant whole -- files, rows, the row itself -- before the intakes
+        # its imports point at.
         for tid in self.tenants:
-            storage.delete_tenant_storage(UUID(tid))
+            purge_test_tenant(tid)
         for iid in self.intakes:
             backend = storage._get_backend()
             keys = backend.list_keys(f"staging/{iid}/")
             if keys:
                 backend.delete_keys(keys)
         with platform_session() as session:
-            # 0012's import tables, when present: imports point at intake
-            # files, and items/buyers point at imports, so they go first.
-            if session.execute(text("SELECT to_regclass('catalog_imports')")).scalar():
-                for tid in self.tenants:
-                    for table in (
-                        "buyer_merge_candidates", "learned_rules", "items", "buyers",
-                        "import_mapping_templates", "catalog_imports",
-                    ):
-                        session.execute(text(f"DELETE FROM {table} WHERE tenant_id = :t"), {"t": tid})
-            for tid in self.tenants:
-                for table in (
-                    "founder_alerts", "email_outbox", "tenant_lifecycle_events", "intake_addresses"
-                ):
-                    session.execute(text(f"DELETE FROM {table} WHERE tenant_id = :t"), {"t": tid})
-                session.execute(text("DELETE FROM admin_actions WHERE target_tenant_id = :t"), {"t": tid})
-            # Tenants and intakes point at each other; unlink before deleting.
-            for tid in self.tenants:
-                session.execute(
-                    text("UPDATE tenants SET onboarding_intake_id = NULL WHERE id = :t"), {"t": tid}
-                )
             for iid in self.intakes:
                 session.execute(text("DELETE FROM onboarding_intake_files WHERE intake_id = :i"), {"i": iid})
                 session.execute(text("DELETE FROM onboarding_intakes WHERE id = :i"), {"i": iid})
-            for tid in self.tenants:
-                session.execute(text("DELETE FROM users WHERE tenant_id = :t"), {"t": tid})
-                session.execute(text("DELETE FROM tenants WHERE id = :t"), {"t": tid})
             session.execute(
                 text("DELETE FROM admin_actions WHERE platform_admin_user_id = :u"), {"u": str(self.user_id)}
             )
@@ -203,6 +182,7 @@ class _Console:
         response = client.post("/admin/tenants/new", headers=self.headers(), json=body)
         if response.status_code == 200:
             self.tenants.append(response.json()["tenant_id"])
+            register_test_tenant(self.tenants[-1])
         return response
 
 

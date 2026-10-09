@@ -19,6 +19,7 @@ from docflow_core.db import platform_session
 from sqlalchemy import text
 
 from tests.conftest import requires_console_schema
+from tests.tenant_cleanup import purge_test_tenant
 from tests.test_console_api import _Console, _environment, stripe  # noqa: F401 -- fixtures
 from tests.test_onboarding_api import requires_go_live_schema
 
@@ -57,8 +58,7 @@ def _row(job_id) -> dict:
 
 
 def _cleanup(tenant_id) -> None:
-    with platform_session() as session:
-        session.execute(text("DELETE FROM scheduled_jobs WHERE tenant_id = :t"), {"t": tenant_id})
+    purge_test_tenant(tenant_id)
 
 
 @requires_go_live_schema

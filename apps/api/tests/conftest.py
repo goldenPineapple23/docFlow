@@ -23,15 +23,25 @@ def database_available() -> bool:
 def pytest_sessionstart(session):
     if session.config.option.collectonly or not database_available():
         return
-    from tests import suite_lock
+    from tests import leftover_count, suite_lock
 
     suite_lock.session_start(get_settings().database_url, suite="api")
+    leftover_count.session_start()
 
 
 def pytest_sessionfinish(session, exitstatus):
-    from tests import suite_lock
+    from tests import leftover_count, suite_lock
 
+    # Counted while the lock is still held, so no other run is writing.
+    leftover_count.session_finish()
     suite_lock.session_finish()
+
+
+# ── What the run left behind (tests/leftover_count.py): printed, not a failure ──
+def pytest_terminal_summary(terminalreporter):
+    from tests import leftover_count
+
+    leftover_count.report(terminalreporter)
 
 
 requires_database = pytest.mark.skipif(

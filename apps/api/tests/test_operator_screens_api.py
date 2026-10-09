@@ -100,14 +100,6 @@ class _Tenant(_TestBuyerTenant):
         with platform_session() as session:
             return session.execute(text(sql), {"t": str(self.tenant_id), **params}).mappings().first()
 
-    def __exit__(self, *exc):
-        tid = str(self.tenant_id)
-        with platform_session() as session:
-            for table in ("buyer_merges", "learned_rules", "items"):
-                session.execute(text(f"DELETE FROM {table} WHERE tenant_id = :t"), {"t": tid})
-            session.execute(text("DELETE FROM admin_actions WHERE target_tenant_id = :t"), {"t": tid})
-        super().__exit__(*exc)
-
 
 def _flagged_pair(tenant: _Tenant):
     """Two orders from what may be one customer; the second is flagged."""

@@ -32,6 +32,7 @@ from docflow_core.db import platform_session, tenant_session
 from sqlalchemy import text
 
 from tests.conftest import requires_console_schema, requires_review_schema
+from tests.tenant_cleanup import purge_test_tenant
 from tests.test_console_api import _Console, _environment  # noqa: F401 -- fixtures
 from tests.test_review_api import CLEAN_LINES, _ReviewTenant, _secrets  # noqa: F401 -- fixture
 
@@ -194,18 +195,7 @@ def _row(tenant_id: UUID, day: date) -> dict:
 
 
 def _cleanup(tenant_id: UUID) -> None:
-    with platform_session() as session:
-        # Lines point at the seeded items; unlink before the tenant fixture
-        # deletes the documents.
-        session.execute(
-            text(
-                "UPDATE document_lines SET matched_item_id = NULL, match_method = NULL WHERE tenant_id = :t"
-            ),
-            {"t": str(tenant_id)},
-        )
-        session.execute(text("DELETE FROM items WHERE tenant_id = :t"), {"t": str(tenant_id)})
-        session.execute(text("DELETE FROM tenant_daily_metrics WHERE tenant_id = :t"), {"t": str(tenant_id)})
-        session.execute(text("DELETE FROM admin_actions WHERE target_tenant_id = :t"), {"t": str(tenant_id)})
+    purge_test_tenant(tenant_id)
 
 
 # ── The section's required test ─────────────────────────────────────────────

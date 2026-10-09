@@ -30,6 +30,7 @@ from tests.conftest import (
     requires_database,
     requires_email_intake_schema,
 )
+from tests.tenant_cleanup import purge_test_tenant, register_test_tenant
 
 
 class _FakeCeleryClient:
@@ -51,6 +52,7 @@ class _TestIntakeTenant:
         self.address = f"{self.token}@mail.docflow.test"
 
     def __enter__(self):
+        register_test_tenant(self.tenant_id)
         with platform_session() as session:
             session.execute(
                 text(
@@ -132,19 +134,7 @@ class _TestIntakeTenant:
         return [dict(r) for r in rows]
 
     def __exit__(self, *exc):
-        tid = str(self.tenant_id)
-        with platform_session() as session:
-            session.execute(text("DELETE FROM raw_emails WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM document_lines WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM document_headers WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM documents WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM intake_rejections WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM intake_addresses WHERE tenant_id = :tid"), {"tid": tid})
-            # D-145: a held unverified sender raises a founder alert, which
-            # names its email; both point at the tenant.
-            session.execute(text("DELETE FROM founder_alerts WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM email_outbox WHERE tenant_id = :tid"), {"tid": tid})
-            session.execute(text("DELETE FROM tenants WHERE id = :tid"), {"tid": tid})
+        purge_test_tenant(self.tenant_id)
 
 
 def _pm_attachment(name: str, content: bytes, content_type: str = "text/plain") -> dict:
