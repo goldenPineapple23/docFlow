@@ -7,21 +7,22 @@ phase."
 
 ---
 
-## Phase 5.5 Stage 3 — Worker, storage, queue, database logins — DRAFT (2026-10-02), not complete
+## Phase 5.5 Stage 3 — Worker, storage, queue, database logins — CHECKPOINT DONE (2026-10-09), awaiting "go"
 
-**DRAFT.** Written ahead of its evidence so the founder can review the form
-and the gate split now. Every `[GAP: ...]` is a result that doesn't exist
-yet; nothing in a gap is a prediction. The checkpoint is complete when the
-gaps are filled, the suites below have passed, and the founder gives "go".
+Written as a draft on 2026-10-02, ahead of its evidence, so the founder
+could review the form and the gate split. Every gap it held is now filled
+(2026-10-09; D-198) and the suites below have passed on the checkpoint
+commit. It waits for the founder's "go".
 
 Built as 3a (PR #26), 3b (PR #31), 3c (PR #32), 3d (PR #33) and 3e
 (PR #35), in that order, as agreed on 2026-09-29. Between them: the one-run
 test lock (PR #27, D-180), card billing with a trial (PRs #28 and #29,
 D-181), the PyJWT and Next.js security update (PR #30), the CI runner pin
 (PR #36) and the docs records (PRs #25, #34, #37). Migrations `0030` to
-`0035` are applied on `docflow-staging`; `0036` is merged and **not
-applied** (the logins cutover, RUNBOOK 10.2). Checkpoint run on `main` at
-`[GAP: the commit the checkpoint suites run on, after the cutover]`.
+`0036` are applied on `docflow-staging` (`0036` at the logins cutover of
+2026-10-05, RUNBOOK 10.2; read again on staging on 2026-10-09: the four
+logins, `worker_starts` and `record_worker_start` are there). Checkpoint
+run on `main` at `5a09632` (PR #57's merge, 2026-10-09).
 
 ### What the checkpoint needs, and what can follow
 
@@ -43,12 +44,12 @@ What's left is proof on staging and on Fly. **Proposed (Q1 below):**
 | Healthchecks.io heartbeat set up and tested to its pass marks (RUNBOOK 9.4) | Needed **by dependency** | The same |
 | Two-at-once sweep tests | Done (CI) | Built in 3e, green in CI (worker 180); they run again on staging in the step 5 run |
 | Restart record built and tested | Done (CI) | The same |
-| `docflow_app` dropped (10.2 step 7, 3 clean days after the cutover) | **Can follow** | Cleanup after F-1 is already enforced; it doesn't change a verdict |
-| `backup_0034` and `backup_0035` dropped | **Can follow** | The founder's own actions after each check |
+| `docflow_app` dropped (10.2 step 7, 3 clean days after the cutover) | **Done 2026-10-09** (RUNBOOK 10.2 step 7; D-198) | Cleanup after F-1 is already enforced; it doesn't change a verdict |
+| `backup_0034` and `backup_0035` dropped | **Done 2026-10-09**, with `backup_3b` (RUNBOOK 1.3; D-198) | The founder's own actions after each check |
 | Moving CI to Ubuntu 26 | **Can follow** | A deliberate CI change before 24.04 is retired, not Stage 3 work |
-| The three `live_api` tests (the golden fixture, the golden fixture with examples, the example-contamination check) | **On the list** (founder, 2026-10-09; D-197) | They run only at checkpoints (RUNBOOK 1.4), against the real model |
-| A shared tenant helper for the API suite that also removes a test tenant's alerts and outbox rows, with a before-and-after count at the end of the run | **On the list** (founder, 2026-10-08; D-197) | The alert triage of 2026-10-08: a killed run cleans nothing, and only some of the suite's hand-written tenant helpers delete alerts |
-| The test leftovers' cleanup on staging, test tenant `db4495fb` ("Acme Test Distributor", `pending_deletion` past its date) included | **On the list** (founder, 2026-10-09; D-197) | The lifecycle sweep visits that tenant every five minutes, and its ready-to-delete alert stays open |
+| The three `live_api` tests (the golden fixture, the golden fixture with examples, the example-contamination check) | **Done 2026-10-09** ("Test runs", below; on the list since D-197) | They run only at checkpoints (RUNBOOK 1.4), against the real model |
+| A shared tenant helper for the API suite that also removes a test tenant's alerts and outbox rows, with a before-and-after count at the end of the run | **Done 2026-10-09** (PR #57; D-198) | The alert triage of 2026-10-08: a killed run cleans nothing, and only some of the suite's hand-written tenant helpers delete alerts |
+| The test leftovers' cleanup on staging, test tenant `db4495fb` ("Acme Test Distributor", `pending_deletion` past its date) included | **Done 2026-10-09** (D-198): `db4495fb` deleted in the Console; 0 pending jobs, 0 held mail rows and 0 alerts belong to a test tenant | The lifecycle sweep visits that tenant every five minutes, and its ready-to-delete alert stays open |
 
 So the checkpoint waits for the first worker deploy (RUNBOOK 9.2) and the
 runs made with it. **Decided (founder, 2026-10-02, Q1 below).**
@@ -67,14 +68,35 @@ stage's evidence is about its own code.
 
 ### Test runs
 
-`[GAP: staging suites on main after the cutover, one at a time (RUNBOOK
-1.4), each as pytest printed it, with the login each ran as]`
-- **Core:** `[GAP]`
-- **Worker** (as `docflow_worker`): `[GAP]`
-- **API** (as `docflow_api`, `docflow_admin`, `docflow_stripe`): `[GAP]`
+Staging suites on `main` at `5a09632`, 2026-10-09, one at a time (RUNBOOK
+1.4), the Fly worker and beat at 0, each line as pytest printed it:
+- **Core:** `806 passed, 1 skipped in 41.42s`. The skip is
+  `test_storage_bucket_live.py:98` ("SUPABASE_JWT_SECRET is blank here
+  (D-174); the anon-key test covers it").
+- **Worker** (as `docflow_worker`): `191 passed, 7 skipped in 1329.40s
+  (0:22:09)`. Its own check: `worker_starts in the last 60 minutes: before
+  0, after 0; starts kept by tests: 0; committed on CI's own database: 0`.
+  Six skips need Linux or CI's parse container; the seventh commits a
+  worker start and runs only on CI's own database. The same seven as the
+  run before it.
+- **API** (as `docflow_api`, `docflow_admin`, `docflow_stripe`): `630
+  passed, 1 skipped, 3 deselected, 657 warnings in 2306.68s (0:38:26)`. The
+  skip is `test_parse_token_boundary.py:43` ("needs the real parse service
+  with a token (CI's API job); the dev service has none"), as before. The 3
+  deselected are the `live_api` tests. The dev parse service was started
+  by hand and stopped afterwards; the local Redis was running before and
+  after.
+- **The API run's leftover line, as printed:** `left behind by this run
+  (before -> after): tenants 34 -> 34 (+0), founder alerts 4 -> 4 (+0),
+  e-mails 30 -> 30 (+0), scheduled jobs 35 -> 35 (+0), platform-admin rows
+  12 -> 12 (+0), users with no tenant 15 -> 15 (+0)`. The first staging run
+  with the purge (PR #57).
 - **Live** (`pytest -m live_api`: golden, golden with examples,
-  contamination): `[GAP]`, with each call's cost, and **the mean, median
-  and maximum of the three** (founder, 2026-10-05). Three calls on two short
+  contamination): `3 passed, 631 deselected, 1 warning in 27.44s`. Each
+  call's cost, as the run printed it: golden $0.013732, golden with
+  examples $0.018016, contamination $0.017892; $0.049640 in all, under the
+  founder's cap of $0.10. **Mean $0.0165, median $0.0179, maximum $0.0180**
+  (founder, 2026-10-05), each on `claude-sonnet-5`. Three calls on two short
   text orders: a floor for cost per document, not a sample of what
   customers send ("A representative cost sample", below).
 
@@ -143,7 +165,10 @@ suites, at `f191e27`, in a worktree, connecting as `docflow_app` (RUNBOOK
   |---|---|---|
   | `backup_0034` | documents, extraction_runs | 0.20 MB |
   | `backup_0035` | documents, founder_alerts, email_outbox | 0.24 MB |
-  | `backup_3b` (still there) | four tables | 0.16 MB |
+  | `backup_3b` | four tables | 0.16 MB |
+
+  **All three were dropped by the founder on 2026-10-09** (RUNBOOK 1.3;
+  D-198).
 
   The whole database is 23.4 MB against the free plan's 500 MB limit, so
   keeping them costs nothing and risks nothing. Every backup table has RLS
@@ -338,9 +363,10 @@ UTC). Steps 1 to 6 are done; step 7 is not.** The evidence files are in
   then was the old URL removed from `.env`; the five settings were
   checked again at 21:35:36. RUNBOOK 10.2 step 6 now has the missing
   step.
-- **Step 7 (dropping `docflow_app`) is not done.** Decided (founder,
-  2026-10-05; D-190): only after the first worker deploy has processed
-  real documents on staging, the same trigger as the backups (D-186).
+- **Step 7 (dropping `docflow_app`) was done on 2026-10-09** (RUNBOOK
+  10.2 step 7; D-198). It waited, as decided (founder, 2026-10-05; D-190),
+  until the first worker deploy had processed real documents on staging,
+  the same trigger as the backups (D-186).
   The RUNBOOK said "after 3e has run cleanly on staging for 3 days", and
   nothing of 3e runs on staging until the worker is deployed.
 - **What was not expected, in one list** (10.2's stop rule: each stops
@@ -419,9 +445,9 @@ founder accepted the 500 + 1 run on 2026-10-08.** Times are UTC.
   2026-10-07; two login lines that day; the time of one Redis reading; a
   Redis reading before the 500 + 1 run; the parse machine's memory during
   the two scans of 2026-10-08. Each is in D-196.
-- **Now due, the founder's actions, not done here:** dropping
-  `backup_0034`, `backup_0035`, `backup_3b` and the role `docflow_app`
-  (D-186, D-190; RUNBOOK 1.3 and 10.2 step 7).
+- **Done by the founder on 2026-10-09:** `backup_0034`, `backup_0035`,
+  `backup_3b` and the role `docflow_app` dropped, each checked read-only
+  before and afterwards (D-198; RUNBOOK 1.3 and 10.2 step 7).
 
 **After the first worker deploy: the stop drills and the second idle hour**
 (Fly staging, 2026-10-08 and 2026-10-09; D-197 has each run's times):
@@ -452,9 +478,34 @@ founder accepted the 500 + 1 run on 2026-10-08.** Times are UTC.
 runner pin): core 745 tests, api 626, worker 180, parse unit 128 and HTTP
 56, each `0 failed, 0 skipped, 0 unapproved`; web 73 passed, web-live 3
 passed. The only warning is the known IPv6 one (the runner has no IPv6;
-IPv6 isolation is proven on Fly). `[GAP: CI on the checkpoint commit]`
+IPv6 isolation is proven on Fly).
 
-### Verdicts (draft; each one final only when its gap is filled)
+**CI on the checkpoint commit** (`5a09632`, push run 37987370691, first
+attempt): core 807 tests, api 631, worker 198, parse unit 128 and HTTP 56,
+each `0 failed, 0 skipped, 0 unapproved`; web 73 passed, web-live 3 passed;
+E3 PASS in the api, worker and parse jobs. The same IPv6 warning. The api
+job's leftover count read `+0` on all six counts.
+
+**At the checkpoint: the test-tenant purge and the leftovers' cleanup**
+(2026-10-09; D-198 has each statement and its count):
+
+- **One purge for every test tenant the API suite makes** (PR #57): files,
+  rows and the tenant; it refuses a tenant the run did not create. The run
+  prints what it left behind.
+- **The leftovers on staging:** tenant `db4495fb` deleted by the founder in
+  the Console (20 rows, no file); test tenants' 7 pending reminder jobs
+  cancelled, their 12 alerts and 45 held mail rows deleted; 4 leftover test
+  admins revoked and 6 user rows made inactive, none deleted.
+- **The recount:** 0 pending jobs, 0 mail rows and 0 alerts belong to a
+  test tenant; 0 alerts unacknowledged; 1 active admin, the founder. The
+  same after the worker suite and after the API suite.
+- **Kept on purpose:** 30 held mail rows and 4 alerts with no tenant. The
+  27 active test tenants, their documents and the 9 Stripe test customers
+  are out of scope (founder).
+- **A leftover cleanup has to include scheduled jobs:** a pending reminder
+  job writes mail for its test tenant whenever a worker runs.
+
+### Verdicts
 
 | Finding | Draft verdict | Evidence so far | Still owed |
 |---|---|---|---|
@@ -463,7 +514,7 @@ IPv6 isolation is proven on Fly). `[GAP: CI on the checkpoint commit]`
 | **H6** Files on one machine's disk | **Closed** | Supabase Storage, a private bucket, the prefix check on read, write and delete (D-182). Core `test_storage.py` (25), including `test_tenant_a_cannot_read_a_tenant_b_path_and_storage_is_never_contacted`; `test_storage_bucket_live.py` against the real bucket: `test_the_bucket_has_no_public_url`, `test_the_anon_key_reaches_no_file`, `test_a_customers_own_signed_in_token_reaches_no_file`, `test_a_hard_delete_empties_the_tenants_folder_in_the_real_bucket`. API `test_storage_outage_api.py`. Staging rollout 2026-09-30: 89 files copied and verified by SHA-256; 14 rows flagged and left out by the founder's choice (seed and test data) | Nothing |
 | **H4** (fairness, 3d) One tenant's backfill starved every other tenant | **Closed** | The dispatcher takes turns between tenants with a per-tenant cap; providers' outages are waits, not failures (D-184). Worker `test_dispatch_real_worker.py`, a real Celery worker and queue: `test_a_newcomer_gets_the_next_slot_and_a_tenants_single_order_beats_its_own_backfill`, `test_the_dispatch_process_reads_only_its_queue_and_never_claims_a_document`; `test_dispatch_db.py` (22) on the real database. Staging suites 2026-10-01 green on 3d's final code. **The 500 + 1 run on Fly staging (2026-10-08, D-196):** a second tenant's single order, saved while 332 of a 500-document backfill waited, was claimed before any further backfill document and processed 14.0 s after its save; 501 of 501 `needs_review`; largest unclaimed age 4.34 s | Nothing (the Phase 6 load test is its own item) |
 | **H4** (matching speed) | **Not Stage 3** | Stage 4 (design proposed alongside this draft) | -- |
-| **F-1** Flag policies keyed on settings any connection could set | **Closed; the old login's drop owed** | Four logins, each flag policy `TO` one login, functions granted login by login (D-185). API `test_logins_db.py` (13 tests, some per login or per function), including `test_every_flag_policy_applies_to_exactly_its_login`, `test_a_flag_that_opens_tenants_opens_it_only_on_its_own_login`, `test_each_security_definer_function_is_callable_by_exactly_its_logins`. `0036` round-tripped in CI (forward, reverse, forward) against staging's pre-0036 snapshot. **On staging since 2026-10-05** ("The cutover", above): the snapshot equals the committed post-0036 state, the API suite with these tests passed as the four logins (`625 passed, 1 skipped, 3 deselected`), and `docflow_app` is `NOLOGIN` and refused. **Deployed (2026-10-06 to 2026-10-08, D-194, D-196):** the worker prints `login check passed as docflow_worker` at each start and has processed 532 documents on its own login (531 to `needs_review`, one failed at the model's request limit), each uploaded through the API on its own | Step 7, dropping `docflow_app` (now due; the founder's action) |
+| **F-1** Flag policies keyed on settings any connection could set | **Closed** | Four logins, each flag policy `TO` one login, functions granted login by login (D-185). API `test_logins_db.py` (13 tests, some per login or per function), including `test_every_flag_policy_applies_to_exactly_its_login`, `test_a_flag_that_opens_tenants_opens_it_only_on_its_own_login`, `test_each_security_definer_function_is_callable_by_exactly_its_logins`. `0036` round-tripped in CI (forward, reverse, forward) against staging's pre-0036 snapshot. **On staging since 2026-10-05** ("The cutover", above): the snapshot equals the committed post-0036 state, the API suite with these tests passed as the four logins (`625 passed, 1 skipped, 3 deselected`), and `docflow_app` is `NOLOGIN` and refused. **Deployed (2026-10-06 to 2026-10-08, D-194, D-196):** the worker prints `login check passed as docflow_worker` at each start and has processed 532 documents on its own login (531 to `needs_review`, one failed at the model's request limit), each uploaded through the API on its own | Nothing (step 7 done 2026-10-09; D-198) |
 | **D-173 residual risk** Any app code could call the Stripe event function | **Closed in CI and on staging** | Only `docflow_stripe` may execute it: `test_only_the_stripe_login_may_execute_the_function`, `test_the_api_login_is_refused_the_stripe_event_function`. Both passed on staging as the four logins on 2026-10-05, and the function's grant there is `docflow_stripe` alone (the post-0036 snapshot) | -- |
 | **D-163** A worker killed mid-call left the call uncosted | **Closed** | A `started` run row before every paid call (0034). Worker `test_stage3c_db.py`: `test_F3_a_worker_killed_during_the_model_call_leaves_the_call_on_the_cost_record`, `test_F3_a_finished_call_has_its_started_row_and_one_outcome`, `test_F3_the_database_refuses_a_started_row_that_claims_an_outcome`; core `test_D163_the_routing_call_has_a_started_row_before_it_and_its_outcome_points_at_it`. **The document's own cost figure was found short on Fly staging on 2026-10-08 and fixed by PR #54** (D-163's addendum): it is set from the sum of the document's finished runs; `test_F3_the_reread_after_a_lost_call_keeps_the_lost_call_on_the_documents_cost`, `test_F3_the_documents_cost_counts_the_routing_read_with_the_extraction`, `test_a_paid_call_that_ended_in_a_provider_wait_stays_on_the_documents_cost` | Nothing |
 | **M6** `rollup_stale` raised but never registered | **Closed** (fixed in 3d) | Registered; one test raises every registered type end to end | Nothing |
@@ -537,8 +588,19 @@ IPv6 isolation is proven on Fly). `[GAP: CI on the checkpoint commit]`
     alerts raised by design, two tied to the 5.7 walkthrough, the drills'
     own, and one (`intake_webhook_refused`, 2026-09-27) closed as most
     likely a draft run before `88e8cd8`;
-  - by the code, the `tenant_ready_to_delete` alert returns within five
-    minutes of each acknowledgement; not yet seen.
+  - the `tenant_ready_to_delete` alert returns after each
+    acknowledgement: seen on 2026-10-09 (acknowledged 17:53:53Z, raised
+    again 17:55:02Z). A Phase 6 item (D-198).
+- **At the checkpoint (2026-10-09; D-198), each a Phase 6 item and none
+  fixed here:**
+  - a tenant whose name starts or ends with a space can never be deleted
+    from the Console (found by reading; not tried);
+  - platform-admin grants write no audit row, and a revoke has no path
+    but hand-run SQL;
+  - the Console delete does not look at an owed Stripe cancel, and the
+    stored subscription status is not changed when Stripe cancels;
+  - CI's image build failed once on a BuildKit timeout and passed on the
+    re-run; cause not established.
 - **While drafting this:** the Phase 6 item on plan changes still said to
   lower the idle-transaction cap "for `docflow_app` ... plus the CI role
   script and its agreement test". After 3e the cap is set on the four logins
@@ -556,26 +618,26 @@ IPv6 isolation is proven on Fly). `[GAP: CI on the checkpoint commit]`
   audit-trail findings, the stranded test data, M7, M10, M11).
 - **Phase 6:** narrow `docflow_stripe`'s grants; production's polled
   `/healthz` check; plan changes outside the transaction; the Sentry
-  scrubber; production's pool size.
+  scrubber; production's pool size; and the checkpoint's own findings
+  (D-198; BUILD-STATUS, "Phase 6 items from the Stage 3 checkpoint").
 - **A representative cost sample** (scans, images, spreadsheets, long
   orders): still not measured. The 500 + 1 run's documents will be the
   first such sample, if its mix includes them.
 
 ### For Stage 4: AI cost per document, and whether the database holds the catalog (founder, 2026-10-05)
 
-**AI cost per document.** `[GAP: mean, median and maximum est_cost_usd of
-the three live calls in this checkpoint's golden run, on the checkpoint
-commit]`. Nothing is measured yet: the live run is part of the step 5 runs,
-after the cutover. The last measurement is Stage 2's (2026-09-29, below):
-$0.0141, $0.0177 and $0.0191, so mean $0.0170, median $0.0177, maximum
-$0.0191 on `claude-sonnet-5`. Those are short text orders. Scans, images,
+**AI cost per document.** The three live calls of this checkpoint's golden
+run, on `5a09632` (2026-10-09): $0.0137, $0.0180 and $0.0179, so **mean
+$0.0165, median $0.0179, maximum $0.0180** on `claude-sonnet-5`. Stage 2's
+(2026-09-29, below) were $0.0141, $0.0177 and $0.0191: mean $0.0170, median
+$0.0177, maximum $0.0191 on the same model. Those are short text orders. Scans, images,
 spreadsheets and long orders are still unmeasured (above).
 
 **Does the database hold about 2.5 million catalog rows plus the trigram
 indexes?** Nothing here is measured. Staging's `items` table holds 70 rows,
 `pg_trgm` and `btree_gist` aren't installed (both are available), and the
-design allows nothing of Stage 4 on staging before `docflow_app` is
-dropped. What follows is an estimate from the table's columns and the two
+design allowed nothing of Stage 4 on staging before `docflow_app` was
+dropped (done 2026-10-09). What follows is an estimate from the table's columns and the two
 indexes the design names (description, and the stripped SKU), with the
 plan figures read from Supabase's pricing and compute pages on 2026-10-05.
 
