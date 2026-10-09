@@ -118,8 +118,14 @@ select n.nspname as backup, string_agg(c.relname, ', ' order by c.relname) as ta
 **On `docflow-staging`:** the founder dropped `backup_0026` to
 `backup_0032` on 2026-09-30, after the PR for `0032` (the card billing
 follow-up, PR #29) merged. Since then:
-- `backup_3b` (the 3b cutover's restore point), unless the founder has
-  dropped it;
+- `backup_3b` (the 3b cutover's restore point: catalog_imports 22,
+  documents 54, exports 11, onboarding_intake_files 2). **Dropped
+  2026-10-09** by the founder, between 18:23:33 and 18:26:07 UTC, one
+  `drop table backup_3b.<table>;` for each of the four tables and then
+  `drop schema backup_3b;` (no `cascade`, as for the two below). Claude's
+  read-only comparison of the two reads: the schema and its four tables
+  gone, nothing else changed, and **no `backup_*` schema is left on
+  `docflow-staging`**;
 - **`backup_0034`** (documents 105, extraction_runs 17; live = backup),
   taken 2026-10-01 before `0034`. **Founder, 2026-10-01: dropped after 3c
   has run cleanly on staging for 3 days** -- 3c merged 2026-10-01 20:53 UTC,
