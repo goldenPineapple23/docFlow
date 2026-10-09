@@ -46,6 +46,9 @@ What's left is proof on staging and on Fly. **Proposed (Q1 below):**
 | `docflow_app` dropped (10.2 step 7, 3 clean days after the cutover) | **Can follow** | Cleanup after F-1 is already enforced; it doesn't change a verdict |
 | `backup_0034` and `backup_0035` dropped | **Can follow** | The founder's own actions after each check |
 | Moving CI to Ubuntu 26 | **Can follow** | A deliberate CI change before 24.04 is retired, not Stage 3 work |
+| The three `live_api` tests (the golden fixture, the golden fixture with examples, the example-contamination check) | **On the list** (founder, 2026-10-09; D-197) | They run only at checkpoints (RUNBOOK 1.4), against the real model |
+| A shared tenant helper for the API suite that also removes a test tenant's alerts and outbox rows, with a before-and-after count at the end of the run | **On the list** (founder, 2026-10-08; D-197) | The alert triage of 2026-10-08: a killed run cleans nothing, and only some of the suite's hand-written tenant helpers delete alerts |
+| The test leftovers' cleanup on staging, test tenant `db4495fb` ("Acme Test Distributor", `pending_deletion` past its date) included | **On the list** (founder, 2026-10-09; D-197) | The lifecycle sweep visits that tenant every five minutes, and its ready-to-delete alert stays open |
 
 So the checkpoint waits for the first worker deploy (RUNBOOK 9.2) and the
 runs made with it. **Decided (founder, 2026-10-02, Q1 below).**
@@ -420,6 +423,31 @@ founder accepted the 500 + 1 run on 2026-10-08.** Times are UTC.
   `backup_0034`, `backup_0035`, `backup_3b` and the role `docflow_app`
   (D-186, D-190; RUNBOOK 1.3 and 10.2 step 7).
 
+**After the first worker deploy: the stop drills and the second idle hour**
+(Fly staging, 2026-10-08 and 2026-10-09; D-197 has each run's times):
+
+- **An idle worker scaled to 0** exits by itself in 10 s with code 0.
+  `fly scale count` sends `SIGTERM` 5 s after the `SIGINT`, which the
+  worker survives; a deploy sent none. A scale-down is not a stand-in for
+  a deploy.
+- **One order at the 10 s queue read:** the worker received the task 4 ms
+  after the dispatch pass sent it.
+- **A scale-down during a read:** the read finished, about 5 s after the
+  signal, and the worker then exited with code 0.
+- **The documents worker killed during a read:** the stuck sweep returned
+  the document and it was read on its second try. Another tenant's order,
+  already saved, waited **31 minutes 16 seconds from the cut-off claim to
+  its dispatch**, with no alert: the Phase 6 launch blocker, measured.
+- **A deploy during a read** (drill D, passed, founder): the read finished
+  8 s after the signal, the worker exited by itself 12 s after it, no
+  `SIGTERM`. A read longer than `kill_timeout` (30 s) is still untested on
+  a deploy.
+- **The idle hour with the 10 s read and no stored results: 6,205
+  commands** (the first deploy's was about 13,650). Production's Redis
+  stays on Pay as You Go (founder).
+- Spend for all of it: $0.0630, to $6.9740 over 1,076 runs. The deployed
+  worker has now read 537 documents.
+
 **CI**, latest on `main` (`d004186`, run 37043224237, after 3e and the
 runner pin): core 745 tests, api 626, worker 180, parse unit 128 and HTTP
 56, each `0 failed, 0 skipped, 0 unapproved`; web 73 passed, web-live 3
@@ -437,7 +465,7 @@ IPv6 isolation is proven on Fly). `[GAP: CI on the checkpoint commit]`
 | **H4** (matching speed) | **Not Stage 3** | Stage 4 (design proposed alongside this draft) | -- |
 | **F-1** Flag policies keyed on settings any connection could set | **Closed; the old login's drop owed** | Four logins, each flag policy `TO` one login, functions granted login by login (D-185). API `test_logins_db.py` (13 tests, some per login or per function), including `test_every_flag_policy_applies_to_exactly_its_login`, `test_a_flag_that_opens_tenants_opens_it_only_on_its_own_login`, `test_each_security_definer_function_is_callable_by_exactly_its_logins`. `0036` round-tripped in CI (forward, reverse, forward) against staging's pre-0036 snapshot. **On staging since 2026-10-05** ("The cutover", above): the snapshot equals the committed post-0036 state, the API suite with these tests passed as the four logins (`625 passed, 1 skipped, 3 deselected`), and `docflow_app` is `NOLOGIN` and refused. **Deployed (2026-10-06 to 2026-10-08, D-194, D-196):** the worker prints `login check passed as docflow_worker` at each start and has processed 532 documents on its own login (531 to `needs_review`, one failed at the model's request limit), each uploaded through the API on its own | Step 7, dropping `docflow_app` (now due; the founder's action) |
 | **D-173 residual risk** Any app code could call the Stripe event function | **Closed in CI and on staging** | Only `docflow_stripe` may execute it: `test_only_the_stripe_login_may_execute_the_function`, `test_the_api_login_is_refused_the_stripe_event_function`. Both passed on staging as the four logins on 2026-10-05, and the function's grant there is `docflow_stripe` alone (the post-0036 snapshot) | -- |
-| **D-163** A worker killed mid-call left the call uncosted | **Closed** | A `started` run row before every paid call (0034). Worker `test_stage3c_db.py`: `test_F3_a_worker_killed_during_the_model_call_leaves_the_call_on_the_cost_record`, `test_F3_a_finished_call_has_its_started_row_and_one_outcome`, `test_F3_the_database_refuses_a_started_row_that_claims_an_outcome`; core `test_D163_the_routing_call_has_a_started_row_before_it_and_its_outcome_points_at_it` | Nothing |
+| **D-163** A worker killed mid-call left the call uncosted | **Closed** | A `started` run row before every paid call (0034). Worker `test_stage3c_db.py`: `test_F3_a_worker_killed_during_the_model_call_leaves_the_call_on_the_cost_record`, `test_F3_a_finished_call_has_its_started_row_and_one_outcome`, `test_F3_the_database_refuses_a_started_row_that_claims_an_outcome`; core `test_D163_the_routing_call_has_a_started_row_before_it_and_its_outcome_points_at_it`. **The document's own cost figure was found short on Fly staging on 2026-10-08 and fixed by PR #54** (D-163's addendum): it is set from the sum of the document's finished runs; `test_F3_the_reread_after_a_lost_call_keeps_the_lost_call_on_the_documents_cost`, `test_F3_the_documents_cost_counts_the_routing_read_with_the_extraction`, `test_a_paid_call_that_ended_in_a_provider_wait_stays_on_the_documents_cost` | Nothing |
 | **M6** `rollup_stale` raised but never registered | **Closed** (fixed in 3d) | Registered; one test raises every registered type end to end | Nothing |
 | **Spike carry-ins** (D-150): hide `/.fly` and `/sys`; re-probe against the real Upstash and API | **Closed** | Hidden in the job's mount namespace and checked on Fly in run 2; A3 against the real Upstash passed there. **A4 against the real API and worker passed on Fly staging on 2026-10-07** (D-196; `docs/spikes/first-worker-deploy-staging/2026-10-07/a4_real_api_worker_2026-10-07.txt`) | Nothing |
 
@@ -497,6 +525,20 @@ IPv6 isolation is proven on Fly). `[GAP: CI on the checkpoint commit]`
 - **At the 3e merge:** the backup checks' rule "suites green on `main`"
   became impossible once `main` needed `0036`; decided: suites at
   `f191e27` (RUNBOOK 1.3).
+- **At the drills after the first worker deploy (2026-10-08 and
+  2026-10-09; D-197):**
+  - a document re-read after a lost call showed only the re-read's cost
+    ($0.0120 against runs summing to $0.0142). Fixed by PR #54: the
+    document's cost is now the sum of its finished runs (D-163's
+    addendum); no backfill;
+  - for about 10 s after every worker start each Celery worker receives
+    nothing; the fix to evaluate is its own PR, not built;
+  - the 18 unacknowledged staging alerts were triaged: test leftovers,
+    alerts raised by design, two tied to the 5.7 walkthrough, the drills'
+    own, and one (`intake_webhook_refused`, 2026-09-27) closed as most
+    likely a draft run before `88e8cd8`;
+  - by the code, the `tenant_ready_to_delete` alert returns within five
+    minutes of each acknowledgement; not yet seen.
 - **While drafting this:** the Phase 6 item on plan changes still said to
   lower the idle-transaction cap "for `docflow_app` ... plus the CI role
   script and its agreement test". After 3e the cap is set on the four logins
