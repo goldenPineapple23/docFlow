@@ -343,9 +343,9 @@ How a run is reported:
   **From the test-tenant purge (2026-10-09; the Stage 3 checkpoint's
   list, D-197):** the API suite gains four tests, all in
   `test_tenant_cleanup.py`, and loses none: CI reads `631 tests`. On this
-  machine against staging that is expected to read `630 passed, 1
-  skipped, 3 deselected`; **it has not been run there yet** (the first
-  run is the Stage 3 checkpoint's run of record). Core and worker are
+  machine against staging it reads `630 passed, 1 skipped, 3 deselected`
+  (2026-10-09 at `5a09632`, 38:26: the Stage 3 checkpoint's run of
+  record), and the leftover line read `+0` on all six counts. Core and worker are
   unchanged.
   - **Every throwaway tenant the API suite makes now ends in one purge**
     (`apps/api/tests/tenant_cleanup.py`): the tenant's files in the bucket,
@@ -372,7 +372,7 @@ How a run is reported:
   |---|---|---|
   | core | 806 passed, 1 skipped | 807 tests |
   | worker | 191 passed, 7 skipped | 198 tests |
-  | API | 630 passed, 1 skipped, 3 deselected (expected; not yet run, see above) | 631 tests |
+  | API | 630 passed, 1 skipped, 3 deselected | 631 tests |
 
   The difference in each row is exactly the skips named here, which need
   Linux, CI's containers or a secret this machine does not hold. A CI
@@ -1949,6 +1949,12 @@ Three settings follow from that measurement:
   **Production stays on Pay as You Go** (founder). Re-check against the
   first production bill and switch to the Fixed 250 MB plan if it goes
   over $10. Staging stays on Pay as You Go.
+- **Before an idle-hour reading, read the API and parse machine states
+  first** (founder, 2026-10-09): `flyctl machine list` for
+  `docflow-api-staging` and `docflow-parse-staging` must both read
+  `stopped`, at the first Upstash reading and again at the second. A
+  Redis reading taken while the API is still up is not an idle reading.
+  For the hour measured on 2026-10-09 both were stopped (D-197, item 6).
 - **Before production's Redis is used** (founder): confirm its endpoint is
   reachable only over Fly's private network. TLS is disabled on the
   Upstash endpoint.
