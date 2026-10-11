@@ -27,7 +27,10 @@ creates the two indexes, measures, and drops them:
   line the design would send to the full scan.
 
 It also times today's full scan per line on this machine, because that is
-what a fallback costs and what top-K must beat.
+what a fallback costs and what top-K must beat; and a faster full scan (the
+catalog's comparison keys built once, `FastScan` below), alone and as the
+fallback behind each variant. The faster scan lives here only: nothing in
+the product changes.
 
 **It refuses any database that is not on this machine**, as the sizing job
 does. Every figure is a GitHub annotation (RUNBOOK 1.6). GitHub keeps ten
@@ -61,6 +64,7 @@ PLAN_LINES = 5  # per family: lines whose plan and buffers are read
 GUARD_SIMILARITY = 0.5  # the design's cut-off guard (A3): "still similar"
 GUARD_FACTOR = 4  # ... and the wider fetch it asks for before the full scan
 THRESHOLDS = (0.3, 0.5, 0.7)  # pg_trgm.similarity_threshold, for the GIN variant
+FAST_KEEP = 100  # the faster full scan: items kept from each score before today's code runs on them
 GENERAL_PREFIX = "Acme Test "  # catalog_gen's general families; the rest are fasteners
 FAMILIES = ("fastener", "general")
 SKU_KINDS = ("one character wrong", "no SKU", "the buyer's own number")
@@ -264,6 +268,95 @@ def spread(values: list[float]) -> str:
     return f"{sizing.percentile(values, 0.5):.1f}/{sizing.percentile(values, 0.95):.1f}/{max(values):.1f}"
 
 
+# ── A faster full scan: no database, and not in the product ─────────────────
+
+
+class FastScan:
+    """Today's full scan with its preparation done once (founder,
+    2026-10-11: measured here, nothing in the product changes).
+
+    Today every line rebuilds every item's comparison keys. This builds them
+    once for the catalog, has rapidfuzz score every item in one call per
+    score, keeps the best `FAST_KEEP` by each score, and runs today's code
+    on those. Every item is still scored, by today's scorers on today's
+    keys. An item left out scores no more than the last one kept, so when
+    the fifth candidate scores above that, the five are the full scan's own;
+    when it does not (a tie at the cut), four times as many are kept and the
+    line is looked at again."""
+
+    def __init__(self, matching, catalog):
+        self.matching, self.catalog = matching, catalog
+        self.description_keys = [matching.normalize_description(item.description) for item in catalog.items]
+        self.sku_keys = [matching.sku_comparison_key(item.sku) for item in catalog.items]
+        self.widened = 0  # lines that needed more than FAST_KEEP
+
+    def resolve(self, line: Line):
+        from rapidfuzz import fuzz, process
+
+        m = self.matching
+        asked = (
+            (m.normalize_description(line.description), self.description_keys, fuzz.token_sort_ratio),
+            (m.sku_comparison_key(line.sku), self.sku_keys, fuzz.ratio),
+        )
+        keep, widened = FAST_KEEP, False
+        while True:
+            kept: set[int] = set()
+            cut = None  # the best score an item left out could have
+            for key, keys, scorer in asked:
+                if not key:
+                    continue
+                best = process.extract(key, keys, scorer=scorer, limit=keep)
+                kept.update(index for _, _, index in best)
+                if len(best) == keep and keep < len(keys):
+                    low = m._as_score(best[-1][1])
+                    cut = low if cut is None else max(cut, low)
+            match = resolve(m, line, m.Catalog([self.catalog.items[i] for i in sorted(kept)]))
+            full = len(match.candidates) >= m.MAX_CANDIDATES
+            if cut is None or cut <= 0 or (full and match.candidates[m.MAX_CANDIDATES - 1].score > cut):
+                self.widened += widened
+                return match
+            keep, widened = keep * 4, True
+
+
+def measure_fast_scan(matching, catalog, lines: dict[str, list[Line]], reference: dict[str, list]) -> dict:
+    """The faster full scan on the same lines: the key build's time and
+    memory, each line's time, and parity with today's full scan."""
+    import tracemalloc
+
+    started = time.perf_counter()
+    fast = FastScan(matching, catalog)
+    build_seconds = time.perf_counter() - started
+    # Built a second time under the memory tracer, which would slow the timing above.
+    tracemalloc.start()
+    FastScan(matching, catalog)
+    held, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    found: dict = {"matches": {}, "ms": {}}
+    timing, parity = [], []
+    for family in FAMILIES:
+        found["matches"][family], found["ms"][family] = [], []
+        for line in lines[family]:
+            started = time.perf_counter()
+            found["matches"][family].append(fast.resolve(line))
+            found["ms"][family].append((time.perf_counter() - started) * 1000)
+        pairs = list(zip(found["matches"][family], reference[family]))
+        timing.append(f"{family} {spread(found['ms'][family])} over {len(lines[family])} lines")
+        parity.append(
+            f"{family} applied match differs on {sum(1 for a, b in pairs if outcome(a) != outcome(b))}, "
+            f"the five candidates differ on {sum(1 for a, b in pairs if recorded(a) != recorded(b))}"
+        )
+    found["report"] = [
+        "the faster full scan (comparison keys built once a document; measured here, not in the product): "
+        f"keys built in {build_seconds:.2f} s; they hold {sizing.megabytes(held)}, "
+        f"{sizing.megabytes(peak)} at the peak of building them",
+        "the faster full scan, ms a line p50/p95/max: " + " | ".join(timing) + f"; more than {FAST_KEEP} "
+        f"items had to be kept on {fast.widened} lines",
+        f"the faster full scan, parity with today's on {PARITY_LINES} lines a family: " + " | ".join(parity),
+    ]
+    return found
+
+
 # ── Measuring one variant ───────────────────────────────────────────────────
 
 
@@ -347,24 +440,26 @@ def _measure(conn, variant: Variant, threshold: float | None, pages: dict[str, i
             fetched[family].append(lists)
 
     for k in KS:
-        timing, parity, guarded = [], [], []
+        timing, parity, guarded, combined = [], [], [], []
         for family in FAMILIES:
             lines = ctx["lines"][family]
-            taken = {}
+            per_line: list[dict[str, float]] = [{} for _ in lines]  # each line's ms, by list
             for field, expression in EXPRESSIONS.items():
                 sql, marks = query(expression, k)
-                asked = [values(line)[field] for line in lines if field in values(line)]
-                for value in asked[: sizing.WARM_UP]:
+                asked = [(n, values(line)[field]) for n, line in enumerate(lines) if field in values(line)]
+                for _, value in asked[: sizing.WARM_UP]:
                     conn.execute(sql, bind(marks, tenant_id, value)).fetchall()
-                taken[field] = []
-                for value in asked:
+                for n, value in asked:
                     started = time.perf_counter()
                     conn.execute(sql, bind(marks, tenant_id, value)).fetchall()
-                    taken[field].append((time.perf_counter() - started) * 1000)
+                    per_line[n][field] = (time.perf_counter() - started) * 1000
+            taken = {field: [ms[field] for ms in per_line if field in ms] for field in EXPRESSIONS}
             timing.append(f"{family} description {spread(taken['description'])}, SKU {spread(taken['SKU'])}")
 
             match_differs, candidates_differ, close, full_scan = 0, Counter(), 0, 0
-            for line, lists, reference in zip(lines, fetched[family], ctx["reference"][family]):
+            together_ms, together_differs = [], 0
+            rows = zip(lines, fetched[family], ctx["reference"][family])
+            for n, (line, lists, reference) in enumerate(rows):
                 ids = [i for found, _ in lists.values() for i in found[:k]]
                 got = from_candidates(matching, line, catalog, ids)
                 if outcome(got) != outcome(reference):
@@ -373,7 +468,19 @@ def _measure(conn, variant: Variant, threshold: float | None, pages: dict[str, i
                     candidates_differ[line.sku_kind] += 1
                 flags = [guard(similarities, k) for _, similarities in lists.values()]
                 close += any(c for c, _ in flags)
-                full_scan += any(f for _, f in flags)
+                fell_back = any(f for _, f in flags)
+                full_scan += fell_back
+                # The index first, and the faster full scan for the lines the guard sends on.
+                final = ctx["fast"]["matches"][family][n] if fell_back else got
+                together_ms.append(
+                    sum(per_line[n].values()) + (ctx["fast"]["ms"][family][n] if fell_back else 0)
+                )
+                same = outcome(final) == outcome(reference) and recorded(final) == recorded(reference)
+                together_differs += not same
+            combined.append(
+                f"{family} {spread(together_ms)} ms a line p50/p95/max, the scan on {full_scan} lines, "
+                f"differs from today's full scan on {together_differs}"
+            )
             by_kind = ", ".join(f"{kind}: {candidates_differ[kind]}" for kind in SKU_KINDS)
             parity.append(
                 f"{family} applied match differs on {match_differs}, the five candidates differ on "
@@ -388,6 +495,10 @@ def _measure(conn, variant: Variant, threshold: float | None, pages: dict[str, i
         )
         out.append(f"{prefix}fetching {k}, parity on {PARITY_LINES} lines a family: " + " | ".join(parity))
         out.append(f"{prefix}fetching {k}, guard on {PARITY_LINES} lines a family: " + " | ".join(guarded))
+        out.append(
+            f"{prefix}fetching {k}, both queries and the faster full scan for the guard's lines, on "
+            f"{PARITY_LINES} lines a family: " + " | ".join(combined)
+        )
 
     if threshold is not None:
         passing = []
@@ -495,6 +606,7 @@ def run(database_url: str, mix: str, seed: int, names: str) -> int:
                 if taken
                 else f"{family} lines: none in this catalog"
             )
+        ctx["fast"] = measure_fast_scan(matching, ctx["catalog"], ctx["lines"], ctx["reference"])
         sizing.emit(
             # No comma in a title: GitHub reads one as the end of the title.
             "variants: today's full scan in Python on this runner",
@@ -502,6 +614,7 @@ def run(database_url: str, mix: str, seed: int, names: str) -> int:
                 f"the {max(sizes)}-item tenant: catalog read from the database in {read_seconds:.2f} s, "
                 f"its exact-SKU table built in {catalog_seconds:.2f} s (both once a document)",
                 *scan_lines,
+                *ctx["fast"]["report"],
                 f"the load: {load_seconds:.0f} s for {sum(sizes)} rows with no trigram index; "
                 f"{rows} items rows in the table",
             ],

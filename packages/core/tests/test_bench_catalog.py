@@ -335,6 +335,56 @@ def test_parity_is_todays_code_over_the_fetched_candidates():
     assert variants.recorded(again) == variants.recorded(reference)
 
 
+def _bench_catalog_and_lines(count: int, per_family: int):
+    from uuid import uuid4
+
+    from docflow_core import matching
+
+    made = list(gen.catalog(7, 1, count))
+    catalog = matching.Catalog(
+        [matching.CatalogItem(uuid4(), i.sku, i.description, i.unit_of_measure) for i in made]
+    )
+    rows = [(i.sku, i.description) for i in made]
+    general = [row for row in rows if row[1].startswith(variants.GENERAL_PREFIX)]
+    fasteners = [row for row in rows if not row[1].startswith(variants.GENERAL_PREFIX)]
+    lines = {
+        "fastener": variants.bench_lines(fasteners[:per_family], 7),
+        "general": variants.bench_lines(general[:per_family], 7),
+    }
+    return matching, catalog, lines
+
+
+@pytest.mark.parametrize("keep", [500, 100, 3])
+def test_the_faster_full_scan_returns_what_todays_full_scan_returns(monkeypatch, keep):
+    """Every line, both families, all nine kinds: the same applied match and
+    the same five candidates. With a small `FAST_KEEP` the cut falls among
+    tied siblings, which is the case that has to widen and look again."""
+    monkeypatch.setattr(variants, "FAST_KEEP", keep)
+    matching, catalog, lines = _bench_catalog_and_lines(1500, 9)
+    fast = variants.FastScan(matching, catalog)
+    for family in variants.FAMILIES:
+        assert len(lines[family]) == 9
+        for line in lines[family]:
+            today = variants.resolve(matching, line, catalog)
+            faster = fast.resolve(line)
+            assert variants.outcome(faster) == variants.outcome(today), (family, line)
+            assert variants.recorded(faster) == variants.recorded(today), (family, line)
+    assert (fast.widened > 0) == (keep == 3)
+
+
+def test_the_faster_full_scan_is_measured_against_todays_on_the_same_lines():
+    matching, catalog, lines = _bench_catalog_and_lines(600, 9)
+    reference = {
+        family: [variants.resolve(matching, line, catalog) for line in lines[family][:3]]
+        for family in variants.FAMILIES
+    }
+    found = variants.measure_fast_scan(matching, catalog, lines, reference)
+    assert [len(found["ms"][family]) for family in variants.FAMILIES] == [9, 9]
+    assert len(found["report"]) == 3
+    assert "keys built in" in found["report"][0] and "MB" in found["report"][0]
+    assert found["report"][2].count("applied match differs on 0, the five candidates differ on 0") == 2
+
+
 def test_the_variants_refuse_any_database_not_on_this_machine(capsys):
     code = variants.main(["--mix", "10", "--database-url", "postgresql://u:pw@db.example.test:5432/postgres"])
     assert code == 2
