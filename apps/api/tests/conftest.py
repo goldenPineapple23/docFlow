@@ -33,11 +33,11 @@ def pytest_sessionfinish(session, exitstatus):
     from tests import leftover_count, suite_lock
 
     # Counted while the lock is still held, so no other run is writing.
-    leftover_count.session_finish()
+    leftover_count.session_finish(session)
     suite_lock.session_finish()
 
 
-# ── What the run left behind (tests/leftover_count.py): printed, not a failure ──
+# ── What the run left behind (tests/leftover_count.py): anything but +0 fails the run ──
 def pytest_terminal_summary(terminalreporter):
     from tests import leftover_count
 
