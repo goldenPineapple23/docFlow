@@ -360,10 +360,20 @@ How a run is reported:
     line: `left behind by this run (before -> after): tenants N -> N (+0),
     founder alerts ..., e-mails ..., scheduled jobs ..., platform-admin
     rows ..., users with no tenant ...`. In CI the same line is a notice
-    annotation, `api leftover count`. **Printed, not a failure, for now**
-    (founder, 2026-10-09): it becomes a failure in the first PR after a
-    staging run of record reads `+0` on every count. A killed run prints
-    nothing and cleans nothing.
+    annotation, `api leftover count`. **A failure since 2026-10-11**
+    (founder; D-199): it was printed only until the staging run of record
+    at `5a09632` read `+0` on every count. A run that does not read `+0`
+    on all six exits 1, pytest's last line counts `1 error`, and a line
+    under the counts names the ones that moved; in CI the annotation is
+    an error. A count that goes down fails too, and so does a run whose
+    counts can't be read again at the end. A killed run prints nothing
+    and cleans nothing.
+  **From the leftover count as a failure (2026-10-11; D-199):** the API
+  suite gains eleven tests, all in `test_leftover_count.py`, and loses
+  none: CI reads `642 tests`. On this machine against staging it reads
+  `641 passed, 1 skipped, 3 deselected` (2026-10-11 at `b278490`, 39:18),
+  and the leftover line read `+0` on all six counts. Core and worker are
+  unchanged.
   **What CI reports for the same code, side by side** (founder,
   2026-10-08). CI runs every test, so each line must also read `0 failed,
   0 skipped, 0 unapproved`:
@@ -372,7 +382,7 @@ How a run is reported:
   |---|---|---|
   | core | 806 passed, 1 skipped | 807 tests |
   | worker | 191 passed, 7 skipped | 198 tests |
-  | API | 630 passed, 1 skipped, 3 deselected | 631 tests |
+  | API | 641 passed, 1 skipped, 3 deselected | 642 tests |
 
   The difference in each row is exactly the skips named here, which need
   Linux, CI's containers or a secret this machine does not hold. A CI

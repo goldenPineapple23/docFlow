@@ -18,21 +18,19 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-10-09:** Phase 5.5, Stage 3, **checkpoint written and waiting for the founder's
-"go"** (CHECKPOINTS.md; D-198). Slices 3a to 3e are merged, the logins cutover (RUNBOOK 10.2) is
-done with step 7, and the first worker deploy (RUNBOOK 9.7) is done through step 15. **Done on
-2026-10-09:** the three backups and the old role `docflow_app` dropped by the founder; one purge for
-every throwaway tenant the API suite makes, with a printed count of what a run leaves (PR #57); the
-test leftovers on staging cleaned up (tenant `db4495fb` deleted in the Console; test tenants'
-pending jobs cancelled, their alerts and held mail removed; four leftover test admins revoked and
-six user rows made inactive). Staging holds 0 pending jobs, 0 held mail rows and 0 alerts belonging
-to a test tenant; 30 held rows and 4 alerts with no tenant are kept on purpose. **The checkpoint's
-runs on `main` `5a09632`:** core `806 passed, 1 skipped`, worker `191 passed, 7 skipped`, API `630
-passed, 1 skipped, 3 deselected` with nothing left behind, and the three live tests passed for
-$0.0496 on `claude-sonnet-5`; CI green on the same commit. The Fly worker and beat are at 0 and the
-Healthchecks.io check is paused. **Next, after the "go":** the leftover count becomes a failure, the
-fix for the 10 seconds after a worker start (its own PR), the model policy (D-195), then Stage 4.
-Nothing of Stage 4 is built before the "go".
+**Status, as of 2026-10-11:** Phase 5.5. **Stage 3 is complete: the founder gave the "go" on
+2026-10-11**, after merging the checkpoint's record (PR #58, `main` `d674d4a`; D-199). **First
+after it:** an API run that does not leave the database as it found it now fails (D-199; RUNBOOK
+1.4); on staging at `b278490` the suite read `641 passed, 1 skipped, 3 deselected` with `+0` on all
+six counts. **The order from here (founder, 2026-10-11; "The plan after the Stage 3 "go"",
+below):** Stage 4 (matching performance, now at 800,000 catalog items; the design is being revised
+to that load, and nothing is built before the founder approves the revision); Stage 5 (cleanup,
+with the fix for the 10 seconds after a worker start as its own PR there, not before Stage 4); demo
+readiness, with D-195's model work; the Phase 6 pilot-blocker subset; then pilots with two or three
+customers. If Stage 4 is not merged by 2026-11-02, D-195's two changes go next, before Stage 5.
+Staging's database is Nano on Supabase's Free plan (500 MB): nothing is loaded for Stage 4 until a
+CI job has measured the sizes and the founder has chosen. The Fly worker and beat are at 0 and the
+Healthchecks.io check is paused.
 
 **That paragraph is the current state only** (founder, 2026-10-05; D-191). When it changes, the
 paragraph it replaces moves, word for word, to the top of `docs/status-history.md`, which is not
@@ -208,9 +206,100 @@ are D-149 – D-153.
 | 0 | Safety net: push, CI green, `main` protected (done before 5.5 began); **CI database and the unapproved-skip check** (H7 part 2); core type-checked and pinned in CI | DONE (PR #3, merged 2026-09-25) | D-148 |
 | 1 | Data integrity: C1 numeric fidelity end to end (with M2, M3, M14), H1 pipeline ordering, H2 re-validation, H3 guarded status transitions and idempotent jobs, stuck documents. **Plus the two defects the founder's walkthrough found on the real stack (2026-09-27): the review screen said nothing when an edit raised a check (D-166), and a session token one second ahead of this clock was refused as "signed out" (D-167).** | **CHECKPOINT DONE 2026-09-26, awaiting "go"** (`CHECKPOINTS.md`: C1, H1, H3, M1, M3, H2, M4, M5 all closed). 1a DONE (PR #4, D-156); 1b DONE (PR #6, migration `0027`, D-158 – D-160); 1c DONE (PR #7: golden rename, M1 streaming measured, H2/M4/M5, one read budget, every paid call costed, Audit tab on one clock; D-159, D-161 – D-164); named system actors DONE (PR #8, migration `0028` applied and verified on staging 2026-09-26: 3 system actors, no blank lifecycle actor, idle-transaction cap 5 min; D-165); Stage 1 checkpoint run on `b04f16d`; walkthrough fixes DONE (D-166 the review screen, D-167 clock skew, D-169 the line table marking the rows and numbers a check is about, and the live end-to-end suite that catches this class of defect) | D-149, D-154 – D-169 |
 | 2 | Security and lifecycle: H8 signed email intake, H10 one lifecycle gate, H9 MFA + step-up, H11 Stripe events (record the event in the same transaction as its effect; ignore an event older than the state already saved; **an event in the same second as the saved state can't be ordered by `created` (one-second resolution), so it re-fetches the subscription from Stripe and saves that, never guesses** -- a webhook-side fetch, not a page-load one, so within 7.15.3 (founder, 2026-09-26); the Phase 6 plan-change reconcile reuses this guard). **Plus two clock items folded in from the D-170 sweep:** `first_past_due_at` written from Stripe's event time rather than the app clock, and tests that a stale and a future-dated Stripe webhook signature are both refused (the 300 s tolerance is real but untested today). **Also carries 2a's deferred `intake_webhook_refused` alert** and the `founder_alerts` insert policy it needs (the `rollup_raise` pattern from 0017), since `0029` is the migration already planned (D-171). **2a (H8) DONE (PR #14):** the inbound webhook now authenticates the provider with Postmark's HTTP Basic credentials, checked before the payload is parsed and before the token is resolved; the per-tenant token identifies the tenant and no longer authenticates the request. A blank credential refuses all inbound mail on purpose (D-171), so RUNBOOK 2.1's cutover order is a requirement: credentials set and deployed, *then* Postmark pointed at the URL carrying them. A refusal logs which reason it was, and **raises a high-severity `intake_webhook_refused` alert in 2c, not 2a** -- a tenant-less alert needs its own RLS insert policy, which needs a migration, and 2c already has `0029`; `test_rls_flags.py` caught the attempt to raise it from the router and located the right home (D-171). **Blocking condition (founder, 2026-09-27): credential enforcement must not go live on an address real customers send to until 2c's alert lands.** A refused request is, from outside, either a misconfigured cutover or an attacker, and the first means no mail arrives at all -- so until the alert exists, the only signal is a log line nobody is watching. Staging and a test address are fine; the RUNBOOK 2.1 cutover on a production intake address waits for 2c. The IP allowlist is log-only with no enforcing branch (D-155); RUNBOOK 2.3 is the confirm-then-enforce procedure and 2.2 the rotation procedure. 12 tests; 10 of them fail with the credential check disabled **2b (H10) DONE (PR #15):** a suspended or pending-deletion tenant can no longer upload -- refused with a new `INT-010` before the file is validated or stored, so it costs nothing; read and export stay open, asserted against `/home`, the order history, one order in full and its export history, in both blocked states (7.14). `cancelling` deliberately does not block. One predicate, `intake_gate.blocks_new_intake`, is shared by both intake channels so the lifecycle answer cannot drift -- which is how the defect existed. Two departures from the review's proposed fix, reasoned in D-172: a new catalog entry rather than reusing INT-006 (whose reader is a buyer whose mail bounced, not the tenant's own user), and the gate reads lifecycle status rather than `intake_address_active` (which is also false before go-live). The refused attempt is recorded in `intake_rejections` (the file is not), so a customer who keeps trying is visible -- a retention signal, not only an audit one. Three drift tests beyond the shared predicate: both real endpoints asserted to agree across four states, a structural test forbidding the status pair inside any condition, and the invariant that the suspend transition sets `status` and clears `intake_address_active` together (they are different columns and only the transition keeps them in step). 14 tests; 3 fail with the gate disabled **2c (H11, clock items #3 and #6, 2a's deferred alert) BUILT, migration `0029` not yet applied to staging:** Stripe events go through `record_stripe_subscription_event()`, a SECURITY DEFINER function called inside the tenant's own session, which records the event id in the same transaction as the status write, applies the ordering guard (older events recorded, not applied; a NULL saved time applies), and cross-checks the customer against the session's tenant. A same-second event fetches Stripe's state with no transaction open and re-checks the guard before saving. `first_past_due_at` is Stripe's event time and `unpaid` no longer resets it. No session can write `stripe_webhook_events` any more; EXECUTE is revoked from PUBLIC **and from Supabase's `anon`/`authenticated`** (which get it by default -- found while building, D-175). A refused inbound webhook now raises a high-severity `intake_webhook_refused` alert, one per reason, never changing the 401 -- **which satisfies 2a's blocking condition once 0029 is applied** (RUNBOOK 2.1). Stripe's clock against ours has one named tolerance, `STRIPE_CLOCK_TOLERANCE_SECONDS` (300 s), enforced at the signature and, on the database's clock, at the event time: an event stamped beyond it is not applied and alerts the founder (D-176). 29 new API tests (22 webhook, 7 refusal alert) plus 5 static core tests | 2a, 2b DONE; **2c DONE** (PR #18; `0029` applied to staging 2026-09-28; on `b540433`: API 477 passed / 3 deselected, core 547 passed, worker 107 passed; CI green); **2d (H9) DONE** (PR #20; lost-device drill passed on staging 2026-09-28, D-177): the Console needs an aal2 session (AUTH-006); seven destructive actions -- hard delete, clear quarantine, cancel, address rotation, buyer merge, go live, tier change -- need a TOTP challenge under 5 min old (AUTH-007, 30 s GoTrue allowance); a wrong code is AUTH-008, mirrored in the web app and kept in step by a test; `CONSOLE_MFA_ENFORCED` ships off, with a startup warning, a Console banner and a founder alert while off; enrol and add a backup at /admin/security; RUNBOOK section 4. No migration. 24 API tests (11 fail with the checks disabled), 4 Vitest, 4 e2e. **Founder enrolled 2026-09-28: two authenticators, both verified** (checked through the Supabase admin API). The backup first failed: Supabase refuses a second factor with the same name (422), and both were named after the date -- fixed in PR #21 (each new authenticator gets a name not already taken; 2 Vitest). A failed enrolment now shows its own catalog entry, **`AUTH-009`** (PR #22), mirrored in the web app and drift-tested like AUTH-008, instead of the generic "We couldn't reach DocFlow" (founder, 2026-09-28, who also set its next-step wording; 2 e2e). **The e2e suite now fails any test whose browser reaches a host other than this machine** (`apps/web/e2e/networkGuard.ts`, every spec imports it and a check fails the suite if one doesn't) -- one AUTH-009 test draft had reached real staging; shown failing with a test pointed at staging. **Second lost-device drill with enforcement on PASSED 2026-09-28 (D-178)**: backup-only sign-in, stale step-up refused, fresh one accepted, dashboard removal leaving only enrolment, re-enrol; drill admin revoked and deleted. **`CONSOLE_MFA_ENFORCED` is on** for the local API (`.env` and the running process agree). A CI timing race in `test_console_mfa.py` was found and fixed (D-178) | D-151, D-170, D-171, D-172, D-173, D-175, D-176, D-177 |
-| 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation (**host settled, D-150: Fly.io, each parse process in its own network namespace; proof spike PASSED 2026-09-28. Carried in from the spike: hide `/.fly` and `/sys` in a mount namespace, and re-run the probe against the real Upstash and API**), H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) -- **including a login for the Stripe webhook that holds EXECUTE on 2c's event function, with EXECUTE then revoked from `docflow_app`**, which closes the residual risk D-173 names. **Also moves with it (founder, 2026-09-28): 0029's `platform_admin_read` policy on `stripe_webhook_events`** -- a flag policy on `app.is_platform_admin`, so it goes to real login separation with D-173's function grant; likewise 0029's `app.intake_refusal` policies (D-175 §8). **H6 note: signed URLs become cross-clock** -- minted and verified on the app clock today (`signed_urls.py`), one clock because one service does both; on Supabase Storage the expiry is Supabase's clock, so D-170 applies (a named tolerance and a test, or the expiry decided in one place) -- **settled 2026-09-29: the expiry is decided in one place, our own signed links with the API streaming from Storage.** **Also carried from the Stage 1 checkpoint (D-163):** a run row before the model call, so a worker killed mid-call still records the call's cost | **CHECKPOINT DONE 2026-10-09, awaiting "go"** (`CHECKPOINTS.md`; D-198) -- design agreed 2026-09-29 ("Stage 3 -- agreed with the founder before building", below); order 3a -> 3e. **3b MERGED 2026-09-30 (PR #31, main `5810a54`, D-182). **3c MERGED 2026-10-01 (PR #32, main `085a2a5`; Fly staging run 2 passed every item, D-183).** **3d MERGED 2026-10-02 (PR #33, main `4a2b907`, D-184; `0035` on staging; the dispatch process on its own queue per the founder's condition) -- see "3d build" and "3d on staging". The 500 + 1 run, memory, fresh parse token, restart record, external monitor and the two two-at-once sweep tests gate the first worker deploy after 3e. 3e (F-1) MERGED 2026-10-02 (PR #35, `e99fbb9`; D-185; see "3e build -- as built" and "3e MERGED"); `0036` waits for the 2026-10-05 check, then the cutover (RUNBOOK 10.2).** Earlier: 3c design approved 2026-10-01 (Q1-Q10); BUILT and CI GREEN 2026-10-01 on `0be5422` (D-183; founder's Q11-Q14 decided during the build); migration `0034` awaiting staging; the Fly staging run (RUNBOOK 8.1) owed; see "3c build".** **3a BUILT** (D-179; branch `phase55/stage3a-task-limits`, migration `0030`), including reactivation option C (**3a MERGED, PR #26**). **Card billing, between 3a and 3b: BUILT** (D-181; branch `phase55/card-billing`, migration `0031` waiting on staging; see "Card billing with a 7-day trial"). **Also (founder, 2026-09-29): a second test run against the same database refuses to start** -- an advisory lock in the API and worker suites (D-180, RUNBOOK 1.4). `0030` applied to staging 2026-09-29 after the founder's backup (`backup_0030`: documents, tenants, RLS on). Staging suites on `621141f`: worker 134 passed / 2 skipped (the two prefork tests, Linux only; they pass in CI), API 518 passed / 1 failed / 3 deselected, core 564 passed. The one API failure, `test_a_failed_tenant_creation_rolls_back_everything_including_the_file_move`, counts every tenant on staging and saw the count fall from 20 to 19 during the test -- something else was writing to staging at that moment; a failed creation cannot remove a tenant. Rerun alone: the file 13 passed, the test 3 of 3 passed. D-163 moved to 3c | D-003, D-150, D-159, D-163, D-170, D-173, D-179, D-182 – D-186, D-188 – D-190, D-192 – D-194, D-196 – D-198 |
-| 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items. **Also (founder, 2026-09-29): audit the ~23 broad `except` blocks on the document path.** Each one turns *any* exception into a data outcome -- DOC-005 (parsing, conversion), DOC-021 (saving, validation) or VAL-016 (buyer identification, matching, duplicate detection) -- so a real bug in our code can be shown as a problem with the customer's file. After the audit only the exceptions each block expects get a catalog code; anything else fails loudly as our error. Found while designing 3a's timeouts, not in 3a's scope | **DESIGN APPROVED WITH CHANGES 2026-10-02** ("Stage 4 detailed design": Q1-Q15 decided, two PRs with B first, the database retry in PR 2 with `0037`; DOC-030, VAL-017 and VAL-018 final; PR 1's content final at `444dc78`, blocked only on the Stage 3 checkpoint's "go"; the audit counts 34 blocks, not ~23); building waits for the Stage 3 checkpoint's "go"; `0037` after `0036`, and nothing on staging before `docflow_app` is dropped (dropped 2026-10-09) | D-152 |
-| 5 | Remaining findings (**review findings still open for Stage 5, counted 2026-10-01: Critical 0, High 0, **Medium 3** (was 4: **M6 fixed in 3d** -- `rollup_stale` registered in `ALERT_TYPES` and raised through the rollup's own session, with a test that raises every registered type; on `main` once 3d merges) -- M7 the three missing Phase 5 alerts (D-155); M10 nine settings never read, the model IDs hardcoded; M11 SETUP.md and a migration ledger -- Low 0**: Lows are fixed only when their file is touched, D-155; the review put M8, M9, M12, M13, M15, L2 and L8 in Phase 6 and deferred L1, L3-L7 and L9), doc/code contradictions (**plus one found 2026-10-01: `celery_app.py` says interactive is always drained first, but kombu's Redis transport takes turns between queues**), proposed CLAUDE.md additions; **audit every test that counts a whole table** (the `deal7` pattern) and move each one to data only that test can see, after which staging suites may run concurrently again (RUNBOOK 1.4); **robust test cleanup** (every test that creates data cleans it up in a fixture or `finally`, so a failing test still leaves nothing); **a staging sweep script** that lists tenants named "Acme Test ..." older than a day, with what each holds, and deletes one only on the founder's per-action OK (a stopped run always strands something); **triage the API suite's warnings** (425 on the 2026-09-26 run): list each kind, say which are harmless library deprecations and which point at a real problem in our code -- listed, not fixed (triage done 2026-09-26, D-163: all 439 are test-only; 438 are PyJWT's `InsecureKeyLengthWarning` from short test signing keys); **use a test JWT secret of at least 32 bytes** to clear that noise (founder); **a test that expects the database to refuse a write** must run in a transaction that is always rolled back, or on data it owns, so it can't leave a row behind when the refusal doesn't happen (D-165 incident); **two audit-trail findings from the second lost-device drill (D-178; founder: fixed before any pilot, with tests; design settled 2026-09-28)** -- (1) refused Console and step-up attempts are recorded server-side (AUTH-006/007); AUTH-008 is never browser-reported, and Supabase's database audit log was checked and records nothing on this project, so that gap is documented and Supabase's rate limit covers wrong-code guessing (its behaviour measured with the test account at build time); 5 refusals in 15 min for one account raise one high-severity founder alert per window, set only after measuring what a normal sign-in and step-up produce; (2) the outcome is a second, append-only `admin_actions` row referencing the intent row (succeeded, or failed with its code; no migration), and an intent with no outcome is shown in the Console as crashed midway, never as done; *low priority, not a blocker:* **count rows in spreadsheet and CSV orders for free before extraction** (no model call needed), so an oversized order is caught before a paid read (founder, D-163) | PLANNED | D-160, D-163, D-165, D-178 |
+| 3 | Worker, storage, queue: H6 Supabase Storage, H5 platform-enforced parsing isolation (**host settled, D-150: Fly.io, each parse process in its own network namespace; proof spike PASSED 2026-09-28. Carried in from the spike: hide `/.fly` and `/sys` in a mount namespace, and re-run the probe against the real Upstash and API**), H4 per-tenant fairness, **F-1 separate database logins for API / worker / admin** (propose with cost and effort, then stop for approval) -- **including a login for the Stripe webhook that holds EXECUTE on 2c's event function, with EXECUTE then revoked from `docflow_app`**, which closes the residual risk D-173 names. **Also moves with it (founder, 2026-09-28): 0029's `platform_admin_read` policy on `stripe_webhook_events`** -- a flag policy on `app.is_platform_admin`, so it goes to real login separation with D-173's function grant; likewise 0029's `app.intake_refusal` policies (D-175 §8). **H6 note: signed URLs become cross-clock** -- minted and verified on the app clock today (`signed_urls.py`), one clock because one service does both; on Supabase Storage the expiry is Supabase's clock, so D-170 applies (a named tolerance and a test, or the expiry decided in one place) -- **settled 2026-09-29: the expiry is decided in one place, our own signed links with the API streaming from Storage.** **Also carried from the Stage 1 checkpoint (D-163):** a run row before the model call, so a worker killed mid-call still records the call's cost | **COMPLETE: checkpoint 2026-10-09, "go" given 2026-10-11** (`CHECKPOINTS.md`; D-198, D-199) -- design agreed 2026-09-29 ("Stage 3 -- agreed with the founder before building", below); order 3a -> 3e. **3b MERGED 2026-09-30 (PR #31, main `5810a54`, D-182). **3c MERGED 2026-10-01 (PR #32, main `085a2a5`; Fly staging run 2 passed every item, D-183).** **3d MERGED 2026-10-02 (PR #33, main `4a2b907`, D-184; `0035` on staging; the dispatch process on its own queue per the founder's condition) -- see "3d build" and "3d on staging". The 500 + 1 run, memory, fresh parse token, restart record, external monitor and the two two-at-once sweep tests gate the first worker deploy after 3e. 3e (F-1) MERGED 2026-10-02 (PR #35, `e99fbb9`; D-185; see "3e build -- as built" and "3e MERGED"); `0036` waits for the 2026-10-05 check, then the cutover (RUNBOOK 10.2).** Earlier: 3c design approved 2026-10-01 (Q1-Q10); BUILT and CI GREEN 2026-10-01 on `0be5422` (D-183; founder's Q11-Q14 decided during the build); migration `0034` awaiting staging; the Fly staging run (RUNBOOK 8.1) owed; see "3c build".** **3a BUILT** (D-179; branch `phase55/stage3a-task-limits`, migration `0030`), including reactivation option C (**3a MERGED, PR #26**). **Card billing, between 3a and 3b: BUILT** (D-181; branch `phase55/card-billing`, migration `0031` waiting on staging; see "Card billing with a 7-day trial"). **Also (founder, 2026-09-29): a second test run against the same database refuses to start** -- an advisory lock in the API and worker suites (D-180, RUNBOOK 1.4). `0030` applied to staging 2026-09-29 after the founder's backup (`backup_0030`: documents, tenants, RLS on). Staging suites on `621141f`: worker 134 passed / 2 skipped (the two prefork tests, Linux only; they pass in CI), API 518 passed / 1 failed / 3 deselected, core 564 passed. The one API failure, `test_a_failed_tenant_creation_rolls_back_everything_including_the_file_move`, counts every tenant on staging and saw the count fall from 20 to 19 during the test -- something else was writing to staging at that moment; a failed creation cannot remove a tenant. Rerun alone: the file 13 passed, the test 3 of 3 passed. D-163 moved to 3c | D-003, D-150, D-159, D-163, D-170, D-173, D-179, D-182 – D-186, D-188 – D-190, D-192 – D-194, D-196 – D-198 |
+| 4 | Matching performance (H4): `pg_trgm`, measured p50/p95 at 50k items. **Also (founder, 2026-09-29): audit the ~23 broad `except` blocks on the document path.** Each one turns *any* exception into a data outcome -- DOC-005 (parsing, conversion), DOC-021 (saving, validation) or VAL-016 (buyer identification, matching, duplicate detection) -- so a real bug in our code can be shown as a problem with the customer's file. After the audit only the exceptions each block expects get a catalog code; anything else fails loudly as our error. Found while designing 3a's timeouts, not in 3a's scope | **LOAD REVISED 2026-10-11 (D-199; "The plan after the Stage 3 "go"", below): 800,000 items in ten tenants, measured on a 250,000-item tenant. The revised plan goes to the founder once the leftover-count PR has merged, and nothing is built before the founder approves it.** Before that: **DESIGN APPROVED WITH CHANGES 2026-10-02** ("Stage 4 detailed design": Q1-Q15 decided, two PRs with B first, the database retry in PR 2 with `0037`; DOC-030, VAL-017 and VAL-018 final; PR 1's content final at `444dc78`, blocked only on the Stage 3 checkpoint's "go"; the audit counts 34 blocks, not ~23); building waits for the Stage 3 checkpoint's "go"; `0037` after `0036`, and nothing on staging before `docflow_app` is dropped (dropped 2026-10-09) | D-152, D-199 |
+| 5 | Remaining findings (**review findings still open for Stage 5, counted 2026-10-01: Critical 0, High 0, **Medium 3** (was 4: **M6 fixed in 3d** -- `rollup_stale` registered in `ALERT_TYPES` and raised through the rollup's own session, with a test that raises every registered type; on `main` once 3d merges) -- M7 the three missing Phase 5 alerts (D-155); M10 nine settings never read, the model IDs hardcoded; M11 SETUP.md and a migration ledger -- Low 0**: Lows are fixed only when their file is touched, D-155; the review put M8, M9, M12, M13, M15, L2 and L8 in Phase 6 and deferred L1, L3-L7 and L9), doc/code contradictions (**plus one found 2026-10-01: `celery_app.py` says interactive is always drained first, but kombu's Redis transport takes turns between queues**), proposed CLAUDE.md additions; **audit every test that counts a whole table** (the `deal7` pattern) and move each one to data only that test can see, after which staging suites may run concurrently again (RUNBOOK 1.4); **robust test cleanup** (every test that creates data cleans it up in a fixture or `finally`, so a failing test still leaves nothing); **a staging sweep script** that lists tenants named "Acme Test ..." older than a day, with what each holds, and deletes one only on the founder's per-action OK (a stopped run always strands something); **triage the API suite's warnings** (425 on the 2026-09-26 run): list each kind, say which are harmless library deprecations and which point at a real problem in our code -- listed, not fixed (triage done 2026-09-26, D-163: all 439 are test-only; 438 are PyJWT's `InsecureKeyLengthWarning` from short test signing keys); **use a test JWT secret of at least 32 bytes** to clear that noise (founder) -- **these two are one item (founder, 2026-10-11; D-199): the 657 warnings of the API run on 2026-10-11 are the same thing, 656 of them `InsecureKeyLengthWarning` from short test keys and 1 a `DeprecationWarning` from starlette's test client; its sub-point, kept apart: first, whether the key-length check covers real keys, because if it does it moves into production setup before pilots**; **a test that expects the database to refuse a write** must run in a transaction that is always rolled back, or on data it owns, so it can't leave a row behind when the refusal doesn't happen (D-165 incident); **two audit-trail findings from the second lost-device drill (D-178; founder: fixed before any pilot, with tests; design settled 2026-09-28)** -- (1) refused Console and step-up attempts are recorded server-side (AUTH-006/007); AUTH-008 is never browser-reported, and Supabase's database audit log was checked and records nothing on this project, so that gap is documented and Supabase's rate limit covers wrong-code guessing (its behaviour measured with the test account at build time); 5 refusals in 15 min for one account raise one high-severity founder alert per window, set only after measuring what a normal sign-in and step-up produce; (2) the outcome is a second, append-only `admin_actions` row referencing the intent row (succeeded, or failed with its code; no migration), and an intent with no outcome is shown in the Console as crashed midway, never as done; *low priority, not a blocker:* **count rows in spreadsheet and CSV orders for free before extraction** (no model call needed), so an oversized order is caught before a paid read (founder, D-163); **added by the founder on 2026-10-11 (D-199): the `ready_alerted=1` log wording; and the fix for the 10 seconds after a worker start (workers started without mingle and gossip) as its own PR, here and not before Stage 4** | PLANNED | D-160, D-163, D-165, D-178, D-199 |
+
+### The plan after the Stage 3 "go" (founder, 2026-10-11; D-199)
+
+The founder is not in a hurry to pilot: the goal is that nothing breaks and
+the engine works well in a demo. **The order:** the leftover-count PR;
+Stage 4; Stage 5 (the worker-start fix and the cleanup that does not depend
+on a model); demo readiness, with D-195's model work; the Phase 6
+pilot-blocker subset (under Phase 6, below); then pilots with two or three
+customers. Of all this, only the leftover-count PR is built.
+
+**Stage 4, the load.** It replaces the approved design's 50,000-item tenant
+under test, its 250,000 rows on staging and its 2.5 million row CI job:
+- **One tenant of 250,000 items, two of 100,000 and seven of 50,000:
+  800,000 items.** The founder's basis: published figures put a mid-size
+  fastener distributor at about 20,000 to 100,000 SKUs, so 250,000 is
+  about twice the headroom.
+- **Measured on the 250,000 tenant:** match time per PO line, catalog
+  import time and memory on the 2 GB worker, and whether the 2.7 s cold
+  dispatch pass gets worse.
+- **The pass marks stay, now on the 250,000 tenant:** p95 at or under
+  100 ms per unmatched line and 4 s per 40-line order.
+- The generated catalog gains fastener-style families, with thousands of
+  siblings one token apart.
+- The 2.5 million row CI job is retired. Its replacement takes the tenant
+  mix as an input, so the scale gate's mix can reuse it.
+- **Staging is Nano on Supabase's Free plan** (read by the founder in the
+  dashboard on 2026-10-11: 45.4 MB, no backups), so item 16 of the design
+  stands, with the 500 MB limit and the 350 MB guard. Until it is known
+  which reading Supabase enforces the limit on, the guard uses the larger
+  one, the dashboard's. **Nothing is loaded on staging** until the CI
+  sizing job has run and its measured sizes are reported; the founder
+  then chooses between Supabase Pro with the 800,000 mix and Nano with
+  the 250,000 tenant alone. The CI sizing job itself waits for the
+  leftover-count PR to merge.
+- Staging's worker is 1 GB. It goes to 2 GB for the import measurement
+  only, then back to 1 GB, and the founder is told before each change.
+  Scaling the worker up on v9 is not a deploy; before it goes up the
+  founder is told and Memurai is restarted (its licence stop is due
+  2026-10-18).
+- A 250,000-row catalog file that exceeds the 25 MB upload cap or the
+  5-minute import limit is reported as a product finding, not worked
+  around.
+- The revised plan goes to the founder in one message, with size
+  estimates for the 250,000 tenant, the 800,000 mix and the 2.9 million
+  mix, each with both indexes, and a version that fits Nano. Nothing is
+  built before the founder's answer.
+
+**The scale gate.** The company objective is 30 to 50 tenants long term.
+At about 15 tenants, Stage 4 is run again at a 50-tenant mix (1 x 250,000,
+4 x 100,000, 45 x 50,000: about 2.9 million items), with a peak-hour
+throughput test (POs per hour at the morning peak), on the
+production-sized database.
+
+**Stage 5, in its row above.** Two items are added: the `ready_alerted=1`
+log wording, and the fix for the 10 seconds after a worker start (workers
+started without mingle and gossip) as its own PR. **This replaces the
+earlier order: that fix does not go before Stage 4.** The 657 test warnings
+are not a new item. They are the row's warnings triage and its test JWT
+secret of at least 32 bytes, now one item: of the 657 on 2026-10-11, 656
+are PyJWT's `InsecureKeyLengthWarning` from short test keys and 1 is a
+`DeprecationWarning` from starlette's test client.
+- Its sub-point, kept apart: first, whether the key-length check covers
+  real keys. If it does, it moves into production setup before pilots.
+
+**D-195 (the model policy) in this order:**
+- Change 1, the model config module, goes at the start of demo readiness,
+  right before the extraction comparison, which it makes possible. It
+  touches core code, so it needs all three suites.
+- Change 2, routing to `claude-haiku-5-5`, is gated by D-195's own
+  comparison of Haiku 4.5's and Haiku 5.5's routing answers.
+- The extraction comparison (`claude-haiku-5-5` against `claude-sonnet-5`)
+  runs at demo readiness and decides only the extraction model.
+- **If Stage 4 is not merged by 2026-11-02, changes 1 and 2 go next,
+  before Stage 5:** D-195 has both landing by 2026-11-16, and Haiku 4.5
+  can be retired from 2026-10-15. The deprecations page is read again on
+  or after 2026-10-16.
+
+**Demo readiness (new, after Stage 5):**
+- A fastener demo tenant with a realistic catalog and 15 to 20 POs across
+  formats: clean PDF, scan, PO in the e-mail body, abbreviated
+  descriptions like "1/4-20 x 1 HHCS GR5 ZP".
+- Header-field accuracy and line-match rate, measured against a bar set
+  in advance. The bar is proposed to the founder before measuring.
+- A full rehearsal through both portals (the founder Console and the
+  customer portal): e-mail in, extraction, matching, review, export.
+- Demo risks: the API stops itself about 6 minutes after a start (set
+  `min_machines_running = 1`); the worker must be up, and no deploy during
+  a demo; alert links point at localhost; the 10 seconds after a worker
+  start.
+- Prospects' own documents are never used until the pilot blockers are
+  fixed.
 
 ### Stage 3 -- agreed with the founder before building (2026-09-29)
 
@@ -537,6 +626,13 @@ checkpoint's "go" (CHECKPOINTS.md, draft). **The founder's answers to
 Q1-Q12 are at the end ("Decided"), with three new questions (Q13-Q15)
 and the DOC-030 fact Q12 asked for.** Where an answer changes the text
 above it, the text is changed and marked *(decided)*.
+
+**2026-10-11 (D-199): the "go" is given, and the load below is replaced.**
+The 50,000-item tenant under test, the 250,000 rows on staging and the
+2.5 million row CI job give way to the 800,000-item mix in "The plan after
+the Stage 3 "go"", above. The text below is the design as approved and is
+not yet rewritten: the revised plan goes to the founder first, and nothing
+is built before the founder approves it.
 
 #### A. Matching speed
 
@@ -1487,7 +1583,31 @@ here is built):
 - **The stored subscription status is set when Stripe confirms the
   cancel** (founder, 2026-10-09). Today the cancel leaves it as it was:
   tenant `0a2b7bc2` reads `active` while Stripe shows `canceled`. The
-  proof that suspension cancels is under "Before the first pilot".
+  proof that suspension cancels is in the production-setup group of the
+  pilot-blocker subset, below.
+
+**The pilot-blocker subset** (founder, 2026-10-11; D-199). These are fixed
+before pilots; everything else in Phase 6 waits for pilot feedback. Nothing
+here is built.
+
+- The localhost alert links.
+- **The stale-claim global block:** re-queue on worker start must be fixed
+  before pilots. "Deploy only when the queue is idle" is not enough,
+  because one stale document blocks every tenant for about 31 minutes.
+  With more workers, the claim must name the worker instance.
+- The large-scan intake stopgap.
+- Tier NOT NULL.
+- **Production setup:** a public API with `min_machines_running = 1`; a
+  2 GB worker; e-mail end to end via TC-07; and **a proof that suspension
+  really cancels the Stripe subscription** (founder, 2026-10-09; D-198),
+  run on the production deployment with Stripe test keys before switching
+  to live keys. The test-mode precedent is the read of tenant
+  `0a2b7bc2`'s subscription on staging: cancelled at 2026-09-23
+  16:38:03Z, the second of suspension. *(The proof was moved here on
+  2026-10-11 from "Before the first pilot".)*
+- The MFA enforcement guard (the pilot blocker of 2026-10-08, above).
+- A read-only check that no tenant name has leading or trailing
+  whitespace (also listed under "Before the first pilot").
 
 ---
 
@@ -1613,6 +1733,35 @@ here is built):
   the Stage 1 walkthrough fell into. **The founder needs to add it to the
   required checks on `main` in the GitHub branch-protection settings** -- the
   other four were added by hand and this one has to be too.
+- **Open: the repository is public, and the decision on its visibility is
+  parked** (founder, 2026-10-11). Four things Claude found that change if it
+  goes private. The two about GitHub's plans are as Claude knows them, not
+  checked against GitHub's own pages, and the account's plan is not known
+  here:
+  - **CI reads.** Claude reads runs, jobs and annotations through GitHub's
+    API with no login (RUNBOOK 1.6). On a private repository those reads
+    return 404, so they would need a read-only token, or the founder
+    pasting each run's results.
+  - **Branch protection.** `main` is protected, with five required checks
+    enforced for everyone (read 2026-10-11). The owner is a personal
+    account, and on GitHub's Free plan protected branches are enforced only
+    on public repositories. To be confirmed in Settings -> Branches after
+    any switch.
+  - **Actions minutes.** A public repository runs the standard runners
+    free; a private one draws on the plan's monthly minutes. Measured: a
+    run's six jobs take 16.5 minutes and bill as 19, each job rounded up
+    (run 37999539445); a one-commit pull request is three runs (the branch
+    push, the pull request, the push to `main` after the merge), about 57;
+    the weekly Debian snapshot is about 90 a month.
+  - **The runner.** A private repository gets a smaller standard runner
+    than a public one. `ci.yml` names only `ubuntu-24.04`, so the parse
+    sandbox, memory-cap and browser tests have only ever run on the larger
+    one. No failure is known; the first run on a private repository would
+    be the test.
+- **Open: `parse service` is not a required check on `main`** (read
+  2026-10-11: the five required are api, core, web, worker and web-live).
+  Adding it is a GitHub branch-protection setting, which the founder will
+  change.
 - Browser walkthroughs: `docs/walkthroughs/README.md` is the index, one file
   per phase or slice from Phase 0 to 5.10, to walk in order before Phase 6
   (QA/UAT). Files for Phases 0–4, 5.1–5.5 and 5.8a–c were added 2026-09-25;
@@ -1702,12 +1851,9 @@ here is built):
     30 held rows, all with no tenant, kept as the fixture for this rule.**
   - **A read-only check that no tenant name has leading or trailing
     whitespace** (founder, 2026-10-09; D-198).
-  - **Production setup, required before the first paying tenant: a proof
-    that suspension really cancels the Stripe subscription** (founder,
-    2026-10-09; D-198). Run on the production deployment with Stripe test
-    keys before switching to live keys. The test-mode precedent is the
-    read of tenant `0a2b7bc2`'s subscription on staging: cancelled at
-    2026-09-23 16:38:03Z, the second of suspension.
+  - *(Moved on 2026-10-11, D-199: the proof that suspension really cancels
+    the Stripe subscription is now in the production-setup group of "The
+    pilot-blocker subset", under Phase 6.)*
 - **Security upgrades, 2026-09-30 (branch `phase55/security-pyjwt-next`,
   founder-approved as its own PR before 3b merges). MERGED 2026-09-30 (PR
   #30, main `166896e`), before 3b.** CI's dependency audit
@@ -1742,7 +1888,7 @@ here is built):
   earlier steps' outcomes (`CI_STEPS`) and says which one failed.
 - **Before the first real customer:** an email provider (the founder is setting one up with the domain). Until then every invite, notice and digest waits in the Console Outbox and must be sent by hand, and the inbound intake address cannot receive real mail.
 - Digest opt-out per person: decided yes, but later (needs a settings page).
-- **An idle worker's Redis commands: three settings changed, and the idle hour measured again on 2026-10-09** (founder, 2026-10-08; D-196, D-197; RUNBOOK 9.8). The worker's queue read waits 10 s, not 1 (`BROKER_POLL_SECONDS`); no task result is stored (no result backend on the worker, the API's client or the e-mail intake client; nothing ever read one); and `apps/worker/fly.toml` gives a stopping worker 30 s (`kill_timeout`; Fly's default is 5), because a stopping worker waits for its open read. Proven in the suites: kombu's own transport takes the 10 s, the three clients have no backend, no `send_task` result is kept anywhere, and in CI a real worker leaves no result key in Redis. **Measured on Fly staging since (2026-10-08 and 2026-10-09; D-197, RUNBOOK 9.8):** the idle hour is 6,205 commands, under the $10 break-even (about 6,850 an hour), so production stays on Pay as You Go; an idle worker scaled to 0 exits by itself in 10 s; a deploy during a short read lets the read finish. **Found by the same runs:** for about 10 s after every worker start each Celery worker receives nothing. The fix to evaluate, starting the workers without mingle and without gossip, is its own PR after Stage 3's open work; not built. Local runs on Windows may pause up to about 2 s before picking up a job.
+- **An idle worker's Redis commands: three settings changed, and the idle hour measured again on 2026-10-09** (founder, 2026-10-08; D-196, D-197; RUNBOOK 9.8). The worker's queue read waits 10 s, not 1 (`BROKER_POLL_SECONDS`); no task result is stored (no result backend on the worker, the API's client or the e-mail intake client; nothing ever read one); and `apps/worker/fly.toml` gives a stopping worker 30 s (`kill_timeout`; Fly's default is 5), because a stopping worker waits for its open read. Proven in the suites: kombu's own transport takes the 10 s, the three clients have no backend, no `send_task` result is kept anywhere, and in CI a real worker leaves no result key in Redis. **Measured on Fly staging since (2026-10-08 and 2026-10-09; D-197, RUNBOOK 9.8):** the idle hour is 6,205 commands, under the $10 break-even (about 6,850 an hour), so production stays on Pay as You Go; an idle worker scaled to 0 exits by itself in 10 s; a deploy during a short read lets the read finish. **Found by the same runs:** for about 10 s after every worker start each Celery worker receives nothing. The fix to evaluate, starting the workers without mingle and without gossip, is its own PR in Stage 5, not before Stage 4 (founder, 2026-10-11; D-199); not built. Local runs on Windows may pause up to about 2 s before picking up a job.
 - **For Stage 4, an observation not explained (D-197):** one dispatch pass took 2.79 s on Fly staging on 2026-10-08, for the first document after a quiet period (2.61 s once on 2026-10-07; 0.12 to 0.30 s for other such documents; 0.13 s when warm).
 - **For Stage 5, log wording (D-197):** the lifecycle sweep's log line `ready_alerted=1` counts tenants visited and reads as if an alert were raised on every pass, when nothing is written.
 - **Seen on 2026-10-09, and now a Phase 6 item (D-197, D-198):** the `tenant_ready_to_delete` alert is deduplicated only against an unacknowledged one, so it came back 69 seconds after the founder acknowledged it (17:53:53Z to 17:55:02Z), with a new held e-mail row. The tenant it was raised for, `db4495fb`, was deleted the same day.

@@ -7,12 +7,13 @@ phase."
 
 ---
 
-## Phase 5.5 Stage 3 — Worker, storage, queue, database logins — CHECKPOINT DONE (2026-10-09), awaiting "go"
+## Phase 5.5 Stage 3 — Worker, storage, queue, database logins — COMPLETE (2026-10-09), go given (2026-10-11)
 
 Written as a draft on 2026-10-02, ahead of its evidence, so the founder
 could review the form and the gate split. Every gap it held is now filled
 (2026-10-09; D-198) and the suites below have passed on the checkpoint
-commit. It waits for the founder's "go".
+commit. **The founder gave the "go" on 2026-10-11**, after merging this
+record (PR #58, `main` `d674d4a`; D-199).
 
 Built as 3a (PR #26), 3b (PR #31), 3c (PR #32), 3d (PR #33) and 3e
 (PR #35), in that order, as agreed on 2026-09-29. Between them: the one-run
