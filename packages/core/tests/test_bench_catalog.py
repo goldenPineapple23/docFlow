@@ -165,6 +165,48 @@ def test_order_lines_are_the_same_on_every_run_and_lowercased():
     assert first[0] == (rows[0][1].lower(), sizing.sku_key(rows[0][0]))
 
 
+def _progress_points(mix: str) -> list[int]:
+    """The row counts at which the load's tenant lines become an annotation."""
+    sizes = gen.parse_mix(mix)
+    points, loaded = [], 0
+    for size in sizes:
+        if sizing.progress_due(loaded, loaded + size, sum(sizes)):
+            points.append(loaded + size)
+        loaded += size
+    return points
+
+
+@pytest.mark.parametrize(
+    ("mix", "points"),
+    [
+        ("250000", [250_000]),
+        ("3000,1000x2", [3000, 4000, 5000]),
+        (STAGE_4_MIX, [250_000, 450_000, 600_000, 800_000]),
+        (SCALE_GATE_MIX, [250_000, 750_000, 1_450_000, 2_200_000, 2_900_000]),
+    ],
+)
+def test_the_load_reports_after_the_first_tenant_and_at_each_quarter(mix, points):
+    assert _progress_points(mix) == points
+
+
+@pytest.mark.parametrize("mix", ["1", "250000", "1x50", "50000x50", STAGE_4_MIX, SCALE_GATE_MIX])
+def test_a_run_never_prints_more_notices_than_github_keeps_from_one_step(mix):
+    """GitHub keeps ten notices from one step and drops the rest without a
+    word: a dropped one would be a figure nobody reads."""
+    results = 4  # inputs, sizes as loaded, the candidate query, the rebuild
+    points = _progress_points(mix)
+    assert len(points) + results <= 10
+    assert points[-1] == sum(gen.parse_mix(mix))  # the last tenant always reports
+
+
+def test_a_tenants_line_gives_its_rows_its_seconds_and_how_far_the_load_is():
+    line = sizing.tenant_line(3, 10, 100_000, 80.0, 450_000, 800_000, 312.4)
+    assert line == (
+        "tenant 3 of 10: 100000 rows in 80 s (1250 rows a second); "
+        "450000 of 800000 rows loaded, 312 s since the load began"
+    )
+
+
 def test_the_trigram_index_statements_have_one_home():
     """scripts/bench/trigram_indexes.sql is where they are written. A
     migration that creates a trigram index (0037 will) must carry these
@@ -201,3 +243,5 @@ def test_the_workflow_is_started_by_hand_and_reads_no_secret():
     run_line = next(line for line in workflow.splitlines() if "catalog_sizing.py" in line and "run:" in line)
     assert "${{" not in run_line
     assert "runs-on: ubuntu-24.04" in workflow
+    # Under GitHub's own 360-minute stop, so the job ends on its own terms.
+    assert "timeout-minutes: 350" in workflow

@@ -46,7 +46,9 @@ jobs:
     name: catalog sizing
     # ubuntu-24.04, not ubuntu-latest, as in ci.yml.
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    # GitHub stops a job on its own runners at 360 minutes. The 2.9 million
+    # mix has not been timed; a run cut short still prints how far it got.
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v2.1.2

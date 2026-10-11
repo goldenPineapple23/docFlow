@@ -25,6 +25,12 @@ loaded table would cost) and the size a freshly built index has.
 
 In CI every figure is also a GitHub annotation, because CI's job logs can't
 be read from the development machine and annotations can (RUNBOOK 1.6).
+
+A run that is cut short still says how far it got. The inputs are printed
+before the load, and each tenant gets a line as its catalog finishes (rows
+and seconds). GitHub keeps ten notices from one step, so in annotations
+those lines travel together: after the first tenant, and each time the load
+passes a quarter of its rows.
 """
 
 from __future__ import annotations
@@ -51,6 +57,9 @@ CANDIDATES = 50  # K in the design (A2): candidates asked of each index per line
 DEFAULT_SEED = 20261011
 DEFAULT_LINES = 200
 WARM_UP = 5
+# GitHub keeps ten notices from one step. Four are the results; the load's
+# progress takes at most five (the first tenant, then each quarter).
+PROGRESS_MARKS = (0.25, 0.5, 0.75, 1.0)
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 DESCRIPTION_QUERY = (
@@ -117,18 +126,52 @@ def percentile(values: list[float], fraction: float) -> float:
     return ordered[min(len(ordered) - 1, int(round(fraction * (len(ordered) - 1))))]
 
 
-def emit(title: str, lines: list[str]) -> None:
-    print(f"== catalog sizing: {title}")
-    for line in lines:
-        print(f"   {line}")
-    sys.stdout.flush()
+def progress_due(loaded_before: int, loaded: int, total: int) -> bool:
+    """Whether the tenant lines gathered so far become an annotation now:
+    after the first tenant, and each time the load passes a quarter of its
+    rows. The last tenant always does."""
+    return loaded_before == 0 or any(loaded_before < mark * total <= loaded for mark in PROGRESS_MARKS)
+
+
+def tenant_line(
+    number: int, tenants: int, rows: int, seconds: float, loaded: int, total: int, since: float
+) -> str:
+    return (
+        f"tenant {number} of {tenants}: {rows} rows in {seconds:.0f} s "
+        f"({rows / max(seconds, 0.001):.0f} rows a second); "
+        f"{loaded} of {total} rows loaded, {since:.0f} s since the load began"
+    )
+
+
+def _annotate(title: str, lines: list[str]) -> None:
     if os.environ.get("GITHUB_ACTIONS") == "true":
         body = "%0A".join(line.replace("%", "%25") for line in lines)
         print(f"::notice title=catalog sizing: {title}::{body}", flush=True)
+
+
+def _summarise(text: str) -> None:
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as out:
-            out.write(f"### catalog sizing: {title}\n\n" + "".join(f"- {line}\n" for line in lines) + "\n")
+            out.write(text)
+
+
+def _heading(title: str) -> None:
+    print(f"== catalog sizing: {title}", flush=True)
+    _summarise(f"### catalog sizing: {title}\n\n")
+
+
+def _line(line: str) -> None:
+    print(f"   {line}", flush=True)
+    _summarise(f"- {line}\n")
+
+
+def emit(title: str, lines: list[str]) -> None:
+    _heading(title)
+    for line in lines:
+        _line(line)
+    _summarise("\n")
+    _annotate(title, lines)
 
 
 def _sizes(conn) -> dict[str, int]:
@@ -198,9 +241,25 @@ def run(database_url: str, mix: str, seed: int, lines: int) -> None:
             conn.execute(statement)
         before = _sizes(conn)
 
+        emit(
+            "inputs",
+            [
+                f"mix {mix}: {len(sizes)} tenants, {total} items; seed {seed}",
+                f"largest tenant {max(sizes)} items; Postgres {version}; "
+                f"items rows before the run: {rows_before}",
+                f"commit {os.environ.get('GITHUB_SHA', '')[:7] or 'not in CI'}; "
+                f"runner {os.environ.get('RUNNER_OS', sys.platform)}",
+                "indexes created first, then the catalogs loaded (as after migration 0037)",
+            ],
+        )
+
         tenants: list[uuid.UUID] = []
+        _heading("the load, tenant by tenant")
+        waiting: list[str] = []  # tenant lines not yet in an annotation
+        loaded_rows = 0
         load_started = time.perf_counter()
         for number, size in enumerate(sizes, start=1):
+            tenant_started = time.perf_counter()
             tenant_id = uuid.uuid4()
             tenants.append(tenant_id)
             conn.execute(
@@ -224,6 +283,18 @@ def run(database_url: str, mix: str, seed: int, lines: int) -> None:
                             json.dumps(item.raw),
                         )
                     )
+            # The COPY has ended and committed: this tenant's rows are in, indexes and all.
+            now = time.perf_counter()
+            loaded_before, loaded_rows = loaded_rows, loaded_rows + size
+            line = tenant_line(
+                number, len(sizes), size, now - tenant_started, loaded_rows, total, now - load_started
+            )
+            _line(line)
+            waiting.append(line)
+            if progress_due(loaded_before, loaded_rows, total):
+                _annotate(f"loaded {loaded_rows} of {total} rows", waiting)
+                waiting = []
+        _summarise("\n")
         load_seconds = time.perf_counter() - load_started
         conn.execute("ANALYZE items")
         rows_added = conn.execute("SELECT count(*) FROM items").fetchone()[0] - rows_before
@@ -231,17 +302,6 @@ def run(database_url: str, mix: str, seed: int, lines: int) -> None:
             raise SystemExit(f"seeded {rows_added} rows, expected {total}: the figures would be wrong")
         loaded = _sizes(conn)
 
-        emit(
-            "inputs",
-            [
-                f"mix {mix}: {len(sizes)} tenants, {total} items; seed {seed}",
-                f"largest tenant {max(sizes)} items; Postgres {version}; "
-                f"items rows before the run: {rows_before}",
-                f"commit {os.environ.get('GITHUB_SHA', 'not in CI')[:7]}; "
-                f"runner {os.environ.get('RUNNER_OS', sys.platform)}",
-                "indexes created first, then the catalogs loaded (as after migration 0037)",
-            ],
-        )
         emit(
             "sizes as loaded",
             _size_lines(loaded, before, total)
