@@ -4,6 +4,25 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-11 (the Stage 3 "go"; D-199)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-09:** Phase 5.5, Stage 3, **checkpoint written and waiting for the founder's
+"go"** (CHECKPOINTS.md; D-198). Slices 3a to 3e are merged, the logins cutover (RUNBOOK 10.2) is
+done with step 7, and the first worker deploy (RUNBOOK 9.7) is done through step 15. **Done on
+2026-10-09:** the three backups and the old role `docflow_app` dropped by the founder; one purge for
+every throwaway tenant the API suite makes, with a printed count of what a run leaves (PR #57); the
+test leftovers on staging cleaned up (tenant `db4495fb` deleted in the Console; test tenants'
+pending jobs cancelled, their alerts and held mail removed; four leftover test admins revoked and
+six user rows made inactive). Staging holds 0 pending jobs, 0 held mail rows and 0 alerts belonging
+to a test tenant; 30 held rows and 4 alerts with no tenant are kept on purpose. **The checkpoint's
+runs on `main` `5a09632`:** core `806 passed, 1 skipped`, worker `191 passed, 7 skipped`, API `630
+passed, 1 skipped, 3 deselected` with nothing left behind, and the three live tests passed for
+$0.0496 on `claude-sonnet-5`; CI green on the same commit. The Fly worker and beat are at 0 and the
+Healthchecks.io check is paused. **Next, after the "go":** the leftover count becomes a failure, the
+fix for the 10 seconds after a worker start (its own PR), the model policy (D-195), then Stage 4.
+Nothing of Stage 4 is built before the "go".
+
 ## Replaced on 2026-10-09 (the Stage 3 checkpoint's runs done; D-198)
 
 <!-- the paragraph as it stood, starting on the next line -->
