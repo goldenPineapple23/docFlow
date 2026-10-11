@@ -374,13 +374,19 @@ How a run is reported:
   `641 passed, 1 skipped, 3 deselected` (2026-10-11 at `b278490`, 39:18),
   and the leftover line read `+0` on all six counts. Core and worker are
   unchanged.
+  **From the catalog sizing job (2026-10-11; D-200; section 1.8):** the
+  core suite gains 43 tests, all in `test_bench_catalog.py`, none needing
+  a database, and loses none: CI reads `850 tests`. On this machine against
+  staging it reads `849 passed, 1 skipped` (2026-10-11 at `1826c70`, 45 s;
+  it read `838 passed, 1 skipped` at `e7b60f7`, before the eleven tests of
+  the load's progress lines). API and worker are unchanged.
   **What CI reports for the same code, side by side** (founder,
   2026-10-08). CI runs every test, so each line must also read `0 failed,
   0 skipped, 0 unapproved`:
 
   | Suite | This machine, against staging | CI |
   |---|---|---|
-  | core | 806 passed, 1 skipped | 807 tests |
+  | core | 849 passed, 1 skipped | 850 tests |
   | worker | 191 passed, 7 skipped | 198 tests |
   | API | 641 passed, 1 skipped, 3 deselected | 642 tests |
 
@@ -503,6 +509,75 @@ the machine, PASS in the sandbox). The order is the rule: show it can fail,
 then trust it passing.
 
 **Related:** D-150; §1.6.
+
+### 1.8 The catalog sizing job (Stage 4; D-199, D-200)
+
+**What it is for.** `docflow-staging` is Supabase's Free plan: its database
+turns read-only past 500 MB, and that would stop all of staging. Before any
+Stage 4 catalog is loaded there, this job measures what the catalogs and
+their two trigram indexes cost on disk, on a throwaway database.
+
+**Where it runs.** On a GitHub runner, against the runner's own Supabase
+stack, like the CI jobs. The script (`scripts/bench/catalog_sizing.py`)
+refuses any database that is not on the machine it runs on. **It never runs
+against `docflow-staging` or production, and nothing here loads a row
+there.**
+
+**Starting it** (the founder; it is started by hand and Claude has no
+login to start it): GitHub -> Actions -> "Catalog sizing (manual)" -> Run
+workflow, branch `main`. Leave the seed as it is. One run per mix,
+**smallest first** (founder, 2026-10-11): the 250,000 tenant, then the Stage
+4 mix. From those two runs' measured rates Claude gives a prediction for the
+scale gate's mix, and the founder starts that one only after reading it:
+
+| Run | Enter as `mix` | Tenants | Items |
+|---|---|---|---|
+| The 250,000 tenant alone | `250000` | 1 | 250,000 |
+| The Stage 4 mix | `250000,100000x2,50000x7` | 10 | 800,000 |
+| The scale gate's mix | `250000,100000x4,50000x45` | 50 | 2,900,000 |
+
+**What it prints**, as annotations on the run's page (Claude reads them
+from there; the job's log can't be read from the development machine, 1.6):
+- `catalog sizing: inputs`: the mix, the seed, the Postgres version, the
+  commit. Printed before the load;
+- `catalog sizing: loaded N of M rows`: one line per tenant (its rows, its
+  seconds, rows a second, and how far the load is). In the job's log and the
+  run's summary each line appears as its tenant finishes. GitHub keeps ten
+  notices from one step, so as annotations the lines travel together: after
+  the first tenant, and each time the load passes a quarter of its rows
+  (five at most);
+- `catalog sizing: sizes as loaded`: the table, each index (the two trigram
+  indexes by name), the table with every index, and the database, each in
+  MB, in bytes and in bytes a row; and how long the load took with both
+  indexes in place;
+- `catalog sizing: candidate query on the largest tenant`: p50, p95 and max
+  for the 50 nearest items by description and by SKU, and each query's plan;
+- `catalog sizing: each trigram index rebuilt at this many rows`: the build
+  time and the size of a freshly built index.
+
+**How to read it.**
+- **The sizes are the measurement.** The staging benchmark's guard is set
+  from them: it refuses to start if staging's current size plus the measured
+  size of the load is over 350 MB. Until it is known which reading Supabase
+  enforces the limit on, the current size is the larger one, the
+  dashboard's (D-199).
+- **The timings are GitHub's runner, not staging's,** and they time the
+  index query alone. The match timings of record come from the matching
+  benchmark, on the database of record.
+- The catalogs are fake and come from a fixed seed
+  (`scripts/bench/catalog_gen.py`): the same mix and seed give the same
+  rows, so a run can be repeated.
+- **A run that is cut short** still shows its inputs and the tenants loaded
+  so far, with their rates. The job stops itself at 350 minutes
+  (`timeout-minutes`); GitHub stops any job on its own runners at 360. The
+  scale gate's mix had not been timed when this was written.
+
+**The index statements have one home:** `scripts/bench/trigram_indexes.sql`.
+Migration `0037` copies them word for word, and a test fails if a migration
+creates a trigram index that is not one of them.
+
+The job also runs by itself, on a small mix, on a pull request that changes
+its own files. It is not one of the required checks on `main`.
 
 ---
 

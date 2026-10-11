@@ -4,6 +4,23 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-11, in the evening (Stage 4 started with the catalog sizing job; D-200)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-11:** Phase 5.5. **Stage 3 is complete: the founder gave the "go" on
+2026-10-11**, after merging the checkpoint's record (PR #58, `main` `d674d4a`; D-199). **First
+after it:** an API run that does not leave the database as it found it now fails (D-199; RUNBOOK
+1.4); on staging at `b278490` the suite read `641 passed, 1 skipped, 3 deselected` with `+0` on all
+six counts. **The order from here (founder, 2026-10-11; "The plan after the Stage 3 "go"",
+below):** Stage 4 (matching performance, now at 800,000 catalog items; the design is being revised
+to that load, and nothing is built before the founder approves the revision); Stage 5 (cleanup,
+with the fix for the 10 seconds after a worker start as its own PR there, not before Stage 4); demo
+readiness, with D-195's model work; the Phase 6 pilot-blocker subset; then pilots with two or three
+customers. If Stage 4 is not merged by 2026-11-02, D-195's two changes go next, before Stage 5.
+Staging's database is Nano on Supabase's Free plan (500 MB): nothing is loaded for Stage 4 until a
+CI job has measured the sizes and the founder has chosen. The Fly worker and beat are at 0 and the
+Healthchecks.io check is paused.
+
 ## Replaced on 2026-10-11 (the Stage 3 "go"; D-199)
 
 <!-- the paragraph as it stood, starting on the next line -->
