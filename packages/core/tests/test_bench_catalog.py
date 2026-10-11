@@ -264,7 +264,35 @@ def test_each_variant_changes_one_thing_from_the_baseline():
 
 
 def test_a_run_of_every_variant_fits_the_notices_github_keeps():
-    assert len(variants.variants()) + 2 <= variants.NOTICES_PER_STEP == 10
+    # The inputs, the full scan, five variants and GIN's three thresholds: all ten, none to spare.
+    assert variants.notices(variants.variants()) == variants.NOTICES_PER_STEP == 10
+    assert variants.notices(variants.chosen("baseline,gin")) == 6
+
+
+def test_a_variants_report_stays_under_the_length_github_cuts_at():
+    """GitHub keeps 4,096 characters of an annotation and drops the rest
+    without a word: the first run lost half the GIN variant's report. The
+    slowest and largest figures a run could print must still fit."""
+    worst = {
+        family: {
+            "ms": {"description": [99999.9] * 3, "SKU": [99999.9] * 3},
+            "match": 50,
+            "five": Counter(dict.fromkeys(variants.SKU_KINDS, 17)),
+            "ties": 50,
+            "close": 50,
+            "full": 50,
+            "with_scan_ms": [99999.9] * 3,
+            "with_scan_differs": 50,
+        }
+        for family in variants.FAMILIES
+    }
+    lines = [line for k in variants.KS for line in variants.report_for_k(k, worst)]
+    assert len(lines) == 12 and all(line.startswith("fetching ") for line in lines)
+    assert "general match 50, five 51 (ties only 50; wrong 17, none 17, own 17)" in lines[1]
+    assert lines[2].endswith("general 50th on 50, 200th on 50")
+    # Beside them: what it is, two build lines, the plan, GIN's count line. 250 characters each is generous.
+    assert len("\n".join(lines)) + 5 * 250 < variants.ANNOTATION_LIMIT == 4096
+    assert len(variants.LEGEND) < 900
 
 
 def test_the_variants_asked_for_are_all_or_named():
@@ -326,9 +354,11 @@ def test_parity_is_todays_code_over_the_fetched_candidates():
     assert variants.outcome(everything) == variants.outcome(reference)
     assert variants.recorded(everything) == variants.recorded(reference)
 
-    # A fetch that misses the best item is a difference the job counts.
+    # A fetch that misses the best item is a difference the job counts, and not one among equal scores.
     without_it = variants.from_candidates(matching, line, catalog, [i.item_id for i in items[1:]])
     assert variants.recorded(without_it) != variants.recorded(reference)
+    assert variants.scores(without_it) != variants.scores(reference)
+    assert len(variants.scores(reference)) == 5 and len(variants.scores(reference)[0]) == 4
     # An id the catalog does not hold, or one fetched by both lists, changes nothing.
     doubled = [i.item_id for i in items] + [items[0].item_id, uuid4()]
     again = variants.from_candidates(matching, line, catalog, doubled)

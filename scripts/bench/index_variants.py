@@ -34,7 +34,8 @@ the product changes.
 
 **It refuses any database that is not on this machine**, as the sizing job
 does. Every figure is a GitHub annotation (RUNBOOK 1.6). GitHub keeps ten
-notices from one step: the inputs, the full scan and one per variant.
+notices from one step, and 4,096 characters of each: the inputs, the full
+scan, and one per variant (for GIN, one per threshold), each written short.
 """
 
 from __future__ import annotations
@@ -262,10 +263,64 @@ def guard(similarities: list[float], k: int) -> tuple[bool, bool]:
     return close, close and len(similarities) >= wide and similarities[wide - 1] >= GUARD_SIMILARITY
 
 
+def scores(match) -> list[tuple]:
+    """The recorded candidates without their items. When two paths record
+    the same scores and other items, they differ only in which of several
+    equally scored items made the five."""
+    return [(c["score"], c["matched_on"], c["eligible"], c["blocked_reason"]) for c in recorded(match)]
+
+
 def spread(values: list[float]) -> str:
     if not values:
         return "no lines"
     return f"{sizing.percentile(values, 0.5):.1f}/{sizing.percentile(values, 0.95):.1f}/{max(values):.1f}"
+
+
+# GitHub cuts an annotation's text at 4,096 characters without a word (the
+# first run of this job lost half the GIN variant's report that way), so a
+# variant's report is written short. LEGEND goes out once, with the inputs.
+ANNOTATION_LIMIT = 4096
+LEGEND = (
+    "reading a variant: 'ms' is p50/p95/max a line over the timing lines; 'match' = lines whose applied "
+    "match differs from today's full scan; 'five' = lines whose five recorded candidates differ; 'ties "
+    "only' = of those, lines with the same scores and other items among equally scored ones; wrong / none "
+    "/ own = those lines by SKU kind (one character wrong, no SKU, the buyer's own number); 'guard' = "
+    f"lines whose K-th candidate is still at {GUARD_SIMILARITY} similarity or more, and lines whose "
+    f"{GUARD_FACTOR}K-th is too, which the design sends to the full scan; 'with scan' = both queries plus "
+    "the faster full scan on those lines, and how many lines then differ from today's full scan"
+)
+_KIND_WORDS = dict(zip(SKU_KINDS, ("wrong", "none", "own")))
+
+
+def report_for_k(k: int, measured: dict[str, dict]) -> list[str]:
+    """One variant's four lines for one number of candidates fetched."""
+    ms, parity, guarded, with_scan = [], [], [], []
+    for family, found in measured.items():
+        ms.append(
+            f"{family} description {spread(found['ms']['description'])}, SKU {spread(found['ms']['SKU'])}"
+        )
+        kinds = ", ".join(f"{_KIND_WORDS[kind]} {found['five'][kind]}" for kind in SKU_KINDS)
+        parity.append(
+            f"{family} match {found['match']}, five {sum(found['five'].values())} "
+            f"(ties only {found['ties']}; {kinds})"
+        )
+        guarded.append(f"{family} {k}th on {found['close']}, {GUARD_FACTOR * k}th on {found['full']}")
+        with_scan.append(
+            f"{family} {spread(found['with_scan_ms'])} ms, scan on {found['full']}, "
+            f"differs {found['with_scan_differs']}"
+        )
+    return [
+        f"fetching {k}, ms: " + " | ".join(ms),
+        f"fetching {k}, parity on {PARITY_LINES}: " + " | ".join(parity),
+        f"fetching {k}, guard on {PARITY_LINES}: " + " | ".join(guarded),
+        f"fetching {k}, with scan on {PARITY_LINES}: " + " | ".join(with_scan),
+    ]
+
+
+def notices(asked: list[Variant]) -> int:
+    """How many notices a run of these variants prints: the inputs, the full
+    scan, and one for each variant or, for GIN, each threshold."""
+    return 2 + sum(max(1, len(variant.thresholds)) for variant in asked)
 
 
 # ── A faster full scan: no database, and not in the product ─────────────────
@@ -392,7 +447,7 @@ def _built(conn, variant: Variant, rows: int, block: int) -> tuple[list[str], di
         size = conn.execute("SELECT pg_relation_size(%s::regclass)", (f"public.{name}",)).fetchone()[0]
         pages[field] = size // block
         lines.append(
-            f"{field} index {name}: built in {seconds:.0f} s; {sizing.megabytes(size)} ({size} bytes), "
+            f"{field} index {name}: built in {seconds:.0f} s; {sizing.megabytes(size)}, "
             f"{size / rows:.0f} bytes a row, {pages[field]} pages"
         )
     conn.execute("ANALYZE items")
@@ -402,7 +457,6 @@ def _built(conn, variant: Variant, rows: int, block: int) -> tuple[list[str], di
 def _measure(conn, variant: Variant, threshold: float | None, pages: dict[str, int], ctx: dict) -> list[str]:
     matching, catalog, tenant_id = ctx["matching"], ctx["catalog"], ctx["tenant_id"]
     query = nearest if threshold is None else above_threshold
-    prefix = "" if threshold is None else f"threshold {threshold}: "
     if threshold is not None:
         conn.execute("SELECT set_config('pg_trgm.similarity_threshold', %s, false)", (str(threshold),))
     out: list[str] = []
@@ -423,8 +477,8 @@ def _measure(conn, variant: Variant, threshold: float | None, pages: dict[str, i
                     scan, buffers = _plan(conn, sql, bind(marks, tenant_id, values(line)[field]))
                     read.append(buffers)
             per_family.append(f"{family} {int(statistics.median(read)) if read else 'none'}")
-        parts.append(f"{field} {scan}, buffers {' / '.join(per_family)} of {pages[field]} index pages")
-    out.append(f"{prefix}plan fetching {KS[0]}: " + " | ".join(parts))
+        parts.append(f"{field} {scan}; buffers {', '.join(per_family)}; index pages {pages[field]}")
+    out.append(f"plan at {KS[0]}: " + " | ".join(parts))
 
     # The candidates of each parity line, once, as far as the guard looks.
     deepest = GUARD_FACTOR * max(KS)
@@ -440,7 +494,7 @@ def _measure(conn, variant: Variant, threshold: float | None, pages: dict[str, i
             fetched[family].append(lists)
 
     for k in KS:
-        timing, parity, guarded, combined = [], [], [], []
+        measured: dict[str, dict] = {}
         for family in FAMILIES:
             lines = ctx["lines"][family]
             per_line: list[dict[str, float]] = [{} for _ in lines]  # each line's ms, by list
@@ -453,52 +507,37 @@ def _measure(conn, variant: Variant, threshold: float | None, pages: dict[str, i
                     started = time.perf_counter()
                     conn.execute(sql, bind(marks, tenant_id, value)).fetchall()
                     per_line[n][field] = (time.perf_counter() - started) * 1000
-            taken = {field: [ms[field] for ms in per_line if field in ms] for field in EXPRESSIONS}
-            timing.append(f"{family} description {spread(taken['description'])}, SKU {spread(taken['SKU'])}")
-
-            match_differs, candidates_differ, close, full_scan = 0, Counter(), 0, 0
-            together_ms, together_differs = [], 0
+            found = {
+                "ms": {field: [ms[field] for ms in per_line if field in ms] for field in EXPRESSIONS},
+                "match": 0,  # lines whose applied match differs from today's full scan
+                "five": Counter(),  # lines whose five recorded candidates differ, by the line's SKU kind
+                "ties": 0,  # of those, lines with the same scores and other items among the equal ones
+                "close": 0,  # lines whose K-th candidate is still similar
+                "full": 0,  # lines the design's guard sends to the full scan
+                "with_scan_ms": [],
+                "with_scan_differs": 0,
+            }
             rows = zip(lines, fetched[family], ctx["reference"][family])
             for n, (line, lists, reference) in enumerate(rows):
-                ids = [i for found, _ in lists.values() for i in found[:k]]
+                ids = [i for listed, _ in lists.values() for i in listed[:k]]
                 got = from_candidates(matching, line, catalog, ids)
-                if outcome(got) != outcome(reference):
-                    match_differs += 1
+                found["match"] += outcome(got) != outcome(reference)
                 if recorded(got) != recorded(reference):
-                    candidates_differ[line.sku_kind] += 1
+                    found["five"][line.sku_kind] += 1
+                    found["ties"] += scores(got) == scores(reference)
                 flags = [guard(similarities, k) for _, similarities in lists.values()]
-                close += any(c for c, _ in flags)
+                found["close"] += any(c for c, _ in flags)
                 fell_back = any(f for _, f in flags)
-                full_scan += fell_back
+                found["full"] += fell_back
                 # The index first, and the faster full scan for the lines the guard sends on.
                 final = ctx["fast"]["matches"][family][n] if fell_back else got
-                together_ms.append(
+                found["with_scan_ms"].append(
                     sum(per_line[n].values()) + (ctx["fast"]["ms"][family][n] if fell_back else 0)
                 )
                 same = outcome(final) == outcome(reference) and recorded(final) == recorded(reference)
-                together_differs += not same
-            combined.append(
-                f"{family} {spread(together_ms)} ms a line p50/p95/max, the scan on {full_scan} lines, "
-                f"differs from today's full scan on {together_differs}"
-            )
-            by_kind = ", ".join(f"{kind}: {candidates_differ[kind]}" for kind in SKU_KINDS)
-            parity.append(
-                f"{family} applied match differs on {match_differs}, the five candidates differ on "
-                f"{sum(candidates_differ.values())} ({by_kind})"
-            )
-            guarded.append(
-                f"{family} the {k}th is still at {GUARD_SIMILARITY} or more on {close} lines, "
-                f"the {GUARD_FACTOR * k}th too on {full_scan} (full scan by the design's guard)"
-            )
-        out.append(
-            f"{prefix}fetching {k}, ms p50/p95/max over {TIMING_LINES} lines a family: " + " | ".join(timing)
-        )
-        out.append(f"{prefix}fetching {k}, parity on {PARITY_LINES} lines a family: " + " | ".join(parity))
-        out.append(f"{prefix}fetching {k}, guard on {PARITY_LINES} lines a family: " + " | ".join(guarded))
-        out.append(
-            f"{prefix}fetching {k}, both queries and the faster full scan for the guard's lines, on "
-            f"{PARITY_LINES} lines a family: " + " | ".join(combined)
-        )
+                found["with_scan_differs"] += not same
+            measured[family] = found
+        out += report_for_k(k, measured)
 
     if threshold is not None:
         passing = []
@@ -510,11 +549,10 @@ def _measure(conn, variant: Variant, threshold: float | None, pages: dict[str, i
             ]
             passing.append(
                 f"{family} median {int(statistics.median(counts))}, max {max(counts)}, "
-                f"none on {sum(1 for c in counts if c == 0)} lines, "
-                f"fewer than {matching.MAX_CANDIDATES} on "
-                f"{sum(1 for c in counts if c < matching.MAX_CANDIDATES)}"
+                f"none on {sum(1 for c in counts if c == 0)}, "
+                f"under {matching.MAX_CANDIDATES} on {sum(1 for c in counts if c < matching.MAX_CANDIDATES)}"
             )
-        out.append(f"{prefix}items above the threshold by description: " + " | ".join(passing))
+        out.append("items above the threshold by description: " + " | ".join(passing))
     return out
 
 
@@ -531,9 +569,22 @@ def run(database_url: str, mix: str, seed: int, names: str) -> int:
     sizing.refuse_unless_local(database_url)
     sizes = catalog_gen.parse_mix(mix)
     asked = chosen(names)
-    if len(asked) + 2 > NOTICES_PER_STEP:
+    not_measured = [v for v in asked if len(sizes) < v.needs_tenants]
+    asked = [v for v in asked if v not in not_measured]
+    if notices(asked) > NOTICES_PER_STEP:
         raise ValueError(f"{len(asked)} variants is more than one run can report")
     failed = 0
+
+    def emit(title: str, lines: list[str]) -> None:
+        nonlocal failed
+        sizing.emit(title, lines)
+        length = len("\n".join(lines))
+        if length > ANNOTATION_LIMIT:
+            failed += 1
+            message = f"{title}: {length} characters, and GitHub keeps {ANNOTATION_LIMIT}; its end is cut"
+            print(message, flush=True)
+            if os.environ.get("GITHUB_ACTIONS") == "true":
+                print(f"::error title=catalog sizing: a report was cut::{message}", flush=True)
 
     with psycopg.connect(database_url, autocommit=True) as conn:
         conn.execute("SET search_path = public, extensions")
@@ -552,16 +603,18 @@ def run(database_url: str, mix: str, seed: int, names: str) -> int:
         for variant in variants():
             _drop(conn, variant)
 
-        sizing.emit(
+        emit(
             "variants: inputs",
             [
                 f"mix {mix}: {len(sizes)} tenants, {sum(sizes)} items; seed {seed}; Postgres {version}",
                 f"commit {os.environ.get('GITHUB_SHA', '')[:7] or 'not in CI'}; "
                 f"runner {os.environ.get('RUNNER_OS', sys.platform)}",
                 "variants: " + "; ".join(f"{v.name} ({v.what})" for v in asked),
+                *(f"{v.name} is not measured: the mix has one tenant" for v in not_measured),
                 f"candidates fetched from each list: {', '.join(map(str, KS))}; timings on {TIMING_LINES} "
                 f"lines a family, parity on {PARITY_LINES}; no line carries its item's exact SKU",
                 "loaded once with no trigram index; each variant's indexes are built on the loaded rows",
+                LEGEND,
             ],
         )
 
@@ -607,7 +660,7 @@ def run(database_url: str, mix: str, seed: int, names: str) -> int:
                 else f"{family} lines: none in this catalog"
             )
         ctx["fast"] = measure_fast_scan(matching, ctx["catalog"], ctx["lines"], ctx["reference"])
-        sizing.emit(
+        emit(
             # No comma in a title: GitHub reads one as the end of the title.
             "variants: today's full scan in Python on this runner",
             [
@@ -621,16 +674,14 @@ def run(database_url: str, mix: str, seed: int, names: str) -> int:
         )
 
         for variant in asked:
-            if len(sizes) < variant.needs_tenants:
-                sizing.emit(
-                    f"variants: {variant.name}", [f"{variant.what}: not measured, the mix has one tenant"]
-                )
-                continue
             try:
                 lines, pages = _built(conn, variant, rows, block)
                 for threshold in variant.thresholds or (None,):
-                    lines += _measure(conn, variant, threshold, pages, ctx)
-                sizing.emit(f"variants: {variant.name}", [variant.what, *lines])
+                    # One annotation for each threshold: together they would be cut.
+                    title = variant.name if threshold is None else f"{variant.name} at {threshold}"
+                    what = variant.what if threshold is None else f"{variant.what} of {threshold}"
+                    measured = _measure(conn, variant, threshold, pages, ctx)
+                    emit(f"variants: {title}", [what, *lines, *measured])
             except psycopg.Error as error:
                 failed += 1
                 message = f"{variant.name} ({variant.what}) was not measured: {type(error).__name__}: {error}"
