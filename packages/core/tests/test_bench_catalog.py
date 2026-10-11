@@ -38,6 +38,7 @@ def _load(name: str):
 
 gen = _load("catalog_gen")
 sizing = _load("catalog_sizing")
+variants = _load("index_variants")
 
 
 def _fingerprint(items) -> str:
@@ -234,14 +235,122 @@ def test_the_queries_order_by_the_indexed_expressions():
         assert "tenant_id = %s AND deleted_at IS NULL" in query
 
 
+# ── The index variants (scripts/bench/index_variants.py) ────────────────────
+
+
+def test_the_baseline_variant_is_the_one_home_word_for_word_and_names_are_distinct():
+    every = variants.variants()
+    assert [v.name for v in every] == ["baseline", "siglen64", "siglen128", "siglen256", "gin", "no_tenant"]
+    home = sizing.statements((BENCH / "trigram_indexes.sql").read_text(encoding="utf-8"))
+    assert list(every[0].creates.values()) == [s for s in home if s.startswith("create index")]
+    names = [variants.index_name(s) for v in every for s in v.creates.values()]
+    assert len(set(names)) == len(names) == 12
+    for variant in every[1:]:
+        for field, statement in variant.creates.items():
+            assert variants.index_name(statement).startswith("bench_")
+            assert statement.endswith("where deleted_at is null")
+            assert variants.EXPRESSIONS[field] in statement
+
+
+def test_each_variant_changes_one_thing_from_the_baseline():
+    by_name = {v.name: v for v in variants.variants()}
+    assert "gist_trgm_ops(siglen=128))" in by_name["siglen128"].creates["description"]
+    assert "using gist (tenant_id, " in by_name["siglen128"].creates["SKU"]
+    assert "using gin (tenant_id, " in by_name["gin"].creates["description"]
+    assert by_name["gin"].thresholds == (0.3, 0.5, 0.7)
+    control = by_name["no_tenant"]
+    assert "tenant_id" not in control.creates["description"] and control.needs_tenants == 2
+    assert variants.KS == (50, 100, 200)
+
+
+def test_a_run_of_every_variant_fits_the_notices_github_keeps():
+    assert len(variants.variants()) + 2 <= variants.NOTICES_PER_STEP == 10
+
+
+def test_the_variants_asked_for_are_all_or_named():
+    assert variants.chosen("all") == variants.variants()
+    assert [v.name for v in variants.chosen("gin, baseline")] == ["gin", "baseline"]
+    for bad in ("", "siglen999", "baseline;drop"):
+        with pytest.raises(ValueError, match="can't read the variants"):
+            variants.chosen(bad)
+
+
+def test_every_variant_query_stays_in_its_tenant_and_binds_its_values():
+    tenant = "t-id"
+    for build in (variants.nearest, variants.above_threshold):
+        for with_similarity in (False, True):
+            for expression in variants.EXPRESSIONS.values():
+                sql, marks = build(expression, 50, with_similarity)
+                assert "tenant_id = %s AND deleted_at IS NULL" in sql and sql.endswith("LIMIT 50")
+                # One parameter for each placeholder, in the order the text needs them.
+                assert sql.replace("%%", "").count("%s") == len(marks)
+                bound = variants.bind(marks, tenant, "the line")
+                assert bound.count(tenant) == 1 and bound[marks.index("t")] == tenant
+    sql, marks = variants.above_threshold("lower(description)", 50)
+    assert "lower(description) %% %s::text" in sql  # the driver turns %% into the one % operator
+    sql, marks = variants.count_above_threshold("lower(description)")
+    assert sql.replace("%%", "").count("%s") == len(marks) == 2
+
+
+def test_no_bench_line_carries_its_items_exact_sku_and_all_nine_kinds_come_in_turn():
+    rows = [(item.sku, item.description) for item in gen.catalog(7, 1, 90)]
+    lines = variants.bench_lines(rows, 7)
+    assert lines == variants.bench_lines(rows, 7)
+    assert all(line.sku != sizing.sku_key(sku) for line, (sku, _) in zip(lines, rows))
+    assert Counter(line.sku_kind for line in lines) == dict.fromkeys(variants.SKU_KINDS, 30)
+    assert all(line.sku is None for line in lines if line.sku_kind == "no SKU")
+    assert lines[0].description == rows[0][1].lower()  # every third description is as written
+    assert all(line.description == line.description.lower() for line in lines)
+
+
+def test_the_guard_reads_the_kth_and_the_4kth_candidate():
+    assert variants.guard([0.9] * 49, 50) == (False, False)  # fewer than K came back: nothing was cut
+    assert variants.guard([0.9] * 50 + [0.4] * 150, 50) == (True, False)
+    assert variants.guard([0.9] * 200, 50) == (True, True)
+    assert variants.guard([0.9] * 49 + [0.49] * 151, 50) == (False, False)
+
+
+def test_parity_is_todays_code_over_the_fetched_candidates():
+    from uuid import uuid4
+
+    from docflow_core import matching
+
+    made = gen.catalog(7, 1, 400)
+    items = [matching.CatalogItem(uuid4(), i.sku, i.description, i.unit_of_measure) for i in made]
+    catalog = matching.Catalog(items)
+    line = variants.bench_lines([(items[0].sku, items[0].description)], 7)[0]
+    reference = variants.resolve(matching, line, catalog)
+    assert reference.candidates and reference.candidates[0].item_id == items[0].item_id
+
+    everything = variants.from_candidates(matching, line, catalog, [i.item_id for i in items])
+    assert variants.outcome(everything) == variants.outcome(reference)
+    assert variants.recorded(everything) == variants.recorded(reference)
+
+    # A fetch that misses the best item is a difference the job counts.
+    without_it = variants.from_candidates(matching, line, catalog, [i.item_id for i in items[1:]])
+    assert variants.recorded(without_it) != variants.recorded(reference)
+    # An id the catalog does not hold, or one fetched by both lists, changes nothing.
+    doubled = [i.item_id for i in items] + [items[0].item_id, uuid4()]
+    again = variants.from_candidates(matching, line, catalog, doubled)
+    assert variants.recorded(again) == variants.recorded(reference)
+
+
+def test_the_variants_refuse_any_database_not_on_this_machine(capsys):
+    code = variants.main(["--mix", "10", "--database-url", "postgresql://u:pw@db.example.test:5432/postgres"])
+    assert code == 2
+    assert "only runs against a database on this machine" in capsys.readouterr().out
+
+
 def test_the_workflow_is_started_by_hand_and_reads_no_secret():
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "workflow_dispatch:" in workflow and "mix:" in workflow
     assert "secrets." not in workflow
     assert "127.0.0.1" in workflow and "supabase.com" not in workflow
     # The inputs are passed as environment values, never pasted into the shell line.
-    run_line = next(line for line in workflow.splitlines() if "catalog_sizing.py" in line and "run:" in line)
-    assert "${{" not in run_line
+    for script in ("catalog_sizing.py", "index_variants.py"):
+        run_line = next(line for line in workflow.splitlines() if script in line and "run:" in line)
+        assert "${{" not in run_line
+    assert "variants:" in workflow and "if: ${{ !inputs.variants }}" in workflow
     assert "runs-on: ubuntu-24.04" in workflow
     # Under GitHub's own 360-minute stop, so the job ends on its own terms.
     assert "timeout-minutes: 350" in workflow

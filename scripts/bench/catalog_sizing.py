@@ -223,6 +223,57 @@ def _plan(conn, query: str, tenant_id: uuid.UUID, value: str) -> str:
     return " | ".join(keep[:4])
 
 
+def load_mix(conn, sizes: list[int], seed: int, annotate: bool = True) -> tuple[list[uuid.UUID], float]:
+    """One new tenant and its catalog per size, in the order given. Returns
+    the tenants' ids and the seconds the load took. Each tenant gets a line
+    as it finishes; `annotate=False` keeps those lines out of the
+    annotations, for a job that needs its ten notices for its results."""
+    total = sum(sizes)
+    tenants: list[uuid.UUID] = []
+    _heading("the load, tenant by tenant")
+    waiting: list[str] = []  # tenant lines not yet in an annotation
+    loaded_rows = 0
+    load_started = time.perf_counter()
+    for number, size in enumerate(sizes, start=1):
+        tenant_started = time.perf_counter()
+        tenant_id = uuid.uuid4()
+        tenants.append(tenant_id)
+        conn.execute(
+            "INSERT INTO tenants (id, name, status, onboarding_status, created_at, updated_at, "
+            "status_changed_at) VALUES (%s, %s, 'active', 'tenant_created', now(), now(), now())",
+            (tenant_id, catalog_gen.tenant_name(number, size)),
+        )
+        with conn.cursor() as cur, cur.copy(
+            "COPY items (tenant_id, sku, description, unit_of_measure, barcode, external_id, raw_data) "
+            "FROM STDIN"
+        ) as copy:
+            for item in catalog_gen.catalog(seed, number, size):
+                copy.write_row(
+                    (
+                        tenant_id,
+                        item.sku,
+                        item.description,
+                        item.unit_of_measure,
+                        item.barcode,
+                        item.external_id,
+                        json.dumps(item.raw),
+                    )
+                )
+        # The COPY has ended and committed: this tenant's rows are in, indexes and all.
+        now = time.perf_counter()
+        loaded_before, loaded_rows = loaded_rows, loaded_rows + size
+        line = tenant_line(
+            number, len(sizes), size, now - tenant_started, loaded_rows, total, now - load_started
+        )
+        _line(line)
+        waiting.append(line)
+        if annotate and progress_due(loaded_before, loaded_rows, total):
+            _annotate(f"loaded {loaded_rows} of {total} rows", waiting)
+            waiting = []
+    _summarise("\n")
+    return tenants, time.perf_counter() - load_started
+
+
 def run(database_url: str, mix: str, seed: int, lines: int) -> None:
     import psycopg
 
@@ -253,49 +304,7 @@ def run(database_url: str, mix: str, seed: int, lines: int) -> None:
             ],
         )
 
-        tenants: list[uuid.UUID] = []
-        _heading("the load, tenant by tenant")
-        waiting: list[str] = []  # tenant lines not yet in an annotation
-        loaded_rows = 0
-        load_started = time.perf_counter()
-        for number, size in enumerate(sizes, start=1):
-            tenant_started = time.perf_counter()
-            tenant_id = uuid.uuid4()
-            tenants.append(tenant_id)
-            conn.execute(
-                "INSERT INTO tenants (id, name, status, onboarding_status, created_at, updated_at, "
-                "status_changed_at) VALUES (%s, %s, 'active', 'tenant_created', now(), now(), now())",
-                (tenant_id, catalog_gen.tenant_name(number, size)),
-            )
-            with conn.cursor() as cur, cur.copy(
-                "COPY items (tenant_id, sku, description, unit_of_measure, barcode, external_id, raw_data) "
-                "FROM STDIN"
-            ) as copy:
-                for item in catalog_gen.catalog(seed, number, size):
-                    copy.write_row(
-                        (
-                            tenant_id,
-                            item.sku,
-                            item.description,
-                            item.unit_of_measure,
-                            item.barcode,
-                            item.external_id,
-                            json.dumps(item.raw),
-                        )
-                    )
-            # The COPY has ended and committed: this tenant's rows are in, indexes and all.
-            now = time.perf_counter()
-            loaded_before, loaded_rows = loaded_rows, loaded_rows + size
-            line = tenant_line(
-                number, len(sizes), size, now - tenant_started, loaded_rows, total, now - load_started
-            )
-            _line(line)
-            waiting.append(line)
-            if progress_due(loaded_before, loaded_rows, total):
-                _annotate(f"loaded {loaded_rows} of {total} rows", waiting)
-                waiting = []
-        _summarise("\n")
-        load_seconds = time.perf_counter() - load_started
+        tenants, load_seconds = load_mix(conn, sizes, seed)
         conn.execute("ANALYZE items")
         rows_added = conn.execute("SELECT count(*) FROM items").fetchone()[0] - rows_before
         if rows_added != total:
