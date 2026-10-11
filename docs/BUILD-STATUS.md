@@ -25,9 +25,9 @@ D-200): the catalog sizing job as its own PR, then PR 1 (the broad-`except` audi
 (matching).** **Built: the sizing job** (`scripts/bench/`, `.github/workflows/catalog-sizing.yml`;
 RUNBOOK 1.8): fake catalogs with fastener families from a fixed seed, loaded into a CI runner's own
 database with the two trigram indexes, and the sizes printed. Once it is on `main` the founder runs
-it for three mixes (the 250,000 tenant alone, the 800,000 mix, the 2.9 million mix) and chooses,
-from the measured sizes, between Supabase Pro with the 800,000 mix and Nano with the 250,000 tenant
-alone. **Nothing is loaded on staging** (Nano on Supabase's Free plan, 500 MB) and nothing of PR 1
+it for three mixes, smallest first (the 250,000 tenant alone, the 800,000 mix, then the 2.9 million
+mix after a prediction of its run time from the first two), and chooses, from the measured sizes,
+between Supabase Pro with the 800,000 mix and Nano with the 250,000 tenant alone. **Nothing is loaded on staging** (Nano on Supabase's Free plan, 500 MB) and nothing of PR 1
 or PR 2 is built. After Stage 4: Stage 5, demo readiness with D-195's model work, the Phase 6
 pilot-blocker subset, then pilots with two or three customers ("The plan after the Stage 3 "go"",
 below). If Stage 4 is not merged by 2026-11-02, D-195's two changes go next, before Stage 5. The

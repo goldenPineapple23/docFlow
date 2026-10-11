@@ -3419,6 +3419,14 @@ Neither change starts before the founder's "go".
 - **The core suite on staging at `e7b60f7`** (2026-10-11 21:16:59 to 21:17:47 UTC): `838 passed, 1 skipped in 46.04s`, 806 passed before, the same one skip. CI should read 839 tests. The API and worker suites are unchanged and were not run again.
 - **Not proven on this machine:** the half that needs a database. This machine has no local Postgres, and staging is not to be loaded. Its proof is the pull request's own run of the job.
 
+**7. The founder's answers after the first push (2026-10-11), and what changed for them** (commit `1826c70`, pushed before the PR was opened, so the PR's first run tests the final workflow).
+- **The three choices in item 6 stand:** the indexes created before the load and then rebuilt; the job also running on pull requests that change its own files, on the small mix; the timings for the index query alone.
+- **The timeout is 350 minutes** (it was 180). Claude's estimate for the 2.9 million mix was 30 to 90 minutes, a guess with no measured rate behind it, and a run longer than 180 minutes could not be ruled out. GitHub stops a job on its own runners at 360.
+- **A run that is cut short says how far it got.** The inputs are printed before the load, and each tenant gets a line as its catalog finishes (its rows, its seconds, rows a second, how far the load is). In the job's log and the run's summary the lines appear one by one. GitHub keeps ten notices from one step and drops the rest, so as annotations the lines travel together: after the first tenant, and each time the load passes a quarter of its rows; five at most, beside the four results. A test fails if any mix could print more than ten.
+- **The runs go smallest first:** `250000`, then the 800,000 mix. From those two runs' measured rates Claude gives a prediction for the 2.9 million mix before the founder starts it.
+- **Tests:** 11 more, 43 in `test_bench_catalog.py`. **The core suite on staging at `1826c70`** (2026-10-11 21:34:21 to 21:35:08 UTC): `849 passed, 1 skipped in 44.63s`, the same one skip. CI should read 850 tests, not the 839 of item 6. The push run on `6ef7890`, before this change, read `839 tests` for core and was green on all six jobs.
+- **Still not proven on this machine:** the half that needs a database. The new load loop was only walked through with a stand-in for the database driver, which shows that it runs and what it prints, and nothing about Postgres.
+
 **Not changed:** any product code, migration, gate, pass mark, limit or constant. Nothing of PR 1 or PR 2 is built.
 
 **Related:** Sections 0 (rules 3, 5 and 7), 7.5, 7.10; D-152, D-155, D-186, D-198, D-199; RUNBOOK 1.6, 1.8, 8.1; BUILD-STATUS "Stage 4 detailed design" (A2, A5 to A7, items 16 to 18) and "The plan after the Stage 3 "go""; `scripts/bench/`, `.github/workflows/catalog-sizing.yml`, `packages/core/tests/test_bench_catalog.py`.
