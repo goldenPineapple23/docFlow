@@ -1,0 +1,70 @@
+name: Catalog sizing (manual)
+
+# Stage 4 (D-199, D-200): what a catalog and its two trigram indexes cost on
+# disk, measured before anything is loaded on docflow-staging, whose
+# database is limited to 500 MB.
+#
+# Started by hand from the Actions tab ("Run workflow"), with the tenant mix
+# as its input: one catalog size per tenant, e.g. 250000,100000x2,50000x7.
+# It seeds fake "Acme Test Bench" catalogs into this runner's own Supabase
+# stack (scripts/bench/catalog_sizing.py, which refuses any database that is
+# not on the machine it runs on), and prints the table size, each index's
+# size, bytes per row, the load and build times and the candidate query's
+# timings as annotations on the run. RUNBOOK 1.8 has the inputs for each run.
+#
+# Its sizes are the measurement. Its timings are GitHub's runner, not staging.
+#
+# It also runs on a pull request that changes its own files, on a small mix,
+# so a change to the job is proven before it merges. It is not one of the
+# required checks on main.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mix:
+        description: "One catalog size per tenant, e.g. 250000,100000x2,50000x7"
+        type: string
+        required: true
+      seed:
+        description: "Seed for the generated catalogs (leave as it is to repeat a run)"
+        type: string
+        required: false
+        default: "20261011"
+  pull_request:
+    paths:
+      - "scripts/bench/**"
+      - ".github/workflows/catalog-sizing.yml"
+
+# Nothing below is a secret: a throwaway value for a database that exists
+# only inside the CI runner, as in ci.yml.
+env:
+  SUPABASE_CLI_VERSION: "2.118.0"
+  SUPERUSER_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+jobs:
+  sizing:
+    name: catalog sizing
+    # ubuntu-24.04, not ubuntu-latest, as in ci.yml.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v2.1.2
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Start the local Supabase stack (applies supabase/migrations/)
+        run: supabase start
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: apps/worker/requirements.lock.txt
+      - run: python -m pip install --upgrade pip
+      # Pinned, not ranges: the worker's lockfile holds the database driver.
+      - run: pip install -r apps/worker/requirements.lock.txt
+      - name: Seed the mix, measure, print
+        # The inputs reach the script as environment values, never as shell text.
+        env:
+          MIX: ${{ inputs.mix || '3000,1000x2' }}
+          SEED: ${{ inputs.seed || '20261011' }}
+        run: python scripts/bench/catalog_sizing.py --mix "$MIX" --seed "$SEED"
