@@ -39,6 +39,7 @@ def _load(name: str):
 gen = _load("catalog_gen")
 sizing = _load("catalog_sizing")
 variants = _load("index_variants")
+scan = _load("full_scan")
 
 
 def _fingerprint(items) -> str:
@@ -400,6 +401,58 @@ def test_the_faster_full_scan_returns_what_todays_full_scan_returns(monkeypatch,
             assert variants.outcome(faster) == variants.outcome(today), (family, line)
             assert variants.recorded(faster) == variants.recorded(today), (family, line)
     assert (fast.widened > 0) == (keep == 3)
+
+
+def test_token_sort_ratio_is_the_plain_ratio_of_the_token_sorted_keys():
+    """The speed-up rests on this: sorting each item's tokens once gives the
+    very same score. Every item of a catalog, against lines of every kind."""
+    from rapidfuzz import fuzz
+
+    matching, catalog, lines = _bench_catalog_and_lines(1500, 9)
+    keys = [matching.normalize_description(item.description) for item in catalog.items]
+    ordered = [scan.sort_tokens(key) for key in keys]
+    assert ordered != keys  # the generated descriptions are not already in token order
+    for line in lines["fastener"] + lines["general"]:
+        asked = matching.normalize_description(line.description)
+        today = [fuzz.token_sort_ratio(asked, key) for key in keys]
+        assert [fuzz.ratio(scan.sort_tokens(asked), key) for key in ordered] == today
+
+
+@pytest.mark.parametrize("keep", [100, 3])
+def test_the_scan_with_token_sorted_keys_returns_what_todays_full_scan_returns(monkeypatch, keep):
+    monkeypatch.setattr(variants, "FAST_KEEP", keep)
+    matching, catalog, lines = _bench_catalog_and_lines(1500, 9)
+    fast = scan.SortedScan(matching, catalog)
+    for family in variants.FAMILIES:
+        for line in lines[family]:
+            today = variants.resolve(matching, line, catalog)
+            faster = fast.resolve(line)
+            assert variants.outcome(faster) == variants.outcome(today), (family, line)
+            assert variants.recorded(faster) == variants.recorded(today), (family, line)
+    assert (fast.widened > 0) == (keep == 3)
+
+
+def test_the_scan_measurement_reports_each_line_parity_and_a_40_line_order():
+    matching, catalog, lines = _bench_catalog_and_lines(600, 9)
+    reference = {
+        family: [variants.resolve(matching, line, catalog) for line in lines[family][:3]]
+        for family in variants.FAMILIES
+    }
+    found = scan.measure(scan.SortedScan, matching, catalog, lines, reference)
+    assert len(found["ms"]) == 18
+    assert found["parity"] == ["fastener match 0, five 0", "general match 0, five 0"]
+    assert scan.order_seconds(2.0, [50.0, 150.0]) == pytest.approx(2.0 + 40 * 0.1)
+    cores = scan.several_cores(scan.SortedScan(matching, catalog), lines["fastener"])
+    assert "one core" in cores[0] and "in 2 chunks on 2 threads" in cores[1]
+    assert "tenant_id = %s" in scan.FRESHNESS and "updated_at" in scan.FRESHNESS
+
+
+def test_the_scan_measurement_refuses_any_database_not_on_this_machine(capsys):
+    code = variants.main(
+        ["--mix", "10", "--variants", "scan", "--database-url", "postgresql://u:pw@db.example.test:5432/postgres"]
+    )
+    assert code == 2
+    assert "only runs against a database on this machine" in capsys.readouterr().out
 
 
 def test_the_faster_full_scan_is_measured_against_todays_on_the_same_lines():

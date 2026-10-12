@@ -71,6 +71,11 @@ FAMILIES = ("fastener", "general")
 SKU_KINDS = ("one character wrong", "no SKU", "the buyer's own number")
 NOTICES_PER_STEP = 10
 
+# The catalog as matching.load_catalog reads it.
+CATALOG_READ = (
+    "SELECT id, sku, description, unit_of_measure FROM items WHERE tenant_id = %s AND deleted_at IS NULL"
+)
+
 EXPRESSIONS = {
     "description": "lower(description)",
     "SKU": "lower(regexp_replace(sku, '[^A-Za-z0-9]', '', 'g'))",
@@ -345,14 +350,21 @@ class FastScan:
         self.sku_keys = [matching.sku_comparison_key(item.sku) for item in catalog.items]
         self.widened = 0  # lines that needed more than FAST_KEEP
 
-    def resolve(self, line: Line):
-        from rapidfuzz import fuzz, process
+    def asked(self, line: Line) -> tuple:
+        """For each score: the line's key, every item's key, the scorer."""
+        from rapidfuzz import fuzz
 
         m = self.matching
-        asked = (
+        return (
             (m.normalize_description(line.description), self.description_keys, fuzz.token_sort_ratio),
             (m.sku_comparison_key(line.sku), self.sku_keys, fuzz.ratio),
         )
+
+    def resolve(self, line: Line):
+        from rapidfuzz import process
+
+        m = self.matching
+        asked = self.asked(line)
         keep, widened = FAST_KEEP, False
         while True:
             kept: set[int] = set()
@@ -381,11 +393,13 @@ def measure_fast_scan(matching, catalog, lines: dict[str, list[Line]], reference
     started = time.perf_counter()
     fast = FastScan(matching, catalog)
     build_seconds = time.perf_counter() - started
-    # Built a second time under the memory tracer, which would slow the timing above.
+    # Built a second time under the memory tracer, which would slow the timing above. It is
+    # kept until it has been measured: released first, it reads 0.0 MB (the 250,000 run did).
     tracemalloc.start()
-    FastScan(matching, catalog)
+    again = FastScan(matching, catalog)
     held, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
+    del again
 
     found: dict = {"matches": {}, "ms": {}}
     timing, parity = [], []
@@ -561,11 +575,70 @@ def _drop(conn, variant: Variant) -> None:
         conn.execute(f"DROP INDEX IF EXISTS public.{index_name(statement)}")
 
 
+def prepare(conn, sizes: list[int], seed: int, matching) -> dict:
+    """Load the mix with no trigram index, draw the lines from the largest
+    tenant, read its catalog as matching does, and run today's full scan on
+    the parity lines: the reference everything else is compared with."""
+    tenants, load_seconds = sizing.load_mix(conn, sizes, seed, annotate=False)
+    conn.execute("ANALYZE items")
+    rows = conn.execute("SELECT count(*) FROM items").fetchone()[0]
+    tenant_id = tenants[sizes.index(max(sizes))]
+
+    ctx: dict = {"matching": matching, "tenant_id": tenant_id, "lines": {}, "reference": {}, "rows": rows}
+    for family, like in (("fastener", "NOT LIKE"), ("general", "LIKE")):
+        sample = conn.execute(
+            f"SELECT sku, description FROM items WHERE tenant_id = %s AND description {like} %s "
+            "ORDER BY id LIMIT %s",
+            (tenant_id, GENERAL_PREFIX + "%", TIMING_LINES),
+        ).fetchall()
+        ctx["lines"][family] = bench_lines([(sku, description) for sku, description in sample], seed)
+
+    # Today's full scan: the catalog read, the comparison data, then each line.
+    started = time.perf_counter()
+    live = conn.execute(CATALOG_READ, (tenant_id,)).fetchall()
+    ctx["read_seconds"] = time.perf_counter() - started
+    started = time.perf_counter()
+    ctx["catalog"] = matching.Catalog([matching.CatalogItem(*row) for row in live])
+    ctx["catalog_seconds"] = time.perf_counter() - started
+    scan_lines = []
+    ctx["today_seconds"] = []
+    for family in FAMILIES:
+        taken, ctx["reference"][family] = [], []
+        for number, line in enumerate(ctx["lines"][family][:PARITY_LINES], start=1):
+            started = time.perf_counter()
+            ctx["reference"][family].append(resolve(matching, line, ctx["catalog"]))
+            taken.append(time.perf_counter() - started)
+            if number % 10 == 0:
+                print(f"   full scan, {family}: {number} lines done", flush=True)
+        ctx["today_seconds"] += taken
+        applied = sum(1 for match in ctx["reference"][family] if match.matched)
+        scan_lines.append(
+            f"{family} lines: {statistics.median(taken):.2f} s a line (median), {max(taken):.2f} s the "
+            f"slowest, over {len(taken)} lines; the full scan applies a match on {applied} of them"
+            if taken
+            else f"{family} lines: none in this catalog"
+        )
+    ctx["today"] = [
+        f"the {max(sizes)}-item tenant: catalog read from the database in {ctx['read_seconds']:.2f} s, "
+        f"its exact-SKU table built in {ctx['catalog_seconds']:.2f} s (both once a document)",
+        *scan_lines,
+    ]
+    ctx["loaded"] = (
+        f"the load: {load_seconds:.0f} s for {sum(sizes)} rows with no trigram index; "
+        f"{rows} items rows in the table"
+    )
+    return ctx
+
+
 def run(database_url: str, mix: str, seed: int, names: str) -> int:
     import psycopg
 
     from docflow_core import matching
 
+    if names.strip().lower() == "scan":
+        import full_scan
+
+        return full_scan.run(database_url, mix, seed)
     sizing.refuse_unless_local(database_url)
     sizes = catalog_gen.parse_mix(mix)
     asked = chosen(names)
@@ -618,59 +691,13 @@ def run(database_url: str, mix: str, seed: int, names: str) -> int:
             ],
         )
 
-        tenants, load_seconds = sizing.load_mix(conn, sizes, seed, annotate=False)
-        conn.execute("ANALYZE items")
-        rows = conn.execute("SELECT count(*) FROM items").fetchone()[0]
-        tenant_id = tenants[sizes.index(max(sizes))]
-
-        ctx: dict = {"matching": matching, "tenant_id": tenant_id, "lines": {}, "reference": {}}
-        for family, like in (("fastener", "NOT LIKE"), ("general", "LIKE")):
-            sample = conn.execute(
-                f"SELECT sku, description FROM items WHERE tenant_id = %s AND description {like} %s "
-                "ORDER BY id LIMIT %s",
-                (tenant_id, GENERAL_PREFIX + "%", TIMING_LINES),
-            ).fetchall()
-            ctx["lines"][family] = bench_lines([(sku, description) for sku, description in sample], seed)
-
-        # Today's full scan: the catalog read, the comparison data, then each line.
-        started = time.perf_counter()
-        live = conn.execute(
-            "SELECT id, sku, description, unit_of_measure FROM items "
-            "WHERE tenant_id = %s AND deleted_at IS NULL",
-            (tenant_id,),
-        ).fetchall()
-        read_seconds = time.perf_counter() - started
-        started = time.perf_counter()
-        ctx["catalog"] = matching.Catalog([matching.CatalogItem(*row) for row in live])
-        catalog_seconds = time.perf_counter() - started
-        scan_lines = []
-        for family in FAMILIES:
-            taken, ctx["reference"][family] = [], []
-            for number, line in enumerate(ctx["lines"][family][:PARITY_LINES], start=1):
-                started = time.perf_counter()
-                ctx["reference"][family].append(resolve(matching, line, ctx["catalog"]))
-                taken.append(time.perf_counter() - started)
-                if number % 10 == 0:
-                    print(f"   full scan, {family}: {number} lines done", flush=True)
-            applied = sum(1 for match in ctx["reference"][family] if match.matched)
-            scan_lines.append(
-                f"{family} lines: {statistics.median(taken):.2f} s a line (median), {max(taken):.2f} s the "
-                f"slowest, over {len(taken)} lines; the full scan applies a match on {applied} of them"
-                if taken
-                else f"{family} lines: none in this catalog"
-            )
+        ctx = prepare(conn, sizes, seed, matching)
+        rows = ctx["rows"]
         ctx["fast"] = measure_fast_scan(matching, ctx["catalog"], ctx["lines"], ctx["reference"])
         emit(
             # No comma in a title: GitHub reads one as the end of the title.
             "variants: today's full scan in Python on this runner",
-            [
-                f"the {max(sizes)}-item tenant: catalog read from the database in {read_seconds:.2f} s, "
-                f"its exact-SKU table built in {catalog_seconds:.2f} s (both once a document)",
-                *scan_lines,
-                *ctx["fast"]["report"],
-                f"the load: {load_seconds:.0f} s for {sum(sizes)} rows with no trigram index; "
-                f"{rows} items rows in the table",
-            ],
+            [*ctx["today"], *ctx["fast"]["report"], ctx["loaded"]],
         )
 
         for variant in asked:
