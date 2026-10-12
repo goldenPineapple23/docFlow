@@ -210,9 +210,10 @@ def test_a_tenants_line_gives_its_rows_its_seconds_and_how_far_the_load_is():
 
 
 def test_the_trigram_index_statements_have_one_home():
-    """scripts/bench/trigram_indexes.sql is where they are written. A
-    migration that creates a trigram index (0037 will) must carry these
-    statements word for word, and no other trigram index."""
+    """scripts/bench/trigram_indexes.sql is where they are written. No
+    migration creates a trigram index today (0037, which was to, is retired:
+    D-201). One that ever does must carry these statements word for word,
+    and no other trigram index."""
     home = sizing.statements((BENCH / "trigram_indexes.sql").read_text(encoding="utf-8"))
     creates = [s for s in home if s.startswith("create index")]
     assert [re.search(r"create index (\w+)", s).group(1) for s in creates] == list(sizing.TRIGRAM_INDEXES)

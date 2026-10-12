@@ -3430,3 +3430,106 @@ Neither change starts before the founder's "go".
 **Not changed:** any product code, migration, gate, pass mark, limit or constant. Nothing of PR 1 or PR 2 is built.
 
 **Related:** Sections 0 (rules 3, 5 and 7), 7.5, 7.10; D-152, D-155, D-186, D-198, D-199; RUNBOOK 1.6, 1.8, 8.1; BUILD-STATUS "Stage 4 detailed design" (A2, A5 to A7, items 16 to 18) and "The plan after the Stage 3 "go""; `scripts/bench/`, `.github/workflows/catalog-sizing.yml`, `packages/core/tests/test_bench_catalog.py`.
+
+## D-201 — Stage 4's matching: an exact, faster full scan replaces the candidate indexes; the measurements, and what is retired (founder, 2026-10-11 and 2026-10-12)
+
+**Context:** D-200 put the catalog sizing job first. It merged as PR #60 (`main` `c30926b`, 2026-10-11 21:48:35; push run 38177888876 green), and the founder ran it on `main` for two of the three mixes. The first run showed that the candidate query of the approved design reads its whole index, so the founder had the index variants measured with the same job before PR 1 started, and then the speed-ups of a faster full scan. This entry records the runs, the founder's decisions and what they retire from the design approved on 2026-10-02 and 2026-10-05. All times are UTC. Every timing is GitHub's runner, not staging's and not the Fly worker's, unless it says otherwise. No product code has changed.
+
+**1. The sizing runs on `main` (`c30926b`), both green.**
+
+| | The 250,000 tenant alone (run 38178174400, 2m 20s) | The Stage 4 mix, 800,000 items in ten tenants (run 38179551199, 3m 07s) |
+|---|---|---|
+| The table | 77.6 MB, 311 bytes a row | 266.4 MB, 333 |
+| `idx_items_trgm_description`, as loaded | 43.0 MB, 172 | 165.0 MB, 206 |
+| `idx_items_trgm_sku`, as loaded | 30.8 MB, 123 | 96.5 MB, 121 |
+| `idx_items_tenant_sku` | 17.9 MB, 72 | 56.5 MB, 71 |
+| `idx_items_tenant_sku_unique` | 17.9 MB, 72 | 56.5 MB, 71 |
+| `items_pkey` | 9.7 MB, 39 | 34.4 MB, 43 |
+| `idx_items_tenant` | 1.6 MB, 6 | 5.3 MB, 7 |
+| The table and every index | 198.7 MB, 795 | 680.6 MB, 851 |
+| The load, both trigram indexes in place | 15 s (17,197 rows a second) | 52 s (13,655 to 16,876 rows a second, tenant by tenant) |
+| Each trigram index rebuilt | description 47.8 MB in 3 s, SKU 33.9 MB in 3 s | description 184.0 MB in 14 s, SKU 106.8 MB in 11 s |
+| The table and every index after the rebuild | 206.5 MB | 709.9 MB |
+| The 50 nearest by description, on the 250,000 tenant: p50 / p95 / max | 67.1 / 75.0 / 78.3 ms | 73.8 / 82.2 / 92.2 ms |
+| The 50 nearest by SKU | 48.5 / 52.8 / 57.9 ms | 54.9 / 58.9 / 70.2 ms |
+
+- **Without the two trigram indexes, the 250,000 tenant is about 125 MB** (the table and its four other indexes: 124.7 MB). With them it is 206.5 MB, which beside the dashboard's 45.4 MB gave 251.9 MB against the 350 MB guard. The 800,000 mix does not fit Nano with or without them.
+- **Other tenants in the index cost about a tenth.** In the ten-tenant run the same queries on the 250,000 tenant were about 10% slower. The lookup read only its own tenant's part of the index (5,375 buffers of an index of 20,141 pages by description; 4,146 of 11,784 by SKU), and all of that part.
+- **The generated 250,000 tenant is about nine fastener items in ten** (223,946 fastener, 26,054 general), not the four in five D-200 item 6 gives for the generator. The general families hold 25,920 combinations at most, so a large tenant fills up with fasteners. That is why every timing below is given for fastener lines and general lines apart (founder: "The product is not only for fasteners").
+- **The scale gate's mix (`250000,100000x4,50000x45`, 2.9 million) has not been run.** Claude's prediction from the two measured rates is about 10 minutes and 2.5 to 2.8 GB; the "30 to 90 minutes" of D-200 item 7 was a guess and was far too high. The founder starts it later, from `main`.
+
+**2. The finding: the candidate query read its whole index.** On the 250,000 tenant alone, the 50 nearest by description read 5,285 buffers of an index of 5,251 pages, and by SKU 3,811 of 3,762. The GiST trigram index did not narrow the search on a fastener catalog, where thousands of items share most of their trigrams. The two queries a line cost about 116 ms at p50 and 128 ms at p95 before any Python scoring: over the 100 ms mark by themselves.
+
+**3. The index variants, measured** (branch `phase55/stage4-index-variants`; `scripts/bench/index_variants.py`; run 38182923638 on `cd42c33`, mix `250000`, 51m 28s, green). Each variant was built on the same loaded rows and asked for 50, 100 and 200 candidates a list. The lines are unmatched lines (none carries its item's exact SKU): the description as written, with a token dropped or with two tokens swapped; the SKU one character wrong, absent, or the buyer's own number. Timings are over 200 lines a family, and parity with today's full scan over 50 lines a family.
+
+| Variant | Size, description + SKU | Fastener lines, p50, description + SKU | Fastener lines of 50 whose five candidates differ, at 50 / 100 / 200 fetched (of them, ties only) | General lines of 50, the same |
+|---|---|---|---|---|
+| GiST, signature length 12 (the design) | 47.7 + 33.9 MB | 77.8 + 52.9 ms | 19 / 16 / 5 (7 / 7 / 3) | 2 / 0 / 0 |
+| GiST, signature length 64 | 47.3 + 30.8 MB | 75.6 + 50.4 ms | 19 / 15 / 6 (7 / 6 / 4) | 2 / 0 / 0 |
+| GiST, signature length 128 | 48.5 + 30.2 MB | 75.8 + 51.6 ms | 20 / 14 / 6 (8 / 6 / 4) | 2 / 0 / 0 |
+| GiST, signature length 256 | 50.3 + 30.0 MB | 77.3 + 51.7 ms | 20 / 16 / 6 (8 / 7 / 4) | 2 / 0 / 0 |
+| GIN, similarity above 0.3 | 12.0 + 10.0 MB | 756.4 + 6.1 ms | 20 / 16 / 7 (8 / 7 / 5) | 2 / 1 / 1 |
+| GIN, similarity above 0.5 | the same indexes | 169.0 + 2.8 ms | 21 / 18 / 9 (7 / 8 / 7) | 2 / 1 / 1 |
+| GIN, similarity above 0.7 | the same indexes | 43.5 + 0.4 ms | 31 / 31 / 31 (9 / 11 / 12) | 9 / 9 / 9 |
+
+- **"Ties only"** counts the lines whose five candidates carry the same scores as the full scan's and differ only in which of several equally scored items were listed.
+- **The applied match never differed,** on any variant, at any number fetched. What differed is the five candidates a reviewer is shown.
+- **No variant keeps parity on fastener lines.** A longer signature changed neither the time nor the buffers on fastener lines (the 256 variant still read 6,098 buffers of 6,145 pages); on general lines it did narrow the search (1,393 buffers, 16.8 ms at p50).
+- **The design's cut-off guard would send nearly every line to the full scan.** With the GiST indexes, the 50th candidate was still at 0.5 similarity or more on 50 of 50 fastener lines, and the 200th too on all 50; fetching 100 it was 48 lines, fetching 200 it was 34. On general lines: 46, 26 and 1. A GiST index with the faster full scan behind it as the fallback took 194 to 261 ms a fastener line at p50, slower than the faster full scan alone.
+- **A variant without `tenant_id` in the index** was measured only on the small proof mix (run 38181871920 on `b0ac1df`, `3000,1000x2`), since the large run had one tenant. **The 800,000 mix was not run with the variants** (founder: skipped).
+
+**4. Today's full scan** (`matching.score_candidates`), on the runner at 250,000 items: 13.9 s a line at the median, the same for fastener and general lines (50 lines each); so a 40-line order of unmatched lines is about 555 s. The catalog read is 0.45 s and its exact-SKU table 1.19 s, both once a document. A profile of one line on the development machine (10.6 s there) puts 0.5 s in rapidfuzz's scoring and the rest in work done again for every item: the measure guard 3.9 s, normalizing the line and each item again 3.5 s, `Decimal` scores 1.2 s, candidate objects 1.1 s, the sort 1.0 s.
+
+**5. The faster full scan, measured in the bench only** (`index_variants.FastScan`, `full_scan.SortedScan`; run 38187558834 on `36412e4`, mix `250000`, variants `scan`, 26m 46s, green).
+- **How it stays exact.** Every item is still scored, by today's scorers on today's keys; the keys are built once for the catalog and the scoring is one library call a score (`rapidfuzz.process.extract`). The best 100 by each score are kept, and today's own code runs on those. If the fifth candidate does not score strictly above the lowest score kept, four times as many are kept and it is done again. One line in 400 needed that.
+- **Token-sorted keys.** rapidfuzz's `token_sort_ratio` is the plain `ratio` of the two strings with their tokens sorted. With each item's tokens sorted once, a line costs one plain ratio an item for the description, as for the SKU. A test holds the two equal on every item of a generated catalog.
+
+| On the 250,000 tenant | Fastener lines, p50 / p95 / max | General lines | Lines that differ from today's full scan, of 100 |
+|---|---|---|---|
+| Today's full scan | 13.78 s (median) | 13.92 s (median) | the reference |
+| Keys built once | 138.9 / 145.1 / 309.7 ms | 138.1 / 143.9 / 159.7 ms | 0 |
+| With token-sorted keys | 57.2 / 60.9 / 156.6 ms | 57.8 / 61.9 / 73.3 ms | 0 |
+
+- **Once a document:** the catalog read 0.47 s, its exact-SKU table 1.15 s, the token-sorted keys 2.55 s.
+- **A 40-line order of unmatched lines:** 6.24 s cold (nothing kept between documents); 2.10 s warm (the catalog and its keys kept, with a check that the catalog has not changed, 28.5 ms). Today: 555 s.
+- **Memory:** the catalog as matching holds it 147.9 MB, the keys 33.5 MB: 181.4 MB for 250,000 items, 725 bytes an item.
+- **Several cores bought nothing.** The description pass alone took 21.9 ms on one core, 22.1 and 21.6 ms in chunks on 2 and 4 threads, and 19.2, 20.1 and 19.2 ms with rapidfuzz's many-core call on 1, 2 and 4 workers (that call spreads work across lines, not across one line's items). The staging worker is one shared core in any case (`shared-cpu-1x`, 1 GB, one document process; D-196).
+- **The 100 lines are not the same lines in each run:** the bench draws them by row id, which is new on every load. Three runs have each tested different lines with no difference. They become repeatable with PR A (founder: yes).
+
+**6. Decided (founder).**
+- **Pursue the faster full scan. The whole-token index is not built;** it stays as a backup, only if the faster scan cannot be made fast enough.
+- **PR A: the exact fast scan in `packages/core/docflow_core/matching.py`, with no state kept between documents.** It goes **before** the broad-`except` audit; PR 1 follows on top of it. This replaces D-200 item 1's order (the sizing job, PR 1, PR 2).
+  - `score_candidates` keeps its signature and its result. Today's loop stays under its own name as the definition and the parity reference.
+  - **The keys are built only when a line first needs fuzzy scoring,** so an order matched entirely by rule or exact SKU never pays for them. The parity tests cover an order that never builds them and one that builds them partway through.
+  - Not touched: the thresholds, the scorers, the guards, the precedence, the provenance, the candidate JSON. No new dependency and no migration.
+  - All three suites, and the CI bench run on `250000` with zero differences on 100 lines, before it merges.
+- **PR B, the catalog and its keys kept between documents: not now.** See item 8.
+- **Before PR A merges, the staging measurement still applies** (D-199 item 4): the 250,000 tenant loaded on staging, which stays on Nano (about 125 MB, under the 350 MB guard), and PR A measured on the Fly worker, the worker at 2 GB for that measurement only and back after. A bench entry point is run inside the Fly worker against staging; after it, one real 40-line PO goes end to end through the pipeline, to prove that the deployed worker uses the new path and that the task's memory stays under the 500 MiB process limit. Claude tells the founder before each change and before loading anything, and asks before the PO run with its expected model cost.
+- **A records PR first** (this entry, the bench scripts and the measurements; no product code), then PR A on top.
+
+**7. What this retires from the approved Stage 4 design** (BUILD-STATUS, "Stage 4 detailed design").
+- **A2, "Postgres picks the candidates":** the two trigram queries a line, K = 50, and the GiST choice of Q2.
+- **A3's cut-off guard and the fallback count logged for each document in production** (Q3). With no candidates cut, there is nothing to guard and no fallback to count. A3's pass mark stays and is stricter in effect: every item is scored, and parity with zero differences is tested against the reference loop.
+- **A7, migration `0037_trigram_matching.sql`:** the `pg_trgm` and `btree_gist` extensions, both partial indexes on `items`, and the grant on the `extensions` schema. With them go D-200 item 3's "`0037` copies them word for word" and the test that `0037` carries both, which was never written. `scripts/bench/trigram_indexes.sql` stays as the bench's baseline variant, and the test that no migration creates any other trigram index stays.
+- **A8's tests of the index query** (the plan uses the index; the fallback fires). The 7.5 test that another tenant's catalog is never a candidate stays as it is: candidates still come only from `load_catalog`'s read in the tenant's own session.
+- **The choice between Supabase Pro with the 800,000 mix and Nano with the 250,000 tenant alone** (D-199 item 4, D-200): staging stays on Nano and takes the 250,000 tenant alone.
+- **Not retired:** the pass marks on the 250,000 tenant (p95 at or under 100 ms per unmatched line, 4 s per 40-line order); A4; item 16; item 18's size guard and the removal of the bench rows on a typed OK; D-199's list of what is measured on the 250,000 tenant.
+
+**8. A known limit: a 40-line order on a 250,000-item catalog.** PR A alone is expected to meet the per-line mark at 250,000 items (57 ms measured on the runner) and to miss the order mark there: 6.24 s cold against 4 s, because the catalog read, its exact-SKU table and the keys are paid again for every document. Scaled from that one measurement, and not measured: about 1.5 s at 50,000 items, 2.7 s at 100,000 and 4.0 s at 150,000. The founder's target customers are mostly 20,000 to 100,000 SKUs. **The fix is PR B:** the catalog and its keys kept in the worker process between documents, with the freshness check (2.10 s warm, measured). It brings a memory bound and state shared across tenants in one process, which the founder does not take on before pilots. **It is built when a tenant of that size exists, or at the scale gate.** The Fly worker's one shared core is slower than the runner by an amount not yet measured, so where the limit really falls is decided by the staging measurement.
+
+**9. A finding left open: two indexes on `items (tenant_id, sku)`.** Both come from `0004_matching_foundations.sql`. `idx_items_tenant_sku_unique` (unique, live rows only) enforces one live item per SKU and must stay. `idx_items_tenant_sku` (not unique, every row) differs only by also holding retired rows, and no product query filters on tenant and SKU together. Staging's own counters show the planner does pick it for whole-tenant reads (8,672 scans, against 1,487 for the unique one and 29,867 for `idx_items_tenant`, on 75 rows): used, not needed. It costs about 72 bytes a row (17.9 MB at 250,000 items). **Nothing is changed. It stays open for a later migration** (founder), which would first show the plans of the two whole-tenant reads without it (`matching.load_catalog`, `catalog_import._catalog_diff`).
+
+**10. Not decided here, asked of the founder.**
+- **The database retry (Q14).** The 2026-10-02 design put the bounded retry on a dropped database connection in PR 2, because its fourth `wait_cause` value needed a migration and `0037` was that migration. `0037` is retired and PR A has no migration, so the retry has no home. Until one is decided, a dropped connection during matching still fails the document with DOC-021, as today.
+- **The hand-typed staging lines for the corpus (Q13)** and the golden set's four lines (Q5): the approved benchmark was to carry them. PR A's parity tests use generated catalogs and named cases; whether those lines are still wanted is the founder's call.
+
+**11. The bench as built** (branch `phase55/stage4-index-variants`, commits `b553dc1`, `b0ac1df`, `cd42c33`, `36412e4` on `c30926b`).
+- **`scripts/bench/index_variants.py`:** the variants (`baseline`, `siglen64`, `siglen128`, `siglen256`, `gin`, `no_tenant`), each one's size, build time, plan and buffers, timings, parity and guard counts, and the faster full scan alone and as each variant's fallback. `catalog_sizing.load_mix` is the one load both scripts use.
+- **`scripts/bench/full_scan.py`:** the token-sorted scan, a 40-line order cold and warm, memory, several cores.
+- **The workflow's `variants` input:** empty runs the sizing job as before; `scan`, `all`, or variant names run the measurements. It can be started from a branch ("Use workflow from"), since the workflow file is on `main`. numpy is installed for the `scan` step only; it is not a product dependency and is in no lockfile.
+- **Two limits of GitHub's annotations, found by running:** ten notices are kept from one step (D-200 item 7), and **one annotation is cut at 4,096 characters without a word.** The proof run lost two of the GIN thresholds that way. Reports are now about 2,000 characters, a report over the limit is an error, and a test holds the count of notices at ten or under.
+- **Tests:** 19 more, 62 in `packages/core/tests/test_bench_catalog.py`, none needing a database. **The core suite on staging at `36412e4`** (2026-10-12 01:05:03 to 01:05:57): `868 passed, 1 skipped in 51.99s`, the same one skip. CI reads `869 tests` (push run on `36412e4`, green on all six jobs). The API and worker suites are unchanged and were not run again.
+
+**Not changed:** any product code, migration, gate, pass mark, limit or constant. Nothing is loaded on staging. Nothing of PR A or PR 1 is built.
+
+**Related:** Sections 0 (rules 3, 5, 7 and 8), 7.5, 7.6, 7.10; D-066, D-152, D-186, D-196, D-197, D-199, D-200; RUNBOOK 1.4, 1.6, 1.8; PR #60; BUILD-STATUS "Stage 4 detailed design" (A1 to A8, Q2, Q3, Q13, Q14, items 16 to 18) and "The plan after the Stage 3 "go""; `scripts/bench/`, `.github/workflows/catalog-sizing.yml`, `packages/core/tests/test_bench_catalog.py`, `packages/core/docflow_core/matching.py`, `supabase/migrations/0004_matching_foundations.sql`.

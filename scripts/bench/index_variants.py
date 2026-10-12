@@ -110,7 +110,7 @@ def _create(name: str, method: str, opclass: str, tenant: bool = True) -> dict[s
 
 def baseline_creates() -> dict[str, str]:
     """The two statements of trigram_indexes.sql, word for word: the baseline
-    is what migration 0037 would carry today."""
+    is what the retired migration 0037 would have carried (D-201)."""
     creates = [
         s
         for s in sizing.statements(sizing.INDEX_SQL.read_text(encoding="utf-8"))
