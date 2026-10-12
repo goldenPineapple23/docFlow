@@ -38,6 +38,8 @@ def _load(name: str):
 
 gen = _load("catalog_gen")
 sizing = _load("catalog_sizing")
+variants = _load("index_variants")
+scan = _load("full_scan")
 
 
 def _fingerprint(items) -> str:
@@ -208,9 +210,10 @@ def test_a_tenants_line_gives_its_rows_its_seconds_and_how_far_the_load_is():
 
 
 def test_the_trigram_index_statements_have_one_home():
-    """scripts/bench/trigram_indexes.sql is where they are written. A
-    migration that creates a trigram index (0037 will) must carry these
-    statements word for word, and no other trigram index."""
+    """scripts/bench/trigram_indexes.sql is where they are written. No
+    migration creates a trigram index today (0037, which was to, is retired:
+    D-201). One that ever does must carry these statements word for word,
+    and no other trigram index."""
     home = sizing.statements((BENCH / "trigram_indexes.sql").read_text(encoding="utf-8"))
     creates = [s for s in home if s.startswith("create index")]
     assert [re.search(r"create index (\w+)", s).group(1) for s in creates] == list(sizing.TRIGRAM_INDEXES)
@@ -234,14 +237,254 @@ def test_the_queries_order_by_the_indexed_expressions():
         assert "tenant_id = %s AND deleted_at IS NULL" in query
 
 
+# ── The index variants (scripts/bench/index_variants.py) ────────────────────
+
+
+def test_the_baseline_variant_is_the_one_home_word_for_word_and_names_are_distinct():
+    every = variants.variants()
+    assert [v.name for v in every] == ["baseline", "siglen64", "siglen128", "siglen256", "gin", "no_tenant"]
+    home = sizing.statements((BENCH / "trigram_indexes.sql").read_text(encoding="utf-8"))
+    assert list(every[0].creates.values()) == [s for s in home if s.startswith("create index")]
+    names = [variants.index_name(s) for v in every for s in v.creates.values()]
+    assert len(set(names)) == len(names) == 12
+    for variant in every[1:]:
+        for field, statement in variant.creates.items():
+            assert variants.index_name(statement).startswith("bench_")
+            assert statement.endswith("where deleted_at is null")
+            assert variants.EXPRESSIONS[field] in statement
+
+
+def test_each_variant_changes_one_thing_from_the_baseline():
+    by_name = {v.name: v for v in variants.variants()}
+    assert "gist_trgm_ops(siglen=128))" in by_name["siglen128"].creates["description"]
+    assert "using gist (tenant_id, " in by_name["siglen128"].creates["SKU"]
+    assert "using gin (tenant_id, " in by_name["gin"].creates["description"]
+    assert by_name["gin"].thresholds == (0.3, 0.5, 0.7)
+    control = by_name["no_tenant"]
+    assert "tenant_id" not in control.creates["description"] and control.needs_tenants == 2
+    assert variants.KS == (50, 100, 200)
+
+
+def test_a_run_of_every_variant_fits_the_notices_github_keeps():
+    # The inputs, the full scan, five variants and GIN's three thresholds: all ten, none to spare.
+    assert variants.notices(variants.variants()) == variants.NOTICES_PER_STEP == 10
+    assert variants.notices(variants.chosen("baseline,gin")) == 6
+
+
+def test_a_variants_report_stays_under_the_length_github_cuts_at():
+    """GitHub keeps 4,096 characters of an annotation and drops the rest
+    without a word: the first run lost half the GIN variant's report. The
+    slowest and largest figures a run could print must still fit."""
+    worst = {
+        family: {
+            "ms": {"description": [99999.9] * 3, "SKU": [99999.9] * 3},
+            "match": 50,
+            "five": Counter(dict.fromkeys(variants.SKU_KINDS, 17)),
+            "ties": 50,
+            "close": 50,
+            "full": 50,
+            "with_scan_ms": [99999.9] * 3,
+            "with_scan_differs": 50,
+        }
+        for family in variants.FAMILIES
+    }
+    lines = [line for k in variants.KS for line in variants.report_for_k(k, worst)]
+    assert len(lines) == 12 and all(line.startswith("fetching ") for line in lines)
+    assert "general match 50, five 51 (ties only 50; wrong 17, none 17, own 17)" in lines[1]
+    assert lines[2].endswith("general 50th on 50, 200th on 50")
+    # Beside them: what it is, two build lines, the plan, GIN's count line. 250 characters each is generous.
+    assert len("\n".join(lines)) + 5 * 250 < variants.ANNOTATION_LIMIT == 4096
+    assert len(variants.LEGEND) < 900
+
+
+def test_the_variants_asked_for_are_all_or_named():
+    assert variants.chosen("all") == variants.variants()
+    assert [v.name for v in variants.chosen("gin, baseline")] == ["gin", "baseline"]
+    for bad in ("", "siglen999", "baseline;drop"):
+        with pytest.raises(ValueError, match="can't read the variants"):
+            variants.chosen(bad)
+
+
+def test_every_variant_query_stays_in_its_tenant_and_binds_its_values():
+    tenant = "t-id"
+    for build in (variants.nearest, variants.above_threshold):
+        for with_similarity in (False, True):
+            for expression in variants.EXPRESSIONS.values():
+                sql, marks = build(expression, 50, with_similarity)
+                assert "tenant_id = %s AND deleted_at IS NULL" in sql and sql.endswith("LIMIT 50")
+                # One parameter for each placeholder, in the order the text needs them.
+                assert sql.replace("%%", "").count("%s") == len(marks)
+                bound = variants.bind(marks, tenant, "the line")
+                assert bound.count(tenant) == 1 and bound[marks.index("t")] == tenant
+    sql, marks = variants.above_threshold("lower(description)", 50)
+    assert "lower(description) %% %s::text" in sql  # the driver turns %% into the one % operator
+    sql, marks = variants.count_above_threshold("lower(description)")
+    assert sql.replace("%%", "").count("%s") == len(marks) == 2
+
+
+def test_no_bench_line_carries_its_items_exact_sku_and_all_nine_kinds_come_in_turn():
+    rows = [(item.sku, item.description) for item in gen.catalog(7, 1, 90)]
+    lines = variants.bench_lines(rows, 7)
+    assert lines == variants.bench_lines(rows, 7)
+    assert all(line.sku != sizing.sku_key(sku) for line, (sku, _) in zip(lines, rows))
+    assert Counter(line.sku_kind for line in lines) == dict.fromkeys(variants.SKU_KINDS, 30)
+    assert all(line.sku is None for line in lines if line.sku_kind == "no SKU")
+    assert lines[0].description == rows[0][1].lower()  # every third description is as written
+    assert all(line.description == line.description.lower() for line in lines)
+
+
+def test_the_guard_reads_the_kth_and_the_4kth_candidate():
+    assert variants.guard([0.9] * 49, 50) == (False, False)  # fewer than K came back: nothing was cut
+    assert variants.guard([0.9] * 50 + [0.4] * 150, 50) == (True, False)
+    assert variants.guard([0.9] * 200, 50) == (True, True)
+    assert variants.guard([0.9] * 49 + [0.49] * 151, 50) == (False, False)
+
+
+def test_parity_is_todays_code_over_the_fetched_candidates():
+    from uuid import uuid4
+
+    from docflow_core import matching
+
+    made = gen.catalog(7, 1, 400)
+    items = [matching.CatalogItem(uuid4(), i.sku, i.description, i.unit_of_measure) for i in made]
+    catalog = matching.Catalog(items)
+    line = variants.bench_lines([(items[0].sku, items[0].description)], 7)[0]
+    reference = variants.resolve(matching, line, catalog)
+    assert reference.candidates and reference.candidates[0].item_id == items[0].item_id
+
+    everything = variants.from_candidates(matching, line, catalog, [i.item_id for i in items])
+    assert variants.outcome(everything) == variants.outcome(reference)
+    assert variants.recorded(everything) == variants.recorded(reference)
+
+    # A fetch that misses the best item is a difference the job counts, and not one among equal scores.
+    without_it = variants.from_candidates(matching, line, catalog, [i.item_id for i in items[1:]])
+    assert variants.recorded(without_it) != variants.recorded(reference)
+    assert variants.scores(without_it) != variants.scores(reference)
+    assert len(variants.scores(reference)) == 5 and len(variants.scores(reference)[0]) == 4
+    # An id the catalog does not hold, or one fetched by both lists, changes nothing.
+    doubled = [i.item_id for i in items] + [items[0].item_id, uuid4()]
+    again = variants.from_candidates(matching, line, catalog, doubled)
+    assert variants.recorded(again) == variants.recorded(reference)
+
+
+def _bench_catalog_and_lines(count: int, per_family: int):
+    from uuid import uuid4
+
+    from docflow_core import matching
+
+    made = list(gen.catalog(7, 1, count))
+    catalog = matching.Catalog(
+        [matching.CatalogItem(uuid4(), i.sku, i.description, i.unit_of_measure) for i in made]
+    )
+    rows = [(i.sku, i.description) for i in made]
+    general = [row for row in rows if row[1].startswith(variants.GENERAL_PREFIX)]
+    fasteners = [row for row in rows if not row[1].startswith(variants.GENERAL_PREFIX)]
+    lines = {
+        "fastener": variants.bench_lines(fasteners[:per_family], 7),
+        "general": variants.bench_lines(general[:per_family], 7),
+    }
+    return matching, catalog, lines
+
+
+@pytest.mark.parametrize("keep", [500, 100, 3])
+def test_the_faster_full_scan_returns_what_todays_full_scan_returns(monkeypatch, keep):
+    """Every line, both families, all nine kinds: the same applied match and
+    the same five candidates. With a small `FAST_KEEP` the cut falls among
+    tied siblings, which is the case that has to widen and look again."""
+    monkeypatch.setattr(variants, "FAST_KEEP", keep)
+    matching, catalog, lines = _bench_catalog_and_lines(1500, 9)
+    fast = variants.FastScan(matching, catalog)
+    for family in variants.FAMILIES:
+        assert len(lines[family]) == 9
+        for line in lines[family]:
+            today = variants.resolve(matching, line, catalog)
+            faster = fast.resolve(line)
+            assert variants.outcome(faster) == variants.outcome(today), (family, line)
+            assert variants.recorded(faster) == variants.recorded(today), (family, line)
+    assert (fast.widened > 0) == (keep == 3)
+
+
+def test_token_sort_ratio_is_the_plain_ratio_of_the_token_sorted_keys():
+    """The speed-up rests on this: sorting each item's tokens once gives the
+    very same score. Every item of a catalog, against lines of every kind."""
+    from rapidfuzz import fuzz
+
+    matching, catalog, lines = _bench_catalog_and_lines(1500, 9)
+    keys = [matching.normalize_description(item.description) for item in catalog.items]
+    ordered = [scan.sort_tokens(key) for key in keys]
+    assert ordered != keys  # the generated descriptions are not already in token order
+    for line in lines["fastener"] + lines["general"]:
+        asked = matching.normalize_description(line.description)
+        today = [fuzz.token_sort_ratio(asked, key) for key in keys]
+        assert [fuzz.ratio(scan.sort_tokens(asked), key) for key in ordered] == today
+
+
+@pytest.mark.parametrize("keep", [100, 3])
+def test_the_scan_with_token_sorted_keys_returns_what_todays_full_scan_returns(monkeypatch, keep):
+    monkeypatch.setattr(variants, "FAST_KEEP", keep)
+    matching, catalog, lines = _bench_catalog_and_lines(1500, 9)
+    fast = scan.SortedScan(matching, catalog)
+    for family in variants.FAMILIES:
+        for line in lines[family]:
+            today = variants.resolve(matching, line, catalog)
+            faster = fast.resolve(line)
+            assert variants.outcome(faster) == variants.outcome(today), (family, line)
+            assert variants.recorded(faster) == variants.recorded(today), (family, line)
+    assert (fast.widened > 0) == (keep == 3)
+
+
+def test_the_scan_measurement_reports_each_line_parity_and_a_40_line_order():
+    matching, catalog, lines = _bench_catalog_and_lines(600, 9)
+    reference = {
+        family: [variants.resolve(matching, line, catalog) for line in lines[family][:3]]
+        for family in variants.FAMILIES
+    }
+    found = scan.measure(scan.SortedScan, matching, catalog, lines, reference)
+    assert len(found["ms"]) == 18
+    assert found["parity"] == ["fastener match 0, five 0", "general match 0, five 0"]
+    assert scan.order_seconds(2.0, [50.0, 150.0]) == pytest.approx(2.0 + 40 * 0.1)
+    cores = scan.several_cores(scan.SortedScan(matching, catalog), lines["fastener"])
+    assert "one core" in cores[0] and "in 2 chunks on 2 threads" in cores[1]
+    assert "tenant_id = %s" in scan.FRESHNESS and "updated_at" in scan.FRESHNESS
+
+
+def test_the_scan_measurement_refuses_any_database_not_on_this_machine(capsys):
+    code = variants.main(
+        ["--mix", "10", "--variants", "scan", "--database-url", "postgresql://u:pw@db.example.test:5432/postgres"]
+    )
+    assert code == 2
+    assert "only runs against a database on this machine" in capsys.readouterr().out
+
+
+def test_the_faster_full_scan_is_measured_against_todays_on_the_same_lines():
+    matching, catalog, lines = _bench_catalog_and_lines(600, 9)
+    reference = {
+        family: [variants.resolve(matching, line, catalog) for line in lines[family][:3]]
+        for family in variants.FAMILIES
+    }
+    found = variants.measure_fast_scan(matching, catalog, lines, reference)
+    assert [len(found["ms"][family]) for family in variants.FAMILIES] == [9, 9]
+    assert len(found["report"]) == 3
+    assert "keys built in" in found["report"][0] and "MB" in found["report"][0]
+    assert found["report"][2].count("applied match differs on 0, the five candidates differ on 0") == 2
+
+
+def test_the_variants_refuse_any_database_not_on_this_machine(capsys):
+    code = variants.main(["--mix", "10", "--database-url", "postgresql://u:pw@db.example.test:5432/postgres"])
+    assert code == 2
+    assert "only runs against a database on this machine" in capsys.readouterr().out
+
+
 def test_the_workflow_is_started_by_hand_and_reads_no_secret():
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "workflow_dispatch:" in workflow and "mix:" in workflow
     assert "secrets." not in workflow
     assert "127.0.0.1" in workflow and "supabase.com" not in workflow
     # The inputs are passed as environment values, never pasted into the shell line.
-    run_line = next(line for line in workflow.splitlines() if "catalog_sizing.py" in line and "run:" in line)
-    assert "${{" not in run_line
+    for script in ("catalog_sizing.py", "index_variants.py"):
+        run_line = next(line for line in workflow.splitlines() if script in line and "run:" in line)
+        assert "${{" not in run_line
+    assert "variants:" in workflow and "if: ${{ !inputs.variants }}" in workflow
     assert "runs-on: ubuntu-24.04" in workflow
     # Under GitHub's own 360-minute stop, so the job ends on its own terms.
     assert "timeout-minutes: 350" in workflow

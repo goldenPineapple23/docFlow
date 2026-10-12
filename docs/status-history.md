@@ -4,6 +4,24 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-12 (the candidate indexes measured and retired; an exact, faster full scan instead; D-201)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-11 (evening):** Phase 5.5, **Stage 4 has started** (matching performance,
+at 800,000 catalog items). Stage 3 is complete, "go" given 2026-10-11 (D-199), and the leftover
+count is a failure since PR #59 (`main` `c462565`). **Stage 4's order (founder, 2026-10-11;
+D-200): the catalog sizing job as its own PR, then PR 1 (the broad-`except` audit), then PR 2
+(matching).** **Built: the sizing job** (`scripts/bench/`, `.github/workflows/catalog-sizing.yml`;
+RUNBOOK 1.8): fake catalogs with fastener families from a fixed seed, loaded into a CI runner's own
+database with the two trigram indexes, and the sizes printed. Once it is on `main` the founder runs
+it for three mixes, smallest first (the 250,000 tenant alone, the 800,000 mix, then the 2.9 million
+mix after a prediction of its run time from the first two), and chooses, from the measured sizes,
+between Supabase Pro with the 800,000 mix and Nano with the 250,000 tenant alone. **Nothing is loaded on staging** (Nano on Supabase's Free plan, 500 MB) and nothing of PR 1
+or PR 2 is built. After Stage 4: Stage 5, demo readiness with D-195's model work, the Phase 6
+pilot-blocker subset, then pilots with two or three customers ("The plan after the Stage 3 "go"",
+below). If Stage 4 is not merged by 2026-11-02, D-195's two changes go next, before Stage 5. The
+Fly worker and beat are at 0 and the Healthchecks.io check is paused.
+
 ## Replaced on 2026-10-11, in the evening (Stage 4 started with the catalog sizing job; D-200)
 
 <!-- the paragraph as it stood, starting on the next line -->

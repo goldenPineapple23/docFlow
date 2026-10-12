@@ -380,13 +380,19 @@ How a run is reported:
   staging it reads `849 passed, 1 skipped` (2026-10-11 at `1826c70`, 45 s;
   it read `838 passed, 1 skipped` at `e7b60f7`, before the eleven tests of
   the load's progress lines). API and worker are unchanged.
+  **From the index variants and the faster full scan's bench (2026-10-12;
+  D-201; section 1.8):** the core suite gains 19 more tests in
+  `test_bench_catalog.py` (62 in the file), none needing a database, and
+  loses none: CI reads `869 tests`. On this machine against staging it reads
+  `868 passed, 1 skipped` (2026-10-12 at `36412e4`, 52 s). API and worker
+  are unchanged.
   **What CI reports for the same code, side by side** (founder,
   2026-10-08). CI runs every test, so each line must also read `0 failed,
   0 skipped, 0 unapproved`:
 
   | Suite | This machine, against staging | CI |
   |---|---|---|
-  | core | 849 passed, 1 skipped | 850 tests |
+  | core | 868 passed, 1 skipped | 869 tests |
   | worker | 191 passed, 7 skipped | 198 tests |
   | API | 641 passed, 1 skipped, 3 deselected | 642 tests |
 
@@ -510,12 +516,18 @@ then trust it passing.
 
 **Related:** D-150; §1.6.
 
-### 1.8 The catalog sizing job (Stage 4; D-199, D-200)
+### 1.8 The catalog sizing job (Stage 4; D-199, D-200, D-201)
 
 **What it is for.** `docflow-staging` is Supabase's Free plan: its database
 turns read-only past 500 MB, and that would stop all of staging. Before any
 Stage 4 catalog is loaded there, this job measures what the catalogs and
 their two trigram indexes cost on disk, on a throwaway database.
+
+**The two trigram indexes are not built in the product (D-201).** The job
+still loads and sizes them, as the baseline its measurements are read
+against. Read "the table and every index" less the two `idx_items_trgm_*`
+lines for what a catalog costs on staging: about 125 MB for the 250,000
+tenant.
 
 **Where it runs.** On a GitHub runner, against the runner's own Supabase
 stack, like the CI jobs. The script (`scripts/bench/catalog_sizing.py`)
@@ -535,6 +547,11 @@ scale gate's mix, and the founder starts that one only after reading it:
 | The 250,000 tenant alone | `250000` | 1 | 250,000 |
 | The Stage 4 mix | `250000,100000x2,50000x7` | 10 | 800,000 |
 | The scale gate's mix | `250000,100000x4,50000x45` | 50 | 2,900,000 |
+
+**Run so far (D-201 has the figures):** the 250,000 tenant (run
+38178174400, 2m 20s) and the Stage 4 mix (run 38179551199, 3m 07s), both on
+`main` `c30926b` on 2026-10-11. **The scale gate's mix has not been run.**
+Predicted from those two: about 10 minutes and 2.5 to 2.8 GB.
 
 **What it prints**, as annotations on the run's page (Claude reads them
 from there; the job's log can't be read from the development machine, 1.6):
@@ -573,11 +590,39 @@ from there; the job's log can't be read from the development machine, 1.6):
   scale gate's mix had not been timed when this was written.
 
 **The index statements have one home:** `scripts/bench/trigram_indexes.sql`.
-Migration `0037` copies them word for word, and a test fails if a migration
-creates a trigram index that is not one of them.
+No migration carries them: `0037`, which was to copy them, is retired
+(D-201). A test still fails if a migration creates a trigram index that is
+not one of them.
 
 The job also runs by itself, on a small mix, on a pull request that changes
-its own files. It is not one of the required checks on `main`.
+its own files: the sizing step, then every index variant. It is not one of
+the required checks on `main`.
+
+**The `variants` input: the matching measurements (D-201).** Left empty,
+the job is the sizing job above. With a value it measures matching on the
+largest tenant of the mix instead, and prints annotations titled
+`catalog sizing: variants: ...` or `catalog sizing: scan: ...`:
+
+| Enter as `variants` | What is measured | Script | The 250,000 tenant took |
+|---|---|---|---|
+| `scan` | The faster full scan: each line's time for fastener and general lines, parity with today's full scan on 100 lines, a 40-line order cold and warm, memory, several cores | `scripts/bench/full_scan.py` | 27 minutes |
+| `all` | Every index variant for the candidate query (GiST at four signature lengths, GIN at three thresholds, an index without `tenant_id`), each at 50, 100 and 200 candidates, with today's full scan | `scripts/bench/index_variants.py` | 51 minutes |
+| names with commas, e.g. `baseline,gin` | Those variants only | the same | |
+
+- **It can be started from a branch** before that branch is merged: Run
+  workflow, "Use workflow from" = the branch. That works because the
+  workflow file is on `main`.
+- **Today's full scan is most of the run time:** 100 lines at about 14 s
+  each on the 250,000 tenant.
+- **Two limits of GitHub's annotations, found by running.** Ten notices are
+  kept from one step, and one annotation is cut at 4,096 characters without
+  a word. The scripts keep under both: a report over the limit is an error
+  on the run, and a test holds the notices at ten or under. A comma in an
+  annotation's title ends the title.
+- `scan` installs numpy for its several-cores measurement only. numpy is
+  not a product dependency and is in no lockfile.
+- These refuse any database that is not on the machine they run on, like
+  the sizing job.
 
 ---
 

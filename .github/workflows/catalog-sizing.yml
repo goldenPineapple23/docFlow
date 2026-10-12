@@ -17,6 +17,10 @@ name: Catalog sizing (manual)
 # It also runs on a pull request that changes its own files, on a small mix,
 # so a change to the job is proven before it merges. It is not one of the
 # required checks on main.
+#
+# With the `variants` input it measures index variants for the candidate
+# query instead (scripts/bench/index_variants.py): each variant's size, build
+# time, plan, timings and parity with today's full scan, on the same rows.
 
 on:
   workflow_dispatch:
@@ -30,6 +34,11 @@ on:
         type: string
         required: false
         default: "20261011"
+      variants:
+        description: "Leave empty for the sizing job. Or: scan (the faster full scan's speed-ups), all (every index variant), or variant names with commas (baseline,siglen64,siglen128,siglen256,gin,no_tenant)"
+        type: string
+        required: false
+        default: ""
   pull_request:
     paths:
       - "scripts/bench/**"
@@ -64,9 +73,28 @@ jobs:
       - run: python -m pip install --upgrade pip
       # Pinned, not ranges: the worker's lockfile holds the database driver.
       - run: pip install -r apps/worker/requirements.lock.txt
+      # docflow_core itself: the variants' parity check runs today's matching code.
+      - run: pip install --no-deps -e packages/core
       - name: Seed the mix, measure, print
+        if: ${{ !inputs.variants }}
         # The inputs reach the script as environment values, never as shell text.
         env:
           MIX: ${{ inputs.mix || '3000,1000x2' }}
           SEED: ${{ inputs.seed || '20261011' }}
         run: python scripts/bench/catalog_sizing.py --mix "$MIX" --seed "$SEED"
+      # For the `scan` measurement only: rapidfuzz's many-core call needs numpy.
+      # It is not a product dependency and is in no lockfile; if it can't be
+      # installed, the measurement says so and the rest still runs.
+      - name: numpy, for the several-cores measurement only
+        if: ${{ inputs.variants == 'scan' }}
+        continue-on-error: true
+        run: pip install numpy==2.2.6
+      # The index variants (scripts/bench/index_variants.py): when asked for by
+      # hand, and on a pull request on the small mix, after the sizing step.
+      - name: Index variants, seed the mix, measure each, print
+        if: ${{ inputs.variants || github.event_name == 'pull_request' }}
+        env:
+          MIX: ${{ inputs.mix || '3000,1000x2' }}
+          SEED: ${{ inputs.seed || '20261011' }}
+          VARIANTS: ${{ inputs.variants || 'all' }}
+        run: python scripts/bench/index_variants.py --mix "$MIX" --seed "$SEED" --variants "$VARIANTS"
