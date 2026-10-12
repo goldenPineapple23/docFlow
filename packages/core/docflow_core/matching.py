@@ -51,7 +51,7 @@ from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID, uuid4
 
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz, process
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -92,6 +92,17 @@ FUZZY_AMBIGUITY_MARGIN = Decimal("0.0200")
 # Five covers a typical size/pack family without turning one review row into
 # a scrolling list.
 MAX_CANDIDATES = 5
+
+# The fuzzy step scores every catalog item (D-201). It keeps this many of the
+# best by each score and runs the per-item code on those alone. Speed only:
+# no value of it changes a result, because a line whose fifth candidate does
+# not score above everything left out is looked at again with more kept
+# (`score_candidates`). Measured at 100 on a 250,000-item fastener catalog:
+# one line in 400 needed the second look.
+FAST_SCAN_KEEP = 100
+
+# How many times as many are kept for that second look, and each one after.
+FAST_SCAN_WIDEN = 4
 
 PROVENANCE_EXACT = "mapped:exact_sku"
 PROVENANCE_FUZZY = "mapped:fuzzy"
@@ -239,6 +250,17 @@ def sku_similarity(left: str | None, right: str | None) -> Decimal:
     return _as_score(fuzz.ratio(left_key, right_key))
 
 
+def _sorted_tokens(description_key: str) -> str:
+    """
+    A description key with its tokens in sorted order. `token_sort_ratio` is
+    the plain `ratio` of two strings prepared this way, so with each catalog
+    item's tokens sorted once, one plain ratio an item gives the same number
+    `description_similarity` does. Used only to choose which items the
+    per-item code runs on; no score that is stored or shown comes from it.
+    """
+    return " ".join(sorted(description_key.split()))
+
+
 # ── Catalog ─────────────────────────────────────────────────────────────────
 
 
@@ -260,6 +282,12 @@ class Catalog:
     SKU, so a catalog carrying both "CF-1001" and "cf-1001 " (padded) has two
     live rows that normalize to one key. That is not an exact match to
     anything -- it is a question for a human.
+
+    It also holds every item's two comparison keys for the fuzzy step, built
+    the first time a line needs them (`scan_keys`) and never before: a
+    document whose lines all match by rule or by exact SKU does not pay for
+    them. They live and die with this object, so nothing is kept between
+    documents.
     """
 
     def __init__(self, items: list[CatalogItem]):
@@ -271,6 +299,24 @@ class Catalog:
             if key:
                 by_sku.setdefault(key, []).append(item)
         self._by_sku = by_sku
+        self._scan_keys: tuple[list[str], list[str]] | None = None
+
+    def scan_keys(self) -> tuple[list[str], list[str]]:
+        """
+        (description keys with their tokens sorted, SKU comparison keys), one
+        of each for every item, in the order of `items`. Built on the first
+        call and reused for every later line of the document.
+        """
+        if self._scan_keys is None:
+            self._scan_keys = (
+                [_sorted_tokens(normalize_description(item.description)) for item in self.items],
+                [sku_comparison_key(item.sku) for item in self.items],
+            )
+        return self._scan_keys
+
+    @property
+    def scan_keys_built(self) -> bool:
+        return self._scan_keys is not None
 
     def get(self, item_id: UUID) -> CatalogItem | None:
         return self._by_id.get(item_id)
@@ -368,17 +414,17 @@ class MatchingSummary:
 # ── The pure resolution step ────────────────────────────────────────────────
 
 
-def score_candidates(
-    raw_sku: str | None, raw_description: str | None, catalog: Catalog
+def _score_items(
+    raw_sku: str | None, raw_description: str | None, items: list[CatalogItem]
 ) -> list[MatchCandidate]:
     """
-    Every catalog item scored against this line, best first, truncated to
+    Each of these items scored against this line, best first, truncated to
     `MAX_CANDIDATES`. Each item contributes its better of (description score,
     SKU score); the measure guard is evaluated on whichever field won, so the
     reason attached to a blocked candidate is the reason for the score shown.
     """
     scored: list[MatchCandidate] = []
-    for item in catalog.items:
+    for item in items:
         desc_score = description_similarity(raw_description, item.description)
         sku_score = sku_similarity(raw_sku, item.sku)
         left: str | None
@@ -405,6 +451,84 @@ def score_candidates(
     # produces the same stored candidate list.
     scored.sort(key=lambda c: (-c.score, c.sku))
     return scored[:MAX_CANDIDATES]
+
+
+def score_candidates_full_scan(
+    raw_sku: str | None, raw_description: str | None, catalog: Catalog
+) -> list[MatchCandidate]:
+    """
+    The definition of the fuzzy step: the per-item code run on every catalog
+    item. This is what `score_candidates` was until D-201 and what it must
+    still return, candidate for candidate; the parity tests compare the two
+    (packages/core/tests/test_matching_fast_scan.py). At 250,000 items it
+    takes about 14 seconds a line, which is why it is no longer the path a
+    document takes.
+    """
+    return _score_items(raw_sku, raw_description, catalog.items)
+
+
+def score_candidates(
+    raw_sku: str | None, raw_description: str | None, catalog: Catalog
+) -> list[MatchCandidate]:
+    """
+    The same candidates `score_candidates_full_scan` returns, found faster.
+
+    Every item is still scored, on both fields. What changes is who does the
+    arithmetic: rapidfuzz scores the whole catalog in one call per field, on
+    keys the catalog built once, and the per-item code (the measure guard,
+    the 4-dp scores, the candidate records) then runs only on the best
+    `FAST_SCAN_KEEP` by each field.
+
+    Why that is the same answer and not an approximation: an item left out
+    scored no more than `cut`, the lowest score kept, on either field. So
+    when the fifth candidate scores strictly above `cut`, nothing left out
+    could have displaced it or anything above it, and the five are the full
+    scan's five in the full scan's order. When it does not -- the cut fell
+    among equally scored items, and which of them were kept was the
+    library's choice, not the SKU order the full scan sorts by -- more are
+    kept and the line is looked at again, up to the whole catalog.
+    """
+    items = catalog.items
+    keep = FAST_SCAN_KEEP
+    if len(items) <= keep:
+        # Nothing would be left out: the catalog is scored as it always was.
+        return score_candidates_full_scan(raw_sku, raw_description, catalog)
+
+    description_keys, sku_keys = catalog.scan_keys()
+    asked = (
+        (_sorted_tokens(normalize_description(raw_description)), description_keys),
+        (sku_comparison_key(raw_sku), sku_keys),
+    )
+    while keep < len(items):
+        kept: set[int] = set()
+        cut = 0.0
+        complete = True
+        for line_key, item_keys in asked:
+            if not line_key:
+                # The line has nothing on this field, so every item scores
+                # zero on it, as `description_similarity` and `sku_similarity`
+                # say. Nothing to keep and nothing to cut.
+                continue
+            best = process.extract(line_key, item_keys, scorer=fuzz.ratio, limit=keep)
+            if len(best) < keep:
+                # Fewer came back than were asked for, so what was left out
+                # is not known to score below the last one kept.
+                complete = False
+                break
+            kept.update(index for _, _, index in best)
+            cut = max(cut, best[-1][1])
+        if complete:
+            # In catalog order, so items the sort cannot tell apart keep the
+            # order the full scan would leave them in.
+            candidates = _score_items(raw_sku, raw_description, [items[i] for i in sorted(kept)])
+            cut_score = _as_score(cut)
+            if cut_score <= 0:
+                # Everything left out scored zero, and a zero is never a candidate.
+                return candidates
+            if len(candidates) == MAX_CANDIDATES and candidates[-1].score > cut_score:
+                return candidates
+        keep *= FAST_SCAN_WIDEN
+    return score_candidates_full_scan(raw_sku, raw_description, catalog)
 
 
 def _fuzzy_match(candidates: list[MatchCandidate]) -> MatchCandidate | None:

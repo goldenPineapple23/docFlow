@@ -442,10 +442,45 @@ def test_the_scan_measurement_reports_each_line_parity_and_a_40_line_order():
     found = scan.measure(scan.SortedScan, matching, catalog, lines, reference)
     assert len(found["ms"]) == 18
     assert found["parity"] == ["fastener match 0, five 0", "general match 0, five 0"]
+    assert found["differ"] == 0
     assert scan.order_seconds(2.0, [50.0, 150.0]) == pytest.approx(2.0 + 40 * 0.1)
     cores = scan.several_cores(scan.SortedScan(matching, catalog), lines["fastener"])
     assert "one core" in cores[0] and "in 2 chunks on 2 threads" in cores[1]
     assert "tenant_id = %s" in scan.FRESHNESS and "updated_at" in scan.FRESHNESS
+
+
+def test_the_scan_measures_the_products_own_path_against_the_full_scan(monkeypatch):
+    """`variants` = scan is the run a change to the fuzzy step is proven by:
+    it times `matching.resolve_line` itself, and its reference is the full
+    scan whatever the product's fuzzy step has become."""
+    matching, catalog, lines = _bench_catalog_and_lines(600, 9)
+    reference = {
+        family: [variants.resolve(matching, line, catalog) for line in lines[family][:3]]
+        for family in variants.FAMILIES
+    }
+    product = scan.ProductScan(matching, catalog)
+    assert product.catalog is not catalog and product.catalog.scan_keys_built
+    assert not catalog.scan_keys_built  # the reference never builds the keys: it is the full scan
+    found = scan.measure(scan.ProductScan, matching, catalog, lines, reference)
+    assert found["differ"] == 0 and len(found["ms"]) == 18
+    assert found["build_seconds"] > 0
+
+    # A fuzzy step that returned something else would be counted, line by line.
+    monkeypatch.setattr(matching, "score_candidates", lambda sku, description, catalog: [])
+    broken = scan.measure(scan.ProductScan, matching, catalog, lines, reference)
+    assert broken["differ"] > 0 and broken["parity"][0].startswith("fastener match ")
+    # ... while the reference is still the full scan.
+    line = lines["fastener"][0]
+    again = variants.resolve(matching, line, catalog)
+    assert variants.recorded(again) == variants.recorded(reference["fastener"][0])
+    assert variants.product(matching, line, catalog).candidates == []
+
+
+def test_the_bench_lines_are_drawn_from_the_same_items_on_every_run():
+    """A row's id is new on every load; the generated SKUs are not."""
+    assert "ORDER BY md5(sku), sku" in variants.LINE_SAMPLE
+    assert "ORDER BY id" not in variants.LINE_SAMPLE
+    assert variants.LINE_SAMPLE.format(like="NOT LIKE").count("%s") == 3
 
 
 def test_the_scan_measurement_refuses_any_database_not_on_this_machine(capsys):

@@ -19,18 +19,23 @@ creates the two indexes, measures, and drops them:
 * p50, p95 and max of the description query and the SKU query, for fastener
   lines and for general "Acme Test" lines apart, fetching 50, 100 and 200
   candidates;
-* parity: for each line, today's full scan in Python (matching.resolve_line
-  over the whole catalog) against the same code over the fetched candidates.
-  The applied match and the five recorded candidates must be the same;
+* parity: for each line, the full scan in Python (the per-item code over the
+  whole catalog, `matching.score_candidates_full_scan`) against the same
+  code over the fetched candidates. The applied match and the five recorded
+  candidates must be the same;
 * the design's cut-off guard (A3): on how many lines the K-th candidate is
   still similar (0.5 or more), and on how many the 4K-th is too, which is a
   line the design would send to the full scan.
 
-It also times today's full scan per line on this machine, because that is
-what a fallback costs and what top-K must beat; and a faster full scan (the
+It also times the full scan per line on this machine, because that is what
+a fallback costs and what top-K must beat; and a faster full scan (the
 catalog's comparison keys built once, `FastScan` below), alone and as the
-fallback behind each variant. The faster scan lives here only: nothing in
-the product changes.
+fallback behind each variant. `FastScan` is the bench's own first version of
+what the product now does in `matching.score_candidates` (D-201); the
+product's function is measured by `--variants scan` (full_scan.py).
+
+"Today's full scan" in the reports is the full scan: the per-item loop that
+was the product's fuzzy step until D-201 and is kept as its definition.
 
 **It refuses any database that is not on this machine**, as the sizing job
 does. Every figure is a GitHub annotation (RUNBOOK 1.6). GitHub keeps ten
@@ -51,6 +56,7 @@ import uuid
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -74,6 +80,15 @@ NOTICES_PER_STEP = 10
 # The catalog as matching.load_catalog reads it.
 CATALOG_READ = (
     "SELECT id, sku, description, unit_of_measure FROM items WHERE tenant_id = %s AND deleted_at IS NULL"
+)
+
+# The items the lines are written from: the same items on every run of the
+# same mix and seed. The generated SKUs are; a row's id is new on every load,
+# and the first runs drew by id, so each tested different lines. md5 spreads
+# the draw across the catalog's families.
+LINE_SAMPLE = (
+    "SELECT sku, description FROM items WHERE tenant_id = %s AND description {like} %s "
+    "ORDER BY md5(sku), sku LIMIT %s"
 )
 
 EXPRESSIONS = {
@@ -248,6 +263,14 @@ def recorded(match) -> list[dict]:
 
 
 def resolve(matching, line: Line, catalog):
+    """The line resolved by the full scan: `resolve_line` with the per-item
+    loop over every item in the fuzzy step's place. The reference."""
+    with mock.patch.object(matching, "score_candidates", matching.score_candidates_full_scan):
+        return product(matching, line, catalog)
+
+
+def product(matching, line: Line, catalog):
+    """The line resolved as a document's line is: the product's own path."""
     return matching.resolve_line(
         raw_sku=line.sku, raw_description=line.description, catalog=catalog, sku_rules={}
     )
@@ -587,9 +610,7 @@ def prepare(conn, sizes: list[int], seed: int, matching) -> dict:
     ctx: dict = {"matching": matching, "tenant_id": tenant_id, "lines": {}, "reference": {}, "rows": rows}
     for family, like in (("fastener", "NOT LIKE"), ("general", "LIKE")):
         sample = conn.execute(
-            f"SELECT sku, description FROM items WHERE tenant_id = %s AND description {like} %s "
-            "ORDER BY id LIMIT %s",
-            (tenant_id, GENERAL_PREFIX + "%", TIMING_LINES),
+            LINE_SAMPLE.format(like=like), (tenant_id, GENERAL_PREFIX + "%", TIMING_LINES)
         ).fetchall()
         ctx["lines"][family] = bench_lines([(sku, description) for sku, description in sample], seed)
 
