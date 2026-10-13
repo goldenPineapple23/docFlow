@@ -3533,3 +3533,73 @@ Neither change starts before the founder's "go".
 **Not changed:** any product code, migration, gate, pass mark, limit or constant. Nothing is loaded on staging. Nothing of PR A or PR 1 is built.
 
 **Related:** Sections 0 (rules 3, 5, 7 and 8), 7.5, 7.6, 7.10; D-066, D-152, D-186, D-196, D-197, D-199, D-200; RUNBOOK 1.4, 1.6, 1.8; PR #60; BUILD-STATUS "Stage 4 detailed design" (A1 to A8, Q2, Q3, Q13, Q14, items 16 to 18) and "The plan after the Stage 3 "go""; `scripts/bench/`, `.github/workflows/catalog-sizing.yml`, `packages/core/tests/test_bench_catalog.py`, `packages/core/docflow_core/matching.py`, `supabase/migrations/0004_matching_foundations.sql`.
+
+## D-202 — PR A as built: the fuzzy step scores every item in one call a field (founder, 2026-10-12)
+
+**Context:** D-201 decided PR A: matching keeps scoring every catalog item and is made fast, with no state kept between documents. Claude sent the plan in one message with the scan run's report; the founder approved it as written and answered its three questions (a records PR first; the keys built only when a line first needs the fuzzy step; the measurement by a bench entry point inside the Fly worker, then one real 40-line PO end to end). The records PR merged as PR #61 (`main` `2b9c163`, 2026-10-12 01:44:28; all 13 checks green on `09e20d8`, and the push run 38193058876 on `2b9c163` green on all six jobs, core at 869 tests). This entry records PR A as built, on branch `phase55/stage4-fast-scan`, on top of it. All times are UTC. **It is not merged, and it does not merge before the two proofs in item 9.**
+
+**1. What changed, in `packages/core/docflow_core/matching.py` only.**
+- **`score_candidates` keeps its signature and its result.** rapidfuzz scores the whole catalog in one call per field (`process.extract`, the description and the SKU), on keys the catalog built once. The per-item code (the measure guard, the 4-dp scores, the candidate records, the sort) then runs on the best `FAST_SCAN_KEEP` (100) by each field, 200 items at most, instead of on every item.
+- **`score_candidates_full_scan` is the loop as it was,** kept as the definition of the fuzzy step and as the parity reference. Its body moved, unchanged, into a helper (`_score_items`) that takes the items to score, so the fast scan runs the very same code on the items it kept.
+- **`Catalog.scan_keys`** builds the two key lists (each description key with its tokens sorted; each SKU's comparison key) the first time a line needs the fuzzy step, and never before. An order whose lines all match by rule or by exact SKU never builds them. They live and die with the document's `Catalog`: nothing is kept between documents.
+- **Not touched:** `resolve_line`, the thresholds (0.90 and the 0.02 margin), the two scorers and their keys, the measure guard, the ambiguity guard, the precedence, the provenance strings, the candidate JSON, `load_catalog`, `match_document_lines`, the worker task. No new dependency (`rapidfuzz` is already locked at 3.14.6) and no migration.
+
+**2. Why the result is the same and not an approximation.**
+- Every item is still scored on both fields. Nothing is skipped by an index or a threshold.
+- An item left out of the kept lists scored no more than the lowest score kept, on either field. So when the fifth candidate scores strictly above that, no item left out could have displaced it or anything above it, and the five are the full scan's five in the full scan's order.
+- When the fifth candidate does not score above it, the cut fell among equally scored items, and which of them were kept was the library's choice and not the SKU order the full scan sorts by. `FAST_SCAN_WIDEN` (4) times as many are then kept and the line is looked at again, up to the whole catalog, where the full scan itself runs.
+- The scores that are stored and shown come from the per-item code, as before. The one-call score only chooses which items that code runs on. It is rapidfuzz's plain `ratio` on token-sorted keys, which is what `token_sort_ratio` computes; a test holds the two equal, after rounding, on every item of a generated catalog, for both fields.
+
+**3. Choices Claude made while building, for the founder to overrule.**
+- **A catalog of 100 items or fewer is scored by the full scan directly** and builds no keys: nothing would be left out, so there is nothing to gain. Staging's existing test tenants (75 items rows in all) therefore match exactly as before, by the same code.
+- **If the library hands back fewer items than it was asked for,** the line is treated as not proven and more are kept, ending at the full scan. It does not do that today; the branch is there so that a library change could cost time and never a wrong candidate.
+- **The slowest a line can be is what it costs today.** A line whose fifth-best score is shared by more than a hundred items (a catalog holding one description under hundreds of SKUs) is widened step by step and can end at the full scan. On the generated 250,000-item fastener catalog one line in 400 needed one widening.
+- **The CI bench run now fails on a difference.** `variants` = `scan` times the product's own `matching.resolve_line` against the full scan and exits non-zero if any of the 100 lines differs, in the applied match or in the five candidates.
+- **The bench's lines are the same on every run** (founder: yes). They are drawn in the order of `md5(sku)`, which the seed fixes, and no longer by row id.
+
+**4. Tests.**
+- **`packages/core/tests/test_matching_fast_scan.py` (new, 21 tests, no database):**
+  - parity with the full scan on three generated catalogs in different house styles, fastener and general lines, all nine kinds of line, keeping 100 and keeping 3 (which puts the cut among tied siblings on most lines);
+  - the whole of `resolve_line` on every line of one catalog: the applied match, score, provenance and the five candidates;
+  - the score rapidfuzz ranks by is the stored score, on every item, both fields;
+  - every item is scored on both fields, and the per-item code runs once, on at most 200 items;
+  - **an order that never builds the keys** (40 exact-SKU lines and a learned rule, with the library call made to fail if it is ever reached), **and one that builds them partway through** (two exact-SKU lines, then the first fuzzy line, then both kinds again: built at the third line, once);
+  - a catalog of exactly 100 items builds nothing, and one of 101 does;
+  - duplicate descriptions under different SKUs (7.15.2 Step 4): the five listed are the full scan's five, lowest SKUs first, and nothing is applied; at keep 3, at the default, and where widening reaches the whole catalog;
+  - items the sort cannot tell apart stay in catalog order;
+  - D-066's pairs ("5lb" against "2lb", a misspelling, a size the catalog lacks) in a catalog big enough to be cut: a changed measure is never applied;
+  - lines and items with a field missing; an empty catalog; the library handing back a short answer.
+- **Each of seven ways of breaking the fast scan is caught by a test:** the cut not checked; a fifth candidate level with the cut accepted; the kept items not in catalog order; a short answer taken as complete; the description ranked on unsorted tokens; the SKU field not scored; the keys built with the catalog.
+- **The bench's tests:** 7 more, 69 in `test_bench_catalog.py` (2 for the scan run, 5 for the worker entry point of item 5).
+- **The existing matching tests are unchanged** and pass (`packages/core/tests/test_matching.py`, `apps/api/tests/test_matching.py`).
+
+**5. The entry point for the measurement on the worker** (`scripts/bench/worker_matching.py`, commit `9426bd0`). The founder's answer was a bench entry point run inside the Fly worker against staging. It does what the document task does and nothing else: one tenant session as `docflow_worker`, `matching.load_catalog`, then `matching.resolve_line` for each line. It prints the catalog read, the keys, each unmatched line's time for fastener and general lines apart, a 40-line order from nothing (three times), parity with the full scan on three lines a family, and its own memory after each stage.
+- **It reads and never writes:** every transaction is set `READ ONLY` before anything else runs in it.
+- **It refuses any tenant that is not a bench tenant** (its name starts "Acme Test Bench"), before that tenant's catalog is read.
+- **It prints counts, timings and sizes only:** no SKU, no description, no connection string.
+- **It is not in the worker's image** (the image holds `apps/worker/app` and `docflow_core` only), so it is put on the machine for the run. How is part of the staging steps, which the founder approves one by one.
+- **Not proven on a real database.** Its whole flow was walked through with a stand-in for the database, which shows that it runs and what it prints, and nothing about Postgres or the worker's login. Its first real run is on the worker.
+
+**6. Measured on the development machine,** on the generated 250,000-item catalog, no database: the product takes 54.8 ms a fastener line and 55.5 ms a general line at p50 (60.5 and 59.3 ms at p95; 120 lines), against 10.1 s a line for the full scan; no difference on 12 lines; the keys build in 2.00 s. The bench's own token-sorted scan, which the 57 ms of D-201 was measured with, takes 55.5 ms beside it.
+
+**7. The suites on staging** (the worker and beat at 0, one at a time; `075ffdd` is the commit that changes `matching.py`, and `9426bd0` adds the entry point of item 5 and its tests on top of it).
+- **Core at `9426bd0`** (2026-10-13 13:48:49 to 13:50:28): `896 passed, 1 skipped in 95.02s (0:01:35)`. 868 passed before PR A: the 28 new tests, none removed, the same one skip. CI should read 897 tests. At `075ffdd` it read `891 passed, 1 skipped in 58.83s`.
+- **Worker at `075ffdd`** (2026-10-12 01:27:16 to 01:52:07): `191 passed, 7 skipped in 1487.10s (0:24:47)`, the count and the seven skips it had before. `9426bd0` changes nothing the worker suite reads, and it was not run again.
+- **API at `9426bd0`, the run of record** (2026-10-13 13:50:34 to 14:29:45, the dev parse service started by hand): `641 passed, 1 skipped, 3 deselected, 657 warnings in 2341.97s (0:39:01)`; the leftover line read `+0` on all six counts (tenants 34, founder alerts 4, e-mails 30, scheduled jobs 35, platform-admin rows 12, users with no tenant 15).
+- **Two API runs before it at `075ffdd` each read one failure, neither in matching.** They are item 8.
+
+**8. Two API runs that failed, and what each showed.**
+- **Run 1** (2026-10-12 01:52:31 to 02:32:11): `1 failed, 640 passed, 1 skipped, 3 deselected, 657 warnings in 2370.76s (0:39:30)`, leftover `+0` on all six. The failure: `tests/test_stripe_webhook_api.py::test_a_signature_stamped_more_than_300_seconds_in_the_future_is_refused`, `assert 200 == 400`.
+  - **The cause is a race in the test, shown before anything was changed.** The test stamps the signature `int(time.time()) + 301`. The product's check (`external_services.verify_webhook_signature`) is `abs(time.time() - stamp) > 300`, on the unrounded clock. Rounding down takes off the part of the second already gone, and the time until the check takes off more: when the two together reach one second, the stamp is no longer more than 300 seconds ahead and is rightly accepted. Called with the clock set by hand, the product's own check refuses a stamp made at .94 of a second and checked 50 ms later, and accepts one made at .95.
+  - **The product's check is correct. PR A touches none of that code.** The mirror test (301 seconds in the past) cannot fail this way: there the rounding adds to the margin.
+  - **Not fixed.** It is a test-only change outside PR A, and it is put to the founder: its own small PR, or inside PR A.
+- **Run 2** (started 2026-10-12 02:33:48): `1 failed, 640 passed, 1 skipped, 3 deselected, 657 warnings in 126873.05s (1 day, 11:14:33)`, leftover `+0` on all six. The development machine went to sleep at 02:49:03, fifteen minutes into the run, and woke at 13:21:35 on 2026-10-13. The run was left to finish, so that its cleanup ran. The failure: `tests/test_suite_lock.py::test_this_run_holds_the_lock_and_a_second_run_is_refused_by_name`: the connection that held the suite lock did not survive the sleep, so the lock was free, which is what the test reads. The Stripe test passed in this run. It is not a run of record.
+
+**9. Not done yet; PR A does not merge before both.**
+- **The CI bench run from this branch:** mix `250000`, variants `scan`. The pass mark is zero differences on the 100 lines.
+- **The staging measurement** (D-201 item 6): the 250,000 tenant loaded on staging and PR A measured on the Fly worker, then one real 40-line PO end to end. Its steps go to the founder separately, and each one is asked before it is taken.
+- The branch is not pushed until the founder says so.
+
+**Not changed:** any gate, pass mark, limit or threshold; any migration; anything on staging.
+
+**Related:** Sections 0 (rules 3 and 7), 7.5, 7.6, 7.10; D-066, D-152, D-170, D-176, D-180, D-196, D-199, D-201; RUNBOOK 1.4, 1.6, 1.8; PR #61; BUILD-STATUS "Stage 4 detailed design" (A1, A3, A4); `packages/core/docflow_core/matching.py`, `packages/core/tests/test_matching_fast_scan.py`, `scripts/bench/full_scan.py`, `scripts/bench/index_variants.py`, `scripts/bench/worker_matching.py`, `apps/api/tests/test_stripe_webhook_api.py`.
