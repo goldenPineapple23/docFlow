@@ -4,6 +4,29 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-13 (after the staging measurement at 50,000 items; PR A's merge gate changed; D-202 items 13 to 15)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-13:** Phase 5.5, **Stage 4** (matching performance, measured on a
+250,000-item tenant). The measurements and what they retire are on `main` (PR #61, `2b9c163`;
+D-201): the approved design's two trigram indexes, migration `0037`, the cut-off guard and the
+fallback count are not built, and matching keeps scoring every item. **PR A is built and not
+merged** (branch `phase55/stage4-fast-scan`; D-202): the fuzzy step in `matching.py` scores the
+whole catalog in one call a field and runs the per-item code on the best 100 by each; the loop as
+it was is kept as the definition, and 21 parity tests hold the two to the same result. On the
+development machine at 250,000 items: 55 ms a line against 10.1 s, no difference on 12 lines.
+**Before PR A merges:** the CI bench run on `250000` from its branch (zero differences on 100
+lines), and the measurement on the Fly worker against the 250,000 tenant loaded on staging, which
+stays on Nano (about 125 MB, under the 350 MB guard), then one real 40-line PO end to end. The
+founder is asked before each staging step. **Nothing is loaded on staging, and nothing of PR 1 is
+built;** PR 1 (the broad-`except` audit) follows on top of PR A. A known limit is recorded: a
+40-line order on a 250,000-item catalog is expected to take about 6 s, against the 4 s mark,
+until the catalog is kept between documents (PR B, not now). After Stage 4: Stage 5, demo
+readiness with D-195's model work, the Phase 6 pilot-blocker subset, then pilots with two or
+three customers ("The plan after the Stage 3 "go"", below). If Stage 4 is not merged by
+2026-11-02, D-195's two changes go next, before Stage 5. The Fly worker and beat are at 0 and the
+Healthchecks.io check is paused.
+
 ## Replaced on 2026-10-13 (the records merged as PR #61; PR A built, not merged; D-202)
 
 <!-- the paragraph as it stood, starting on the next line -->

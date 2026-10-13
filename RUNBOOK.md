@@ -2077,6 +2077,45 @@ above, and what to do the same way next time:**
   the founder's machine. `flyctl` is the same program and takes the same
   commands.
 
+**Notes added after the staging measurement of 2026-10-13 (D-202 items 13
+and 14):**
+- **An `fly ssh` session on the worker's machine carries the worker's
+  database setting.** Checked by printing yes or no, never the value. The
+  session is root; a read-only script put in `/tmp` was run as the
+  worker's own user (`setpriv --reuid=10100 --regid=10100 --clear-groups`)
+  with the worker's Python (`/opt/worker/venv/bin/python`), and removed
+  afterwards. The image is not changed and no worker start is recorded.
+- **The Fly API cannot create a tenant.** The Console's create-tenant
+  route always creates the Stripe customer, and `docflow-api-staging` has
+  no Stripe key (above), so the screen would show CON-006. A tenant is
+  created through a local API against staging, by the founder, after
+  these read-only checks, each reported first:
+  - the local `.env`'s Stripe key starts with `sk_test_` (the prefix only
+    is read);
+  - the local API's queue is the local Redis, so anything it enqueues
+    reaches no worker: the tenant is created and nothing else is done;
+  - starting the API runs no migration, sweep or scheduled work;
+  - the commit the local API runs from is recorded as the code that
+    created the tenant.
+
+  Claude's `fly proxy` holds port 8000, so it is stopped first and started
+  again when the founder has stopped the local API; `/healthz` is read
+  before anything is uploaded.
+- **The parse machine stops itself about six minutes after a start,** as
+  the API does, unless its auto-stop is turned off for the session
+  (`fly machine update <id> --autostop=off --yes --app
+  docflow-parse-staging`, and `--autostop=stop --yes` at the wind-down,
+  each read back from `fly machine list --json`). The update leaves a
+  stopped machine stopped: start it afterwards. A parse machine start is
+  not a worker start and writes no `worker_starts` row. Its start-up
+  check counts one out-of-memory kill (`canary:memory-cap-kills PASS`), so
+  the machine's count reads 1 when nothing has gone wrong.
+- **`fly proxy` bypasses Fly's public edge.** It is a tunnel to the
+  machine. A request timed through it says nothing about the edge's
+  timeouts: the catalog commit of 2026-10-13 ran 4 min 14 s through it,
+  and whether the edge would have cut it is not established (D-202 item
+  14 has the sources).
+
 **If something goes wrong.** Any step fails: stop the worker and report.
 Documents already received stay as they are; nothing is deleted. Going back
 entirely is stopping the three apps: staging is then as before, the local
