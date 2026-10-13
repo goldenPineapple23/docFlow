@@ -386,13 +386,30 @@ How a run is reported:
   loses none: CI reads `869 tests`. On this machine against staging it reads
   `868 passed, 1 skipped` (2026-10-12 at `36412e4`, 52 s). API and worker
   are unchanged.
+  **From PR A, the fuzzy step's fast scan (2026-10-13; D-202):** the core
+  suite gains 28 tests, none needing a database, and loses none: 21 in the
+  new `test_matching_fast_scan.py` and 7 more in `test_bench_catalog.py`
+  (69 in the file). CI should read `897 tests`. On this machine against
+  staging it reads `896 passed, 1 skipped` (2026-10-13 at `9426bd0`, 95 s).
+  The worker and API counts are unchanged: `191 passed, 7 skipped`
+  (2026-10-12 at `075ffdd`, 24:47) and `641 passed, 1 skipped, 3 deselected`
+  (2026-10-13 at `9426bd0`, 39:01, the leftover line `+0` on all six).
+  **A known cause of one API failure, not yet fixed (D-202 item 8):**
+  `test_a_signature_stamped_more_than_300_seconds_in_the_future_is_refused`
+  reads 200 when the test reads the clock late in a second. It is a race in
+  the test, and the product's check is correct. If it is the run's only
+  failure, say so with this cause, and run the suite again for the record.
+  **A machine that sleeps during a run** drops the connection that holds the
+  suite lock: `test_this_run_holds_the_lock_and_a_second_run_is_refused_by_name`
+  then fails, and the run is not a run of record (2026-10-12; D-202 item 8).
+  Let it finish, so its cleanup runs, and run again.
   **What CI reports for the same code, side by side** (founder,
   2026-10-08). CI runs every test, so each line must also read `0 failed,
   0 skipped, 0 unapproved`:
 
   | Suite | This machine, against staging | CI |
   |---|---|---|
-  | core | 868 passed, 1 skipped | 869 tests |
+  | core | 896 passed, 1 skipped | 897 tests |
   | worker | 191 passed, 7 skipped | 198 tests |
   | API | 641 passed, 1 skipped, 3 deselected | 642 tests |
 
@@ -605,7 +622,7 @@ largest tenant of the mix instead, and prints annotations titled
 
 | Enter as `variants` | What is measured | Script | The 250,000 tenant took |
 |---|---|---|---|
-| `scan` | The faster full scan: each line's time for fastener and general lines, parity with today's full scan on 100 lines, a 40-line order cold and warm, memory, several cores | `scripts/bench/full_scan.py` | 27 minutes |
+| `scan` | **The product's own fuzzy step** (`matching.resolve_line`, from D-202) against the full scan: each line's time for fastener and general lines, parity on 100 lines, a 40-line order, memory, several cores. **The run fails if any line differs.** It is the proof a change to the fuzzy step needs before it merges | `scripts/bench/full_scan.py` | 27 minutes |
 | `all` | Every index variant for the candidate query (GiST at four signature lengths, GIN at three thresholds, an index without `tenant_id`), each at 50, 100 and 200 candidates, with today's full scan | `scripts/bench/index_variants.py` | 51 minutes |
 | names with commas, e.g. `baseline,gin` | Those variants only | the same | |
 
@@ -623,6 +640,18 @@ largest tenant of the mix instead, and prints annotations titled
   not a product dependency and is in no lockfile.
 - These refuse any database that is not on the machine they run on, like
   the sizing job.
+- **The lines are the same on every run** of the same mix and seed (from
+  D-202): they are drawn in the order of `md5(sku)`. The runs before it
+  drew by row id, so each of those tested different lines.
+
+**One bench script is not for the runner: `scripts/bench/worker_matching.py`
+(D-202 item 5).** It times matching inside the worker's machine, as
+`docflow_worker`, against the database that machine is configured for, for
+one bench tenant: `python worker_matching.py --tenant-id <id>`. It sets
+every transaction read-only, refuses any tenant whose name does not start
+"Acme Test Bench", and prints counts, timings and sizes only. It is not in
+the worker's image and nothing runs it by itself. **Running it is a step on
+staging: the founder is asked first.**
 
 ---
 
@@ -2047,6 +2076,45 @@ above, and what to do the same way next time:**
   and the `fly` command name disappeared from `C:\Users\NK\.fly\bin` on
   the founder's machine. `flyctl` is the same program and takes the same
   commands.
+
+**Notes added after the staging measurement of 2026-10-13 (D-202 items 13
+and 14):**
+- **An `fly ssh` session on the worker's machine carries the worker's
+  database setting.** Checked by printing yes or no, never the value. The
+  session is root; a read-only script put in `/tmp` was run as the
+  worker's own user (`setpriv --reuid=10100 --regid=10100 --clear-groups`)
+  with the worker's Python (`/opt/worker/venv/bin/python`), and removed
+  afterwards. The image is not changed and no worker start is recorded.
+- **The Fly API cannot create a tenant.** The Console's create-tenant
+  route always creates the Stripe customer, and `docflow-api-staging` has
+  no Stripe key (above), so the screen would show CON-006. A tenant is
+  created through a local API against staging, by the founder, after
+  these read-only checks, each reported first:
+  - the local `.env`'s Stripe key starts with `sk_test_` (the prefix only
+    is read);
+  - the local API's queue is the local Redis, so anything it enqueues
+    reaches no worker: the tenant is created and nothing else is done;
+  - starting the API runs no migration, sweep or scheduled work;
+  - the commit the local API runs from is recorded as the code that
+    created the tenant.
+
+  Claude's `fly proxy` holds port 8000, so it is stopped first and started
+  again when the founder has stopped the local API; `/healthz` is read
+  before anything is uploaded.
+- **The parse machine stops itself about six minutes after a start,** as
+  the API does, unless its auto-stop is turned off for the session
+  (`fly machine update <id> --autostop=off --yes --app
+  docflow-parse-staging`, and `--autostop=stop --yes` at the wind-down,
+  each read back from `fly machine list --json`). The update leaves a
+  stopped machine stopped: start it afterwards. A parse machine start is
+  not a worker start and writes no `worker_starts` row. Its start-up
+  check counts one out-of-memory kill (`canary:memory-cap-kills PASS`), so
+  the machine's count reads 1 when nothing has gone wrong.
+- **`fly proxy` bypasses Fly's public edge.** It is a tunnel to the
+  machine. A request timed through it says nothing about the edge's
+  timeouts: the catalog commit of 2026-10-13 ran 4 min 14 s through it,
+  and whether the edge would have cut it is not established (D-202 item
+  14 has the sources).
 
 **If something goes wrong.** Any step fails: stop the worker and report.
 Documents already received stay as they are; nothing is deleted. Going back

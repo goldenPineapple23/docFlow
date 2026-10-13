@@ -1,28 +1,30 @@
 """
-The faster full scan's speed-ups (Stage 4; founder, 2026-10-12).
+The product's fuzzy step against the full scan (Stage 4; D-201).
 
 The index variants were measured on the 250,000-item tenant and none keeps
-parity with today's full scan on fastener catalogs. The faster full scan
-(index_variants.FastScan) does: 134 ms a line there, against the 100 ms
-mark. The founder chose to pursue it, and asked for its speed-ups to be
-measured before any product code is written. This measures, on the largest
-tenant of the mix:
+parity with the full scan on fastener catalogs. A faster full scan does, and
+the founder chose it. It was measured here first, in the bench
+(`SortedScan`, 57 ms a line), and is now the product's own
+`matching.score_candidates`. This measures, on the largest tenant of the
+mix:
 
-* the scan with **token-sorted keys** (`SortedScan`): today's description
-  score, rapidfuzz's token_sort_ratio, is the plain ratio of the two
-  strings with their tokens sorted. Sorting each item's tokens once, with
-  its other keys, leaves the plain ratio to do for each line;
-* **the keys kept between documents**: what a document costs cold (the
-  catalog read, its exact-SKU table, the keys) and warm (a check that the
-  catalog has not changed), as a 40-line order;
-* **memory**: the catalog as matching holds it, and the keys;
+* **the product** (`ProductScan`): `matching.resolve_line` as a document's
+  line meets it, each line's time for fastener and general lines apart, and
+  parity with the full scan (`matching.score_candidates_full_scan`) on the
+  same 100 lines. This is the run a change to the fuzzy step is proven by;
+* the bench's own scan with **token-sorted keys** (`SortedScan`), beside
+  it: the product should take no longer;
+* **a 40-line order**, cold (the catalog read, its exact-SKU table, the
+  keys) and warm (the catalog kept between documents, with a check that it
+  has not changed: PR B, not built);
+* **memory**: the catalog as matching holds it, and its keys;
 * **several cores**: the description pass on threads, and with rapidfuzz's
   own many-core call when numpy is there (it is not a product dependency).
 
     python scripts/bench/index_variants.py --mix 250000 --variants scan
 
-Parity is against today's full scan on the same 100 lines, as for the index
-variants. Nothing in the product changes; the database is this machine's.
+The lines are the same on every run of the same mix and seed. The database
+is this machine's.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ import sys
 import time
 import tracemalloc
 from concurrent.futures import ThreadPoolExecutor
+from unittest import mock
 
 import catalog_gen
 import catalog_sizing as sizing
@@ -76,11 +79,38 @@ class SortedScan(v.FastScan):
         )
 
 
+class ProductScan:
+    """The product's own path: `matching.resolve_line` on a catalog of its
+    own, so that catalog's keys are built here, at first need, and timed."""
+
+    def __init__(self, matching, catalog):
+        self.matching = matching
+        self.catalog = matching.Catalog(catalog.items)
+        started = time.perf_counter()
+        self.catalog.scan_keys()
+        self.build_seconds = time.perf_counter() - started
+        self.widened = 0  # lines that needed more than FAST_SCAN_KEEP
+
+    def resolve(self, line: v.Line):
+        process = self.matching.process
+        extract, limits = process.extract, []
+
+        def counted(query, choices, *, scorer, limit):
+            limits.append(limit)
+            return extract(query, choices, scorer=scorer, limit=limit)
+
+        with mock.patch.object(process, "extract", counted):
+            match = v.product(self.matching, line, self.catalog)
+        self.widened += any(limit > self.matching.FAST_SCAN_KEEP for limit in limits)
+        return match
+
+
 def measure(scan_class, matching, catalog, lines: dict, reference: dict) -> dict:
     """One scan on the timing lines: the key build, each line's time, parity."""
     started = time.perf_counter()
     scan = scan_class(matching, catalog)
-    found: dict = {"build_seconds": time.perf_counter() - started, "ms": [], "by_family": [], "parity": []}
+    built = getattr(scan, "build_seconds", time.perf_counter() - started)
+    found: dict = {"build_seconds": built, "ms": [], "by_family": [], "parity": [], "differ": 0}
     for family in v.FAMILIES:
         taken, matches = [], []
         for line in lines[family]:
@@ -88,12 +118,12 @@ def measure(scan_class, matching, catalog, lines: dict, reference: dict) -> dict
             matches.append(scan.resolve(line))
             taken.append((time.perf_counter() - started) * 1000)
         pairs = list(zip(matches, reference[family]))
+        match = sum(1 for a, b in pairs if v.outcome(a) != v.outcome(b))
+        five = sum(1 for a, b in pairs if v.recorded(a) != v.recorded(b))
         found["ms"] += taken
         found["by_family"].append(f"{family} {v.spread(taken)}")
-        found["parity"].append(
-            f"{family} match {sum(1 for a, b in pairs if v.outcome(a) != v.outcome(b))}, "
-            f"five {sum(1 for a, b in pairs if v.recorded(a) != v.recorded(b))}"
-        )
+        found["parity"].append(f"{family} match {match}, five {five}")
+        found["differ"] += match + five
     found["widened"] = scan.widened
     return found
 
@@ -111,11 +141,10 @@ def memory(conn, matching, tenant_id) -> list[str]:
     catalog = matching.Catalog([matching.CatalogItem(*row) for row in live])
     del live
     held_catalog, _ = tracemalloc.get_traced_memory()
-    scan = SortedScan(matching, catalog)
+    catalog.scan_keys()  # the product's own keys, held until they have been measured
     held_all, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     items = len(catalog)
-    del scan
     return [
         f"memory, {items} items: the catalog as matching holds it (rows, items, the exact-SKU table) "
         f"{sizing.megabytes(held_catalog)}; the keys (token-sorted descriptions, SKU keys) "
@@ -193,25 +222,36 @@ def run(database_url: str, mix: str, seed: int) -> int:
                 f"commit {os.environ.get('GITHUB_SHA', '')[:7] or 'not in CI'}; "
                 f"runner {os.environ.get('RUNNER_OS', sys.platform)}, {os.cpu_count()} cores",
                 f"the largest tenant, {max(sizes)} items; timings on {v.TIMING_LINES} lines a family, parity "
-                f"with today's full scan on {v.PARITY_LINES}; no line carries its item's exact SKU",
-                "no index is built: every item is scored, by today's scorers on today's keys",
+                f"with the full scan on {v.PARITY_LINES}; no line carries its item's exact SKU; the lines "
+                "are the same on every run of this mix and seed",
+                "no index is built: every item is scored. 'the product' is matching.resolve_line as a "
+                "document's line meets it; 'the full scan' is matching.score_candidates_full_scan, the "
+                "per-item loop it must agree with",
             ],
         )
         ctx = v.prepare(conn, sizes, seed, matching)
         catalog, lines, reference = ctx["catalog"], ctx["lines"], ctx["reference"]
 
-        keys_once = measure(v.FastScan, matching, catalog, lines, reference)
+        in_product = measure(ProductScan, matching, catalog, lines, reference)
         sorted_keys = measure(SortedScan, matching, catalog, lines, reference)
+        if in_product["differ"]:
+            # The run is the proof of parity at this size: a difference fails it.
+            failed += 1
+            print(
+                "::error title=catalog sizing: the product differs from the full scan::"
+                + " | ".join(in_product["parity"]),
+                flush=True,
+            )
         emit(
             "scan: each line and parity",
             [
                 *ctx["today"],
-                f"keys built once (as the 250,000 run measured it): ms a line p50/p95/max "
-                f"{' | '.join(keys_once['by_family'])}; lines that differ from today's of {v.PARITY_LINES} a "
-                f"family: {' | '.join(keys_once['parity'])}; kept more than {v.FAST_KEEP} on "
-                f"{keys_once['widened']} lines",
-                f"with token-sorted keys: ms a line p50/p95/max "
-                f"{' | '.join(sorted_keys['by_family'])}; lines that differ from today's of "
+                f"the product (matching.score_candidates, keeping {matching.FAST_SCAN_KEEP}): ms a line "
+                f"p50/p95/max {' | '.join(in_product['by_family'])}; lines that differ from the full "
+                f"scan's of {v.PARITY_LINES} a family: {' | '.join(in_product['parity'])}; kept more than "
+                f"{matching.FAST_SCAN_KEEP} on {in_product['widened']} lines",
+                f"the bench's scan with token-sorted keys, beside it: ms a line p50/p95/max "
+                f"{' | '.join(sorted_keys['by_family'])}; lines that differ from the full scan's of "
                 f"{v.PARITY_LINES} a family: {' | '.join(sorted_keys['parity'])}; kept more than "
                 f"{v.FAST_KEEP} on {sorted_keys['widened']} lines",
                 ctx["loaded"],
@@ -228,19 +268,16 @@ def run(database_url: str, mix: str, seed: int) -> int:
         emit(
             "scan: a 40-line order cold and warm",
             [
-                f"paid once a document when nothing is kept: the catalog read {ctx['read_seconds']:.2f} s, "
-                f"its exact-SKU table {ctx['catalog_seconds']:.2f} s, the keys "
-                f"{keys_once['build_seconds']:.2f} s (token-sorted: {sorted_keys['build_seconds']:.2f} s)",
-                f"paid once a document when the catalog and its keys are kept: the check that the catalog "
-                f"has not changed, {fresh * 1000:.1f} ms (median of {FRESHNESS_RUNS}; count and newest "
-                "updated_at of the tenant's items)",
-                f"a {ORDER_LINES}-line order, keys built once: cold "
-                f"{order_seconds(cold + keys_once['build_seconds'], keys_once['ms']):.2f} s, warm "
-                f"{order_seconds(fresh, keys_once['ms']):.2f} s",
-                f"a {ORDER_LINES}-line order, token-sorted keys: cold "
-                f"{order_seconds(cold + sorted_keys['build_seconds'], sorted_keys['ms']):.2f} s, warm "
-                f"{order_seconds(fresh, sorted_keys['ms']):.2f} s",
-                f"a {ORDER_LINES}-line order today (the full scan on every line): "
+                f"paid once a document, as the product is (nothing kept between documents): the catalog "
+                f"read {ctx['read_seconds']:.2f} s, its exact-SKU table {ctx['catalog_seconds']:.2f} s, and "
+                f"the keys {in_product['build_seconds']:.2f} s, built at the first line that needs them",
+                f"a {ORDER_LINES}-line order of unmatched lines in the product: "
+                f"{order_seconds(cold + in_product['build_seconds'], in_product['ms']):.2f} s",
+                f"if the catalog and its keys were kept between documents (PR B, not built): the check "
+                f"that the catalog has not changed, {fresh * 1000:.1f} ms (median of {FRESHNESS_RUNS}; "
+                f"count and newest updated_at of the tenant's items), and the same order "
+                f"{order_seconds(fresh, in_product['ms']):.2f} s",
+                f"a {ORDER_LINES}-line order by the full scan on every line: "
                 f"{order_seconds(cold, [1000 * s for s in ctx['today_seconds']]):.0f} s",
                 *memory(conn, matching, ctx["tenant_id"]),
             ],

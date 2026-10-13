@@ -40,6 +40,7 @@ gen = _load("catalog_gen")
 sizing = _load("catalog_sizing")
 variants = _load("index_variants")
 scan = _load("full_scan")
+worker = _load("worker_matching")
 
 
 def _fingerprint(items) -> str:
@@ -442,10 +443,150 @@ def test_the_scan_measurement_reports_each_line_parity_and_a_40_line_order():
     found = scan.measure(scan.SortedScan, matching, catalog, lines, reference)
     assert len(found["ms"]) == 18
     assert found["parity"] == ["fastener match 0, five 0", "general match 0, five 0"]
+    assert found["differ"] == 0
     assert scan.order_seconds(2.0, [50.0, 150.0]) == pytest.approx(2.0 + 40 * 0.1)
     cores = scan.several_cores(scan.SortedScan(matching, catalog), lines["fastener"])
     assert "one core" in cores[0] and "in 2 chunks on 2 threads" in cores[1]
     assert "tenant_id = %s" in scan.FRESHNESS and "updated_at" in scan.FRESHNESS
+
+
+def test_the_scan_measures_the_products_own_path_against_the_full_scan(monkeypatch):
+    """`variants` = scan is the run a change to the fuzzy step is proven by:
+    it times `matching.resolve_line` itself, and its reference is the full
+    scan whatever the product's fuzzy step has become."""
+    matching, catalog, lines = _bench_catalog_and_lines(600, 9)
+    reference = {
+        family: [variants.resolve(matching, line, catalog) for line in lines[family][:3]]
+        for family in variants.FAMILIES
+    }
+    product = scan.ProductScan(matching, catalog)
+    assert product.catalog is not catalog and product.catalog.scan_keys_built
+    assert not catalog.scan_keys_built  # the reference never builds the keys: it is the full scan
+    found = scan.measure(scan.ProductScan, matching, catalog, lines, reference)
+    assert found["differ"] == 0 and len(found["ms"]) == 18
+    assert found["build_seconds"] > 0
+
+    # A fuzzy step that returned something else would be counted, line by line.
+    monkeypatch.setattr(matching, "score_candidates", lambda sku, description, catalog: [])
+    broken = scan.measure(scan.ProductScan, matching, catalog, lines, reference)
+    assert broken["differ"] > 0 and broken["parity"][0].startswith("fastener match ")
+    # ... while the reference is still the full scan.
+    line = lines["fastener"][0]
+    again = variants.resolve(matching, line, catalog)
+    assert variants.recorded(again) == variants.recorded(reference["fastener"][0])
+    assert variants.product(matching, line, catalog).candidates == []
+
+
+def test_the_bench_lines_are_drawn_from_the_same_items_on_every_run():
+    """A row's id is new on every load; the generated SKUs are not."""
+    assert "ORDER BY md5(sku), sku" in variants.LINE_SAMPLE
+    assert "ORDER BY id" not in variants.LINE_SAMPLE
+    assert variants.LINE_SAMPLE.format(like="NOT LIKE").count("%s") == 3
+
+
+# ── The entry point run inside the worker's machine (worker_matching.py) ────
+
+
+class _WorkerSession:
+    """Stands in for a tenant session: records what is executed, in order,
+    and answers the tenant's name."""
+
+    def __init__(self, name):
+        self.name, self.statements = name, []
+
+    def execute(self, statement, params=None):
+        self.statements.append(str(statement))
+        return self
+
+    def scalar(self):
+        return self.name
+
+
+class _WorkerDb:
+    def __init__(self, session):
+        self.session = session
+
+    def tenant_session(self, tenant_id):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def opened():
+            yield self.session
+
+        return opened()
+
+
+def test_the_worker_measurement_refuses_any_tenant_that_is_not_a_bench_tenant():
+    worker.refuse_unless_bench_tenant(gen.tenant_name(1, 250000))
+    for name in ("Acme Test Distributor", "acme test bench 01", "Some Customer Ltd", "", None):
+        with pytest.raises(worker.Refused):
+            worker.refuse_unless_bench_tenant(name)
+
+
+def test_the_worker_measurement_reads_only_and_reads_no_catalog_but_a_bench_tenants():
+    """It runs against a database that is not a throwaway. So every session
+    is made read-only before anything else runs in it, and a tenant that is
+    not a bench tenant is refused before its catalog is read."""
+    from uuid import uuid4
+
+    from sqlalchemy import text
+
+    matching, catalog, _ = _bench_catalog_and_lines(300, 3)
+
+    class Matching:
+        loaded = 0
+
+        @classmethod
+        def load_catalog(cls, session, tenant_id):
+            cls.loaded += 1
+            return catalog
+
+    session = _WorkerSession(gen.tenant_name(1, 300))
+    read, seconds = worker.read_catalog(_WorkerDb(session), Matching, text, uuid4())
+    assert session.statements[0] == "SET TRANSACTION READ ONLY"
+    assert read is catalog and seconds >= 0 and Matching.loaded == 1
+
+    other = _WorkerSession("Acme Test Distributor")
+    with pytest.raises(worker.Refused):
+        worker.read_catalog(_WorkerDb(other), Matching, text, uuid4())
+    assert Matching.loaded == 1  # refused before the catalog was read
+    assert other.statements[0] == "SET TRANSACTION READ ONLY"
+
+    source = (BENCH / "worker_matching.py").read_text(encoding="utf-8")
+    for write in ("INSERT", "UPDATE ", "DELETE", "COPY ", "CREATE ", "DROP "):
+        assert write not in source
+
+
+def test_the_worker_measurement_writes_its_lines_from_the_same_items_on_every_run():
+    """Whatever order the database returns the catalog in."""
+    _, catalog, _ = _bench_catalog_and_lines(600, 3)
+    first = worker.sample(catalog.items, 9)
+    assert first == worker.sample(list(reversed(catalog.items)), 9)
+    assert [len(first[family]) for family in variants.FAMILIES] == [9, 9]
+    assert all(row[1].startswith(variants.GENERAL_PREFIX) for row in first["general"])
+    assert not any(row[1].startswith(variants.GENERAL_PREFIX) for row in first["fastener"])
+
+
+def test_the_worker_measurement_times_the_products_path_and_counts_a_difference(monkeypatch):
+    matching, catalog, _ = _bench_catalog_and_lines(600, 3)
+    lines = variants.bench_lines(worker.sample(catalog.items, 6)["fastener"], 7)
+    assert len(worker.time_lines(matching, catalog, lines)) == 6
+    differ, seconds = worker.parity(matching, catalog, lines[:2])
+    assert differ == 0 and len(seconds) == 2
+    monkeypatch.setattr(matching, "score_candidates", lambda sku, description, catalog: [])
+    assert worker.parity(matching, catalog, lines[:2])[0] == 2
+
+
+def test_the_worker_measurement_holds_the_designs_marks_and_prints_no_catalog_data():
+    assert (worker.LINE_MARK_MS, worker.ORDER_MARK_SECONDS, worker.ORDER_LINES) == (100.0, 4.0, 40)
+    assert worker.verdict(61.0, 100.0, "ms") == "within the 100 ms mark"
+    assert worker.verdict(6.24, 4.0, "s") == "OVER the 4 s mark"
+    assert "MiB" in worker.memory() or "not read" in worker.memory()
+    # Counts, timings and sizes only (Section 7.10); and never the connection string.
+    source = (BENCH / "worker_matching.py").read_text(encoding="utf-8")
+    assert "DATABASE_URL" not in source and "login_url" not in source
+    printed = [line for line in source.splitlines() if "print(" in line or line.strip().startswith('f"')]
+    assert not any(word in line for line in printed for word in (".sku", ".description", "line.sku"))
 
 
 def test_the_scan_measurement_refuses_any_database_not_on_this_machine(capsys):
