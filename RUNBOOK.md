@@ -2115,6 +2115,16 @@ and 14):**
   timeouts: the catalog commit of 2026-10-13 ran 4 min 14 s through it,
   and whether the edge would have cut it is not established (D-202 item
   14 has the sources).
+- **A Stripe test customer created through a local API lives in the
+  sandbox of the local `.env`'s `sk_test_` key.** A sandbox is an account
+  of its own, and the Stripe dashboard opens whichever one the browser
+  last used, so the customer may not be in the default view (the bench
+  tenant's customer, 2026-10-13; D-202 item 18). To find one, don't search
+  the sandboxes by hand: read the key's account id first, read-only
+  (`GET /v1/account`, its `id`, `acct_...`), and open that sandbox.
+  `GET /v1/customers/<id>` with the same key then shows the customer, or
+  `deleted: true` once it is deleted. The key's prefix is checked first
+  (`sk_test_`), and the key is never printed.
 
 **If something goes wrong.** Any step fails: stop the worker and report.
 Documents already received stay as they are; nothing is deleted. Going back

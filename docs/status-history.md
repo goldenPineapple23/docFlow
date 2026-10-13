@@ -4,6 +4,37 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-13 (PR A merged as PR #62; the bench tenant removed from staging; D-202 items 16 to 18)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-13, after the staging measurement:** Phase 5.5, **Stage 4** (matching
+performance). **PR A is built, measured and not merged** (PR #62, branch `phase55/stage4-fast-scan`;
+D-202): the fuzzy step in `matching.py` scores the whole catalog in one call a field and runs the
+per-item code on the best 100 by each; the loop as it was is kept as the definition, and 21 parity
+tests hold the two to the same result. **Its merge gate (founder, 2026-10-13): a 50,000-item tenant
+measured on staging through the product, plus the green 250,000-item CI bench run.** Both are done.
+The CI bench run (38424636633): no difference from the full scan on 100 lines, 36.5 ms a line at
+p50. On staging: 50,000 items imported through the Console, then on the Fly worker 12.3 ms a line at
+p50 and 14.8 ms at p95 (the mark is 100 ms), a 40-line order in 1.7 s (the mark is 4 s), no
+difference on 30 lines; then one real 40-line PO reached `needs_review` with its lines matched in
+3.4 s, for $0.0694. **Merging is the founder's.** The gate had been a 250,000-item tenant on
+staging: **the product cannot import more than 50,000 items** (the parse service's row cap, D-108),
+which the measurement found; a direct load was declined, and the 250,000 measurement on the Fly
+worker moves to the cap's own PR. **Three findings are not fixed, each for its own PR, timed at the
+Stage 4 checkpoint:** IMP-003's wording, which would retire items (a pilot blocker); the 50,000-row
+cap (a candidate); and the catalog commit, which held one request for 4 min 14 s (a pilot blocker,
+pending a test through a public address). A known limit stands: a 40-line order on a 250,000-item
+catalog took 4.86 s on a CI runner, against the 4 s mark, until the catalog is kept between
+documents (PR B, not now). **Staging holds the bench tenant** `Acme Test Bench 01 (50000 items)`
+(about 30 MB; the dashboard read 78 of 500 MB) until PR A merges; the founder then removes it with
+the Console's delete. **Nothing of PR 1 is built;** PR 1 (the broad-`except` audit) follows on top
+of PR A, then the Stripe test's fix and the database retry as their own small PRs. After Stage 4:
+Stage 5, demo readiness with D-195's model work, the Phase 6 pilot-blocker subset, then pilots with
+two or three customers ("The plan after the Stage 3 "go"", below). If Stage 4 is not merged by
+2026-11-02, D-195's two changes go next, before Stage 5. The Fly worker and beat are at 0 with PR
+A's image as the release (v10; if PR A does not merge, `main`'s image is deployed again before
+staging is used for anything else), and the Healthchecks.io check is paused.
+
 ## Replaced on 2026-10-13 (after the staging measurement at 50,000 items; PR A's merge gate changed; D-202 items 13 to 15)
 
 <!-- the paragraph as it stood, starting on the next line -->
