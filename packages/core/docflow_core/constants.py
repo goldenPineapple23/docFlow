@@ -237,6 +237,12 @@ HEARTBEAT_PING_TIMEOUT_SECONDS = 5
 # the sweep's could never fire (a test pins it).
 DISPATCH_UNCLAIMED_ALERT_MIN = 20
 
+# Stage 4, PR 1a (founder, 2026-10-13; D-203): an alert raised once per state
+# stays quiet after it is acknowledged. The Console lists an acknowledged
+# alert under "Acknowledged, still happening" while its state keeps hitting
+# documents, and drops it once this many days pass with no new one.
+ALERT_STILL_HAPPENING_DAYS = 7
+
 
 def constants_in_effect(*names: str) -> dict[str, Any]:
     """The named constants' current values, for a lifecycle event's

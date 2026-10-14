@@ -653,6 +653,30 @@ every transaction read-only, refuses any tenant whose name does not start
 the worker's image and nothing runs it by itself. **Running it is a step on
 staging: the founder is asked first.**
 
+### 1.9 Migration 0037: the alert's state key (Stage 4, PR 1a; D-203)
+
+`supabase/migrations/0037_alert_state_key.sql` adds two nullable columns
+and their indexes: `founder_alerts.state_key` (unique over every row,
+acknowledged or not) and `documents.fault_keys`. It changes no existing
+row, policy or grant.
+
+- **The order is the migration first, then the code.** The code that comes
+  with it names `state_key` in every alert it writes, so on a database
+  without the column no alert can be raised. Code from before `0037` is
+  unaffected by it. So: apply `0037`, then deploy.
+- **Staging: no backup (founder, 2026-10-13).** Additive columns, no row
+  changes and a reverse that CI tests. Run the file in the SQL Editor, then
+  check that both columns and both indexes are there.
+- **Production follows the standard backup rule regardless (founder,
+  2026-10-13):** 1.1 for `founder_alerts` and `documents`, the row counts
+  of 1.2, then the migration.
+- **Going back** is `supabase/reverse/0037_reverse.sql`, run only with the
+  code from before `0037` deployed. It removes the two columns and the two
+  indexes and no row. What is lost is the keys: an alert already raised can
+  then be raised again by the same state, and the Console's count of
+  affected documents reads nothing. CI runs forward, reverse, forward on
+  every push (`scripts/ci/migration_0037_roundtrip.py`).
+
 ---
 
 ## 2. Inbound email (Postmark)
@@ -1803,6 +1827,32 @@ The Console's health strip shows the same heartbeat, red past
   --app docflow-worker-staging` for `run_workers: ... exited; stopping the
   other` and the line before it (a memory kill, a database or broker
   error). A deploy is one start; a deploy and one crash is two.
+- **An alert with `exception_type` and `location` in its payload** (Stage
+  4, PR 1a; D-203): a step of ours failed. It is one of
+  `pipeline_step_failed` (buyer identification, matching or duplicate
+  detection: the document is in review with VAL-016), `document_failed`
+  with DOC-021 (saving or validation: the document failed), or
+  `cost_record_lost` (a model call's run row could not be written; `step`
+  says `started`, the row before the call, or `outcome`).
+  - **`location` is `module:function:line` in our own code, and `release`
+    the image it ran in.** The exception's message is never in the alert or
+    the log. The log line of the same moment carries the same type and
+    location with the document's id: search `fly logs` for the id in
+    `first_document_id`.
+  - **It is raised once for that state**, for that tenant: the same
+    exception type at the same place in the same release raises nothing
+    again, **acknowledged or not**. A new release, another tenant, another
+    step or another exception type is a new alert.
+  - **A dropped database connection** (`OperationalError`,
+    `InterfaceError`) is raised once a UTC day instead, until the database
+    retry exists.
+  - **"Affected documents: N"** on the alert counts the documents that
+    state has hit, read from the documents themselves.
+  - **After you acknowledge it, look at "Acknowledged, still happening"**
+    on the Console's home page. An alert is listed there while its state
+    keeps hitting documents, with the count since you acknowledged it, and
+    leaves the list after `ALERT_STILL_HAPPENING_DAYS` (7) with no new one.
+    Nothing is e-mailed for a repeat.
 - **Healthchecks.io: "docflow-worker-... is DOWN"** (e-mail, not a DocFlow
   alert; 9.4): no ping for period + grace. The worker is down, crash-looping,
   or can't reach the database. `fly status --app docflow-worker-staging`,
@@ -1831,6 +1881,7 @@ The Console's health strip shows the same heartbeat, red past
 | `HEARTBEAT_PING_MIN` | 5 | At most one heartbeat ping this often (3e) |
 | `HEARTBEAT_PING_TIMEOUT_SECONDS` | 5 | A ping's own time limit; a failed ping never fails a pass |
 | `DISPATCH_UNCLAIMED_ALERT_MIN` | 20 | Dispatched and unclaimed this long sends `/fail` (Q2; founder Q9: 20, above every non-document task's hard limit and below `STUCK_PROCESSING_TIMEOUT_MIN` (30), both pinned by a test) |
+| `ALERT_STILL_HAPPENING_DAYS` | 7 | An acknowledged alert stays under "Acknowledged, still happening" until this many days pass with no new document hit by its state (D-203) |
 
 ### 9.7 The first worker deploy on staging: the procedure (founder, 2026-10-05; D-193)
 

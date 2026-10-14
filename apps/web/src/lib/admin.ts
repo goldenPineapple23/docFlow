@@ -154,6 +154,16 @@ export type FounderAlert = {
   tenant_name: string | null;
   payload: Record<string, unknown>;
   created_at: string;
+  acknowledged_at?: string | null;
+  /**
+   * The documents this alert's state has hit (D-203). Present only for an
+   * alert raised once per state; null for every other alert.
+   */
+  affected_documents?: {
+    total: number;
+    since_acknowledged: number;
+    latest_at: string | null;
+  } | null;
 };
 
 export type OutboxEmail = {
@@ -253,7 +263,12 @@ export const getTenantOverview = (id: string) =>
 export const sendInvite = (id: string) =>
   request<{ email_outbox_id: string; held: boolean }>(`/admin/tenants/${id}/invite`, { method: "POST" });
 
-export const listAlerts = () => request<{ alerts: FounderAlert[] }>("/admin/alerts");
+/**
+ * The attention panel's two lists: the open alerts, and the acknowledged
+ * ones whose state is still hitting documents (D-203).
+ */
+export const listAlerts = () =>
+  request<{ alerts: FounderAlert[]; still_happening?: FounderAlert[] }>("/admin/alerts");
 export const acknowledgeAlert = (id: string) =>
   request<{ acknowledged: boolean }>(`/admin/alerts/${id}/acknowledge`, { method: "POST" });
 

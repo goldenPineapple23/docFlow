@@ -170,7 +170,11 @@ def parse_postmark_payload(payload: dict) -> ParsedEmail:
         content_b64 = entry.get("Content") or ""
         try:
             content = base64.b64decode(content_b64, validate=True)
-        except Exception as exc:
+        except (ValueError, TypeError) as exc:
+            # What b64decode raises on the provider's content: binascii.Error
+            # (a ValueError) for text that isn't base64, TypeError for a value
+            # that isn't text at all. Anything else is ours and is not called
+            # a malformed payload (Stage 4, PR 1a; D-203).
             raise MalformedPayloadError(f"Attachment {name!r} has invalid base64 content.") from exc
         attachments.append(
             ParsedAttachment(filename=name, content=content, content_type=str(entry.get("ContentType") or ""))

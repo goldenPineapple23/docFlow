@@ -3785,3 +3785,121 @@ Neither change starts before the founder's "go".
 **Not changed:** any pass mark, limit or threshold; any migration. **Changed, by the founder:** PR A's merge gate (item 14). On staging: what items 13 and 18 list, each step on the founder's go.
 
 **Related:** Sections 0 (rules 3 and 7), 7.5, 7.6, 7.10, 7.14; D-066, D-152, D-170, D-176, D-180, D-196, D-199, D-201; RUNBOOK 1.4, 1.6, 1.8, 9.7; PR #61; BUILD-STATUS "Stage 4 detailed design" (A1, A3, A4); `packages/core/docflow_core/matching.py`, `packages/core/tests/test_matching_fast_scan.py`, `scripts/bench/full_scan.py`, `scripts/bench/index_variants.py`, `scripts/bench/worker_matching.py`, `apps/api/tests/test_stripe_webhook_api.py`.
+
+## D-203 — PR 1 is split in two; PR 1a: the guard, an alert raised once per state, migration `0037` (founder, 2026-10-13)
+
+**Context:** PR A is on `main` (PR #62) and the bench tenant is removed (PR #63; `main` is `d9b7e8f`). PR 1 is next: the audit of the broad `except` blocks, designed in BUILD-STATUS "Stage 4 detailed design", part B, final at `444dc78`. Before any code the founder asked for its size, the broad `except` blocks outside the audit's 34, a dedupe rule for the new alert that does not repeat the re-raised-alert defect (D-198), and what the findings of 2026-10-13 change in the design. This entry records the answers, the founder's decisions of 2026-10-13, and PR 1a as built on branch `phase55/stage4-pr1a-except-audit`, from `main` at `d9b7e8f`. All times are UTC. **It is not merged. Migration `0037` is on staging, applied by the founder and verified on 2026-10-14 (item 13).**
+
+**1. PR 1 is split: PR 1a, then PR 1b (founder).**
+- **PR 1a, worker and core.** Kind 3's alert detail (the exception's type and our code location), the alert raised once per state (item 5), the alert for a cost record that could not be written (Q11), the check of the kind 4 blocks, the guard test (item 3), two request blocks narrowed (item 4), migration `0037` (item 6), the Console's count (item 7). It changes nothing in `apps/parse` and not the worker's `parse_client`, so RUNBOOK 8.1's Fly gate does not apply to it.
+- **PR 1b, the parse service.** Kind 1 with DOC-030 and a new job outcome, `error` (the outcomes today are `ok`, `rejected`, `stopped` and `crashed`, so the new one crosses the parse job, the launcher, `parse_client` and the worker); `RtfParseError`; the mutation corpus; kind 2 with VAL-017 and VAL-018; the RUNBOOK step for a DOC-030; the Fly gate.
+- **`file_types.py`'s block is in 1b, not 1a.** Once it catches only what a zip member's read raises, an unexpected exception there needs DOC-030.
+- **Why split:** the parts whose size is not known (the corpus, the new outcome across two services, the Fly gate) are all in 1b.
+
+**2. The census on `d9b7e8f`, and D-200's "nine".** D-200 item 5 named nine files holding broad `except` blocks outside the audit's 34 and listed none. **The number could not be reproduced.** Counted on `d9b7e8f` by syntax tree (a handler that catches `Exception`, `BaseException` or everything; tests and virtual environments left out): **87 blocks in 29 files. The 34 are unchanged, in the same nine files with the same counts. Outside them: 53 blocks in 20 files.** A star marks a block whose body ends in a bare `raise`.
+- **The 34** (line numbers have moved since `444dc78`):
+  - `apps/parse/parse_service/job.py`: 73
+  - `apps/parse/parse_service/parsing/conversion.py`: 152, 243, 278, 285, 491, 556, 570, 584
+  - `apps/parse/parse_service/parsing/documents.py`: 285, 313
+  - `apps/parse/parse_service/parsing/tables.py`: 156
+  - `apps/worker/app/tasks/parse_and_extract.py`: 158, 189, 216, 287, 364, 482, 574, 772, 927, 946, 962, 1011, 1026
+  - `packages/core/docflow_core/email_intake.py`: 173, 428
+  - `packages/core/docflow_core/extraction.py`: 335, 347, 366
+  - `packages/core/docflow_core/file_types.py`: 473
+  - `packages/core/docflow_core/model_provider.py`: 134, 173, 200
+- **Outside the 34, on the document path:**
+  - `apps/api/app/routers/email_intake.py`: 101 (the webhook's JSON body)
+  - `apps/parse/parse_service/sandbox_init.py`: 181, 204, 305 (isolation failed: the file is never read)
+  - `apps/worker/app/timeouts.py`: 42 (a timeout that could not be recorded)
+  - `packages/core/docflow_core/dispatch.py`: 193, 203, 277
+  - `packages/core/docflow_core/stuck_documents.py`: 301
+  - `packages/core/docflow_core/founder_alerts.py`: 290, 327, 381, 412, 430, 458, 508, 523, 536 (an alert that could not be raised)
+  - `packages/core/docflow_core/db.py`: 315*, 341*, 371*, 396*, 421*, 444*, 469*, 494*, 517*, 544*, 567*, 592* (roll back, then re-raise)
+  - `packages/core/docflow_core/exports.py`: 665 (after review: a file that cannot be read back fails EXP-004)
+- **Outside the 34, off the document path:**
+  - `apps/api/app/deps.py`: 172
+  - `apps/api/app/main.py`: 73, 133, 239, 246
+  - `apps/api/app/routers/admin.py`: 85, 1481, 1490
+  - `apps/worker/app/celery_app.py`: 189
+  - `apps/worker/app/run_workers.py`: 132
+  - `packages/core/docflow_core/admin_data_access.py`: 615*, 626, 898*, 910
+  - `packages/core/docflow_core/heartbeat.py`: 104, 114
+  - `packages/core/docflow_core/metrics.py`: 377*
+  - `packages/core/docflow_core/scheduled_jobs.py`: 107
+  - `packages/core/docflow_core/worker_starts.py`: 76
+  - `scripts/ci/create_logins.py`: 35
+  - `scripts/seed_live_e2e.py`: 158, 277*
+
+**3. The guard test covers everything in `apps/` and `packages/` (founder).** `scripts/` is out. A block whose body ends in a bare `raise` is exempt by that rule, not by a list. Every other broad `except` is listed with its kind and one line saying why broad is right there (`packages/core/tests/test_broad_except_guard.py`). The test fails when one is added without an entry, and when an entry points at nothing. Entries are keyed by file, function and the handler's ordinal in that function, not by line number.
+- **On `d9b7e8f`:** 84 blocks in 27 files, 15 exempt, 69 to list.
+- **As built in PR 1a:** 84 blocks, 16 exempt, 68 listed. Two are narrowed and gone (item 4); two are new: the started-row hook, which ends in a bare `raise`, and the helper that raises the cost-record alert.
+- **The kinds are the audit's five.** The two that the audit changes (any failure blamed on the input; content dropped with no record) are left only in the parse service and in `file_types.py`'s zip scan, which PR 1b changes; a test holds that.
+
+**4. Two request blocks are narrowed in 1a (founder), and what the provider does.** The webhook's JSON block (`routers/email_intake.py`) and the attachment's base64 block (`docflow_core/email_intake.py`, one of the 34) catch only what reading the sender's content raises: `ValueError` (a body that is not JSON or not UTF-8; text that is not base64), `TypeError` (attachment content that is not text) and, for the body, a sender that went away mid-request. Anything else is ours: it is logged as an unhandled error with its code location and answered 500.
+- **Postmark retries a 400 as it retries a 500** (its inbound webhook page, "Errors and retries", read 2026-10-13: https://postmarkapp.com/developer/webhooks/inbound-webhook). Any response other than 200 is retried: "A total of 10 retries will be made, with growing intervals" (1 min, 5 min, 10 min three times, 15 min, 30 min, 1 h, 2 h, 6 h; about 10 h 21 min in all). "If we receive a 403 response, we will stop retries." After the last retry the message is listed as Inbound Error and can be retried by hand. The page does not mention 400.
+- **So a 400 was never dropped, and the reason for narrowing is the record, not the retry:** a 400 "malformed" names our own failure as the provider's bad request.
+- **Found with it, and not built here (founder): a PO that fails on our side raises no alert.** It is answered 500, Postmark retries for about ten hours and then lists it as Inbound Error, and nothing tells the founder, so an order can be lost unseen. **A pilot blocker,** in BUILD-STATUS's Phase 6 pilot-blocker subset.
+
+**5. The new alert is raised once per state (founder), with the tenant in the key.**
+- **The defect it must not repeat** (D-198): the only dedupe was a unique index on `dedupe_key` over unacknowledged rows (`idx_founder_alerts_open_dedupe`), so acknowledging an alert let the next occurrence raise it again. The design's hourly window (decision 10) has the same hole, and also raises again every hour while the first alert is still open. **The hourly window is replaced.**
+- **The state key** (`docflow_core.faults.state_key`): the alert's type, the tenant, the step, the exception's type, our code location (module, function and line of the innermost frame in our own code; never the message) and the release (the tag of `FLY_IMAGE_REF`; `unversioned` off Fly). It is unique over all rows, acknowledged or not. A repeat fails the insert and raises nothing, as the open-row index does.
+- **An acknowledged alert stays quiet** because its row still holds the key. Nothing reads the acknowledgement.
+- **It is raised again only when the state changes:** a different exception type or code location, a new release (a bug that recurs after a deploy is news), another step, or another tenant.
+- **Connection errors also carry the UTC date in their key (founder).** `OperationalError` and `InterfaceError` are not a standing state of our code, so a second outage in the same release must be raised again. The date is the database's. This lasts until `0038` gives them wait-and-retry (Q14).
+- **Where it applies in 1a.**
+  - The three steps that end in VAL-016 (buyer identification, matching, duplicate detection): `pipeline_step_failed`, one alert for each failed step, once per state. It was one alert for each document.
+  - Saving and validation, which end in DOC-021: `document_failed`, once per state. It was one per tenant, code and day.
+  - A cost record that could not be written: a new type, `cost_record_lost` (Q11). **It covers the run row written before the model call as well as the one with its outcome (founder).**
+  - The document's outcome is unchanged in all five blocks.
+- **Every other alert type keeps its rule;** the Phase 6 item stands for them. In PR 1b the same key serves DOC-030's alert.
+
+**6. Migration `0037` is in PR 1a (founder).** `supabase/migrations/0037_alert_state_key.sql`: a nullable `founder_alerts.state_key` with a unique index over all rows, and a nullable `documents.fault_keys` (`text[]`) with a partial index (item 7). It changes no existing row, policy or grant.
+- **Why a migration at all:** a tenant session may insert an alert and never read one (`tenant_raise`, `0011`), so only the database can refuse the duplicate. PR 1 is therefore no longer migration-free. The reason the design gave for that (not waiting for `docflow_app`'s drop) ended on 2026-10-09.
+- **The reverse** (`supabase/reverse/0037_reverse.sql`) drops the two indexes and the two columns. It loses the keys and nothing else: no alert and no document row. After it an alert already raised could be raised again, and the Console's count reads nothing.
+- **The CI round trip** (`scripts/ci/migration_0037_roundtrip.py`, the core job, after `0036`'s): forward, reverse, forward. After the reverse the four objects are gone and every other column and index of the two tables is as it was; after forward again the state equals the first; the policies and the function grants are the same at all three.
+- **The order is the migration first, then the code:** the code's alert insert names `state_key`. Code from before `0037` is unaffected by two nullable columns.
+- **Backup waived on staging (founder):** additive columns, no row changes, a tested reverse, as decided for the old `0037`. **A migration on production follows the standard backup rule regardless** (RUNBOOK 1.1).
+- **Q14's constraint change becomes `0038`,** still with the `document_lines` index finding (D-202 item 12) and possibly the duplicate SKU index.
+
+**7. How an acknowledged alert's state stays visible (founder): the exact count.**
+- **On the document.** The worker writes the alert's state key on every document the state hits (`documents.fault_keys`), in the transaction that records the document's outcome and in the document's own tenant session. A second document hit by the same state raises no alert and carries the same key.
+- **On the alert, nothing changes after its insert.** `tenant_raise` stays insert-only; no tenant session reads an alert.
+- **In the Console,** which reads as the platform admin (`GET /admin/alerts`, one request, one admin action):
+  - each alert raised once per state shows "Affected documents: N, latest at T", counted from the documents that carry its key;
+  - a second list, **"Acknowledged, still happening"**: acknowledged alerts whose key has hit a document since the acknowledgement, with that count. One leaves the list when `ALERT_STILL_HAPPENING_DAYS` (7) pass with no new document, by the database's clock.
+- **No e-mail and no new alert row for a repeat:** either would be the defect again.
+
+**8. The sixteen log calls that printed an exception's message (founder).** Nine in `founder_alerts.py`, two in `parse_and_extract.py`, three in `model_provider.py` and two in `dispatch.py` used `logger.exception`, which prints the message with the traceback; a database error's message carries the statement's bound values. All sixteen now log through `faults.for_log`.
+- **The format:** the event and its ids as before, then `error_type=<type> location=<module>:<function>:<line>`, a newline, and the traceback's frames as Python prints them (file, line, function, and that line of source). No message, no chained exception, no local values.
+- **A frame's source line is our code, not data:** it shows `raise ValueError(f"po_number {value}")` and never what `value` held.
+- **Tests:** a database error whose text carries a bound value gives a log text without it; and no product code in `apps/` or `packages/` calls `logger.exception` or passes `exc_info` (the second added by the founder, 2026-10-14, in the same test; none did).
+- **The five kind 3 log lines too (founder, 2026-10-14).** Saving, buyer identification, matching, duplicate detection and validation logged the type and our location but not the frames. They now log through `faults.for_log` like the sixteen. Test: for each of the five, the line carries the frames down to the function that raised, and neither the message as raised nor the value in it.
+
+**9. Decided for later (founder).**
+- **An import that hits our bug** gets its wording in PR 1b: a new IMP code saying that it is our problem, that we have been alerted, and that the file need not be changed.
+- **The three pilot-blocker PRs** (IMP-003's wording, the 50,000-row cap, the long commit) stay out of Stage 4. Their timing is a checkpoint decision.
+
+**10. What no longer holds in the design at `444dc78`.** Decision 10's hourly dedupe (item 5). "PR 1 is migration-free" (item 6). One PR (item 1). The line numbers of the 34 (item 2). Not covered by the design: what an import shows when the parse job answers `error` (item 9).
+
+**11. PR 1a as built.**
+- **New product files:** `packages/core/docflow_core/faults.py`; the migration and its reverse; `scripts/ci/migration_0037_roundtrip.py`.
+- **Changed:** `founder_alerts.py` (the state key, `raise_fault_alert`, `cost_record_lost`), `parse_and_extract.py` (the five kind 3 blocks, the two run rows, the keys on the document), `extraction.py`, `email_intake.py` and the webhook's router (item 4), `admin_data_access.py`, the alerts route and the Console's home page (item 7), `constants.py`, `model_provider.py` and `dispatch.py` (item 8), `ci.yml` and `check_skips.py` (the round trip's step).
+- **The kind 4 blocks, checked:** each of the sixteen logs the exception's type; none is changed in what it does. The one that lost data (a run row not recorded) now raises its alert.
+- **New tests, 99:** core 61 (`test_faults.py` 25, `test_broad_except_guard.py` 19, `test_migration_0037.py` 16, one in `test_ci_guards.py`), worker 16 (`test_pipeline_faults_db.py`, five of them the kind 3 log lines of item 8), API 20 (`test_alert_state_key.py` 11, `test_email_intake_narrowing.py` 9), web 2 (`dashboard.spec.ts`). CI should read core 958, api 662, worker 214 and web 75.
+- **A database fact the build ran into:** this project's driver sends a Python list as `jsonb`, so a `text[]` column is never given a list. The key is appended in SQL from one text value (`array_append`), and the Console's count compares in SQL.
+
+**12. Size and the date.** PR 1a: about 4 working days with the migration and the Console's count in it; no Fly gate; `0037` applied on staging before the staging suites run from the branch. PR 1b: 3 to 4 days. Then the Stripe test's fix, `0038` and the Stage 4 checkpoint, ending around 2026-10-29 to 2026-10-30, against 2026-11-02 (D-199).
+
+**13. `0037` on staging and the staging suites (2026-10-14).**
+- **Applied by the founder** in the SQL Editor on `docflow-staging`, the four statements as one block: "Success. No rows returned". Backup waived for staging (item 6). Verified read-only at 15:59Z as `docflow_admin`: `state_key` is `text`, nullable; `fault_keys` is `text[]`, nullable; `idx_founder_alerts_state_key` is a unique btree with no predicate; `idx_documents_fault_keys` is gin with `WHERE (fault_keys IS NOT NULL)`; both valid. No row carried a key.
+- **The suites, from the working tree on `d9b7e8f`, with the four logins of the root `.env`, the worker app at no machines:** core `957 passed, 1 skipped in 92.08s (0:01:32)`; worker `207 passed, 7 skipped in 1663.90s (0:27:43)`, its own check `before 0, after 0`; API `1 failed, 660 passed, 1 skipped, 3 deselected, 675 warnings in 2358.81s (0:39:18)`, the leftover line `+0` on all six. Every count is the last recorded one plus this PR's new tests; the skips are the ones recorded.
+- **The one failure was the test's, not the product's.** `test_the_console_counts_the_documents_that_carry_the_alerts_key` read `assert 1 == 2`: the test's `_raise` always passed `step="matching"`, so both alerts said "matching", and the test's lookup by that field kept the second. The Console's count was right for both. Fixed in the test only (founder): each alert is found by its `state_key`, the tenant must have exactly two, each must name its own step, and both counts are asserted. Run once with the old helper, it failed on the step assertion (`assert 'matching' == 'duplicate_detection'`); with the helper fixed, the file alone against staging read `11 passed, 20 warnings in 50.59s`, the leftover line `+0` on all six. The full API suite was not run again (founder): one test file changed, and CI runs the whole suite.
+- **The 18 new warnings** (675 against 657 at `9426bd0`) are all from `test_alert_state_key.py`: the 23-byte test JWT key's `InsecureKeyLengthWarning`, 9 at encode and 9 at decode, a kind already counted. Not fixed (Stage 5).
+- **Known, not fixed (founder, 2026-10-14):**
+  - **A step and validation failing on one document.** The step's state key and its `pipeline_step_failed` alert are written in the validation transaction, so when validation fails too they roll back with it: the document ends `failed` with DOC-021, and only the DOC-021 alert remains, as before this PR. The step's own log line is written before that transaction and stays.
+  - **A deploy raises every live state again,** once per affected tenant: the release is part of the state key (item 5). By design.
+  - **Acknowledged keyed alerts are never deleted,** so the "Acknowledged, still happening" query reads more of them as they accumulate. Fine at today's scale.
+
+**Not changed:** any catalog wording (DOC-030, VAL-017 and VAL-018 are final as written); any threshold; what a document's outcome is in the five kind 3 blocks (DOC-021 or VAL-016, as before); every alert type but the three item 5 names. **Changed, by the founder:** PR 1 into two PRs; the guard's coverage; the alert's dedupe rule; PR 1's migration.
+
+**Related:** Sections 0 (rules 3 and 7), 7.9, 7.10, 7.15.1, 7.15.3; D-104, D-145, D-163, D-170, D-171, D-198, D-199, D-200, D-202; RUNBOOK 1.1, 1.9, 8.1, 9.5, 9.6; BUILD-STATUS "Stage 4 detailed design" (B; decisions 10, 11 and 14); `packages/core/docflow_core/faults.py`, `packages/core/docflow_core/founder_alerts.py`, `apps/worker/app/tasks/parse_and_extract.py`, `supabase/migrations/0037_alert_state_key.sql`, `supabase/migrations/0011_console_foundations.sql`.

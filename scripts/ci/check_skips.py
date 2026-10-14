@@ -134,6 +134,7 @@ STEP_NAMES = {
     "deps": "pip install -r requirements.lock.txt",
     "core": "pip install packages/core",
     "roundtrip": "Migration 0036 forward -> reverse -> forward",
+    "roundtrip_0037": "Migration 0037 forward -> reverse -> forward",
     "app_role": "Turn on the four logins",
     "libreoffice": "Install LibreOffice",
     "ruff": "ruff check",

@@ -33,6 +33,7 @@ from docflow_core import (
     dispatch,
     document_status,
     example_prompting,
+    faults,
     field_schema,
     file_types,
     founder_alerts,
@@ -239,11 +240,19 @@ class _StartedRuns:
         self.extraction: UUID | None = None
 
     def __call__(self, run_kind: str, model_id: str, counted: int | None) -> None:
-        with tenant_session(self.tenant_id) as session:
-            run_id = model_runs.record_started(
-                session, self.tenant_id, self.document_id, run_kind=run_kind, model_id=model_id,
-                counted_input_tokens=counted,
-            )
+        try:
+            with tenant_session(self.tenant_id) as session:
+                run_id = model_runs.record_started(
+                    session, self.tenant_id, self.document_id, run_kind=run_kind, model_id=model_id,
+                    counted_input_tokens=counted,
+                )
+        except Exception as exc:
+            # The call goes ahead without its started row (extraction's
+            # `_announce` logs this and carries on). If the worker is killed
+            # mid-call, that call's cost is on no record: the founder is told
+            # now (Q11; D-203).
+            _alert_lost_cost_record(self.tenant_id, self.document_id, faults.describe(exc), which="started")
+            raise
         if run_kind == "extraction":
             self.extraction = run_id
 
@@ -285,8 +294,44 @@ def _record_unsaved_extraction(
         with tenant_session(tenant_id) as session:
             _record_runs(session, tenant_id, document_id, plan, result, started_run_id)
     except Exception as exc:  # noqa: BLE001 -- see the docstring
+        fault = faults.describe(exc)
         logger.error(
-            "extraction_run_not_recorded document_id=%s error_type=%s", document_id, type(exc).__name__
+            "extraction_run_not_recorded document_id=%s error_type=%s location=%s",
+            document_id,
+            fault.exception_type,
+            fault.location,
+        )
+        # A paid call that is on no cost record is a data loss (Section 7.9),
+        # so the founder is told (Q11; D-203).
+        _alert_lost_cost_record(tenant_id, document_id, fault, which="outcome")
+
+
+def _alert_lost_cost_record(tenant_id: UUID, document_id: UUID, fault: faults.Fault, *, which: str) -> None:
+    """The founder alert for a run row that could not be written: the row
+    before the call (`started`) or the one with its outcome (`outcome`).
+    Raised once per state, and the document carries the state's key. Its own
+    transaction; never raises: the document must still reach its outcome."""
+    try:
+        with tenant_session(tenant_id) as session:
+            key = faults.state_key(
+                session, alert_type="cost_record_lost", tenant_id=tenant_id, step=which, fault=fault
+            )
+            faults.note_on_document(session, document_id, key)
+            founder_alerts.raise_fault_alert(
+                session,
+                alert_type="cost_record_lost",
+                severity="high",
+                tenant_id=tenant_id,
+                document_id=document_id,
+                step=which,
+                fault=fault,
+                state_key=key,
+            )
+    except Exception as exc:  # noqa: BLE001 -- logged; the document goes on
+        logger.error(
+            "founder_alert_not_raised document_id=%s alert=cost_record_lost %s",
+            document_id,
+            faults.for_log(exc),
         )
 
 
@@ -308,19 +353,34 @@ def _mark_failed(tenant_id: UUID, document_id: UUID, *, raw_response: dict | Non
 
 
 def _fail_after_extraction(
-    tenant_id: UUID, document_id: UUID, code: str, *, raw_response: dict | None = None
+    tenant_id: UUID,
+    document_id: UUID,
+    code: str,
+    *,
+    step: str,
+    fault: faults.Fault,
+    raw_response: dict | None = None,
 ) -> None:
     """A failure after the model answered (saving it, or checking it: DOC-021).
     The answer already on the document stays; `raw_response` is written only
-    when saving it was what failed. Then the promised alert (D-145)."""
+    when saving it was what failed. Then the promised alert (D-145).
+
+    `step` and `fault` say which step of ours failed and where (D-203): the
+    state's key goes on the document in this transaction, and the alert is
+    raised once for that state, with the exception's type and our code
+    location."""
     values: dict = {"failure_code": code, "processed_at": document_status.NOW}
     if raw_response is not None:
         values["raw_json"] = raw_response
     with tenant_session(tenant_id) as session:
+        key = faults.state_key(
+            session, alert_type="document_failed", tenant_id=tenant_id, step=step, fault=fault
+        )
+        faults.note_on_document(session, document_id, key)
         document_status.transition(
             session, document_id, from_statuses=["processing"], to="failed", values=values
         )
-    _alert_failure(tenant_id, document_id, code)
+    _alert_failure(tenant_id, document_id, code, step=step, fault=fault, state_key=key)
 
 
 # Stage 3c: a parse job stopped at a limit (memory, CPU, wall clock, answer
@@ -361,8 +421,10 @@ def _parse_alert(tenant_id: UUID, document_id: UUID, code: str, cause: str, *, b
                 session, tenant_id=tenant_id, document_id=document_id, error_code=code, cause=cause,
                 by_cause=by_cause,
             )
-    except Exception:
-        logger.exception("founder_alert_not_raised document_id=%s error_code=%s", document_id, code)
+    except Exception as exc:
+        logger.error(
+            "founder_alert_not_raised document_id=%s error_code=%s %s", document_id, code, faults.for_log(exc)
+        )
 
 
 def _after_lost_parse(tenant_id: UUID, document_id: UUID, reason: str) -> None:
@@ -466,22 +528,37 @@ def _wait_for_provider(
     model_provider.record_failure(error)
 
 
-def _alert_failure(tenant_id: UUID, document_id: UUID, error_code: str | None) -> None:
+def _alert_failure(
+    tenant_id: UUID,
+    document_id: UUID,
+    error_code: str | None,
+    *,
+    step: str | None = None,
+    fault: faults.Fault | None = None,
+    state_key: str | None = None,
+) -> None:
     """
     Raise the founder alert a failure's catalog message promises (D-145).
 
     Its own transaction, after the document is already marked failed: an
     alert that can't be written must never roll back the record of what
     happened to the document. It is logged instead, with IDs only.
+
+    With a fault (a step of ours failed), the alert carries the exception's
+    type and our code location and is raised once per state (D-203).
     """
+    fault_detail = {} if fault is None else {"step": step, "fault": fault, "state_key": state_key}
     try:
         with tenant_session(tenant_id) as session:
             founder_alerts.raise_for_failure(
-                session, tenant_id=tenant_id, error_code=error_code, document_id=document_id
+                session, tenant_id=tenant_id, error_code=error_code, document_id=document_id, **fault_detail
             )
-    except Exception:
-        logger.exception(
-            "founder_alert_not_raised document_id=%s error_code=%s", document_id, error_code
+    except Exception as exc:
+        logger.error(
+            "founder_alert_not_raised document_id=%s error_code=%s %s",
+            document_id,
+            error_code,
+            faults.for_log(exc),
         )
 
 
@@ -772,9 +849,12 @@ def _parse_and_extract(tid: UUID, did: UUID) -> None:
     except Exception as exc:  # noqa: BLE001 -- the document must not be stranded (M3)
         # Nothing of the answer was written (one transaction). Keep the paid
         # answer on the failed document, with a code, and tell the founder.
-        logger.error("extraction_save_failed document_id=%s error_type=%s", did, type(exc).__name__)
+        fault = faults.describe(exc)
+        logger.error("extraction_save_failed document_id=%s %s", did, faults.for_log(exc))
         _record_unsaved_extraction(tid, did, plan, result, started.extraction)
-        _fail_after_extraction(tid, did, "DOC-021", raw_response=result.raw_response)
+        _fail_after_extraction(
+            tid, did, "DOC-021", step="saving", fault=fault, raw_response=result.raw_response
+        )
         return
 
     _finish(tid, did)
@@ -903,6 +983,9 @@ def _finish(tid: UUID, did: UUID) -> None:
         schema = field_schema.at_version(session, tid, field_schema_version)
 
     issues: list[str] = []
+    # Where each step that didn't finish failed: the exception's type and our
+    # code location, never its message (D-203).
+    step_faults: dict[str, faults.Fault] = {}
     # Learned rules that fired, added to `times_applied` once, in the move to
     # review below -- so a resumed document is never counted twice (Stage 3a).
     rules_applied: dict[UUID, int] = {}
@@ -927,7 +1010,8 @@ def _finish(tid: UUID, did: UUID) -> None:
     except Exception as exc:  # noqa: BLE001 -- recorded as a pipeline issue
         # No exception message: a database error's text can carry bound
         # parameters, which here are customer data (Section 7.10).
-        logger.error("buyer_identification_failed document_id=%s error_type=%s", did, type(exc).__name__)
+        step_faults["buyer_identification"] = fault = faults.describe(exc)
+        logger.error("buyer_identification_failed document_id=%s %s", did, faults.for_log(exc))
         issues.append("buyer_identification")
 
     # Matching. `buyer_id` None is not a failure: matching then uses the
@@ -944,7 +1028,8 @@ def _finish(tid: UUID, did: UUID) -> None:
             summary.lines_matched,
         )
     except Exception as exc:  # noqa: BLE001 -- recorded as a pipeline issue
-        logger.error("matching_failed document_id=%s error_type=%s", did, type(exc).__name__)
+        step_faults["matching"] = fault = faults.describe(exc)
+        logger.error("matching_failed document_id=%s %s", did, faults.for_log(exc))
         issues.append("matching")
 
     # Duplicate / change-order detection (Section 7.8). Here as well as at
@@ -960,7 +1045,8 @@ def _finish(tid: UUID, did: UUID) -> None:
             relationships.is_possible_change_order,
         )
     except Exception as exc:  # noqa: BLE001 -- recorded as a pipeline issue
-        logger.error("duplicate_detection_failed document_id=%s error_type=%s", did, type(exc).__name__)
+        step_faults["duplicate_detection"] = fault = faults.describe(exc)
+        logger.error("duplicate_detection_failed document_id=%s %s", did, faults.for_log(exc))
         issues.append("duplicate_detection")
 
     # Validation and the move into review: one transaction. Validation reports
@@ -972,6 +1058,18 @@ def _finish(tid: UUID, did: UUID) -> None:
                 text("UPDATE documents SET pipeline_issues = :issues WHERE id = :id"),
                 {"id": str(did), "issues": issues},
             )
+            # Each failed step's state key goes on the document (D-203), so
+            # the Console can count the documents a state has hit.
+            step_keys: dict[str, str] = {}
+            for step in issues:
+                step_keys[step] = faults.state_key(
+                    session,
+                    alert_type="pipeline_step_failed",
+                    tenant_id=tid,
+                    step=step,
+                    fault=step_faults[step],
+                )
+                faults.note_on_document(session, did, step_keys[step])
             checked = validate_document(session, tid, did, schema.rules())
             moved = document_status.transition(
                 session,
@@ -988,14 +1086,20 @@ def _finish(tid: UUID, did: UUID) -> None:
                 # Someone else moved it while we worked (the stuck sweep gave
                 # up on it, say). Their decision stands; undo ours.
                 raise _AlreadyMovedOn()
-            if issues:
-                founder_alerts.raise_alert(
+            # One alert per step that failed, once per state: its exception
+            # type and our code location, in this release, for this tenant.
+            # A second document hit by the same state raises nothing and
+            # carries the same key (D-203; it was one alert per document).
+            for step in issues:
+                founder_alerts.raise_fault_alert(
                     session,
                     alert_type="pipeline_step_failed",
                     severity="high",
                     tenant_id=tid,
-                    payload={"document_id": str(did), "steps": issues},
-                    dedupe_key=f"pipeline_step_failed:{did}",
+                    document_id=did,
+                    step=step,
+                    fault=step_faults[step],
+                    state_key=step_keys[step],
                 )
             # Exactly once per document: this transaction is the only one
             # that moves it to review (compare-and-set above).
@@ -1024,8 +1128,9 @@ def _finish(tid: UUID, did: UUID) -> None:
         logger.info("parse_and_extract_moved_on document_id=%s", did)
         return
     except Exception as exc:  # noqa: BLE001 -- never silent: failed + DOC-021 + alert
-        logger.error("validation_failed document_id=%s error_type=%s", did, type(exc).__name__)
-        _fail_after_extraction(tid, did, "DOC-021")
+        fault = faults.describe(exc)
+        logger.error("validation_failed document_id=%s %s", did, faults.for_log(exc))
+        _fail_after_extraction(tid, did, "DOC-021", step="validation", fault=fault)
         return
 
 

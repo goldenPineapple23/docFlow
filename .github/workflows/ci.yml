@@ -283,6 +283,12 @@ jobs:
           name: 0036-forward-state
           path: packages/core/0036-forward-state.json
           if-no-files-found: warn
+      # Stage 4, PR 1a (D-203): 0037's reverse is tested the same way. After
+      # the reverse its two columns and two indexes are gone and nothing else
+      # on the two tables differs; after forward again the state is the first.
+      - name: Migration 0037 forward -> reverse -> forward
+        id: roundtrip_0037
+        run: python "${{ github.workspace }}/scripts/ci/migration_0037_roundtrip.py"
       - name: Turn on the four logins (migration 0036 creates them), as RUNBOOK 10.2 does
         id: app_role
         run: python "${{ github.workspace }}/scripts/ci/create_logins.py"
