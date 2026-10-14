@@ -39,6 +39,7 @@ import logging
 from docflow_core import email_intake, founder_alerts
 from docflow_core.storage import StorageUnavailableError
 from fastapi import APIRouter, Header, HTTPException, Request
+from starlette.requests import ClientDisconnect
 
 from app.deps import (
     InboundWebhookRefused,
@@ -98,7 +99,13 @@ async def receive_inbound_email(
 
     try:
         payload = await request.json()
-    except Exception as exc:
+    except (ValueError, ClientDisconnect) as exc:
+        # What reading the body raises on the sender's side: a body that
+        # isn't JSON or isn't UTF-8 (both ValueErrors), or a sender that went
+        # away mid-body. Anything else is ours: it is logged as an unhandled
+        # error with its code location and answered 500, never called a
+        # malformed request (Stage 4, PR 1a; D-203). Postmark retries a 400
+        # and a 500 alike; only a 403 stops it.
         raise HTTPException(status_code=400, detail="Malformed request body: not valid JSON.") from exc
 
     resolved = email_intake.resolve_tenant_by_token(token)

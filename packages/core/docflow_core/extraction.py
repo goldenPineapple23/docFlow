@@ -32,6 +32,7 @@ from typing import Any
 import anthropic
 import httpx2
 
+from docflow_core import faults
 from docflow_core.numbers import parse_document_number
 from docflow_core.provider_errors import ProviderError, classify
 
@@ -345,7 +346,14 @@ def _announce(on_call_start: CallStart | None, run_kind: str, model: str, counte
     try:
         on_call_start(run_kind, model, counted)
     except Exception as exc:  # noqa: BLE001 -- see the docstring
-        logger.error("started_run_not_recorded run_kind=%s error_type=%s", run_kind, type(exc).__name__)
+        # The worker's hook has already raised the founder alert (Q11, D-203).
+        fault = faults.describe(exc)
+        logger.error(
+            "started_run_not_recorded run_kind=%s error_type=%s location=%s",
+            run_kind,
+            fault.exception_type,
+            fault.location,
+        )
 
 
 def _count_example_tokens(client: Any, examples: list[PromptExample]) -> int | None:

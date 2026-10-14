@@ -38,6 +38,7 @@ from sqlalchemy import RowMapping, text
 from sqlalchemy.orm import Session
 
 from docflow_core import deal_terms, founder_alerts, system_actors
+from docflow_core.constants import ALERT_STILL_HAPPENING_DAYS
 from docflow_core.db import platform_session, rowcount
 
 logger = logging.getLogger(__name__)
@@ -1242,25 +1243,111 @@ def send_invite(*, platform_admin_user_id: UUID, tenant_id: UUID) -> dict[str, A
 # ── Founder alerts and the outbox (Section 7.9 / 7.15.3) ────────────────────
 
 
+# The documents a state has hit (D-203): the ones that carry the alert's
+# state key in `fault_keys`, the worker's write in each document's own
+# transaction. Read here, by the platform admin, and nowhere else: a tenant
+# session still inserts an alert and never reads one. `hit_at` is when the
+# document reached its outcome; the count "since acknowledged" compares it
+# with the alert's own `acknowledged_at`, both stamped by the database.
+_AFFECTED_DOCUMENTS = """
+    LEFT JOIN LATERAL (
+        SELECT count(*) AS total,
+               count(*) FILTER (WHERE coalesce(d.processed_at, d.created_at) > a.acknowledged_at)
+                   AS since_acknowledged,
+               max(coalesce(d.processed_at, d.created_at)) AS latest_at
+        FROM documents d
+        WHERE a.state_key IS NOT NULL
+          AND d.tenant_id = a.tenant_id
+          AND d.fault_keys @> ARRAY[a.state_key]
+    ) hit ON true
+"""
+
+
+def _alert_row(row: Any) -> dict[str, Any]:
+    """One alert for the Console. `affected_documents` is None for an alert
+    that isn't raised per state (it has no key to count by)."""
+    alert = dict(row)
+    counted = alert.pop("has_state_key")
+    total = alert.pop("affected_total")
+    since = alert.pop("affected_since_acknowledged")
+    latest = alert.pop("affected_latest_at")
+    alert["affected_documents"] = (
+        {"total": int(total), "since_acknowledged": int(since), "latest_at": latest} if counted else None
+    )
+    return alert
+
+
 def list_open_alerts(*, platform_admin_user_id: UUID) -> list[dict[str, Any]]:
-    """The attention panel: unacknowledged, most severe first."""
+    """The attention panel: unacknowledged, most severe first. An alert
+    raised once per state also says how many documents the state has hit."""
     with platform_session() as session:
         _record_admin_action(
             session, platform_admin_user_id=platform_admin_user_id, action="read", target_type="alerts"
         )
         rows = session.execute(
             text(
-                """
+                f"""
                 SELECT a.id, a.type, a.severity, a.tenant_id, t.name AS tenant_name, a.payload,
-                       a.created_at
+                       a.created_at, a.acknowledged_at,
+                       a.state_key IS NOT NULL AS has_state_key,
+                       hit.total AS affected_total,
+                       hit.since_acknowledged AS affected_since_acknowledged,
+                       hit.latest_at AS affected_latest_at
                 FROM founder_alerts a LEFT JOIN tenants t ON t.id = a.tenant_id
+                {_AFFECTED_DOCUMENTS}
                 WHERE a.acknowledged_at IS NULL
                 ORDER BY array_position(ARRAY['critical','high','warning','info'], a.severity),
                          a.created_at
                 """
             )
         ).mappings().all()
-        return [dict(r) for r in rows]
+        return [_alert_row(r) for r in rows]
+
+
+def list_alerts_still_happening(session: Session) -> list[dict[str, Any]]:
+    """
+    "Acknowledged, still happening" (founder, 2026-10-13; D-203): alerts
+    raised once per state that the founder has acknowledged, whose state has
+    hit a document SINCE the acknowledgement. An acknowledged alert is never
+    raised again for the same state, so this list is where the founder sees
+    that it has not stopped. No new alert row and no e-mail: a repeat of
+    either would be the re-raised-alert defect again.
+
+    One leaves the list when ALERT_STILL_HAPPENING_DAYS pass with no new
+    document, by the database's clock. Part of the same read as the open
+    alerts (`console_alerts`), so it writes no admin action of its own.
+    """
+    rows = session.execute(
+        text(
+            f"""
+            SELECT a.id, a.type, a.severity, a.tenant_id, t.name AS tenant_name, a.payload,
+                   a.created_at, a.acknowledged_at,
+                   true AS has_state_key,
+                   hit.total AS affected_total,
+                   hit.since_acknowledged AS affected_since_acknowledged,
+                   hit.latest_at AS affected_latest_at
+            FROM founder_alerts a LEFT JOIN tenants t ON t.id = a.tenant_id
+            {_AFFECTED_DOCUMENTS}
+            WHERE a.acknowledged_at IS NOT NULL
+              AND a.state_key IS NOT NULL
+              AND hit.since_acknowledged > 0
+              AND hit.latest_at > now() - make_interval(days => :days)
+            ORDER BY hit.latest_at DESC
+            """
+        ),
+        {"days": ALERT_STILL_HAPPENING_DAYS},
+    ).mappings().all()
+    return [_alert_row(r) for r in rows]
+
+
+def console_alerts(*, platform_admin_user_id: UUID) -> dict[str, list[dict[str, Any]]]:
+    """The attention panel's two lists in one request, and one admin action:
+    the open alerts, and the acknowledged ones whose state is still hitting
+    documents."""
+    alerts = list_open_alerts(platform_admin_user_id=platform_admin_user_id)
+    with platform_session() as session:
+        still_happening = list_alerts_still_happening(session)
+    return {"alerts": alerts, "still_happening": still_happening}
 
 
 def acknowledge_alert(*, platform_admin_user_id: UUID, alert_id: UUID) -> bool:

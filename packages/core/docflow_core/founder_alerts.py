@@ -12,6 +12,11 @@ the two channels cannot disagree. A `dedupe_key` collapses a condition that
 keeps firing (a document stuck for three hours) into one open alert; once
 the founder acknowledges it, the next occurrence raises a new one.
 
+A `state_key` (migration 0037, D-203) is the other rule: the alert is raised
+ONCE for that state, and an acknowledged one stays quiet until the state
+itself changes. The alerts about a fault in our own code use it
+(`raise_fault_alert`); every other type keeps its `dedupe_key`.
+
 Payloads carry ids, counts and codes only -- never document values or
 customer data (Section 7.10), because the payload is emailed.
 """
@@ -28,7 +33,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from docflow_core import email_outbox
+from docflow_core import email_outbox, faults
 from docflow_core.config import get_settings
 from docflow_core.errors import get_error
 
@@ -98,6 +103,10 @@ ALERT_TYPES: dict[str, str] = {
     # Stage 3e (founder, 2026-10-01): raised by the worker's launcher at
     # start-up, tenant-less, under the dispatcher flag (0036).
     "worker_restarting": "The worker keeps restarting",
+    # Stage 4, PR 1a (Q11; D-203): a model call's run row could not be
+    # written -- the row before the call, or the one with its outcome. A
+    # lost cost record is a data loss, not a side effect (Section 7.9).
+    "cost_record_lost": "A model call's cost record couldn't be written",
 }
 
 # Why a seccomp kill's alert has no syscall number (founder: say so when it
@@ -145,11 +154,17 @@ def raise_alert(
     dedupe_key: str | None = None,
     dedupe_per_utc_day: bool = False,
     dedupe_per_utc_hour: bool = False,
+    state_key: str | None = None,
 ) -> bool:
     """
     Raise an alert. Returns False when an open alert with the same dedupe key
     already exists (nothing is written). Works in a tenant session for that
     tenant (0011's `tenant_raise` policy) or a platform session.
+
+    `state_key` instead of `dedupe_key` raises it once per state (migration
+    0037): False when ANY alert with that key exists, open or acknowledged.
+    The database refuses the duplicate; nothing here reads an alert, which a
+    tenant session could not do.
 
     `dedupe_per_utc_day` makes it one alert per condition per day: the INSERT
     appends ":YYYY-MM-DD" to the key, the UTC date by the database's clock --
@@ -159,6 +174,8 @@ def raise_alert(
     """
     if dedupe_per_utc_day and dedupe_per_utc_hour:
         raise ValueError("choose one dedupe window")
+    if state_key is not None and (dedupe_key is not None or dedupe_per_utc_day or dedupe_per_utc_hour):
+        raise ValueError("a state key is its own rule: no dedupe key and no window with it")
     if alert_type not in ALERT_TYPES:
         raise ValueError(f"unknown alert type {alert_type!r}")
     if severity not in SEVERITIES:
@@ -198,7 +215,7 @@ def raise_alert(
             text(
                 """
                 INSERT INTO founder_alerts
-                    (id, type, severity, tenant_id, payload, dedupe_key, email_outbox_id)
+                    (id, type, severity, tenant_id, payload, dedupe_key, state_key, email_outbox_id)
                 VALUES
                     (:id, :type, :severity, :tenant_id, CAST(:payload AS jsonb),
                      CASE WHEN :per_day
@@ -207,6 +224,7 @@ def raise_alert(
                           THEN CAST(:dedupe_key AS text) || ':'
                                || to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24')
                           ELSE CAST(:dedupe_key AS text) END,
+                     CAST(:state_key AS text),
                      :email_outbox_id)
                 """
             ),
@@ -217,6 +235,7 @@ def raise_alert(
                 "tenant_id": str(tenant_id) if tenant_id else None,
                 "payload": json.dumps(payload, sort_keys=True),
                 "dedupe_key": dedupe_key,
+                "state_key": state_key,
                 "per_day": dedupe_per_utc_day,
                 "per_hour": dedupe_per_utc_hour,
                 "email_outbox_id": str(outbox_id) if outbox_id else None,
@@ -224,7 +243,7 @@ def raise_alert(
         )
     except IntegrityError as exc:
         savepoint.rollback()  # discards the email written with it
-        if _is_open_duplicate(exc):
+        if _is_duplicate(exc):
             return False
         raise
     savepoint.commit()
@@ -232,13 +251,58 @@ def raise_alert(
 
 
 _OPEN_DEDUPE_INDEX = "idx_founder_alerts_open_dedupe"
+# Migration 0037: unique over every row, acknowledged or not.
+_STATE_KEY_INDEX = "idx_founder_alerts_state_key"
 
 
-def _is_open_duplicate(exc: IntegrityError) -> bool:
-    """True only for the dedupe index -- any other integrity failure is a bug
-    and must surface, not be mistaken for 'already open'."""
+def _is_duplicate(exc: IntegrityError) -> bool:
+    """True only for the two dedupe indexes -- any other integrity failure is
+    a bug and must surface, not be mistaken for 'already raised'."""
     diag = getattr(exc.orig, "diag", None)
-    return getattr(diag, "constraint_name", None) == _OPEN_DEDUPE_INDEX
+    return getattr(diag, "constraint_name", None) in (_OPEN_DEDUPE_INDEX, _STATE_KEY_INDEX)
+
+
+def raise_fault_alert(
+    session: Session,
+    *,
+    alert_type: str,
+    severity: str,
+    tenant_id: UUID,
+    document_id: UUID,
+    step: str,
+    fault: faults.Fault,
+    state_key: str,
+    error_code: str | None = None,
+) -> bool:
+    """
+    The alert for a fault in one of our own steps (D-203): the exception's
+    type and where it passed through our code, never its message. Raised
+    once per state -- `state_key` is `faults.state_key`'s, the same string
+    the document carries in `fault_keys`, so the Console can count the
+    documents the state has hit. Returns False when the state was already
+    raised, open or acknowledged.
+
+    No savepoint beyond `raise_alert`'s own, and it swallows no error: the
+    caller decides whether an alert that can't be written may undo what it
+    is recording.
+    """
+    payload: dict[str, Any] = {
+        "first_document_id": str(document_id),
+        "step": step,
+        "exception_type": fault.exception_type,
+        "location": fault.location,
+        "release": faults.release(),
+    }
+    if error_code is not None:
+        payload["error_code"] = error_code
+    return raise_alert(
+        session,
+        alert_type=alert_type,
+        severity=severity,
+        tenant_id=tenant_id,
+        payload=payload,
+        state_key=state_key,
+    )
 
 
 def raise_for_failure(
@@ -249,12 +313,19 @@ def raise_for_failure(
     document_id: UUID | None = None,
     cause: str | None = None,
     detail: dict[str, Any] | None = None,
+    fault: faults.Fault | None = None,
+    step: str | None = None,
+    state_key: str | None = None,
 ) -> bool:
     """
     Raise the alert a failure's catalog message promises, if it promises one
     (D-145). Returns False when the code promises nothing, or when an open
     alert for the same tenant, code (and cause, when given) and day already
     exists: a flood of broken files is one alert, not a thousand.
+
+    With `fault`, `step` and `state_key` (a step of ours failed: DOC-021),
+    the alert names the exception's type and our code location and is raised
+    once per state instead (`raise_fault_alert`, D-203).
 
     `cause` splits one code's alerts by why it happened -- DOC-022's
     `timeout` against `worker_stopped` (Stage 3a) -- so the first cause of
@@ -278,19 +349,35 @@ def raise_for_failure(
     # that record. It is logged instead, with the code and ids only.
     savepoint = session.begin_nested()
     try:
-        raised = raise_alert(
-            session,
-            alert_type=alert_type,
-            severity=entry.severity,
-            tenant_id=tenant_id,
-            payload=payload,
-            dedupe_key=f"{alert_type}:{tenant_id}:{entry.code}" + (f":{cause}" if cause else ""),
-            dedupe_per_utc_day=True,
-        )
-    except Exception:
+        if fault is not None and step is not None and state_key is not None and document_id is not None:
+            raised = raise_fault_alert(
+                session,
+                alert_type=alert_type,
+                severity=entry.severity,
+                tenant_id=tenant_id,
+                document_id=document_id,
+                step=step,
+                fault=fault,
+                state_key=state_key,
+                error_code=entry.code,
+            )
+        else:
+            raised = raise_alert(
+                session,
+                alert_type=alert_type,
+                severity=entry.severity,
+                tenant_id=tenant_id,
+                payload=payload,
+                dedupe_key=f"{alert_type}:{tenant_id}:{entry.code}" + (f":{cause}" if cause else ""),
+                dedupe_per_utc_day=True,
+            )
+    except Exception as exc:
         savepoint.rollback()
-        logger.exception(
-            "founder_alert_not_raised tenant_id=%s error_code=%s", tenant_id, entry.code
+        logger.error(
+            "founder_alert_not_raised tenant_id=%s error_code=%s %s",
+            tenant_id,
+            entry.code,
+            faults.for_log(exc),
         )
         return False
     savepoint.commit()
@@ -324,9 +411,12 @@ def raise_storage_unavailable(session: Session, *, tenant_id: UUID, where: str) 
             dedupe_key="storage_unavailable",
             dedupe_per_utc_hour=True,
         )
-    except Exception:
+    except Exception as exc:
         savepoint.rollback()
-        logger.exception("founder_alert_not_raised tenant_id=%s alert=storage_unavailable", tenant_id)
+        logger.error(
+            "founder_alert_not_raised tenant_id=%s alert=storage_unavailable %s",
+            tenant_id, faults.for_log(exc),
+        )
         return False
     savepoint.commit()
     return raised
@@ -378,8 +468,11 @@ def report_refused_storage_path(
                 },
                 dedupe_key=f"storage_path_cross_tenant:{tenant_id}:{ref_id}",
             )
-    except Exception:  # noqa: BLE001 -- logged above and here; the caller's error still goes out
-        logger.exception("founder_alert_not_raised tenant_id=%s alert=storage_path_cross_tenant", tenant_id)
+    except Exception as exc:  # noqa: BLE001 -- logged above and here; the caller's error still goes out
+        logger.error(
+            "founder_alert_not_raised tenant_id=%s alert=storage_path_cross_tenant %s",
+            tenant_id, faults.for_log(exc),
+        )
 
 
 def raise_seccomp_kill(
@@ -409,9 +502,12 @@ def raise_seccomp_kill(
             },
             dedupe_key=f"parse_seccomp_kill:{where}:{ref_id or uuid4()}",
         )
-    except Exception:
+    except Exception as exc:
         savepoint.rollback()
-        logger.exception("founder_alert_not_raised tenant_id=%s alert=parse_seccomp_kill", tenant_id)
+        logger.error(
+            "founder_alert_not_raised tenant_id=%s alert=parse_seccomp_kill %s",
+            tenant_id, faults.for_log(exc),
+        )
         return False
     savepoint.commit()
     logger.error("parse_seccomp_kill tenant_id=%s where=%s ref_id=%s", tenant_id, where, ref_id)
@@ -427,8 +523,11 @@ def alert_seccomp_kill(tenant_id: UUID, *, where: str, ref_id: UUID | None, erro
             raise_seccomp_kill(
                 session, tenant_id=tenant_id, where=where, ref_id=ref_id, error_code=error_code
             )
-    except Exception:
-        logger.exception("founder_alert_not_raised tenant_id=%s alert=parse_seccomp_kill", tenant_id)
+    except Exception as exc:
+        logger.error(
+            "founder_alert_not_raised tenant_id=%s alert=parse_seccomp_kill %s",
+            tenant_id, faults.for_log(exc),
+        )
 
 
 def raise_parse_service_unavailable(session: Session, *, tenant_id: UUID, where: str, reason: str) -> bool:
@@ -455,9 +554,12 @@ def raise_parse_service_unavailable(session: Session, *, tenant_id: UUID, where:
             dedupe_key="parse_service_unavailable",
             dedupe_per_utc_hour=True,
         )
-    except Exception:
+    except Exception as exc:
         savepoint.rollback()
-        logger.exception("founder_alert_not_raised tenant_id=%s alert=parse_service_unavailable", tenant_id)
+        logger.error(
+            "founder_alert_not_raised tenant_id=%s alert=parse_service_unavailable %s",
+            tenant_id, faults.for_log(exc),
+        )
         return False
     savepoint.commit()
     return raised
@@ -505,9 +607,12 @@ def raise_parse_alert(
             dedupe_key=f"document_failed:{tenant_id}:{entry.code}:parse" + (f":{cause}" if by_cause else ""),
             dedupe_per_utc_day=True,
         )
-    except Exception:
+    except Exception as exc:
         savepoint.rollback()
-        logger.exception("founder_alert_not_raised tenant_id=%s error_code=%s", tenant_id, entry.code)
+        logger.error(
+            "founder_alert_not_raised tenant_id=%s error_code=%s %s",
+            tenant_id, entry.code, faults.for_log(exc),
+        )
         return False
     savepoint.commit()
     return raised
@@ -520,8 +625,11 @@ def alert_parse_service_unavailable(tenant_id: UUID, *, where: str, reason: str)
     try:
         with tenant_session(tenant_id) as session:
             raise_parse_service_unavailable(session, tenant_id=tenant_id, where=where, reason=reason)
-    except Exception:  # noqa: BLE001 -- logged; the caller's error still goes out
-        logger.exception("founder_alert_not_raised tenant_id=%s alert=parse_service_unavailable", tenant_id)
+    except Exception as exc:  # noqa: BLE001 -- logged; the caller's error still goes out
+        logger.error(
+            "founder_alert_not_raised tenant_id=%s alert=parse_service_unavailable %s",
+            tenant_id, faults.for_log(exc),
+        )
 
 
 def alert_storage_unavailable(tenant_id: UUID, *, where: str) -> None:
@@ -533,5 +641,8 @@ def alert_storage_unavailable(tenant_id: UUID, *, where: str) -> None:
     try:
         with tenant_session(tenant_id) as session:
             raise_storage_unavailable(session, tenant_id=tenant_id, where=where)
-    except Exception:  # noqa: BLE001 -- logged; the caller's error still goes out
-        logger.exception("founder_alert_not_raised tenant_id=%s alert=storage_unavailable", tenant_id)
+    except Exception as exc:  # noqa: BLE001 -- logged; the caller's error still goes out
+        logger.error(
+            "founder_alert_not_raised tenant_id=%s alert=storage_unavailable %s",
+            tenant_id, faults.for_log(exc),
+        )

@@ -70,6 +70,20 @@ def test_the_core_job_runs_the_0036_round_trip_before_the_logins_are_turned_on()
     assert block.index("scripts/ci/migration_roundtrip.py") < block.index("scripts/ci/create_logins.py")
 
 
+def test_the_core_job_runs_the_0037_round_trip_and_the_skip_check_can_name_it():
+    """D-203: 0037's reverse is tested in CI, not just checked in. It runs
+    after 0036's round trip (which puts the roles back) and before the suite,
+    and a run where it failed says so by name instead of pointing at pytest."""
+    block = _job_block(WORKFLOW.read_text(encoding="utf-8"), "core")
+    assert (
+        block.index("scripts/ci/migration_roundtrip.py")
+        < block.index("scripts/ci/migration_0037_roundtrip.py")
+        < block.index("id: test\n")
+    )
+    assert "id: roundtrip_0037\n" in block
+    assert "roundtrip_0037" in _check_skips().STEP_NAMES
+
+
 # A skip on docflow-staging only (founder, 2026-10-05; D-189). No CI job reads
 # these lines, so the test still has to run in CI.
 STAGING_ONLY = tuple(f"{job}-staging" for job in PYTHON_JOBS)

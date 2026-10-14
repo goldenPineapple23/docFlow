@@ -386,8 +386,10 @@ def request_card(tenant_id: UUID, identity: AuthenticatedIdentity = Depends(requ
 
 @router.get("/alerts")
 def alerts(identity: AuthenticatedIdentity = Depends(require_platform_admin)) -> dict:
-    rows = admin_data_access.list_open_alerts(platform_admin_user_id=_admin_id(identity))
-    return {"alerts": [_jsonable(r) for r in rows]}
+    # The open alerts, and the acknowledged ones whose state is still hitting
+    # documents (D-203): one request, one admin action.
+    lists = admin_data_access.console_alerts(platform_admin_user_id=_admin_id(identity))
+    return {name: [_jsonable(r) for r in rows] for name, rows in lists.items()}
 
 
 @router.post("/alerts/{alert_id}/acknowledge")

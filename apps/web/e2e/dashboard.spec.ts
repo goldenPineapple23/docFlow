@@ -188,3 +188,88 @@ test("a rollup that hasn't run says so, and recompute can be asked for", async (
   await page.getByTestId("recompute").click();
   await expect.poll(() => recomputed).toEqual({ days: 2 });
 });
+
+test("an alert raised once per state shows its documents, and an acknowledged one that hasn't stopped is listed", async ({
+  page,
+}) => {
+  // D-203: an acknowledged alert is never raised again for the same state, so
+  // the Console is where the founder sees that it is still hitting documents.
+  const fault = {
+    first_document_id: "33333333-3333-3333-3333-333333333333",
+    step: "matching",
+    exception_type: "TypeError",
+    location: "docflow_core.matching:resolve_line:412",
+    release: "deployment-01TEST",
+  };
+  await stub(page);
+  await page.route(/\/admin\/alerts/, (route) =>
+    route.request().url().startsWith(API)
+      ? route.fulfill({
+          json: {
+            alerts: [
+              {
+                id: "a1",
+                type: "pipeline_step_failed",
+                severity: "high",
+                tenant_id: TENANTS[0].id,
+                tenant_name: TENANTS[0].name,
+                payload: fault,
+                created_at: "2026-10-13T10:00:00Z",
+                acknowledged_at: null,
+                affected_documents: { total: 3, since_acknowledged: 0, latest_at: "2026-10-13T11:00:00Z" },
+              },
+              {
+                id: "a2",
+                type: "export_integrity_failure",
+                severity: "high",
+                tenant_id: TENANTS[0].id,
+                tenant_name: TENANTS[0].name,
+                payload: { export_id: "e1" },
+                created_at: "2026-10-13T09:00:00Z",
+                acknowledged_at: null,
+                affected_documents: null,
+              },
+            ],
+            still_happening: [
+              {
+                id: "a0",
+                type: "document_failed",
+                severity: "high",
+                tenant_id: TENANTS[0].id,
+                tenant_name: TENANTS[0].name,
+                payload: { ...fault, step: "validation", error_code: "DOC-021" },
+                created_at: "2026-10-10T10:00:00Z",
+                acknowledged_at: "2026-10-11T10:00:00Z",
+                affected_documents: { total: 9, since_acknowledged: 4, latest_at: "2026-10-13T08:00:00Z" },
+              },
+            ],
+          },
+        })
+      : route.continue(),
+  );
+  await page.goto("/admin");
+
+  const open = page.getByTestId("alerts").locator("li");
+  await expect(open).toHaveCount(2);
+  await expect(open.nth(0).getByTestId("affected-documents")).toContainText("Affected documents: 3");
+  // An open alert has no "since you acknowledged it".
+  await expect(open.nth(0).getByTestId("affected-documents")).not.toContainText("since you acknowledged");
+  // An alert that isn't raised per state carries no count.
+  await expect(open.nth(1).getByTestId("affected-documents")).toHaveCount(0);
+
+  const still = page.getByTestId("alerts-still-happening").locator("li");
+  await expect(still).toHaveCount(1);
+  await expect(still).toContainText("document failed");
+  await expect(still.getByTestId("affected-documents")).toContainText(
+    "Affected documents: 9 (4 since you acknowledged it)",
+  );
+  // It is not raised again: there is nothing to acknowledge a second time.
+  await expect(still.getByRole("button", { name: "Acknowledge" })).toHaveCount(0);
+});
+
+test("with nothing acknowledged and still happening, that list is not shown", async ({ page }) => {
+  await stub(page);
+  await page.goto("/admin");
+  await expect(page.getByTestId("no-alerts")).toBeVisible();
+  await expect(page.getByTestId("alerts-still-happening")).toHaveCount(0);
+});

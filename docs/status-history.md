@@ -4,6 +4,39 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-13 (PR 1 split in two; PR 1a built, not merged, with migration `0037`; D-203)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-13, after PR A merged:** Phase 5.5, **Stage 4** (matching performance). **PR
+A is merged** (PR #62; `main` is `2988661`; D-202): the fuzzy step in `matching.py` scores the whole
+catalog in one call a field and runs the per-item code on the best 100 by each; the loop as it was
+is kept as the definition, and 21 parity tests hold the two to the same result. Its merge gate
+(founder, 2026-10-13) was a 50,000-item tenant measured on staging through the product, plus the
+green 250,000-item CI bench run, and both were met: no difference from the full scan on 100 lines at
+250,000 items (run 38424636633); on the Fly worker at 50,000 items, 12.3 ms a line at p50 and 14.8
+ms at p95 (the mark is 100 ms), a 40-line order in 1.7 s (the mark is 4 s) and no difference on 30
+lines; and one real 40-line PO to `needs_review` with its lines matched in 3.4 s, for $0.0694. CI
+was green on the merged head (13 checks) and on `main` (six jobs), each on its first attempt. **The
+bench tenant is removed from staging** (D-202 item 18): cancelled by the founder, suspended by one
+sweep run locally, made due by one statement the founder ran, and deleted by the founder in the
+Console, its 50,000 items in about 4.1 s through a local API. Its Stripe test customer is deleted,
+and nothing of any other tenant changed. The database is 43 MB by SQL (58 of 500 MB on the
+dashboard). **The next step is PR 1, the broad-`except` audit, on top of `main`; nothing of it is
+built.** After it, inside Stage 4: the Stripe test's fix and the database retry, as their own small
+PRs. **The product cannot import more than 50,000 items** (the parse service's row cap, D-108),
+which the measurement found; the 250,000 measurement on the Fly worker moves to the cap's own PR.
+**Three findings are not fixed, each for its own PR, timed at the Stage 4 checkpoint:** IMP-003's
+wording, which would retire items (a pilot blocker); the 50,000-row cap (a candidate); and the
+catalog commit, which held one request for 4 min 14 s (a pilot blocker, pending a test through a
+public address). A known limit stands: a 40-line order on a 250,000-item catalog took 4.86 s on a CI
+runner, against the 4 s mark, until the catalog is kept between documents (PR B, not now). After
+Stage 4: Stage 5, demo readiness with D-195's model work, the Phase 6 pilot-blocker subset, then
+pilots with two or three customers ("The plan after the Stage 3 "go"", below). If Stage 4 is not
+merged by 2026-11-02, D-195's two changes go next, before Stage 5. The Fly worker and beat are at 0
+with PR A's merged code as the release (v10; no redeploy is owed), the API's and the parse machine's
+auto-stop are on, and the Healthchecks.io check is paused. On the next worker start the machine's
+memory is read before anything else.
+
 ## Replaced on 2026-10-13 (PR A merged as PR #62; the bench tenant removed from staging; D-202 items 16 to 18)
 
 <!-- the paragraph as it stood, starting on the next line -->

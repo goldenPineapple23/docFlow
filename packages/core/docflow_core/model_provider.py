@@ -35,7 +35,7 @@ from typing import Any
 
 from sqlalchemy import text
 
-from docflow_core import founder_alerts
+from docflow_core import faults, founder_alerts
 from docflow_core.constants import (
     PROVIDER_DOWN_FAILURES,
     PROVIDER_DOWN_WINDOW_MIN,
@@ -131,8 +131,8 @@ def record_failure(error: ProviderError) -> bool:
             )
         logger.error("model_provider_down provider=%s cause=%s label=%s", PROVIDER, error.cause, error.label)
         return True
-    except Exception:  # noqa: BLE001 -- logged; see the docstring
-        logger.exception("model_provider_failure_not_recorded provider=%s", PROVIDER)
+    except Exception as exc:  # noqa: BLE001 -- logged; see the docstring
+        logger.error("model_provider_failure_not_recorded provider=%s %s", PROVIDER, faults.for_log(exc))
         return False
 
 
@@ -170,8 +170,8 @@ def record_success() -> bool:
             )
         logger.info("model_provider_recovered provider=%s waited=%d", PROVIDER, int(row["waiting"]))
         return True
-    except Exception:  # noqa: BLE001 -- logged; see the docstring
-        logger.exception("model_provider_success_not_recorded provider=%s", PROVIDER)
+    except Exception as exc:  # noqa: BLE001 -- logged; see the docstring
+        logger.error("model_provider_success_not_recorded provider=%s %s", PROVIDER, faults.for_log(exc))
         return False
 
 
@@ -197,8 +197,8 @@ def alert_routing_failure(error: ProviderError) -> None:
             if not raised:
                 session.execute(text("SELECT public.count_routing_model_failure()"))
         logger.error("routing_model_failure label=%s", error.label)
-    except Exception:  # noqa: BLE001 -- logged; see the docstring
-        logger.exception("routing_model_failure_not_recorded label=%s", error.label)
+    except Exception as exc:  # noqa: BLE001 -- logged; see the docstring
+        logger.error("routing_model_failure_not_recorded label=%s %s", error.label, faults.for_log(exc))
 
 
 def _routing_payload(error: ProviderError, session: Any) -> dict[str, Any]:

@@ -51,7 +51,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from docflow_core import founder_alerts, model_provider
+from docflow_core import faults, founder_alerts, model_provider
 from docflow_core.config import get_settings
 from docflow_core.constants import DISPATCHER_STALE_MIN, PROVIDER_PROBE_MINUTES, TENANT_IN_FLIGHT_CAP
 from docflow_core.db import dispatcher_session, function_session
@@ -200,8 +200,10 @@ def run_pass(send: Send, *, target: int | None = None, cap: int = TENANT_IN_FLIG
                     session.execute(
                         text("SELECT public.clear_dispatched(:id)"), {"id": str(item.document_id)}
                     )
-            except Exception:  # noqa: BLE001 -- the stuck sweep returns it after the timeout
-                logger.exception("dispatch_unmark_failed document_id=%s", item.document_id)
+            except Exception as unmark_exc:  # noqa: BLE001 -- the stuck sweep returns it after the timeout
+                logger.error(
+                    "dispatch_unmark_failed document_id=%s %s", item.document_id, faults.for_log(unmark_exc)
+                )
     # Ids and counts only (Section 7.10).
     if result.sent or result.send_failed or result.probe:
         logger.info(
@@ -274,6 +276,6 @@ def check_stopped() -> bool:
                 "dispatcher_stopped age_seconds=%s waiting=%d", current.age_seconds, current.waiting
             )
         return raised
-    except Exception:  # noqa: BLE001 -- logged; the sweep goes on
-        logger.exception("dispatcher_stopped_check_failed")
+    except Exception as exc:  # noqa: BLE001 -- logged; the sweep goes on
+        logger.error("dispatcher_stopped_check_failed %s", faults.for_log(exc))
         return False

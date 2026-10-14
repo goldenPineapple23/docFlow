@@ -39,8 +39,26 @@ const SEVERITY_STYLE: Record<FounderAlert["severity"], string> = {
   info: "bg-sky-100 text-sky-800",
 };
 
+/**
+ * How many documents an alert's state has hit (D-203). Only an alert raised
+ * once per state carries the count; it is read from the documents
+ * themselves, so it keeps counting after the alert is acknowledged.
+ */
+function AffectedDocuments({ alert }: { alert: FounderAlert }) {
+  const affected = alert.affected_documents;
+  if (!affected) return null;
+  return (
+    <p data-testid="affected-documents" className="text-sm text-gray-700">
+      Affected documents: {affected.total}
+      {alert.acknowledged_at ? ` (${affected.since_acknowledged} since you acknowledged it)` : ""}
+      {affected.latest_at ? ` · latest ${new Date(affected.latest_at).toLocaleString()}` : ""}
+    </p>
+  );
+}
+
 export default function ConsoleHome() {
   const [alerts, setAlerts] = useState<FounderAlert[] | null>(null);
+  const [stillHappening, setStillHappening] = useState<FounderAlert[]>([]);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [tenants, setTenants] = useState<TenantRow[] | null>(null);
   const [error, setError] = useState<CatalogError | null>(null);
@@ -48,6 +66,7 @@ export default function ConsoleHome() {
   const load = useCallback(async () => {
     const [a, d, t] = await Promise.all([listAlerts(), getDashboard(), listTenants()]);
     setAlerts(a.alerts);
+    setStillHappening(a.still_happening ?? []);
     setDashboard(d);
     setTenants(t);
   }, []);
@@ -58,6 +77,7 @@ export default function ConsoleHome() {
       .then(([a, d, t]) => {
         if (cancelled) return;
         setAlerts(a.alerts);
+        setStillHappening(a.still_happening ?? []);
         setDashboard(d);
         setTenants(t);
       })
@@ -111,6 +131,7 @@ export default function ConsoleHome() {
                     .map(([k, v]) => `${k}: ${String(v)}`)
                     .join(" · ")}
                 </p>
+                <AffectedDocuments alert={alert} />
               </div>
               <button
                 type="button"
@@ -125,6 +146,49 @@ export default function ConsoleHome() {
             </li>
           ))}
         </ul>
+      ) : null}
+
+      {stillHappening.length > 0 ? (
+        <section className="mt-6">
+          <h2 className="text-sm font-semibold">Acknowledged, still happening</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            You acknowledged these, and the same problem has hit more documents since. They are
+            not raised or emailed again.
+          </p>
+          <ul
+            data-testid="alerts-still-happening"
+            className="mt-3 divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white"
+          >
+            {stillHappening.map((alert) => (
+              <li key={alert.id} className="space-y-1 p-4">
+                <p className="flex items-center gap-2">
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_STYLE[alert.severity]}`}>
+                    {alert.severity}
+                  </span>
+                  <span className="font-medium">{alert.type.replaceAll("_", " ")}</span>
+                </p>
+                <p className="text-sm text-gray-600">
+                  {alert.tenant_id ? (
+                    <Link href={`/admin/tenants/${alert.tenant_id}`} className="text-blue-700 hover:underline">
+                      {alert.tenant_name ?? alert.tenant_id}
+                    </Link>
+                  ) : (
+                    "No tenant"
+                  )}
+                  {alert.acknowledged_at
+                    ? ` · acknowledged ${new Date(alert.acknowledged_at).toLocaleString()}`
+                    : ""}
+                </p>
+                <p className="font-mono text-xs text-gray-500">
+                  {Object.entries(alert.payload)
+                    .map(([k, v]) => `${k}: ${String(v)}`)
+                    .join(" · ")}
+                </p>
+                <AffectedDocuments alert={alert} />
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
       {dashboard ? <HealthStrip data={dashboard} onRecomputed={() => void load()} /> : null}
