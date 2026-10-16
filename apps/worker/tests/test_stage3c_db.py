@@ -341,60 +341,51 @@ def test_F6_doc_029s_alert_fires_at_most_once_per_tenant_per_day():
             with tenant_session(a.tenant_id) as session:
                 raised.append(
                     founder_alerts.raise_parse_alert(
-                        session,
-                        tenant_id=a.tenant_id,
-                        document_id=uuid4(),
-                        error_code="DOC-029",
-                        cause=cause,
-                        by_cause=False,
+                        session, tenant_id=a.tenant_id, document_id=uuid4(), cause=cause
                     )
                 )
         with tenant_session(b.tenant_id) as session:
             raised_b = founder_alerts.raise_parse_alert(
-                session,
-                tenant_id=b.tenant_id,
-                document_id=uuid4(),
-                error_code="DOC-029",
-                cause="stopped:memory",
-                by_cause=False,
+                session, tenant_id=b.tenant_id, document_id=uuid4(), cause="stopped:memory"
             )
         assert raised == [True, False, False] and raised_b is True
         assert _parse_alerts(a.tenant_id, "DOC-029") == 1 and _parse_alerts(b.tenant_id, "DOC-029") == 1
 
 
-def test_F6_a_crash_alert_is_once_per_cause_per_day():
-    with WorkerTestTenant("Acme Test Parse Fault") as tenant:
-        raised = []
-        for cause in ("crashed:signal_11", "crashed:signal_11", "invalid:bad_part"):
-            with tenant_session(tenant.tenant_id) as session:
-                raised.append(
-                    founder_alerts.raise_parse_alert(
-                        session,
-                        tenant_id=tenant.tenant_id,
-                        document_id=uuid4(),
-                        error_code="DOC-005",
-                        cause=cause,
-                        by_cause=True,
-                    )
-                )
-        assert raised == [True, False, True]
+def test_F6_the_parse_alert_is_doc_029s_alone():
+    """PR 1b-i (D-204): a crashed job or a refused answer is DOC-030 with the
+    keyed alert (tests/test_parse_fault_db.py), never this alert's DOC-005
+    once per cause per day. The function no longer takes a code or a
+    per-cause switch, so it cannot be asked for DOC-005."""
+    import inspect
+
+    assert set(inspect.signature(founder_alerts.raise_parse_alert).parameters) == {
+        "session", "tenant_id", "document_id", "cause"
+    }
+    with WorkerTestTenant("Acme Test Parse Alert Code") as tenant:
+        with tenant_session(tenant.tenant_id) as session:
+            founder_alerts.raise_parse_alert(
+                session, tenant_id=tenant.tenant_id, document_id=uuid4(), cause="stopped:memory"
+            )
+        assert _parse_alerts(tenant.tenant_id, "DOC-029") == 1
+        assert _parse_alerts(tenant.tenant_id, "DOC-005") == 0
 
 
 def test_F6_every_seccomp_kill_alerts_and_says_why_there_is_no_syscall_number():
-    """Founder, departure #1: SIGSYS is its own alert, never rate-limited."""
+    """Founder, departure #1: SIGSYS is its own alert, never rate-limited.
+    Raised by the worker beside the DOC-030 keyed alert (PR 1b-i)."""
     with WorkerTestTenant("Acme Test Seccomp Kill") as tenant:
         documents = [uuid4(), uuid4(), uuid4()]
         raised = []
         for document_id in documents:
             with tenant_session(tenant.tenant_id) as session:
                 raised.append(
-                    founder_alerts.raise_parse_alert(
+                    founder_alerts.raise_seccomp_kill(
                         session,
                         tenant_id=tenant.tenant_id,
-                        document_id=document_id,
-                        error_code="DOC-005",
-                        cause=founder_alerts.SECCOMP_KILL_CAUSE,
-                        by_cause=True,
+                        where="worker",
+                        ref_id=document_id,
+                        error_code="DOC-030",
                     )
                 )
         rows = _rows(
@@ -408,7 +399,7 @@ def test_F6_every_seccomp_kill_alerts_and_says_why_there_is_no_syscall_number():
             assert row["payload"]["syscall_unavailable"] == founder_alerts.SECCOMP_SYSCALL_UNAVAILABLE
             assert row["payload"]["signal"] == "SIGSYS (31)"
         # A seccomp kill is not also a rate-limited document_failed alert.
-        assert _parse_alerts(tenant.tenant_id, "DOC-005") == 0
+        assert _parse_alerts(tenant.tenant_id, "DOC-030") == 0
 
 
 def test_F7_parse_service_unavailable_fires_once_per_hour_across_tenants():

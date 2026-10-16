@@ -229,6 +229,26 @@ test("an alert raised once per state shows its documents, and an acknowledged on
                 acknowledged_at: null,
                 affected_documents: null,
               },
+              {
+                // PR 1b-i: an e-mail attachment refused at intake as DOC-030.
+                id: "a3",
+                type: "document_failed",
+                severity: "high",
+                tenant_id: TENANTS[0].id,
+                tenant_name: TENANTS[0].name,
+                payload: {
+                  intake_rejection_id: "44444444-4444-4444-4444-444444444444",
+                  step: "email_intake",
+                  exception_type: "RuntimeError",
+                  location: "docflow_core.file_types:_classify_zip:512",
+                  release: "deployment-01TEST",
+                  error_code: "DOC-030",
+                },
+                created_at: "2026-10-13T08:30:00Z",
+                acknowledged_at: null,
+                affected_documents: null,
+                no_document: "email_intake",
+              },
             ],
             still_happening: [
               {
@@ -250,12 +270,15 @@ test("an alert raised once per state shows its documents, and an acknowledged on
   await page.goto("/admin");
 
   const open = page.getByTestId("alerts").locator("li");
-  await expect(open).toHaveCount(2);
+  await expect(open).toHaveCount(3);
   await expect(open.nth(0).getByTestId("affected-documents")).toContainText("Affected documents: 3");
   // An open alert has no "since you acknowledged it".
   await expect(open.nth(0).getByTestId("affected-documents")).not.toContainText("since you acknowledged");
   // An alert that isn't raised per state carries no count.
   await expect(open.nth(1).getByTestId("affected-documents")).toHaveCount(0);
+  // A keyed alert with no document says where it came from, never "0" (PR 1b-i).
+  await expect(open.nth(2).getByTestId("affected-documents")).toHaveText("Email intake, no document");
+  await expect(open.nth(2)).not.toContainText("Affected documents");
 
   const still = page.getByTestId("alerts-still-happening").locator("li");
   await expect(still).toHaveCount(1);

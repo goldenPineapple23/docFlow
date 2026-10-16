@@ -15,7 +15,11 @@ learns about the sender's filename.
 Answers, as JSON with HTTP 200:
 - {"outcome": "ok", ...} or {"outcome": "rejected", "code": ...} -- the job's;
 - {"outcome": "stopped", "cause": memory|cpu|wall_clock|output_too_large};
-- {"outcome": "crashed", "cause": ...} -- the job died some other way.
+- {"outcome": "crashed", "cause": ..., "release": ...} -- the job died some
+  other way;
+- {"outcome": "error", "error_type": ..., "location": ..., "release": ...} --
+  the job raised something no parser raises on a malformed file: ours, not
+  the file's (D-203, PR 1b-i). `release` is this app's, for the alert's key.
 HTTP 503 means the request never got in (no free slot, or the service can't
 isolate a job); the worker waits and tries again.
 
@@ -37,7 +41,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from docflow_core.file_types import MAX_FILE_SIZE_BYTES
 
-from parse_service import config
+from parse_service import config, fault_origin, stderr_summary
 from parse_service.launcher import run_job
 
 logger = logging.getLogger("parse_service")
@@ -134,22 +138,35 @@ class Handler(BaseHTTPRequestHandler):
             self.service.slots.put(slot)
         logger.info("job kind=%s outcome=%s cause=%s seconds=%s", kind, result.outcome, result.cause, result.seconds)
         if result.outcome == "rejected":
-            # Why, in the parser's or LibreOffice's own words: the log only.
-            # The worker (and the tenant) get the catalog code alone.
+            # The code, and the job's stderr as length, hash and category:
+            # never its text (7.10, D-204 item 4a). The worker (and the
+            # tenant) get the catalog code alone.
             logger.warning(
-                "job_rejected kind=%s code=%s detail=%s",
+                "job_rejected kind=%s code=%s %s",
                 kind,
                 (result.answer or {}).get("code"),
-                result.evidence.get("stderr_tail", "").strip(),
+                stderr_summary.for_log(result.evidence.get("stderr")),
             )
         if result.outcome == "isolation_failed":
+            # The evidence holds the stderr's summary, never a tail (launcher).
             logger.critical("isolation_failed cause=%s evidence=%s", result.cause, result.evidence)
             self._reply(503, {"error": "isolation_failed"}, {"Retry-After": "30"})
             return
         if result.outcome in ("ok", "rejected"):
             self._reply(200, result.answer or {})
             return
-        self._reply(200, {"outcome": result.outcome, "cause": result.cause})
+        if result.outcome == "error":
+            # Ours, not the file's (D-203, PR 1b-i): its type and our code
+            # location, never a message, and no stderr in the log. The
+            # release is this app's, read here: a job's sandbox has no Fly
+            # environment.
+            answer = result.answer or {}
+            logger.error(
+                "job_error kind=%s error_type=%s location=%s", kind, answer.get("error_type"), answer.get("location")
+            )
+            self._reply(200, {**answer, "release": fault_origin.release()})
+            return
+        self._reply(200, {"outcome": result.outcome, "cause": result.cause, "release": fault_origin.release()})
 
 
 class _Server(ThreadingHTTPServer):

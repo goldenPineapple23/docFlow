@@ -116,6 +116,8 @@ ALERT_TYPES: dict[str, str] = {
 # only SIGSYS, and the number goes to the kernel's audit log on the machine,
 # which the parse service can't read.
 SECCOMP_KILL_CAUSE = "crashed:signal_31"
+# The one code `raise_parse_alert` raises for: a parse job stopped at a limit.
+PARSE_STOPPED_CODE = "DOC-029"
 SECCOMP_SYSCALL_UNAVAILABLE = (
     "not available: the filter kills a call from a foreign architecture (x32 or 32-bit) without "
     "reporting which call; only the kernel's audit log on the parse machine has it"
@@ -268,11 +270,13 @@ def raise_fault_alert(
     alert_type: str,
     severity: str,
     tenant_id: UUID,
-    document_id: UUID,
+    document_id: UUID | None,
     step: str,
     fault: faults.Fault,
     state_key: str,
     error_code: str | None = None,
+    release_tag: str | None = None,
+    intake_rejection_id: UUID | None = None,
 ) -> bool:
     """
     The alert for a fault in one of our own steps (D-203): the exception's
@@ -282,16 +286,26 @@ def raise_fault_alert(
     documents the state has hit. Returns False when the state was already
     raised, open or acknowledged.
 
+    With no document (an e-mail attachment refused at intake, PR 1b-i), the
+    payload names the intake rejection instead; nothing of the e-mail's own
+    -- no body, no sender -- is in it.
+
     No savepoint beyond `raise_alert`'s own, and it swallows no error: the
     caller decides whether an alert that can't be written may undo what it
     is recording.
     """
+    first: dict[str, Any] = (
+        {"first_document_id": str(document_id)}
+        if document_id is not None
+        else {"intake_rejection_id": str(intake_rejection_id)}
+    )
     payload: dict[str, Any] = {
-        "first_document_id": str(document_id),
+        **first,
         "step": step,
         "exception_type": fault.exception_type,
         "location": fault.location,
-        "release": faults.release(),
+        # A parse job's fault is the parse app's release (D-203, PR 1b-i).
+        "release": release_tag or faults.release(),
     }
     if error_code is not None:
         payload["error_code"] = error_code
@@ -303,6 +317,56 @@ def raise_fault_alert(
         payload=payload,
         state_key=state_key,
     )
+
+
+# The step an e-mail attachment's own check belongs to (D-203, PR 1b-i).
+INTAKE_STEP = "email_intake"
+
+
+def raise_intake_fault(
+    session: Session,
+    *,
+    tenant_id: UUID,
+    intake_rejection_id: UUID,
+    fault: faults.Fault,
+    error_code: str,
+) -> bool:
+    """
+    DOC-030 at email intake (founder, 2026-10-16, (a1)): checking one
+    attachment failed on our side, and it was refused with no document. The
+    keyed `document_failed` alert, once per state (step `email_intake`); its
+    payload names the intake rejection. The Console shows it as "Email
+    intake, no document" -- there are no documents to count.
+
+    Its own savepoint, and it never raises: the e-mail's other attachments
+    and the refusal itself must stand if the alert can't be written.
+    """
+    savepoint = session.begin_nested()
+    try:
+        key = faults.state_key(
+            session, alert_type="document_failed", tenant_id=tenant_id, step=INTAKE_STEP, fault=fault
+        )
+        raised = raise_fault_alert(
+            session,
+            alert_type="document_failed",
+            severity="high",
+            tenant_id=tenant_id,
+            document_id=None,
+            intake_rejection_id=intake_rejection_id,
+            step=INTAKE_STEP,
+            fault=fault,
+            state_key=key,
+            error_code=error_code,
+        )
+    except Exception as exc:  # noqa: BLE001 -- logged; the refusal and the rest of the e-mail stand
+        savepoint.rollback()
+        logger.error(
+            "founder_alert_not_raised tenant_id=%s error_code=%s %s",
+            tenant_id, error_code, faults.for_log(exc),
+        )
+        return False
+    savepoint.commit()
+    return raised
 
 
 def raise_for_failure(
@@ -570,28 +634,23 @@ def raise_parse_alert(
     *,
     tenant_id: UUID,
     document_id: UUID | None,
-    error_code: str,
     cause: str,
-    by_cause: bool,
 ) -> bool:
     """
-    Stage 3c (founder, Q3): a parse job that stopped at a limit (DOC-029), or
-    that crashed some other way or answered something the worker refused
-    (DOC-005). Either may be a file built to attack a parser, so the founder
-    hears about it even though the catalog text (founder-approved) promises
-    the customer no alert -- which is why these are not in FAILURE_ALERTS.
+    Stage 3c (founder, Q3): a parse job that stopped at a limit (DOC-029).
+    It may be a file built to attack a parser, so the founder hears about it
+    even though the catalog text (founder-approved) promises the customer no
+    alert -- which is why DOC-029 is not in FAILURE_ALERTS.
 
-    One `document_failed` alert per tenant per code per UTC day (DOC-029,
-    `by_cause=False`), or per tenant per code per cause per day (DOC-005,
-    whose causes are distinct faults). `cause` is a fixed label
-    (stopped:memory, crashed:signal_11, invalid:bad_part...). Its own
-    savepoint; never raises.
+    One `document_failed` alert per tenant per UTC day. `cause` is a fixed
+    label (stopped:memory, stopped:cpu...). Its own savepoint; never raises.
+
+    A crashed job or an answer the worker refused was DOC-005 here, once per
+    cause per day, until PR 1b-i (D-204): it is DOC-030 now, with the keyed
+    alert (`raise_fault_alert`), and a seccomp kill raises
+    `raise_seccomp_kill` from the worker directly.
     """
-    entry = get_error(error_code)
-    if cause == SECCOMP_KILL_CAUSE:
-        return raise_seccomp_kill(
-            session, tenant_id=tenant_id, where="worker", ref_id=document_id, error_code=entry.code
-        )
+    entry = get_error(PARSE_STOPPED_CODE)
     savepoint = session.begin_nested()
     try:
         raised = raise_alert(
@@ -604,7 +663,7 @@ def raise_parse_alert(
                 "cause": cause,
                 **({"first_document_id": str(document_id)} if document_id else {}),
             },
-            dedupe_key=f"document_failed:{tenant_id}:{entry.code}:parse" + (f":{cause}" if by_cause else ""),
+            dedupe_key=f"document_failed:{tenant_id}:{entry.code}:parse",
             dedupe_per_utc_day=True,
         )
     except Exception as exc:

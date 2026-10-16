@@ -278,6 +278,10 @@ DOC-029 [warning/tenant] This file was too much to read
   what+why: Reading this file needed more memory or time than DocFlow allows for one file, so it was stopped before anything was read. This usually means a very large or damaged file.
   next:     Ask the sender for a smaller copy -- fewer pages, or saved as a PDF -- and upload that.
 
+DOC-030 [high/tenant] We couldn't read this file
+  what+why: We couldn't read this file because of a problem on our side, not with your file. We're already on it.
+  next:     Please hold off on resending until we notify you that it's fixed, then re-upload the file or forward the original email.
+
 EXM-001 [warning/founder] Confirm the live golden check first
   what+why: Example prompting changes what the extraction model is sent, so it may only be switched on after a live golden-fixture run with examples has passed (Section 7.13). The confirmation wasn't ticked, so nothing was changed.
   next:     Run `pytest -m live_api tests/test_example_prompting_golden.py` in apps/api; when it passes, tick the confirmation and switch it on again.

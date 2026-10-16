@@ -38,9 +38,13 @@ ALERTED_ELSEWHERE = {
     # Stage 3d: shown only while the provider is marked down, which is when
     # model_provider.record_failure raised this alert.
     "DOC-023": "model_api_failure",
+    # Stage 4 (D-203, PR 1b-i): a parse job that failed on our side. The worker
+    # raises the keyed `document_failed` alert, once per state.
+    "DOC-030": "document_failed",
 }
 
-PROMISE = re.compile(r"(has|have) (already )?been alerted", re.IGNORECASE)
+# "We're already on it" (DOC-030) makes the same promise in other words.
+PROMISE = re.compile(r"(has|have) (already )?been alerted|already on it", re.IGNORECASE)
 
 
 def _promising_codes() -> set[str]:

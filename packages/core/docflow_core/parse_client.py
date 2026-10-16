@@ -4,8 +4,10 @@ module opens no file, and importing it pulls in no parsing library, so the
 dependency-graph tests allow it anywhere.
 
 What each answer means for the caller:
-- `ParseAnswer` with outcome ok / rejected / stopped / crashed -- the
-  service answered (a "crashed" job died some other way than our limits);
+- `ParseAnswer` with outcome ok / rejected / stopped / crashed / error --
+  the service answered (a "crashed" job died some other way than our
+  limits; an "error" job raised something no parser raises on a malformed
+  file, which is ours: DOC-030, D-203);
 - `ParseUnavailable` -- **never got in**: no connection, the service busy
   (503) or refusing (401: a token mismatch), after waiting up to
   PARSE_CONNECT_PATIENCE_SECONDS (a stopped Fly machine is started by the
@@ -64,6 +66,14 @@ PREVIEW_MEDIA_TYPES = {"image/png", "image/jpeg"}
 STOP_CAUSES = {"memory", "cpu", "wall_clock", "output_too_large"}
 _CODE = re.compile(r"^(DOC|IMP)-\d{3}$")
 _EXTENSION = re.compile(r"^\.[a-z0-9]{1,8}$")
+# An `error` answer's fields (D-203, PR 1b-i): a class name, and
+# `module:function:line` of our code. Nothing else gets through.
+_ERROR_TYPE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,99}$")
+_LOCATION = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,149}:[A-Za-z_<>][A-Za-z0-9_.<>]{0,149}:\d{1,6}$")
+_RELEASE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+# A parse app from before 1b-i names no release (deploy order: the worker
+# first, then the parse app).
+UNKNOWN_RELEASE = "unknown"
 
 
 class ParseUnavailable(Exception):
@@ -86,9 +96,15 @@ class ParseAnswerInvalid(Exception):
 
 @dataclass
 class ParseAnswer:
-    outcome: str  # ok | rejected | stopped | crashed
+    outcome: str  # ok | rejected | stopped | crashed | error
     code: str | None = None
     cause: str | None = None
+    # `error` (D-203, PR 1b-i): an exception no parser raises on a malformed
+    # file -- its type and our code location, never its message.
+    error_type: str | None = None
+    location: str | None = None
+    # `error` and `crashed`: the parse app's release, for the alert's key.
+    release: str = UNKNOWN_RELEASE
     file_type: str | None = None
     parts: list[dict] = field(default_factory=list)
     image_preview: dict | None = None  # {"media_type", "kind", "content": bytes}
@@ -128,7 +144,14 @@ def _check_document(body: dict) -> ParseAnswer:
     if outcome == "crashed":
         cause = body.get("cause")
         named = isinstance(cause, str) and len(cause) < 40
-        return ParseAnswer("crashed", cause=cause if named else "unknown")
+        return ParseAnswer("crashed", cause=cause if named else "unknown", release=_release(body))
+    if outcome == "error":
+        error_type, location = body.get("error_type"), body.get("location")
+        if not isinstance(error_type, str) or not _ERROR_TYPE.match(error_type):
+            raise ParseAnswerInvalid("bad_error_type")
+        if not isinstance(location, str) or not _LOCATION.match(location):
+            raise ParseAnswerInvalid("bad_error_location")
+        return ParseAnswer("error", error_type=error_type, location=location, release=_release(body))
     if outcome != "ok":
         raise ParseAnswerInvalid("unknown_outcome")
     file_type = body.get("file_type")
@@ -178,9 +201,14 @@ def _check_document(body: dict) -> ParseAnswer:
     return ParseAnswer("ok", file_type=file_type, parts=checked, image_preview=checked_preview)
 
 
+def _release(body: dict) -> str:
+    value = body.get("release")
+    return value if isinstance(value, str) and _RELEASE.match(value) else UNKNOWN_RELEASE
+
+
 def _check_table(body: dict) -> ParseAnswer:
     outcome = body.get("outcome")
-    if outcome in ("rejected", "stopped", "crashed"):
+    if outcome in ("rejected", "stopped", "crashed", "error"):
         return _check_document(body)
     if outcome != "ok":
         raise ParseAnswerInvalid("unknown_outcome")

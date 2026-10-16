@@ -41,7 +41,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 
-from parse_service import config
+from parse_service import config, fault_origin, stderr_summary
 from parse_service.cgroups import CgroupError, Cgroups, JobCgroup
 
 logger = logging.getLogger("parse_service.launcher")
@@ -72,7 +72,7 @@ class Limits:
 
 @dataclass
 class JobResult:
-    # ok | rejected | stopped | crashed | isolation_failed
+    # ok | rejected | stopped | crashed | error | isolation_failed
     outcome: str
     answer: dict | None = None
     cause: str | None = None
@@ -308,9 +308,12 @@ def run_job(
     result.seconds = round(time.monotonic() - started, 3)
     result.evidence = evidence
     if result.outcome in ("crashed", "isolation_failed", "rejected"):
-        # The tail of the job's own stderr: our messages and, for a failed
-        # conversion, LibreOffice's own (the parsers print nothing about a
-        # file's contents). For the service log only; never in the answer.
+        # What the log may say about the job's stderr: length, a short hash
+        # and a known category, never its text (7.10, D-204 item 4a). The
+        # job read a hostile file, and whatever a library prints lands there.
+        evidence["stderr"] = stderr_summary.summarize(bytes(err), truncated=err_overflow.is_set())
+    if result.outcome == "crashed":
+        # The tail itself: collected, never logged, never in the answer.
         evidence["stderr_tail"] = stderr_tail[-500:]
     return result
 
@@ -563,6 +566,12 @@ def _classify(status: int | None, cause: str | None, out: bytes, *, isolation_ca
     if not isinstance(answer, dict):
         return JobResult("crashed", cause="invalid_output", exit_status=status)
     outcome = answer.get("outcome")
+    if outcome == "error":
+        # Ours, not the file's (D-203, PR 1b-i): a type and a code location,
+        # checked here too -- the job read a hostile file.
+        if not fault_origin.is_error_answer(answer):
+            return JobResult("crashed", cause="invalid_output", exit_status=status)
+        return JobResult("error", answer=answer, exit_status=status)
     if outcome not in ("ok", "rejected", "selftest"):
         return JobResult("crashed", cause="invalid_output", exit_status=status)
     return JobResult(outcome, answer=answer, exit_status=status)

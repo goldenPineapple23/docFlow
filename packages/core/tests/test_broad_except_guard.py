@@ -20,8 +20,8 @@ and the tests are out (founder, 2026-10-13).
 The kinds, from the audit (BUILD-STATUS "Stage 4 detailed design", B1):
   BLAMES_INPUT   any failure becomes "this file / this request is the
                  problem". The audit's target: narrowed to what the library
-                 raises on a bad input, in PR 1b.
-  DROPS_CONTENT  content is skipped with no record. PR 1b adds the warning.
+                 raises on a bad input: done in PR 1b-i, none left.
+  DROPS_CONTENT  content is skipped with no record. PR 1b-ii adds the warning.
   OUR_STEP       a step of ours failed and says so honestly (a catalog code
                  that doesn't blame the input, and an alert).
   BEST_EFFORT    a side effect that must never fail the main thing: logged,
@@ -82,28 +82,24 @@ LISTED: dict[tuple[str, str, int], tuple[str, str]] = {
         BEST_EFFORT,
         "the health strip degrades, the page doesn't",
     ),
-    # ── the parse service (kinds changed in PR 1b) ───────────────────────────
+    # ── the parse service ────────────────────────────────────────────────────
+    # PR 1b-i narrowed the parsing blocks that blamed the file for anything
+    # (DOC-005, DOC-017, IMP-004): each catches only what its library raises
+    # on a malformed file (`fault_origin`). What they don't catch is ours.
     (f"{_PARSE}/job.py", "main", 1): (FAIL_CLOSED, "hardening failed: the file is never read"),
-    (f"{_PARSE}/parsing/conversion.py", "_open_image", 1): (BLAMES_INPUT, "DOC-017; narrowed in 1b"),
-    (f"{_PARSE}/parsing/conversion.py", "convert_xls", 1): (BLAMES_INPUT, "DOC-017; narrowed in 1b"),
-    (f"{_PARSE}/parsing/conversion.py", "convert_odf", 1): (BLAMES_INPUT, "DOC-017; narrowed in 1b"),
-    (f"{_PARSE}/parsing/conversion.py", "convert_odf", 2): (BLAMES_INPUT, "DOC-017; narrowed in 1b"),
-    (f"{_PARSE}/parsing/conversion.py", "unwrap_msg", 1): (BLAMES_INPUT, "DOC-017; narrowed in 1b"),
-    (f"{_PARSE}/parsing/conversion.py", "unwrap_eml", 1): (BLAMES_INPUT, "DOC-017; narrowed in 1b"),
+    (f"{_PARSE}/job.py", "_parse", 1): (
+        OUR_STEP,
+        "anything no parsing block claimed is ours: `error`, DOC-030 and the keyed alert",
+    ),
+    (f"{_PARSE}/parsing/conversion.py", "unwrap_eml", 1): (
+        DROPS_CONTENT,
+        "an undecodable body; VAL-018 in 1b-ii",
+    ),
     (f"{_PARSE}/parsing/conversion.py", "unwrap_eml", 2): (
         DROPS_CONTENT,
-        "an undecodable body; VAL-018 in 1b",
-    ),
-    (f"{_PARSE}/parsing/conversion.py", "unwrap_eml", 3): (
-        DROPS_CONTENT,
-        "an undecodable attachment; VAL-017 in 1b",
+        "an undecodable attachment; VAL-017 in 1b-ii",
     ),
     (f"{_PARSE}/parsing/documents.py", "image_preview", 1): (BEST_EFFORT, "no preview is the right outcome"),
-    (f"{_PARSE}/parsing/documents.py", "parse", 1): (
-        BLAMES_INPUT,
-        "DOC-005; narrowed in 1b, DOC-030 for ours",
-    ),
-    (f"{_PARSE}/parsing/tables.py", "parse_table", 1): (BLAMES_INPUT, "IMP-004; narrowed in 1b"),
     (f"{_PARSE}/sandbox_init.py", "main", 1): (FAIL_CLOSED, "the sandbox could not be set up"),
     (f"{_PARSE}/sandbox_init.py", "main", 2): (FAIL_CLOSED, "no confirmation was sent: isolation failed"),
     (f"{_PARSE}/sandbox_init.py", "_reap_as_init", 1): (
@@ -130,6 +126,7 @@ LISTED: dict[tuple[str, str, int], tuple[str, str]] = {
     (_TASK, "_alert_lost_cost_record", 1): (BEST_EFFORT, _NOT_RAISED),
     (_TASK, "_parse_alert", 1): (BEST_EFFORT, _NOT_RAISED),
     (_TASK, "_alert_failure", 1): (BEST_EFFORT, _NOT_RAISED),
+    (_TASK, "_fail_parse_ours", 1): (BEST_EFFORT, _NOT_RAISED),
     (_TASK, "dispatch_after_task", 1): (BEST_EFFORT, "beat's backstop runs the next pass"),
     (_TASK, "_parse_and_extract", 1): (OUR_STEP, "saving the answer: DOC-021 and the fault's alert"),
     (_TASK, "_finish", 1): (OUR_STEP, "buyer identification: VAL-016 and the fault's alert"),
@@ -153,6 +150,10 @@ LISTED: dict[tuple[str, str, int], tuple[str, str]] = {
     ),
     (f"{_CORE}/dispatch.py", "check_stopped", 1): (BEST_EFFORT, "the check failed: the sweep goes on"),
     (f"{_CORE}/email_intake.py", "alert_webhook_refused", 1): (BEST_EFFORT, _NOT_RAISED),
+    (f"{_CORE}/email_intake.py", "_accept_attachment", 1): (
+        OUR_STEP,
+        "checking one attachment failed on our side: DOC-030 for it, the rest of the email is read",
+    ),
     (f"{_CORE}/exports.py", "build_export", 1): (
         FAIL_CLOSED,
         "a file that can't be read back fails its integrity check (EXP-004)",
@@ -166,10 +167,6 @@ LISTED: dict[tuple[str, str, int], tuple[str, str]] = {
         "the hook never stops the call; the worker's hook raises cost_record_lost (Q11)",
     ),
     (f"{_CORE}/extraction.py", "_count_example_tokens", 1): (BEST_EFFORT, "a failed count returns None"),
-    (f"{_CORE}/file_types.py", "_scan_zip_xml_for_entities", 1): (
-        BLAMES_INPUT,
-        "a zip member that can't be read is DOC-005; narrowed in 1b",
-    ),
     (_ALERTS, "raise_for_failure", 1): (BEST_EFFORT, _NOT_RAISED),
     (_ALERTS, "raise_storage_unavailable", 1): (BEST_EFFORT, _NOT_RAISED),
     (_ALERTS, "report_refused_storage_path", 1): (BEST_EFFORT, _NOT_RAISED),
@@ -177,6 +174,7 @@ LISTED: dict[tuple[str, str, int], tuple[str, str]] = {
     (_ALERTS, "alert_seccomp_kill", 1): (BEST_EFFORT, _NOT_RAISED),
     (_ALERTS, "raise_parse_service_unavailable", 1): (BEST_EFFORT, _NOT_RAISED),
     (_ALERTS, "raise_parse_alert", 1): (BEST_EFFORT, _NOT_RAISED),
+    (_ALERTS, "raise_intake_fault", 1): (BEST_EFFORT, _NOT_RAISED),
     (_ALERTS, "alert_parse_service_unavailable", 1): (BEST_EFFORT, _NOT_RAISED),
     (_ALERTS, "alert_storage_unavailable", 1): (BEST_EFFORT, _NOT_RAISED),
     (f"{_CORE}/heartbeat.py", "after_pass", 1): (BEST_EFFORT, "no reading, no ping"),
@@ -298,17 +296,15 @@ def test_every_entry_has_a_known_kind_and_says_why():
         assert len(why.strip()) >= 10, key
 
 
-def test_the_kinds_the_audit_still_has_to_change_are_only_where_1b_changes_them():
-    """BLAMES_INPUT and DROPS_CONTENT are the audit's targets. After PR 1a
-    they are left only in the parse service and in `file_types`'s zip scan,
-    which PR 1b narrows; one anywhere else is a new instance of the defect."""
-    targets = {key[0] for key, (kind, _) in LISTED.items() if kind in (BLAMES_INPUT, DROPS_CONTENT)}
-    assert targets == {
-        f"{_PARSE}/parsing/conversion.py",
-        f"{_PARSE}/parsing/documents.py",
-        f"{_PARSE}/parsing/tables.py",
-        f"{_CORE}/file_types.py",
-    }
+def test_the_kinds_the_audit_still_has_to_change_are_only_where_1b_ii_changes_them():
+    """BLAMES_INPUT and DROPS_CONTENT are the audit's targets. PR 1b-i
+    narrowed every BLAMES_INPUT block; the two DROPS_CONTENT blocks left are
+    the `.eml` body and attachment in `conversion.py`, which PR 1b-ii gives
+    VAL-018 and VAL-017. One anywhere else is a new instance of the defect."""
+    blames = {key for key, (kind, _) in LISTED.items() if kind == BLAMES_INPUT}
+    drops = {key[0] for key, (kind, _) in LISTED.items() if kind == DROPS_CONTENT}
+    assert blames == set()
+    assert drops == {f"{_PARSE}/parsing/conversion.py"}
 
 
 def test_the_guard_reads_the_product_code_and_nothing_else():

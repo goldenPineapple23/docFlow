@@ -208,6 +208,15 @@ def test_a_new_release_is_a_different_state(monkeypatch):
     assert _key() != before
 
 
+def test_a_parse_fault_is_keyed_by_the_parse_apps_release_not_this_ones(monkeypatch):
+    """D-203, PR 1b-i: a parse job's fault happened in the parse app's
+    release, which the worker is given in the answer."""
+    monkeypatch.setenv("FLY_IMAGE_REF", "registry.fly.io/docflow-worker-staging:deployment-W1")
+    key = _key(release_tag="deployment-P7")
+    assert key.endswith(":deployment-P7") and "deployment-W1" not in key
+    assert _key(release_tag="deployment-P8") != key
+
+
 def test_the_same_state_is_the_same_key_on_any_day():
     assert _key(_Session("2026-10-13")) == _key(_Session("2026-12-25"))
 

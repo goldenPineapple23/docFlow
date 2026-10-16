@@ -164,6 +164,11 @@ export type FounderAlert = {
     since_acknowledged: number;
     latest_at: string | null;
   } | null;
+  /**
+   * A keyed alert with no document to count (PR 1b-i): an e-mail attachment
+   * refused at intake. Shown as "Email intake, no document".
+   */
+  no_document?: "email_intake" | null;
 };
 
 export type OutboxEmail = {

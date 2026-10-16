@@ -15,6 +15,7 @@ converter is ever reached.
 from __future__ import annotations
 
 import zipfile
+import zlib
 from io import BytesIO
 
 import pytest
@@ -504,3 +505,55 @@ def test_every_rejection_code_exists_in_the_error_catalog():
 
     for code in sorted(set(_re.findall(r"\bDOC-\d{3}\b", source))):
         assert code in CATALOG, f"{code} is returned by file_types but missing from the catalog"
+
+# ── a zip member that can't be read (D-203, PR 1b-i) ─────────────────────────
+
+
+def _member_read_raises(monkeypatch, exc: BaseException, member: str) -> None:
+    real_open, real_read = zipfile.ZipFile.open, zipfile.ZipFile.read
+
+    def name_of(entry) -> str:
+        return entry.filename if isinstance(entry, zipfile.ZipInfo) else entry
+
+    def open_(self, entry, *args, **kwargs):
+        if name_of(entry) == member:
+            raise exc
+        return real_open(self, entry, *args, **kwargs)
+
+    def read(self, entry, *args, **kwargs):
+        if name_of(entry) == member:
+            raise exc
+        return real_read(self, entry, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "open", open_)
+    monkeypatch.setattr(zipfile.ZipFile, "read", read)
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        zipfile.BadZipFile("Bad CRC-32"),
+        zlib.error("invalid stored block lengths"),
+        NotImplementedError("compression method"),
+    ],
+    ids=["BadZipFile", "zlib.error", "NotImplementedError"],
+)
+@pytest.mark.parametrize("member", ["mimetype", "content.xml"])
+def test_a_member_that_cant_be_read_is_doc_005(monkeypatch, exc, member):
+    """What the mutation corpus saw a broken archive raise. `mimetype` is the
+    read the corpus found unguarded (three `.ods` cases escaped as crashes)."""
+    ods = _make_odf("application/vnd.oasis.opendocument.spreadsheet")
+    _member_read_raises(monkeypatch, exc, member)
+    result = validate_upload(ods, "po.ods")
+    assert (result.ok, result.error_code) == (False, "DOC-005")
+
+
+@pytest.mark.parametrize("member", ["mimetype", "content.xml"])
+def test_anything_else_from_a_member_read_is_ours_and_not_called_the_files(monkeypatch, member):
+    """Narrowed: an unexpected exception passes through validation. The parse
+    job answers `error` (DOC-030), email intake refuses that attachment as
+    DOC-030, upload and the Console answer SYS-001 -- never DOC-005."""
+    ods = _make_odf("application/vnd.oasis.opendocument.spreadsheet")
+    _member_read_raises(monkeypatch, RuntimeError("ours"), member)
+    with pytest.raises(RuntimeError):
+        validate_upload(ods, "po.ods")

@@ -60,13 +60,19 @@ def harden() -> None:
 
 
 def _answer(answer: dict) -> None:
-    out = sys.stdout.buffer
-    out.write(json.dumps(answer, ensure_ascii=False).encode("utf-8"))
-    out.flush()
+    from parse_service import answer_channel
+
+    answer_channel.write(json.dumps(answer, ensure_ascii=False).encode("utf-8"))
 
 
 def main(argv: list[str]) -> int:
     kind = argv[1]
+    # First, before the hardening and before any library loads (D-204): the
+    # real stdout carries the answer alone; whatever else writes to
+    # descriptor 1 goes to stderr (`answer_channel`).
+    from parse_service import answer_channel
+
+    answer_channel.keep_stdout_for_the_answer()
     if os.environ.get("PARSE_ISOLATION", "on") == "on":
         try:
             harden()
@@ -83,20 +89,38 @@ def main(argv: list[str]) -> int:
             return 0
         content = sys.stdin.buffer.read()
         filename = str(header.get("filename") or "upload")
-        if kind == "document":
-            from parse_service.parsing import documents
-
-            _answer(documents.parse(content, filename))
-        elif kind == "table":
-            from parse_service.parsing import tables
-
-            _answer(tables.parse(content, filename))
-        else:
+        if kind not in ("document", "table"):
             print(f"unknown job kind {kind!r}", file=sys.stderr)
             return 2
+        _answer(_parse(kind, content, filename))
     except MemoryError:
         return EXIT_MEMORY
     return 0
+
+
+def _parse(kind: str, content: bytes, filename: str) -> dict:
+    """
+    The parser's answer, or `error` (D-203, PR 1b-i): each parsing block
+    catches only what its library raises on a malformed file, so an
+    exception that reaches here is ours, not the file's. The answer carries
+    its type and our code location, never its message (a message can
+    carry the file's content); nothing is printed. MemoryError passes: a
+    limit, answered as `stopped` by the supervisor.
+    """
+    from parse_service import fault_origin
+
+    try:
+        if kind == "document":
+            from parse_service.parsing import documents
+
+            return documents.parse(content, filename)
+        from parse_service.parsing import tables
+
+        return tables.parse(content, filename)
+    except MemoryError:
+        raise
+    except Exception as exc:  # noqa: BLE001 -- anything no parser claimed is ours: `error`, DOC-030
+        return {"outcome": "error", **fault_origin.describe(exc)}
 
 
 if __name__ == "__main__":

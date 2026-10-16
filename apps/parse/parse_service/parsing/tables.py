@@ -18,11 +18,14 @@ price never becomes 47.500000000000004 (Section 7.1).
 from __future__ import annotations
 
 import csv
+import functools
 import io
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
 from docflow_core.file_types import TABLE_FORMATS
+
+from parse_service import fault_origin
 
 MAX_ROWS = 50_000
 MAX_COLUMNS = 100
@@ -151,10 +154,24 @@ def parse_table(content: bytes, file_type: str) -> ParsedTable:
         if file_type in ("xlsx", "xlsm"):
             return _parse_xlsx(content)
         return _parse_xls(content)
-    except (ImportParseError, MemoryError):
-        raise  # MemoryError is a limit, not the file's content: the supervisor answers `stopped`
-    except Exception as exc:  # noqa: BLE001 -- any library failure on a hostile file
+    except fault_origin.catchable(table_errors()) as exc:
+        # MemoryError is in none of these: a limit, which the supervisor
+        # answers as `stopped`. Anything not the file's is ours (D-203, PR
+        # 1b-i): the job answers `error`; the import shows IMP-004 until 1b-ii.
+        if not fault_origin.from_input(exc, table_errors()):
+            raise
         raise ImportParseError("IMP-004", f"{file_type} unreadable: {type(exc).__name__}") from exc
+
+
+@functools.cache
+def table_errors() -> tuple[type[BaseException], ...]:
+    """What the table readers raise on a malformed file: xlrd, openpyxl and
+    the zip and XML readers under it, the csv module."""
+    from openpyxl.utils.exceptions import InvalidFileException
+
+    from parse_service.parsing.conversion import xlrd_errors, xml_errors, zip_errors
+
+    return (*xlrd_errors(), InvalidFileException, *zip_errors(), *xml_errors(), csv.Error)
 
 
 def parse(content: bytes, filename: str) -> dict:

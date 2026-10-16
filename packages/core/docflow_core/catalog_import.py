@@ -995,8 +995,15 @@ def run_parse(tenant_id: UUID, import_id: UUID) -> str:
     else:
         if answer.outcome == "rejected":
             code = answer.code or "IMP-004"
-        elif answer.outcome in ("stopped", "crashed"):
+        elif answer.outcome in ("stopped", "crashed", "error"):
+            # `error` is our fault, not the file's (D-203); it keeps IMP-004
+            # until the import's own code exists (PR 1b-ii).
             code = "IMP-004"
+            if answer.outcome == "error":
+                logger.error(
+                    "import_parse_error import_id=%s error_type=%s location=%s release=%s",
+                    import_id, answer.error_type, answer.location, answer.release,
+                )
             if answer.outcome == "crashed" and answer.cause == "signal_31":
                 # Every seccomp kill alerts, here as in the worker (founder).
                 from docflow_core import founder_alerts

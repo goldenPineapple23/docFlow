@@ -419,6 +419,24 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="tenant",
     ),
+    # Stage 4 (D-203, PR 1b-i): the parse job failed in a way the file can't
+    # explain -- an exception no parser raises on a malformed file, or a job
+    # that crashed. Founder's wording, 2026-10-02. The keyed founder alert is
+    # what keeps "We're already on it" true.
+    "DOC-030": ErrorCatalogEntry(
+        code="DOC-030",
+        title="We couldn't read this file",
+        message=(
+            "We couldn't read this file because of a problem on our side, not with your file. "
+            "We're already on it."
+        ),
+        action=(
+            "Please hold off on resending until we notify you that it's fixed, then re-upload "
+            "the file or forward the original email."
+        ),
+        severity="high",
+        audience="tenant",
+    ),
     "INT-001": ErrorCatalogEntry(
         code="INT-001",
         title="No attachment to process",
