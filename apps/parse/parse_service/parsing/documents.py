@@ -17,6 +17,7 @@ DECISIONS.md D-010).
 from __future__ import annotations
 
 import base64
+import functools
 import io
 import re
 import sys
@@ -24,11 +25,15 @@ from io import BytesIO
 
 from docflow_core import file_types
 
+from parse_service import fault_origin
 from parse_service.parsing.conversion import (
     ConversionError,
     PreparedArtifact,
     format_cell_value,
+    pil_errors,
     prepare_artifacts,
+    xml_errors,
+    zip_errors,
 )
 
 # Below this many extracted characters, a PDF is treated as scanned/
@@ -291,6 +296,34 @@ def image_preview(content: bytes) -> dict | None:
     }
 
 
+@functools.cache
+def tier1_errors() -> tuple[type[BaseException], ...]:
+    """What the readers behind `prepare_artifacts` raise on a malformed file
+    (D-203, PR 1b-i): pdfplumber and pdfminer, python-docx and lxml,
+    openpyxl, the zip and XML readers, Pillow. Imported only when a file
+    has already failed, so a job that succeeds loads none it doesn't use.
+    MemoryError is in none of them: a limit, which the supervisor answers
+    as `stopped`."""
+    from docx.exceptions import PythonDocxError
+    from docx.opc.exceptions import OpcError
+    from lxml.etree import LxmlError
+    from openpyxl.utils.exceptions import InvalidFileException
+    from pdfminer.psexceptions import PSException
+    from pdfplumber.utils.exceptions import PdfminerException
+
+    return (
+        PdfminerException,
+        PSException,
+        PythonDocxError,
+        OpcError,
+        LxmlError,
+        InvalidFileException,
+        *zip_errors(),
+        *xml_errors(),
+        *pil_errors(),
+    )
+
+
 def parse(content: bytes, filename: str) -> dict:
     """
     The job's answer for one document:
@@ -308,9 +341,9 @@ def parse(content: bytes, filename: str) -> dict:
         # through the job's stderr; the answer carries the catalog code only.
         print(f"rejected code={exc.error_code} reason={exc.detail}", file=sys.stderr)
         return {"outcome": "rejected", "code": exc.error_code, "file_type": file_type.name.value}
-    except MemoryError:
-        raise  # a limit, not the file's content: the supervisor answers `stopped`
-    except Exception as exc:  # noqa: BLE001 -- any library failure on a hostile file, as before 3c
+    except fault_origin.catchable(tier1_errors()) as exc:
+        if not fault_origin.from_input(exc, tier1_errors()):
+            raise  # ours (D-203, PR 1b-i): the job answers `error`, DOC-030
         print(f"rejected code=DOC-005 reason={type(exc).__name__}", file=sys.stderr)
         return {"outcome": "rejected", "code": "DOC-005", "file_type": file_type.name.value}
     preview = image_preview(content) if file_type.name in _IMAGE_LIKE else None

@@ -46,6 +46,8 @@ from pathlib import Path
 from docflow_core import file_types
 from docflow_core.file_types import FileType
 
+from parse_service import fault_origin
+
 logger = logging.getLogger(__name__)
 
 # ── Named limits (CLAUDE.md Section 7.11) ──────────────────────────────────
@@ -84,6 +86,34 @@ class ConversionError(Exception):
         super().__init__(detail)
         self.error_code = error_code
         self.detail = detail
+
+
+# What each library raises on a malformed file (D-203, PR 1b-i), from the
+# mutation corpus and the libraries' own exception classes. A block catches
+# these and the generic types (`fault_origin.GENERIC`); anything else is ours.
+def pil_errors() -> tuple[type[BaseException], ...]:
+    from PIL import Image, UnidentifiedImageError
+
+    return (UnidentifiedImageError, Image.DecompressionBombError)
+
+
+def xlrd_errors() -> tuple[type[BaseException], ...]:
+    import xlrd
+    from xlrd.compdoc import CompDocError
+
+    return (xlrd.XLRDError, CompDocError)
+
+
+def zip_errors() -> tuple[type[BaseException], ...]:
+    return file_types.ZIP_MEMBER_READ_ERRORS
+
+
+def xml_errors() -> tuple[type[BaseException], ...]:
+    from xml.etree.ElementTree import ParseError
+
+    from defusedxml import DefusedXmlException
+
+    return (ParseError, DefusedXmlException)
 
 
 @dataclass(frozen=True)
@@ -147,9 +177,12 @@ def _open_image(content: bytes):
     # Explicit, deliberate decompression-bomb guard rather than Pillow's
     # default (CLAUDE.md Section 7.11: "pixel-dimension caps before decode").
     Image.MAX_IMAGE_PIXELS = file_types.MAX_IMAGE_PIXELS
+    errors = pil_errors()
     try:
         return Image.open(BytesIO(content))
-    except Exception as exc:
+    except fault_origin.catchable(errors) as exc:
+        if not fault_origin.from_input(exc, errors):
+            raise  # ours: the job answers `error` (DOC-030)
         raise ConversionError(
             "DOC-017", f"Image could not be opened: {type(exc).__name__}"
         ) from exc
@@ -238,9 +271,12 @@ def convert_xls(content: bytes) -> list[tuple[bytes, str]]:
     except ImportError as exc:  # pragma: no cover - dependency is pinned
         raise ConversionError("DOC-017", "Legacy Excel support is not installed.") from exc
 
+    errors = xlrd_errors()
     try:
         book = xlrd.open_workbook(file_contents=content)
-    except Exception as exc:
+    except fault_origin.catchable(errors) as exc:
+        if not fault_origin.from_input(exc, errors):
+            raise  # ours: the job answers `error` (DOC-030)
         raise ConversionError(
             "DOC-017", f"Legacy Excel workbook could not be read: {type(exc).__name__}"
         ) from exc
@@ -272,17 +308,23 @@ def convert_odf(content: bytes) -> list[tuple[bytes, str]]:
 
     from defusedxml.ElementTree import fromstring
 
+    errors = zip_errors()
     try:
         with zipfile.ZipFile(BytesIO(content)) as archive:
             xml_bytes = archive.read("content.xml")
-    except Exception as exc:
+    except fault_origin.catchable(errors) as exc:
+        if not fault_origin.from_input(exc, errors):
+            raise  # ours: the job answers `error` (DOC-030)
         raise ConversionError(
             "DOC-017", f"OpenDocument content could not be read: {type(exc).__name__}"
         ) from exc
 
+    errors = xml_errors()
     try:
         root = fromstring(xml_bytes)
-    except Exception as exc:
+    except fault_origin.catchable(errors) as exc:
+        if not fault_origin.from_input(exc, errors):
+            raise  # ours: the job answers `error` (DOC-030)
         raise ConversionError(
             "DOC-017", f"OpenDocument XML could not be parsed: {type(exc).__name__}"
         ) from exc
@@ -486,9 +528,14 @@ def unwrap_msg(content: bytes) -> list[tuple[bytes, str]]:
     except ImportError as exc:  # pragma: no cover - dependency is pinned
         raise ConversionError("DOC-017", "Outlook .msg support is not installed.") from exc
 
+    from olefile.olefile import OleFileError  # not exported at the top level in 0.47
+
+    errors = (OleFileError,)
     try:
         ole = olefile.OleFileIO(BytesIO(content))
-    except Exception as exc:
+    except fault_origin.catchable(errors) as exc:
+        if not fault_origin.from_input(exc, errors):
+            raise  # ours: the job answers `error` (DOC-030)
         raise ConversionError(
             "DOC-017", f"Outlook message could not be opened: {type(exc).__name__}"
         ) from exc
@@ -550,10 +597,14 @@ def unwrap_eml(content: bytes) -> list[tuple[bytes, str]]:
     """
     import email
     from email import policy
+    from email.errors import MessageError
 
+    errors = (MessageError,)
     try:
         message = email.message_from_bytes(content, policy=policy.default)
-    except Exception as exc:
+    except fault_origin.catchable(errors) as exc:
+        if not fault_origin.from_input(exc, errors):
+            raise  # ours: the job answers `error` (DOC-030)
         raise ConversionError("DOC-017", f"Email could not be parsed: {type(exc).__name__}") from exc
 
     header_lines = []

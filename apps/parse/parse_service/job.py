@@ -83,20 +83,38 @@ def main(argv: list[str]) -> int:
             return 0
         content = sys.stdin.buffer.read()
         filename = str(header.get("filename") or "upload")
-        if kind == "document":
-            from parse_service.parsing import documents
-
-            _answer(documents.parse(content, filename))
-        elif kind == "table":
-            from parse_service.parsing import tables
-
-            _answer(tables.parse(content, filename))
-        else:
+        if kind not in ("document", "table"):
             print(f"unknown job kind {kind!r}", file=sys.stderr)
             return 2
+        _answer(_parse(kind, content, filename))
     except MemoryError:
         return EXIT_MEMORY
     return 0
+
+
+def _parse(kind: str, content: bytes, filename: str) -> dict:
+    """
+    The parser's answer, or `error` (D-203, PR 1b-i): each parsing block
+    catches only what its library raises on a malformed file, so an
+    exception that reaches here is ours, not the file's. The answer carries
+    its type and our code location, never its message (a message can
+    carry the file's content); nothing is printed. MemoryError passes: a
+    limit, answered as `stopped` by the supervisor.
+    """
+    from parse_service import fault_origin
+
+    try:
+        if kind == "document":
+            from parse_service.parsing import documents
+
+            return documents.parse(content, filename)
+        from parse_service.parsing import tables
+
+        return tables.parse(content, filename)
+    except MemoryError:
+        raise
+    except Exception as exc:  # noqa: BLE001 -- anything no parser claimed is ours: `error`, DOC-030
+        return {"outcome": "error", **fault_origin.describe(exc)}
 
 
 if __name__ == "__main__":

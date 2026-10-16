@@ -203,6 +203,17 @@ def _b64(data: bytes) -> str:
             "part_bad_base64",
         ),
         ({**OK_ANSWER, "image_preview": {"media_type": "text/html", "data": ""}}, "bad_preview"),
+        # `error` (D-203, PR 1b-i): a class name and `module:function:line`, nothing else.
+        ({"outcome": "error", "location": "parse_service.job:_parse:7"}, "bad_error_type"),
+        (
+            {"outcome": "error", "error_type": "<b>x</b>", "location": "parse_service.job:_parse:7"},
+            "bad_error_type",
+        ),
+        ({"outcome": "error", "error_type": "TypeError"}, "bad_error_location"),
+        (
+            {"outcome": "error", "error_type": "TypeError", "location": "the po_number was 4471"},
+            "bad_error_location",
+        ),
     ],
 )
 def test_a_malformed_answer_is_refused_not_used(service, body, reason):
@@ -231,6 +242,14 @@ def test_an_answer_that_is_not_json_is_refused(service):
         ({"outcome": "rejected", "code": "DOC-017"}, "rejected", "code", "DOC-017"),
         ({"outcome": "stopped", "cause": "memory"}, "stopped", "cause", "memory"),
         ({"outcome": "crashed", "cause": "signal_11"}, "crashed", "cause", "signal_11"),
+        (
+            {"outcome": "crashed", "cause": "signal_11", "release": "deployment-P7"},
+            "crashed",
+            "release",
+            "deployment-P7",
+        ),
+        ({"outcome": "crashed", "cause": "signal_11"}, "crashed", "release", "unknown"),
+        ({"outcome": "crashed", "cause": "exit_1", "release": "no spaces!"}, "crashed", "release", "unknown"),
     ],
 )
 def test_the_service_s_verdicts_come_through(service, body, outcome, field, value):
@@ -252,3 +271,19 @@ def test_a_table_answer_is_checked(service):
     service(_json(200, {"outcome": "ok", "columns": ["SKU"], "rows": [["A"], [1]], "header_row_number": 1}))
     with pytest.raises(parse_client.ParseAnswerInvalid):
         parse_client.parse_table(b"x", "catalog.csv")
+
+def test_an_error_answer_comes_through_with_its_type_location_and_release(service):
+    """D-203, PR 1b-i: ours, not the file's; the worker fails it with DOC-030."""
+    body = {
+        "outcome": "error",
+        "error_type": "TypeError",
+        "location": "parse_service.parsing.conversion:convert_xls:281",
+        "release": "deployment-P7",
+    }
+    service(_json(200, body))
+    answer = parse_client.parse_document(b"x", "po.xls")
+    assert (answer.outcome, answer.error_type, answer.location, answer.release) == (
+        "error", "TypeError", "parse_service.parsing.conversion:convert_xls:281", "deployment-P7"
+    )
+    service(_json(200, body))
+    assert parse_client.parse_table(b"x", "catalog.xls").outcome == "error"

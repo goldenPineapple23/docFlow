@@ -765,10 +765,17 @@ def _drive_with_answer(monkeypatch, outcome):
     monkeypatch.setattr(mod, "tenant_session", fake_tenant_session)
     monkeypatch.setattr(mod, "read_file", lambda tenant_id, path: b"%PDF-1.4 fake")
     monkeypatch.setattr(mod.parse_client, "parse_document", fake_parse)
-    for name in ("raise_for_failure", "raise_parse_alert", "raise_parse_service_unavailable"):
+    for name in (
+        "raise_for_failure", "raise_parse_alert", "raise_parse_service_unavailable", "raise_fault_alert"
+    ):
         monkeypatch.setattr(
             mod.founder_alerts, name, lambda session, _n=name, **kw: alerts.append((_n, kw)) or True
         )
+    monkeypatch.setattr(
+        mod.founder_alerts,
+        "alert_seccomp_kill",
+        lambda tenant_id, **kw: alerts.append(("alert_seccomp_kill", kw)),
+    )
     sent: list[tuple] = []
     monkeypatch.setattr(
         mod.celery_app, "send_task", lambda name, args, queue: sent.append((name, args, queue))
@@ -795,10 +802,11 @@ def test_a_limit_fails_doc_029_with_its_alert(monkeypatch):
     # DOC-029's wording promises the customer nothing, so it isn't in
     # FAILURE_ALERTS; the founder's parse alert is raised explicitly, once per
     # tenant per day (not per cause).
+    # `raise_parse_alert` is DOC-029's alone since PR 1b-i (D-204): it takes
+    # no code and no per-cause switch.
     parse_alerts = [kw for name, kw in alerts if name == "raise_parse_alert"]
-    assert [(kw["error_code"], kw["cause"], kw["by_cause"]) for kw in parse_alerts] == [
-        ("DOC-029", "stopped:memory", False)
-    ]
+    assert [kw["cause"] for kw in parse_alerts] == ["stopped:memory"]
+    assert set(parse_alerts[0]) == {"tenant_id", "document_id", "cause"}
 
 
 def test_a_rejection_keeps_its_catalog_code(monkeypatch):
@@ -806,19 +814,72 @@ def test_a_rejection_keeps_its_catalog_code(monkeypatch):
     assert _to(session, "failed")[-1]["v_failure_code"] == "DOC-016"
 
 
+def _keys_noted(session) -> list[str]:
+    return [params["key"] for sql, params in session.statements if "array_append" in sql]
+
+
 @pytest.mark.parametrize(
-    "outcome, cause",
+    "outcome, fault, release, detail",
     [
-        (parse_client.ParseAnswer("crashed", cause="signal_11"), "crashed:signal_11"),
-        (parse_client.ParseAnswerInvalid("bad_part_type"), "invalid:bad_part_type"),
+        (
+            parse_client.ParseAnswer("crashed", cause="signal_11", release="deployment-P7"),
+            ("crashed", "parse_service.job", "signal_11", 0),
+            "deployment-P7",
+            "crashed:signal_11",
+        ),
+        (
+            parse_client.ParseAnswer("crashed", cause="self_reported_memory_error", release="deployment-P7"),
+            ("crashed", "parse_service.job", "self_reported_memory_error", 0),
+            "deployment-P7",
+            "crashed:self_reported_memory_error",
+        ),
+        (
+            parse_client.ParseAnswerInvalid("bad_part_type"),
+            ("invalid_answer", "docflow_core.parse_client", "bad_part_type", 0),
+            "unknown",
+            "invalid:bad_part_type",
+        ),
+        (
+            parse_client.ParseAnswer(
+                "error",
+                error_type="TypeError",
+                location="parse_service.parsing.conversion:convert_xls:281",
+                release="deployment-P7",
+            ),
+            ("TypeError", "parse_service.parsing.conversion", "convert_xls", 281),
+            "deployment-P7",
+            "error",
+        ),
     ],
+    ids=["signal", "exit 71", "unreadable answer", "error"],
 )
-def test_a_crash_or_a_refused_answer_fails_doc_005_and_tells_the_founder(monkeypatch, outcome, cause):
+def test_a_parse_job_that_failed_on_our_side_is_doc_030_with_the_keyed_alert(
+    monkeypatch, outcome, fault, release, detail
+):
+    """D-203, PR 1b-i (founder, 2026-10-16): never DOC-005, which blamed the
+    file. The key names the parse app's release; for a crash the cause
+    stands in the code location's place."""
     session, alerts, _ = _drive_with_answer(monkeypatch, outcome)
-    assert _to(session, "failed")[-1]["v_failure_code"] == "DOC-005"
-    assert [(name, kw["error_code"], kw["cause"], kw["by_cause"]) for name, kw in alerts] == [
-        ("raise_parse_alert", "DOC-005", cause, True)
-    ]
+    failed = _to(session, "failed")[-1]
+    assert failed["v_failure_code"] == "DOC-030"
+    assert failed["v_raw_json"] == {"error_code": "DOC-030", "detail": f"parse service: {detail}"}
+    assert [name for name, _ in alerts] == ["raise_fault_alert"]
+    kw = alerts[0][1]
+    assert (kw["alert_type"], kw["severity"], kw["error_code"], kw["step"]) == (
+        "document_failed", "high", "DOC-030", "parsing"
+    )
+    assert (kw["fault"].exception_type, kw["fault"].module, kw["fault"].function, kw["fault"].line) == fault
+    assert kw["release_tag"] == release and kw["state_key"].endswith(f":{release}")
+    assert _keys_noted(session) == [kw["state_key"]], "the document carries the alert's key"
+
+
+def test_a_seccomp_kill_keeps_its_own_alert_beside_the_keyed_one(monkeypatch):
+    session, alerts, _ = _drive_with_answer(
+        monkeypatch, parse_client.ParseAnswer("crashed", cause="signal_31", release="deployment-P7")
+    )
+    assert _to(session, "failed")[-1]["v_failure_code"] == "DOC-030"
+    assert [name for name, _ in alerts] == ["raise_fault_alert", "alert_seccomp_kill"]
+    assert alerts[1][1] == {"where": "worker", "ref_id": alerts[0][1]["document_id"], "error_code": "DOC-030"}
 
 
 def test_a_lost_try_is_recorded_and_retried_at_once(monkeypatch):

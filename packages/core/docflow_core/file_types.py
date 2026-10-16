@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import re
 import zipfile
+import zlib
 from dataclasses import dataclass
 from enum import Enum
 from io import BytesIO
@@ -442,6 +443,13 @@ def _inspect_zip_entries(content: bytes) -> zipfile.ZipFile:
     return zf
 
 
+# What reading a member of a malformed zip raises (D-203, PR 1b-i; the mutation
+# corpus saw all three): a broken archive, a broken deflate stream, a
+# compression method zipfile lacks. The file's problem: DOC-005. Anything
+# else from a member's read is ours and is not caught here.
+ZIP_MEMBER_READ_ERRORS: tuple[type[Exception], ...] = (zipfile.BadZipFile, zlib.error, NotImplementedError)
+
+
 def _scan_zip_xml_for_entities(zf: zipfile.ZipFile) -> None:
     """
     XXE / entity-expansion defense (CLAUDE.md Section 7.11): "Parse with
@@ -470,7 +478,7 @@ def _scan_zip_xml_for_entities(zf: zipfile.ZipFile) -> None:
         try:
             with zf.open(info) as handle:
                 prefix = handle.read(to_read)
-        except Exception as exc:  # a truncated/corrupt member
+        except ZIP_MEMBER_READ_ERRORS as exc:  # a truncated/corrupt member
             raise ZipInspectionError(
                 "DOC-005", f"Could not read zip entry {info.filename!r}: {type(exc).__name__}"
             ) from exc
@@ -505,7 +513,12 @@ def _classify_zip(content: bytes) -> FileTypeName | None:
         _scan_zip_xml_for_entities(zf)
         return FileTypeName.XLSX
     if "content.xml" in names and "mimetype" in names:
-        mimetype = zf.read("mimetype").decode("utf-8", errors="replace").strip()
+        try:
+            mimetype = zf.read("mimetype").decode("utf-8", errors="replace").strip()
+        except ZIP_MEMBER_READ_ERRORS as exc:  # a truncated/corrupt member (the corpus's .ods)
+            raise ZipInspectionError(
+                "DOC-005", f"Could not read zip entry 'mimetype': {type(exc).__name__}"
+            ) from exc
         if "opendocument.text" in mimetype:
             _scan_zip_xml_for_entities(zf)
             return FileTypeName.ODT

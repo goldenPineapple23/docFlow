@@ -1265,14 +1265,23 @@ _AFFECTED_DOCUMENTS = """
 
 def _alert_row(row: Any) -> dict[str, Any]:
     """One alert for the Console. `affected_documents` is None for an alert
-    that isn't raised per state (it has no key to count by)."""
+    that isn't raised per state (it has no key to count by).
+
+    A keyed alert raised at email intake has no document to count (PR 1b-i):
+    `no_document` says where it came from, so the Console shows "Email
+    intake, no document" and never "Affected documents: 0"."""
     alert = dict(row)
     counted = alert.pop("has_state_key")
     total = alert.pop("affected_total")
     since = alert.pop("affected_since_acknowledged")
     latest = alert.pop("affected_latest_at")
+    payload = alert.get("payload") or {}
+    without_document = counted and payload.get("step") == "email_intake" and "first_document_id" not in payload
+    alert["no_document"] = "email_intake" if without_document else None
     alert["affected_documents"] = (
-        {"total": int(total), "since_acknowledged": int(since), "latest_at": latest} if counted else None
+        {"total": int(total), "since_acknowledged": int(since), "latest_at": latest}
+        if counted and not without_document
+        else None
     )
     return alert
 

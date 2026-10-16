@@ -386,44 +386,102 @@ def _fail_after_extraction(
 # Stage 3c: a parse job stopped at a limit (memory, CPU, wall clock, answer
 # size) -- founder-approved wording, Q3.
 STOPPED_CODE = "DOC-029"
-# A job that crashed some other way, or an answer that failed the checks:
-# the customer sees the file as unreadable; the founder gets an alert.
-PARSE_FAULT_CODE = "DOC-005"
+# A parse job that failed on our side (D-203, PR 1b-i; founder, 2026-10-16):
+# an exception no parser raises on a malformed file (`error`), a job that
+# crashed some other way, or an answer that failed the checks. Never blamed
+# on the customer's file; the founder gets the keyed alert.
+PARSE_OURS_CODE = "DOC-030"
+PARSE_STEP = "parsing"
 # Stage 3d: waited PROVIDER_MAX_WAIT_HOURS on the model provider (the stuck
 # sweep uses the same code for a document that reached it while held).
 PROVIDER_WAIT_LIMIT_CODE = "DOC-024"
 
 
-def _fail_parse_fault(tenant_id: UUID, document_id: UUID, cause: str) -> None:
+def _fail_parse_ours(
+    tenant_id: UUID, document_id: UUID, *, fault: faults.Fault, release_tag: str, detail: str
+) -> None:
+    """
+    DOC-030 (D-203, PR 1b-i): the parse job failed on our side. The state's
+    key -- with the parse app's release, where the fault is -- goes on the
+    document in the transaction that fails it; the alert is raised once per
+    state, in its own transaction, so one that can't be written never undoes
+    the failed status.
+
+    `fault` is the exception's type and our code location for an `error`
+    answer; for a crash, the cause (signal or exit status) stands in the
+    location's place (founder, 2026-10-16).
+    """
     with tenant_session(tenant_id) as session:
+        key = faults.state_key(
+            session,
+            alert_type="document_failed",
+            tenant_id=tenant_id,
+            step=PARSE_STEP,
+            fault=fault,
+            release_tag=release_tag,
+        )
+        faults.note_on_document(session, document_id, key)
         document_status.transition(
             session,
             document_id,
             from_statuses=["processing"],
             to="failed",
             values={
-                "raw_json": {"error_code": PARSE_FAULT_CODE, "detail": f"parse service: {cause}"},
-                "failure_code": PARSE_FAULT_CODE,
+                "raw_json": {"error_code": PARSE_OURS_CODE, "detail": f"parse service: {detail}"},
+                "failure_code": PARSE_OURS_CODE,
                 "processed_at": document_status.NOW,
             },
         )
-    _parse_alert(tenant_id, document_id, PARSE_FAULT_CODE, cause, by_cause=True)
+    try:
+        with tenant_session(tenant_id) as session:
+            founder_alerts.raise_fault_alert(
+                session,
+                alert_type="document_failed",
+                severity="high",
+                tenant_id=tenant_id,
+                document_id=document_id,
+                step=PARSE_STEP,
+                fault=fault,
+                state_key=key,
+                error_code=PARSE_OURS_CODE,
+                release_tag=release_tag,
+            )
+    except Exception as exc:  # noqa: BLE001 -- an alert that can't be written never undoes the failure
+        logger.error(
+            "founder_alert_not_raised document_id=%s error_code=%s %s",
+            document_id,
+            PARSE_OURS_CODE,
+            faults.for_log(exc),
+        )
 
 
-def _parse_alert(tenant_id: UUID, document_id: UUID, code: str, cause: str, *, by_cause: bool) -> None:
+def _crash_fault(kind: str, cause: str, module: str) -> faults.Fault:
+    """A crash has no exception of ours to name: its cause stands in the
+    code location's place in the state key (founder, 2026-10-16)."""
+    return faults.Fault(exception_type=kind, module=module, function=cause, line=0)
+
+
+def _error_fault(answer: parse_client.ParseAnswer) -> faults.Fault:
+    module, function, line = (answer.location or "unknown:unknown:0").rsplit(":", 2)
+    return faults.Fault(
+        exception_type=answer.error_type or "unknown", module=module, function=function, line=int(line)
+    )
+
+
+def _parse_alert(tenant_id: UUID, document_id: UUID, cause: str) -> None:
     """The founder alert for a parse job stopped at a limit (DOC-029, once per
-    tenant per day) or one that crashed / answered badly (DOC-005, once per
-    tenant per cause per day). Its own transaction, after the failed status,
-    so an alert that can't be written never undoes it."""
+    tenant per day). A crashed job or a bad answer is DOC-030 with the keyed
+    alert since PR 1b-i (`_fail_parse_ours`). Its own transaction, after the
+    failed status, so an alert that can't be written never undoes it."""
     try:
         with tenant_session(tenant_id) as session:
             founder_alerts.raise_parse_alert(
-                session, tenant_id=tenant_id, document_id=document_id, error_code=code, cause=cause,
-                by_cause=by_cause,
+                session, tenant_id=tenant_id, document_id=document_id, cause=cause
             )
     except Exception as exc:
         logger.error(
-            "founder_alert_not_raised document_id=%s error_code=%s %s", document_id, code, faults.for_log(exc)
+            "founder_alert_not_raised document_id=%s error_code=%s %s",
+            document_id, STOPPED_CODE, faults.for_log(exc),
         )
 
 
@@ -769,7 +827,13 @@ def _parse_and_extract(tid: UUID, did: UUID) -> None:
         return
     except parse_client.ParseAnswerInvalid as exc:
         logger.error("parse_answer_invalid document_id=%s reason=%s", did, exc.reason)
-        _fail_parse_fault(tid, did, f"invalid:{exc.reason}")
+        _fail_parse_ours(
+            tid,
+            did,
+            fault=_crash_fault("invalid_answer", exc.reason, "docflow_core.parse_client"),
+            release_tag=parse_client.UNKNOWN_RELEASE,
+            detail=f"invalid:{exc.reason}",
+        )
         return
 
     if answer.outcome == "rejected":
@@ -783,11 +847,30 @@ def _parse_and_extract(tid: UUID, did: UUID) -> None:
         _mark_failed(
             tid, did, raw_response={"error_code": STOPPED_CODE, "detail": f"stopped: {answer.cause}"}
         )
-        _parse_alert(tid, did, STOPPED_CODE, f"stopped:{answer.cause}", by_cause=False)
+        _parse_alert(tid, did, f"stopped:{answer.cause}")
         return
     if answer.outcome == "crashed":
-        logger.error("parse_crashed document_id=%s cause=%s", did, answer.cause)
-        _fail_parse_fault(tid, did, f"crashed:{answer.cause}")
+        logger.error("parse_crashed document_id=%s cause=%s release=%s", did, answer.cause, answer.release)
+        cause = answer.cause or "unknown"
+        _fail_parse_ours(
+            tid,
+            did,
+            fault=_crash_fault("crashed", cause, "parse_service.job"),
+            release_tag=answer.release,
+            detail=f"crashed:{cause}",
+        )
+        if f"crashed:{cause}" == founder_alerts.SECCOMP_KILL_CAUSE:
+            # Every seccomp kill keeps its own alert too (founder, 2026-10-01).
+            founder_alerts.alert_seccomp_kill(tid, where="worker", ref_id=did, error_code=PARSE_OURS_CODE)
+        return
+    if answer.outcome == "error":
+        # Ours, not the file's (D-203, PR 1b-i): IDs, the type and our code
+        # location only (7.10).
+        logger.error(
+            "parse_error document_id=%s tenant_id=%s error_type=%s location=%s release=%s",
+            did, tid, answer.error_type, answer.location, answer.release,
+        )
+        _fail_parse_ours(tid, did, fault=_error_fault(answer), release_tag=answer.release, detail="error")
         return
 
     parts = answer.parts

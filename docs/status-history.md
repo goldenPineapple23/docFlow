@@ -4,6 +4,43 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-16 (PR 1a merged as PR #64; PR 1b split; PR 1b-i built, not merged; D-204)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-14, with PR 1a built and its staging run done:** Phase 5.5, **Stage 4** (matching performance, then
+the audit of the broad `except` blocks). PR A is on `main` (PR #62) and the bench tenant is removed
+(PR #63; `main` is `d9b7e8f`). **PR 1, the audit, is split in two (founder; D-203), and PR 1a is
+built and not merged** (branch `phase55/stage4-pr1a-except-audit`). It holds: the alert for a fault
+in one of our own steps, with the exception's type and our code location and never its message;
+**that alert raised once per state**, so an acknowledged one is not raised again until the
+exception, the place, the release or the tenant changes (the re-raised-alert defect of D-198 does
+not apply to it); the documents a state has hit, counted on the Console, with a list of acknowledged
+alerts that are still happening; an alert for a model call's cost record that could not be written;
+the guard test over every broad `except` in `apps/` and `packages/` (84 blocks: 16 exempt by rule,
+68 listed with a kind); two request blocks narrowed; sixteen log calls that printed an
+exception's message changed to its type, our location and the frames; and the five kind 3 log
+lines given the frames as well (founder, 2026-10-14). **It carries migration
+`0037`** (two nullable columns and their indexes, a reverse script, the CI round trip), **applied on
+staging by the founder on 2026-10-14 and verified.** The staging suites from the branch: core and
+worker green; the API's one failure was a fault in a test of the PR's own, fixed in the test and its
+file green alone (D-203 item 13). The migration goes before the code. No Fly gate applies to 1a. **PR 1b follows:** the parse service's
+blocks, DOC-030, VAL-017 and VAL-018, a new job outcome, the mutation corpus and the Fly gate
+(RUNBOOK 8.1). After it, inside Stage 4: the Stripe test's fix, and the database retry with
+migration `0038`. **The product cannot import more than 50,000 items** (the parse service's row cap,
+D-108); the 250,000 measurement on the Fly worker moves to the cap's own PR. **Not fixed, each for
+its own PR, with its timing decided at the Stage 4 checkpoint and not inside Stage 4 (founder):**
+IMP-003's wording, which would retire items (a pilot blocker); the 50,000-row cap (a candidate); the
+catalog commit, which held one request for 4 min 14 s (a pilot blocker, pending a test through a
+public address); and, new, **a PO that fails on our side at intake raises no alert** (a pilot
+blocker). A known limit stands: a 40-line order on a 250,000-item catalog took 4.86 s on a CI
+runner, against the 4 s mark, until the catalog is kept between documents (PR B, not now). After
+Stage 4: Stage 5, demo readiness with D-195's model work, the Phase 6 pilot-blocker subset, then
+pilots with two or three customers ("The plan after the Stage 3 "go"", below). If Stage 4 is not
+merged by 2026-11-02, D-195's two changes go next, before Stage 5; the estimate today ends Stage 4
+around 2026-10-29 to 2026-10-30. The Fly worker and beat are at 0 with PR A's merged code as the
+release (v10), the API's and the parse machine's auto-stop are on, and the Healthchecks.io check is
+paused. On the next worker start the machine's memory is read before anything else.
+
 ## Replaced on 2026-10-13 (PR 1 split in two; PR 1a built, not merged, with migration `0037`; D-203)
 
 <!-- the paragraph as it stood, starting on the next line -->

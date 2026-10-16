@@ -375,6 +375,28 @@ def test_a_header_only_file_fails_with_its_reason_shown(client, stripe):
         assert preview["error"]["action"]
 
 
+@requires_imports_schema
+def test_an_import_answered_error_keeps_imp_004_until_1b_ii(client, stripe, monkeypatch, caplog):
+    """D-203, PR 1b-i: an `error` answer is our fault, not the file's. Until
+    the import's own code exists (PR 1b-ii) it shows IMP-004, as a crash
+    does -- never an `ok` it isn't. The log names the type and our location."""
+    from docflow_core import parse_client
+
+    location = "parse_service.parsing.tables:parse_table:157"
+    answer = parse_client.ParseAnswer(
+        "error", error_type="TypeError", location=location, release="deployment-P7"
+    )
+    monkeypatch.setattr(parse_client, "parse_table", lambda content, filename: answer)
+    with _Console() as console:
+        tenant_id = console.create_tenant(client).json()["tenant_id"]
+        with caplog.at_level("ERROR"):
+            preview = _import(client, console, tenant_id, CATALOG_V1)
+        assert preview["status"] == "failed"
+        assert preview["error"]["code"] == "IMP-004"
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "import_parse_error" in logged and f"location={location}" in logged
+
+
 # ── From the intake, and customer lists ─────────────────────────────────────
 
 

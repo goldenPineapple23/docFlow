@@ -530,11 +530,13 @@ jobs:
       - name: "E3: start the service (production mode); its canary log"
         id: serve
         run: bash "${{ github.workspace }}/scripts/ci/parse_image.sh" docflow-parse:ci serve
-      - name: "HTTP tests against the real image (C1, C2, D1, D2, D3, N4)"
+      # The mutation corpus (D-203, PR 1b-i): 369 broken files, each answered
+      # by a real sandboxed job -- the recorded answer, never `error`.
+      - name: "HTTP tests against the real image (C1, C2, D1, D2, D3, N4, the mutation corpus)"
         id: http
         env:
           PARSE_SERVICE_URL: http://127.0.0.1:8100
-        run: pytest -v tests/test_parity.py tests/test_service.py --junitxml=junit-http.xml
+        run: pytest -v tests/test_parity.py tests/test_service.py tests/test_mutation_corpus.py --durations=10 --junitxml=junit-http.xml
       - name: No unapproved skipped tests (HTTP)
         if: success() || failure()
         env:

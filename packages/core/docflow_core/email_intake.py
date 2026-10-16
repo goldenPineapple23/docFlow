@@ -38,7 +38,7 @@ from celery import Celery
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from docflow_core import allowance, file_types, founder_alerts, intake_gate
+from docflow_core import allowance, faults, file_types, founder_alerts, intake_gate
 from docflow_core.config import get_settings
 
 # Named constants (Section 7.15.4) are defined once, in docflow_core.constants.
@@ -49,6 +49,9 @@ from docflow_core.errors import render_error
 from docflow_core.storage import save_file
 
 logger = logging.getLogger(__name__)
+
+# An attachment whose check failed on our side, not the file's (D-203, PR 1b-i).
+INTAKE_OURS_CODE = "DOC-030"
 
 # Public mail providers: a buyer using one of these does not make the whole
 # domain "known" (see is_known_sender).
@@ -487,7 +490,8 @@ def _insert_intake_rejection(
     original_filename: str | None,
     detected_type: str | None,
     error_code: str,
-) -> None:
+) -> UUID:
+    rejection_id = uuid4()
     session.execute(
         text(
             """
@@ -500,7 +504,7 @@ def _insert_intake_rejection(
             """
         ),
         {
-            "id": str(uuid4()),
+            "id": str(rejection_id),
             "tenant_id": str(tenant_id),
             "original_filename": original_filename,
             "detected_type": detected_type,
@@ -510,6 +514,7 @@ def _insert_intake_rejection(
             "message_id": parsed.message_id,
         },
     )
+    return rejection_id
 
 
 def _reply_not_active(session: Session, tenant_id: UUID, tenant_name: str, sender: str | None) -> None:
@@ -616,7 +621,43 @@ def _accept_attachment(
     endpoint. Does not enqueue -- callers enqueue only after the enclosing
     transaction commits (see `process_inbound_email`).
     """
-    validation = file_types.validate_upload(attachment.content, attachment.filename)
+    try:
+        validation = file_types.validate_upload(attachment.content, attachment.filename)
+    except Exception as exc:  # noqa: BLE001 -- ours, never the whole email's loss (founder, 2026-10-16)
+        # Checking this one attachment failed on our side, not the file's
+        # (D-203, PR 1b-i): it is refused as DOC-030 and the email's other
+        # attachments are still read; the webhook answers 200. The type and
+        # our location are logged, never the message. DOC-030 promises "we're
+        # already on it": the keyed alert, once per state, names the intake
+        # rejection -- there is no document (founder, 2026-10-16, (a1)).
+        logger.error(
+            "email_attachment_validation_fault tenant_id=%s error_code=%s %s",
+            tenant_id,
+            INTAKE_OURS_CODE,
+            faults.for_log(exc),
+        )
+        rejection_id = _insert_intake_rejection(
+            session,
+            tenant_id,
+            parsed,
+            original_filename=attachment.filename,
+            detected_type=None,
+            error_code=INTAKE_OURS_CODE,
+        )
+        founder_alerts.raise_intake_fault(
+            session,
+            tenant_id=tenant_id,
+            intake_rejection_id=rejection_id,
+            fault=faults.describe(exc),
+            error_code=INTAKE_OURS_CODE,
+        )
+        return AttachmentOutcome(
+            filename=attachment.filename,
+            accepted=False,
+            document_id=None,
+            error_code=INTAKE_OURS_CODE,
+            possible_duplicate_of=None,
+        )
     if not validation.ok:
         # A failed validation always carries its catalog code (file_types).
         assert validation.error_code is not None

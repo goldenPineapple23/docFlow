@@ -41,7 +41,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 
-from parse_service import config
+from parse_service import config, fault_origin
 from parse_service.cgroups import CgroupError, Cgroups, JobCgroup
 
 logger = logging.getLogger("parse_service.launcher")
@@ -72,7 +72,7 @@ class Limits:
 
 @dataclass
 class JobResult:
-    # ok | rejected | stopped | crashed | isolation_failed
+    # ok | rejected | stopped | crashed | error | isolation_failed
     outcome: str
     answer: dict | None = None
     cause: str | None = None
@@ -563,6 +563,12 @@ def _classify(status: int | None, cause: str | None, out: bytes, *, isolation_ca
     if not isinstance(answer, dict):
         return JobResult("crashed", cause="invalid_output", exit_status=status)
     outcome = answer.get("outcome")
+    if outcome == "error":
+        # Ours, not the file's (D-203, PR 1b-i): a type and a code location,
+        # checked here too -- the job read a hostile file.
+        if not fault_origin.is_error_answer(answer):
+            return JobResult("crashed", cause="invalid_output", exit_status=status)
+        return JobResult("error", answer=answer, exit_status=status)
     if outcome not in ("ok", "rejected", "selftest"):
         return JobResult("crashed", cause="invalid_output", exit_status=status)
     return JobResult(outcome, answer=answer, exit_status=status)

@@ -96,12 +96,23 @@ def release() -> str:
     return tag or UNVERSIONED
 
 
-def state_key(session: Session, *, alert_type: str, tenant_id: UUID, step: str, fault: Fault) -> str:
+def state_key(
+    session: Session,
+    *,
+    alert_type: str,
+    tenant_id: UUID,
+    step: str,
+    fault: Fault,
+    release_tag: str | None = None,
+) -> str:
     """
     The key of one state: this alert type, for this tenant, at this step,
     with this exception type at this place in our code, in this release. A
     different value in any of them is a different state, so it is raised
     again; the same key is raised once, acknowledged or not.
+
+    `release_tag` names the release the fault happened in when that is not
+    this process's: a parse job's fault is the parse app's (D-203, PR 1b-i).
 
     A connection error also carries today's UTC date, by the database's
     clock, the one that stamps the alert's row (D-170).
@@ -115,7 +126,7 @@ def state_key(session: Session, *, alert_type: str, tenant_id: UUID, step: str, 
         fault.module,
         fault.function,
         str(fault.line),
-        release(),
+        release_tag or release(),
     ]
     if fault.exception_type in CONNECTION_ERRORS:
         day = session.execute(text("SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')")).scalar_one()

@@ -1376,7 +1376,7 @@ A **DOC-022** alert whose detail has `last_lost_reason` (`http_502`,
 `http_504`, or a read error such as `ReadTimeout`) means the parse requests
 got in and never came out: a 502/504 is Fly's proxy (the machine died or
 didn't start), not a parser crash, which arrives as a `crashed` answer and
-DOC-005.
+DOC-030 (8.6).
 
 **A `parse_seccomp_kill` alert** (founder, 2026-10-01: every one, never
 rate-limited) means a parse job was killed by the seccomp filter (SIGSYS).
@@ -1384,8 +1384,9 @@ The filter kills only a system call from a foreign architecture (x32 or
 32-bit), which no parser makes by accident: treat the file as an attack.
 The alert has no syscall number (the kill reports none; only the kernel's
 audit log on the parse machine has it, in `fly logs` if the kernel printed
-it). The document failed with DOC-005 (an import with IMP-004); nothing
-else needs doing in DocFlow. Keep the file's hash from the alert's
+it). The document failed with DOC-030 and its keyed alert (8.6) as well
+(since PR 1b-i; an import with IMP-004); nothing else needs doing in
+DocFlow. Keep the file's hash from the alert's
 document for any follow-up.
 
 ### 8.5 Upgrading a parser (an ongoing duty, CLAUDE.md 7.11)
@@ -1419,6 +1420,69 @@ waiting for Monday.
 A build never changes by itself: until the date moves, a rebuild installs
 exactly what the last one did. If snapshot.debian.org is down, the build
 fails; it never falls back to the live archive.
+
+### 8.6 When the founder gets a DOC-030 alert (D-203, PR 1b-i)
+
+A `document_failed` alert with `error_code` DOC-030 means a parse job
+failed **on our side, not the file's**. The customer was told "We're
+already on it" and asked to hold off resending until DocFlow says it's
+fixed. Keeping that promise is this step.
+
+**What the alert says.** It is raised once per state: the tenant, the step
+(`parsing`), and what failed, in the **parse app's** release. An
+acknowledged alert stays quiet; the Console's "Affected documents: N" and
+"Acknowledged, still happening" count the documents that carry its key
+(`documents.fault_keys`). The payload's `exception_type` and `location`:
+- **a Python type and `module:function:line`** (an `error` answer): an
+  exception no parser raises on a malformed file reached our code there.
+  The parse app's log has `job_error kind=... error_type=... location=...`
+  and the worker's `parse_error document_id=... error_type=... location=...`.
+  Never a message: neither log carries one.
+- **`crashed` and a cause** (`signal_11`, `exit_1`,
+  `self_reported_memory_error`, `invalid_output`): the job died without an
+  answer. A `signal_31` is a seccomp kill and has its own alert too (8.4).
+- **`invalid_answer` and a reason**: the worker refused the service's
+  answer; the release is `unknown`.
+
+**1. List the affected documents, read-only, from the record** (the alert
+is only the trigger; founder, 2026-10-02). As `docflow_admin`, in the SQL
+Editor, with the alert's `state_key` from the Console:
+
+    SELECT tenant_id, id, created_at, processed_at
+    FROM documents
+    WHERE fault_keys @> ARRAY['<the alert's state_key>']::text[]
+    ORDER BY tenant_id, processed_at;
+
+Every DOC-030 document since a date, whatever its state:
+`WHERE failure_code = 'DOC-030' AND processed_at >= '<date>'`.
+
+**2. Fix it**, with a test that reproduces the fault. If a mutation-corpus
+case or a customer file shows a parser raising a type we didn't list for
+its block, add the type to that block (`conversion.py`, `documents.py`,
+`tables.py`) and the case to the corpus; never widen a block back to
+`Exception`.
+
+**3. Deploy: the worker first, then the parse app** (an older worker reads
+an `error` answer as unreadable). The parse app's deploy follows 8.1.
+
+**4. E-mail each affected tenant once the fix is deployed**: which
+documents (by received date and the customer's own reference, never the
+contents), that the problem was DocFlow's, and that they can now send them
+again. Nothing re-reads a failed document by itself (`failed` is final;
+the founder re-run is a Phase 6 item). **A re-upload works; an e-mail must
+be a new forward**, since a redelivery of the same message (its
+Message-ID) is dropped as a duplicate.
+
+**Also DOC-030, without a document:** an e-mail attachment whose check
+failed on our side is refused as DOC-030 at intake and the rest of the
+e-mail is read (`email_attachment_validation_fault` in the API log). It is
+in `intake_rejections` with `error_code = 'DOC-030'`. Its alert has step
+`email_intake` and names the rejection (`intake_rejection_id`), never the
+e-mail; the Console shows it as "Email intake, no document". List them:
+`SELECT id, created_at FROM intake_rejections WHERE error_code = 'DOC-030'
+AND created_at >= '<date>'`. The sender is in that row, for the step 4
+e-mail. **An import** that hits our bug shows IMP-004 until PR 1b-ii
+(`import_parse_error` in the log).
 
 ## 9. The dispatcher and waiting documents (Stage 3d)
 
