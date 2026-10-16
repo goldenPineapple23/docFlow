@@ -170,20 +170,25 @@ _NOT_A_SUBSCRIPTION = {
 
 
 def test_a_signature_stamped_more_than_300_seconds_ago_is_refused(client, _environment):
-    response = _post(client, _NOT_A_SUBSCRIPTION, signed_at=int(time.time()) - 301)
+    # 30 seconds past the edge: these stamp from the real clock, which moves
+    # between the stamp and the check. The exact edge (300 accepted, 301
+    # refused) is pinned on a fixed clock in core (D-201 item 8).
+    response = _post(client, _NOT_A_SUBSCRIPTION, signed_at=int(time.time()) - 330)
     assert response.status_code == 400
 
 
 def test_a_signature_stamped_more_than_300_seconds_in_the_future_is_refused(client, _environment):
     """The tolerance compares Stripe's clock with ours (D-170). A future stamp is
     as suspect as a stale one -- it would let a captured request be replayed
-    for longer -- so the check is symmetric, and this pins it."""
-    response = _post(client, _NOT_A_SUBSCRIPTION, signed_at=int(time.time()) + 301)
+    for longer -- so the check is symmetric, and this pins it. 30 seconds past
+    the edge: a +301 stamp from the real clock raced the check (D-201 item 8;
+    the exact edge is pinned on a fixed clock in core)."""
+    response = _post(client, _NOT_A_SUBSCRIPTION, signed_at=int(time.time()) + 330)
     assert response.status_code == 400
 
 
 def test_a_signature_inside_the_tolerance_is_accepted_either_side(client, _environment):
-    for offset in (-290, 290):
+    for offset in (-270, 270):
         response = _post(client, _NOT_A_SUBSCRIPTION, signed_at=int(time.time()) + offset)
         assert response.status_code == 200, offset
         assert response.json()["outcome"] == "ignored"

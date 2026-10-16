@@ -442,6 +442,27 @@ def test_an_old_timestamp_is_refused_even_with_a_correct_signature():
         es.verify_webhook_signature(payload, header, "whsec_test")
 
 
+@pytest.mark.parametrize(("offset", "accepted"), [(-300, True), (300, True), (-301, False), (301, False)])
+def test_the_tolerance_boundary_is_300_seconds_either_side_on_a_fixed_clock(monkeypatch, offset, accepted):
+    """The exact boundary, on a clock that does not move (D-201 item 8): a
+    stamp 300 seconds from now either way is accepted, 301 is refused. The
+    API's tests stamp from the real clock, where rounding and the time until
+    the check can take up to a second off a +301 stamp, so they keep a wide
+    margin and this test pins the edge. The check reads `time.time()`
+    inside the function, so the clock is fixed there, for this test only."""
+    import time
+
+    now = 1_800_000_000.0
+    monkeypatch.setattr(time, "time", lambda: now)
+    payload = b'{"id": "evt_1"}'
+    header = _signed(payload, "whsec_test", timestamp=int(now) + offset)
+    if accepted:
+        assert es.verify_webhook_signature(payload, header, "whsec_test")["id"] == "evt_1"
+    else:
+        with pytest.raises(es.ExternalServiceError, match="outside tolerance"):
+            es.verify_webhook_signature(payload, header, "whsec_test")
+
+
 def test_a_malformed_header_is_refused():
     with pytest.raises(es.ExternalServiceError):
         es.verify_webhook_signature(b"{}", "not-a-valid-header", "whsec_test")

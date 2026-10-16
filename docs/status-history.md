@@ -4,6 +4,40 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-16 (PR 1b-i merged as PR #65; the Stripe test's fix built; D-204 item 10, D-205)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-16, with PR 1b-i built:** Phase 5.5, **Stage 4** (the audit of the broad
+`except` blocks). **PR 1a is merged** (PR #64; `main` is `5df2ddb`; D-203 item 14): the alert raised
+once per state, the guard over every broad `except`, migration `0037` (on staging, not deployed in
+code). **PR 1b is split (founder; D-204). PR 1b-i is built and not merged** (branch
+`phase55/stage4-pr1b-i-parse-error`, uncommitted): every parsing block that blamed the file for any
+exception now catches only what its library raises on a malformed file, a generic type only from the
+library's own frame; anything else is ours, and the parse job answers a new outcome, `error`. A
+document whose parse fails on our side, or whose job crashed, fails with **DOC-030** ("a problem on
+our side, not with your file") and the keyed alert, keyed by the parse app's release, never DOC-005.
+The zip scan and the unguarded ODF `mimetype` read catch exactly what a broken zip raises. Email
+intake refuses only the attachment whose check failed on our side, as DOC-030, and reads the rest,
+with the keyed alert naming the intake rejection ("Email intake, no document" in the Console). **The mutation corpus:** 369
+broken copies of every fixture, each held to the answer it gave before this PR and never `error`, in
+CI through the real image too; it found three crashes from the unguarded read (now DOC-005), one
+bug of this PR's own (fixed), and **a bug present since 3c**: a library printing to stdout (xlrd, on
+an `.xls` whose size is not a whole number of 512-byte sectors, valid ones included) corrupted the
+job's answer, so the file failed as DOC-005 or IMP-004; the job now keeps its real stdout for the
+answer alone, and the service logs a job's stderr only as length, hash and category, never as text
+(7.10; D-204 item 4a). RUNBOOK 8.6 says what to do with a DOC-030. No migration. Local runs
+without staging green (parse 534, core 162 of its non-database files, worker 8, web); **the database
+tests run in CI only (founder), and the Fly gate (RUNBOOK 8.1) waits for a green pull-request run and
+the founder's word.** Deploy order:
+the worker, then the parse app. **PR 1b-ii follows Q14:** VAL-017 and VAL-018, IMP-011 and the
+import's own code (until then an import that hits our bug shows IMP-004). After 1b-i: the Stripe
+test's fix, then the database retry with migration `0038` (Q14), then 1b-ii and the Stage 4
+checkpoint. Not fixed, each its own PR, timed at the Stage 4 checkpoint: IMP-003's wording, the
+50,000-row cap, the long catalog commit, and a PO that fails on our side at intake raising no alert.
+If Stage 4 is not merged by 2026-11-02, D-195's two changes go next. The Fly worker and beat are at
+0 with PR A's code (v10), the API's and the parse machine's auto-stop are on, and the Healthchecks.io
+check is paused. On the next worker start the machine's memory is read before anything else.
+
 ## Replaced on 2026-10-16 (PR 1a merged as PR #64; PR 1b split; PR 1b-i built, not merged; D-204)
 
 <!-- the paragraph as it stood, starting on the next line -->
