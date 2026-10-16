@@ -31,8 +31,11 @@ The zip scan and the unguarded ODF `mimetype` read catch exactly what a broken z
 intake refuses only the attachment whose check failed on our side, as DOC-030, and reads the rest,
 with the keyed alert naming the intake rejection ("Email intake, no document" in the Console). **The mutation corpus:** 369
 broken copies of every fixture, each held to the answer it gave before this PR and never `error`, in
-CI through the real image too; it found three crashes from the unguarded read (now DOC-005) and one
-bug of this PR's own (fixed). RUNBOOK 8.6 says what to do with a DOC-030. No migration. Local runs
+CI through the real image too; it found three crashes from the unguarded read (now DOC-005), one
+bug of this PR's own (fixed), and **a bug present since 3c**: a library printing to stdout (xlrd, on
+an `.xls` whose size is not a whole number of 512-byte sectors, valid ones included) corrupted the
+job's answer, so the file failed as DOC-005 or IMP-004; the job now keeps its real stdout for the
+answer alone (D-204 item 4a). RUNBOOK 8.6 says what to do with a DOC-030. No migration. Local runs
 without staging green (parse 534, core 162 of its non-database files, worker 8, web); **the database
 tests run in CI only (founder), and the Fly gate (RUNBOOK 8.1) waits for a green pull-request run and
 the founder's word.** Deploy order:

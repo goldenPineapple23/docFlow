@@ -60,13 +60,19 @@ def harden() -> None:
 
 
 def _answer(answer: dict) -> None:
-    out = sys.stdout.buffer
-    out.write(json.dumps(answer, ensure_ascii=False).encode("utf-8"))
-    out.flush()
+    from parse_service import answer_channel
+
+    answer_channel.write(json.dumps(answer, ensure_ascii=False).encode("utf-8"))
 
 
 def main(argv: list[str]) -> int:
     kind = argv[1]
+    # First, before the hardening and before any library loads (D-204): the
+    # real stdout carries the answer alone; whatever else writes to
+    # descriptor 1 goes to stderr (`answer_channel`).
+    from parse_service import answer_channel
+
+    answer_channel.keep_stdout_for_the_answer()
     if os.environ.get("PARSE_ISOLATION", "on") == "on":
         try:
             harden()

@@ -394,12 +394,14 @@ def forkbomb(args: dict) -> dict:
 
 
 def flood(args: dict) -> dict:
-    """B7: writes far more than the answer cap to stdout."""
+    """B7: writes far more than the answer cap to the answer channel -- the
+    job's real stdout, which a hostile job can still reach after the job
+    points descriptor 1 at stderr (D-204)."""
+    from parse_service import answer_channel
+
     chunk = b"x" * (1 << 20)
-    out = sys.stdout.buffer
     for _ in range(int(args.get("mib", 64))):
-        out.write(chunk)
-    out.flush()
+        answer_channel.write(chunk)
     return {"flooded": True}
 
 
