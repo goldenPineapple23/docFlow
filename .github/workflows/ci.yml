@@ -289,6 +289,12 @@ jobs:
       - name: Migration 0037 forward -> reverse -> forward
         id: roundtrip_0037
         run: python "${{ github.workspace }}/scripts/ci/migration_0037_roundtrip.py"
+      # Stage 4, Q14 (D-206): 0038's reverse, the same way, and what it does
+      # with a document already waiting on 'database' (in a rolled-back
+      # transaction): cleared to an ordinary waiting document.
+      - name: Migration 0038 forward -> reverse -> forward
+        id: roundtrip_0038
+        run: python "${{ github.workspace }}/scripts/ci/migration_0038_roundtrip.py"
       - name: Turn on the four logins (migration 0036 creates them), as RUNBOOK 10.2 does
         id: app_role
         run: python "${{ github.workspace }}/scripts/ci/create_logins.py"

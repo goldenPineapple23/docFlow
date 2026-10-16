@@ -246,22 +246,23 @@ def test_another_tenant_hit_by_the_same_fault_is_raised_for_that_tenant(monkeypa
 
 
 @requires_documents_schema
-def test_a_connection_error_carries_the_date_so_a_later_outage_is_raised_again(monkeypatch):
-    """Founder, 2026-10-13: a dropped connection is not a standing state of
-    our code. Until the database retry exists (0038) its key ends with the
-    database's UTC date."""
-    dropped = OperationalError("SELECT 1", {}, Exception("server closed the connection unexpectedly"))
-    _break(monkeypatch, "match_document_lines", dropped)
-    with WorkerTestTenant("Acme Test Fault Connection") as tenant:
-        today = _database_utc_date()
+def test_a_database_error_that_is_not_an_outage_is_keyed_by_its_sqlstate(monkeypatch):
+    """Q14 (D-206): a database error that is not an outage (here a deadlock,
+    40P01) fails the step as before, and its SQLSTATE ends the key, so a
+    deadlock and a timeout at the same place are separate alerts. The UTC
+    date connection errors carried until the database retry existed is gone:
+    an outage now waits instead (test_database_wait_db.py)."""
+    import psycopg
+
+    deadlock = OperationalError("SELECT 1", {}, psycopg.errors.DeadlockDetected())
+    _break(monkeypatch, "match_document_lines", deadlock)
+    with WorkerTestTenant("Acme Test Fault Deadlock") as tenant:
         run_extraction(monkeypatch, tenant, tenant.create_pending_document(), CLEAN)
 
         (alert,) = _alerts(tenant, "pipeline_step_failed")
         assert alert["payload"]["exception_type"] == "OperationalError"
-        # Midnight UTC between the two reads would make this the next day's.
-        assert alert["state_key"].endswith(f":{today}") or alert["state_key"].endswith(
-            f":{_database_utc_date()}"
-        )
+        assert alert["state_key"].endswith(":40P01")
+        assert _database_utc_date() not in alert["state_key"]
 
 
 # ── DOC-021: saving and validation ───────────────────────────────────────────

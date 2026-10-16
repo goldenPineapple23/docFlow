@@ -121,6 +121,42 @@ def set_document_cost(session: Session, document_id: UUID) -> None:
 LOST_CALL_CODE = "worker_lost_during_call"
 
 
+def unsaved_answer_calls(session: Session, document_id: UUID) -> int:
+    """
+    The paid extraction calls this document has made whose answer may have
+    come back and was never saved (Q14, D-206), over its whole life: read
+    only when it has no saved answer, so every such call's answer is lost.
+
+    A call counts when its outcome is missing (the worker died, or the
+    outcome row was lost with the database), was closed as lost
+    (LOST_CALL_CODE), or says it succeeded. A call whose outcome says the
+    model failed (a provider error, a refusal) brought no answer and does not
+    count: those have their own rules (the provider wait, DOC-008). Counted
+    from the started rows, plus any outcome row whose started row was never
+    written (the started row can be lost too, D-163). A call that left no
+    row at all cannot be counted.
+    """
+    count = session.execute(
+        text(
+            """
+            SELECT
+              (SELECT count(*) FROM extraction_runs s
+                WHERE s.document_id = :id AND s.run_kind = 'extraction' AND s.run_state = 'started'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM extraction_runs o
+                       WHERE o.started_run_id = s.id AND o.succeeded = false
+                         AND o.error_code IS DISTINCT FROM :lost))
+            + (SELECT count(*) FROM extraction_runs o
+                WHERE o.document_id = :id AND o.run_kind = 'extraction' AND o.run_state = 'finished'
+                  AND o.started_run_id IS NULL
+                  AND (o.succeeded = true OR o.error_code = :lost))
+            """
+        ),
+        {"id": str(document_id), "lost": LOST_CALL_CODE},
+    ).scalar_one()
+    return int(count)
+
+
 def close_lost_runs(session: Session, tenant_id: UUID, document_id: UUID) -> Decimal:
     """
     Outcome rows for this document's started calls that have none: the worker

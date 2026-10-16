@@ -314,7 +314,10 @@ def claim_for_processing(
     return row is not None
 
 
-WAIT_CAUSES = ("model_provider", "storage", "parse_service")
+# 'database' since migration 0038 (Q14, D-206): a step that lost the
+# database waits it out. The same list as the check on
+# documents.wait_cause (a test holds them equal).
+WAIT_CAUSES = ("model_provider", "storage", "parse_service", "database")
 
 
 def to_waiting(

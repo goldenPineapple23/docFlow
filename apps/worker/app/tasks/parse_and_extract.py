@@ -47,8 +47,10 @@ from docflow_core import (
 from docflow_core.buyers import identify_and_link_buyer
 from docflow_core.config import get_settings
 from docflow_core.constants import (
+    DATABASE_MAX_WAIT_HOURS,
     DISPATCH_QUEUE,
     DOCUMENT_TASK_TIME_LIMIT_SECONDS,
+    MAX_UNSAVED_EXTRACTION_CALLS,
     PARSE_SERVICE_WAIT_RETRY_MINUTES,
     PROVIDER_MAX_WAIT_HOURS,
     STORAGE_WAIT_RETRY_MINUTES,
@@ -586,6 +588,83 @@ def _wait_for_provider(
     model_provider.record_failure(error)
 
 
+def _wait_for_database(
+    tid: UUID, did: UUID, exc: BaseException, *, step: str, raw_response: dict | None = None
+) -> None:
+    """
+    Q14 (founder, 2026-10-16; D-206): a step of ours lost the database
+    (`faults.database_unavailable`). Neither the document's fault nor a bug
+    of ours, so the document waits and the step is tried again, as for the
+    model provider:
+
+    - `processing -> pending`, `wait_cause = 'database'`, retried on the
+      provider's steps (1, 2, 4, 8, then every 15 minutes) with the attempt
+      given back. A step after the answer was saved resumes from it, with
+      no model call; a lost save re-runs the extraction, at most once
+      (`_may_extract_again`);
+    - after DATABASE_MAX_WAIT_HOURS of waiting: DOC-021 and its alert;
+    - if the wait can't be written either (the database is still out), the
+      claim is left as it is: the stuck sweep takes it over after
+      STUCK_PROCESSING_TIMEOUT_MIN, which counts an attempt toward DOC-022.
+    """
+    fault = faults.describe(exc)
+    label = f"database:{step}:{fault.sqlstate or fault.exception_type}"
+    try:
+        with tenant_session(tid) as session:
+            waited = document_status.waited_seconds(session, did, "database")
+            at_limit = waited is not None and waited >= DATABASE_MAX_WAIT_HOURS * 3600
+            if not at_limit:
+                document_status.to_waiting(
+                    session,
+                    did,
+                    cause="database",
+                    retry_after_seconds=model_provider.retry_delay_seconds(waited),
+                    error_label=label,
+                )
+    except Exception as wait_exc:  # noqa: BLE001 -- still out: the stuck sweep takes the claim over
+        logger.error(
+            "database_wait_not_recorded document_id=%s step=%s %s", did, step, faults.for_log(wait_exc)
+        )
+        return
+    # Labels and ids only (Section 7.10).
+    logger.error(
+        "database_wait document_id=%s step=%s label=%s waited_seconds=%s at_limit=%s %s",
+        did,
+        step,
+        label,
+        waited,
+        at_limit,
+        faults.for_log(exc),
+    )
+    if at_limit:
+        _fail_after_extraction(tid, did, "DOC-021", step=step, fault=fault, raw_response=raw_response)
+
+
+def _may_extract_again(tid: UUID, did: UUID) -> bool:
+    """
+    After a save lost to the database: whether one more paid extraction is
+    allowed (founder, 2026-10-16; D-206). The first call and one more, counted
+    from the cost record (`model_runs.unsaved_answer_calls`, this call
+    included). If the count can't be read (the database is still out), the
+    document is put to wait; the check before the next call holds the limit.
+    """
+    try:
+        with tenant_session(tid) as session:
+            calls = model_runs.unsaved_answer_calls(session, did)
+    except Exception as exc:  # noqa: BLE001 -- unreadable: wait; the check before the call holds the limit
+        logger.error("unsaved_calls_not_read document_id=%s %s", did, faults.for_log(exc))
+        return True
+    return calls < MAX_UNSAVED_EXTRACTION_CALLS
+
+
+def _unsaved_limit_fault() -> faults.Fault:
+    """The fault an alert names when the limit refuses a paid call: no
+    exception was raised, so a fixed label stands in for its type."""
+    return faults.Fault(
+        exception_type="unsaved_answer_limit", module=__name__, function="_parse_and_extract", line=0
+    )
+
+
 def _alert_failure(
     tenant_id: UUID,
     document_id: UUID,
@@ -753,12 +832,24 @@ def _parse_and_extract(tid: UUID, did: UUID) -> None:
         sender_email = row.get("sender_email")
         already_extracted = row.get("current_extraction_run_id") is not None
         expected_sha256 = row.get("content_sha256")
+        # D-206: paid calls already made whose answer was never saved. Read
+        # after close_lost_runs, so a call the last attempt died in counts.
+        unsaved_calls = 0 if already_extracted else model_runs.unsaved_answer_calls(session, did)
 
     if already_extracted:
         # An earlier attempt saved the model's answer and then stopped (a
         # restart, a crash, a timeout). Resume from it: no second model call.
         logger.info("parse_and_extract_resuming document_id=%s", did)
         _finish(tid, did)
+        return
+
+    if unsaved_calls >= MAX_UNSAVED_EXTRACTION_CALLS:
+        # The first call and one more have been paid for and neither answer
+        # was saved (founder, 2026-10-16; D-206): no third call. This holds
+        # however the document got here -- a second save lost with its wait,
+        # the stuck sweep's takeover, a worker that died mid-call twice.
+        logger.error("unsaved_answer_limit document_id=%s calls=%d", did, unsaved_calls)
+        _fail_after_extraction(tid, did, "DOC-021", step="saving", fault=_unsaved_limit_fault())
         return
 
     # Stage 3b (Q3, Q5). Outside every broad `except`, so a Storage failure
@@ -935,6 +1026,10 @@ def _parse_and_extract(tid: UUID, did: UUID) -> None:
         fault = faults.describe(exc)
         logger.error("extraction_save_failed document_id=%s %s", did, faults.for_log(exc))
         _record_unsaved_extraction(tid, did, plan, result, started.extraction)
+        if faults.database_unavailable(exc) and _may_extract_again(tid, did):
+            # Lost to the database (D-206): wait, then extract once more.
+            _wait_for_database(tid, did, exc, step="saving", raw_response=result.raw_response)
+            return
         _fail_after_extraction(
             tid, did, "DOC-021", step="saving", fault=fault, raw_response=result.raw_response
         )
@@ -1091,6 +1186,9 @@ def _finish(tid: UUID, did: UUID) -> None:
             if identification.rule_id is not None:
                 rules_applied[identification.rule_id] = rules_applied.get(identification.rule_id, 0) + 1
     except Exception as exc:  # noqa: BLE001 -- recorded as a pipeline issue
+        if faults.database_unavailable(exc):
+            _wait_for_database(tid, did, exc, step="buyer_identification")  # D-206
+            return
         # No exception message: a database error's text can carry bound
         # parameters, which here are customer data (Section 7.10).
         step_faults["buyer_identification"] = fault = faults.describe(exc)
@@ -1111,6 +1209,9 @@ def _finish(tid: UUID, did: UUID) -> None:
             summary.lines_matched,
         )
     except Exception as exc:  # noqa: BLE001 -- recorded as a pipeline issue
+        if faults.database_unavailable(exc):
+            _wait_for_database(tid, did, exc, step="matching")  # D-206
+            return
         step_faults["matching"] = fault = faults.describe(exc)
         logger.error("matching_failed document_id=%s %s", did, faults.for_log(exc))
         issues.append("matching")
@@ -1128,6 +1229,9 @@ def _finish(tid: UUID, did: UUID) -> None:
             relationships.is_possible_change_order,
         )
     except Exception as exc:  # noqa: BLE001 -- recorded as a pipeline issue
+        if faults.database_unavailable(exc):
+            _wait_for_database(tid, did, exc, step="duplicate_detection")  # D-206
+            return
         step_faults["duplicate_detection"] = fault = faults.describe(exc)
         logger.error("duplicate_detection_failed document_id=%s %s", did, faults.for_log(exc))
         issues.append("duplicate_detection")
@@ -1211,6 +1315,9 @@ def _finish(tid: UUID, did: UUID) -> None:
         logger.info("parse_and_extract_moved_on document_id=%s", did)
         return
     except Exception as exc:  # noqa: BLE001 -- never silent: failed + DOC-021 + alert
+        if faults.database_unavailable(exc):
+            _wait_for_database(tid, did, exc, step="validation")  # D-206
+            return
         fault = faults.describe(exc)
         logger.error("validation_failed document_id=%s %s", did, faults.for_log(exc))
         _fail_after_extraction(tid, did, "DOC-021", step="validation", fault=fault)

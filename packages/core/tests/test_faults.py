@@ -12,8 +12,9 @@ from __future__ import annotations
 import json
 from uuid import UUID
 
+import psycopg
 import pytest
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError, InterfaceError, OperationalError
 
 from docflow_core import faults
 
@@ -23,8 +24,9 @@ BOUND_VALUE = "Acme Test Buyer 47.50 SECRET-BOUND-VALUE"
 
 
 class _Session:
-    """Answers `state_key`'s one read (the database's UTC date) and records
-    every statement."""
+    """Records every statement, and would answer a read with `day`: the
+    tests use it to show `state_key` reads nothing (it read the database's
+    UTC date for connection errors until Q14, D-206)."""
 
     def __init__(self, day: str = "2026-10-13"):
         self.day = day
@@ -76,17 +78,12 @@ def test_with_the_real_package_list_a_frame_in_core_is_ours():
         def execute(self, *args, **kwargs):
             raise RuntimeError("the database went away")
 
-    connection_fault = faults.Fault("OperationalError", "docflow_core.x", "f", 1)
-    exc = _caught(
-        lambda: faults.state_key(
-            Broken(), alert_type="document_failed", tenant_id=TENANT, step="saving", fault=connection_fault
-        )
-    )
+    exc = _caught(lambda: faults.note_on_document(Broken(), TENANT, "a-key"))
     fault = faults.describe(exc)
     assert (fault.exception_type, fault.module, fault.function) == (
         "RuntimeError",
         "docflow_core.faults",
-        "state_key",
+        "note_on_document",
     )
 
 
@@ -221,21 +218,110 @@ def test_the_same_state_is_the_same_key_on_any_day():
     assert _key(_Session("2026-10-13")) == _key(_Session("2026-12-25"))
 
 
-@pytest.mark.parametrize("exception_type", sorted(faults.CONNECTION_ERRORS))
-def test_a_connection_error_also_carries_the_databases_utc_date(exception_type):
-    """Founder, 2026-10-13: until the database retry exists (0038), a second
-    outage in the same release must be raised again."""
-    fault = faults.Fault(exception_type, "docflow_core.matching", "load_catalog", 88)
-    monday, tuesday = _Session("2026-10-12"), _Session("2026-10-13")
-    first, second = _key(monday, fault=fault), _key(tuesday, fault=fault)
-    assert first.endswith(":2026-10-12") and second.endswith(":2026-10-13") and first != second
-    assert _key(_Session("2026-10-12"), fault=fault) == first
-    assert len(monday.statements) == 1 and "now()" in monday.statements[0][0]
+def test_a_database_error_carries_its_sqlstate_so_a_deadlock_and_a_timeout_are_two_states():
+    """Q14 (founder, 2026-10-16; D-206)."""
+    deadlock = faults.Fault("OperationalError", "docflow_core.matching", "load_catalog", 88, sqlstate="40P01")
+    timeout = faults.Fault("OperationalError", "docflow_core.matching", "load_catalog", 88, sqlstate="57014")
+    session = _Session("2026-10-13")
+    first, second = _key(session, fault=deadlock), _key(session, fault=timeout)
+    assert first.endswith(":40P01") and second.endswith(":57014") and first != second
+    assert session.statements == [], "the key reads nothing from the database"
 
 
-def test_the_connection_errors_are_the_two_the_database_retry_will_take():
-    assert faults.CONNECTION_ERRORS == {"OperationalError", "InterfaceError"}
-    assert OperationalError.__name__ in faults.CONNECTION_ERRORS
+def test_no_key_carries_the_date_any_more():
+    """The UTC date connection errors carried until the database retry
+    existed (founder, 2026-10-13) is gone: an outage now waits instead."""
+    fault = faults.Fault("OperationalError", "docflow_core.matching", "load_catalog", 88)
+    assert _key(_Session("2026-10-12"), fault=fault) == _key(_Session("2026-10-13"), fault=fault)
+    assert not hasattr(faults, "CONNECTION_ERRORS")
+
+
+# ── database_unavailable: exactly the outage classes (D-206) ─────────────────
+
+
+def _wrapped(driver: BaseException, *, invalidated: bool = False) -> BaseException:
+    """As SQLAlchemy raises it on the real path."""
+    return OperationalError("SELECT 1", {}, driver, connection_invalidated=invalidated)
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        _wrapped(psycopg.errors.ConnectionException()),  # 08000
+        _wrapped(psycopg.errors.ConnectionFailure()),  # 08006
+        _wrapped(psycopg.errors.SqlclientUnableToEstablishSqlconnection()),  # 08001
+        _wrapped(psycopg.errors.ProtocolViolation()),  # 08P01
+        _wrapped(psycopg.errors.AdminShutdown()),  # 57P01
+        _wrapped(psycopg.errors.CrashShutdown()),  # 57P02
+        _wrapped(psycopg.errors.CannotConnectNow()),  # 57P03
+        _wrapped(psycopg.errors.TooManyConnections()),  # 53300
+        _wrapped(psycopg.errors.ConnectionTimeout()),
+        _wrapped(psycopg.OperationalError("connection failed")),  # before any server answered
+        _wrapped(psycopg.errors.DeadlockDetected(), invalidated=True),  # the connection is gone
+        InterfaceError("SELECT 1", {}, psycopg.InterfaceError(), connection_invalidated=True),
+        psycopg.errors.AdminShutdown(),  # unwrapped, as the driver raises it
+    ],
+    ids=[
+        "08000",
+        "08006",
+        "08001",
+        "08P01",
+        "57P01",
+        "57P02",
+        "57P03",
+        "53300",
+        "connect timeout",
+        "connect failed, no sqlstate",
+        "connection invalidated",
+        "InterfaceError on a closed connection",
+        "unwrapped 57P01",
+    ],
+)
+def test_an_outage_is_database_unavailable(exc):
+    assert faults.database_unavailable(exc)
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        _wrapped(psycopg.errors.DeadlockDetected()),  # 40P01
+        _wrapped(psycopg.errors.SerializationFailure()),  # 40001
+        _wrapped(psycopg.errors.QueryCanceled()),  # 57014, a statement timeout
+        _wrapped(psycopg.errors.LockNotAvailable()),  # 55P03, a lock timeout
+        _wrapped(psycopg.errors.InvalidPassword()),  # 28P01, our login
+        _wrapped(psycopg.errors.DiskFull()),  # 53100
+        _wrapped(psycopg.errors.OutOfMemory()),  # 53200
+        _wrapped(psycopg.errors.PipelineAborted()),  # no sqlstate, but a subclass
+        _wrapped(psycopg.errors.CancellationTimeout()),  # no sqlstate, but a subclass
+        IntegrityError("INSERT", {}, psycopg.errors.UniqueViolation()),  # 23505
+        InterfaceError("SELECT 1", {}, psycopg.InterfaceError()),  # not on a closed connection
+        RuntimeError("a bug of ours"),
+    ],
+    ids=[
+        "40P01",
+        "40001",
+        "57014",
+        "55P03",
+        "28P01",
+        "53100",
+        "53200",
+        "PipelineAborted",
+        "CancellationTimeout",
+        "23505",
+        "InterfaceError, connection open",
+        "not a database error",
+    ],
+)
+def test_anything_else_is_not_an_outage(exc):
+    assert not faults.database_unavailable(exc)
+
+
+def test_the_sqlstate_is_read_from_the_drivers_original_exception():
+    exc = _caught(lambda: (_ for _ in ()).throw(_wrapped(psycopg.errors.DeadlockDetected())))
+    assert faults.sqlstate(exc) == "40P01"
+    assert faults.describe(exc).sqlstate == "40P01"
+    assert faults.sqlstate(RuntimeError("x")) is None
+    assert faults.sqlstate(_wrapped(psycopg.OperationalError("connection failed"))) is None
 
 
 # ── note_on_document ────────────────────────────────────────────────────────

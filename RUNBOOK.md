@@ -677,6 +677,32 @@ row, policy or grant.
   affected documents reads nothing. CI runs forward, reverse, forward on
   every push (`scripts/ci/migration_0037_roundtrip.py`).
 
+### 1.10 Migration 0038: the database wait and the item-delete index (Stage 4, Q14; D-206)
+
+`supabase/migrations/0038_database_wait.sql` lets `documents.wait_cause` be
+`database` (0035's check, replaced with the same list plus that value) and
+adds `idx_document_lines_matched_item_id`. It changes no existing row,
+policy or grant.
+
+- **The order is the migration first, then the code.** The code that comes
+  with it writes `wait_cause = 'database'`, which the old check refuses.
+  Code from before `0038` never writes it. So: apply `0038`, then deploy.
+- **Staging: no backup (founder, 2026-10-16),** as for `0037`: a check
+  widened, an index added, no row changed, a reverse that CI tests. Run the
+  file in the SQL Editor, then check that the check names four causes and
+  the index is there. Then Claude runs the staging suites (step 4 of this
+  section) before the PR merges.
+- **Production follows the standard backup rule regardless:** 1.1 for
+  `documents` and `document_lines`, the row counts of 1.2, then the
+  migration.
+- **Going back** is `supabase/reverse/0038_reverse.sql`, run only with the
+  code from before `0038` deployed. Documents already waiting on the
+  database become ordinary waiting documents first (their wait cause, its
+  start and its last error cleared; still `pending`, so the dispatcher sends
+  them again); then the three-cause check is put back and the index dropped.
+  No row is removed. CI runs it, and forward, reverse, forward, on every push
+  (`scripts/ci/migration_0038_roundtrip.py`).
+
 ---
 
 ## 2. Inbound email (Postmark)
