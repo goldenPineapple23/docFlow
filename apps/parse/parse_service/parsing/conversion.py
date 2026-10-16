@@ -460,9 +460,10 @@ def convert_with_libreoffice(
 
         produced = sorted(p for p in outdir.iterdir() if p.is_file())
         if completed.returncode != 0 or not produced:
-            # The converter's own words go to the service log only (the job
-            # prints this detail to its stderr); the answer, and so the
-            # tenant, gets DOC-017 alone (Section 7.16.5).
+            # The converter's own words go to the job's stderr only, which the
+            # service logs as length, hash and category, never as text (7.10,
+            # D-204 item 4a); the answer, and so the tenant, gets DOC-017
+            # alone (Section 7.16.5).
             raise ConversionError(
                 "DOC-017",
                 f"Converter exited with status {completed.returncode} and no output file; "
@@ -472,7 +473,7 @@ def convert_with_libreoffice(
 
 
 def _stderr_tail(raw: bytes) -> str:
-    """The converter's last words, on one line, for the service log."""
+    """The converter's last words, on one line, for the job's stderr (never logged as text)."""
     text = " | ".join(line.strip() for line in raw.decode("utf-8", errors="replace").splitlines() if line.strip())
     return text[-300:] or "(empty)"
 

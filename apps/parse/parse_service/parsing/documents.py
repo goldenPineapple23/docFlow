@@ -337,8 +337,9 @@ def parse(content: bytes, filename: str) -> dict:
     try:
         parts = artifact_parts(prepare_artifacts(file_type, content))
     except ConversionError as exc:
-        # The reason (for LibreOffice, its own stderr) reaches the service log
-        # through the job's stderr; the answer carries the catalog code only.
+        # The reason (for LibreOffice, its own stderr) goes to the job's
+        # stderr, which the service logs as length, hash and category, never
+        # as text (7.10, D-204 item 4a); the answer carries the code only.
         print(f"rejected code={exc.error_code} reason={exc.detail}", file=sys.stderr)
         return {"outcome": "rejected", "code": exc.error_code, "file_type": file_type.name.value}
     except fault_origin.catchable(tier1_errors()) as exc:

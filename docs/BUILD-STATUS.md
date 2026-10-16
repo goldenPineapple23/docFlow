@@ -35,7 +35,8 @@ CI through the real image too; it found three crashes from the unguarded read (n
 bug of this PR's own (fixed), and **a bug present since 3c**: a library printing to stdout (xlrd, on
 an `.xls` whose size is not a whole number of 512-byte sectors, valid ones included) corrupted the
 job's answer, so the file failed as DOC-005 or IMP-004; the job now keeps its real stdout for the
-answer alone (D-204 item 4a). RUNBOOK 8.6 says what to do with a DOC-030. No migration. Local runs
+answer alone, and the service logs a job's stderr only as length, hash and category, never as text
+(7.10; D-204 item 4a). RUNBOOK 8.6 says what to do with a DOC-030. No migration. Local runs
 without staging green (parse 534, core 162 of its non-database files, worker 8, web); **the database
 tests run in CI only (founder), and the Fly gate (RUNBOOK 8.1) waits for a green pull-request run and
 the founder's word.** Deploy order:

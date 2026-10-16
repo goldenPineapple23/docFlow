@@ -41,7 +41,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from docflow_core.file_types import MAX_FILE_SIZE_BYTES
 
-from parse_service import config, fault_origin
+from parse_service import config, fault_origin, stderr_summary
 from parse_service.launcher import run_job
 
 logger = logging.getLogger("parse_service")
@@ -138,15 +138,17 @@ class Handler(BaseHTTPRequestHandler):
             self.service.slots.put(slot)
         logger.info("job kind=%s outcome=%s cause=%s seconds=%s", kind, result.outcome, result.cause, result.seconds)
         if result.outcome == "rejected":
-            # Why, in the parser's or LibreOffice's own words: the log only.
-            # The worker (and the tenant) get the catalog code alone.
+            # The code, and the job's stderr as length, hash and category:
+            # never its text (7.10, D-204 item 4a). The worker (and the
+            # tenant) get the catalog code alone.
             logger.warning(
-                "job_rejected kind=%s code=%s detail=%s",
+                "job_rejected kind=%s code=%s %s",
                 kind,
                 (result.answer or {}).get("code"),
-                result.evidence.get("stderr_tail", "").strip(),
+                stderr_summary.for_log(result.evidence.get("stderr")),
             )
         if result.outcome == "isolation_failed":
+            # The evidence holds the stderr's summary, never a tail (launcher).
             logger.critical("isolation_failed cause=%s evidence=%s", result.cause, result.evidence)
             self._reply(503, {"error": "isolation_failed"}, {"Retry-After": "30"})
             return

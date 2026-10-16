@@ -41,7 +41,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 
-from parse_service import config, fault_origin
+from parse_service import config, fault_origin, stderr_summary
 from parse_service.cgroups import CgroupError, Cgroups, JobCgroup
 
 logger = logging.getLogger("parse_service.launcher")
@@ -308,9 +308,12 @@ def run_job(
     result.seconds = round(time.monotonic() - started, 3)
     result.evidence = evidence
     if result.outcome in ("crashed", "isolation_failed", "rejected"):
-        # The tail of the job's own stderr: our messages and, for a failed
-        # conversion, LibreOffice's own (the parsers print nothing about a
-        # file's contents). For the service log only; never in the answer.
+        # What the log may say about the job's stderr: length, a short hash
+        # and a known category, never its text (7.10, D-204 item 4a). The
+        # job read a hostile file, and whatever a library prints lands there.
+        evidence["stderr"] = stderr_summary.summarize(bytes(err), truncated=err_overflow.is_set())
+    if result.outcome == "crashed":
+        # The tail itself: collected, never logged, never in the answer.
         evidence["stderr_tail"] = stderr_tail[-500:]
     return result
 
