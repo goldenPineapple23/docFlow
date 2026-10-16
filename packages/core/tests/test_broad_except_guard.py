@@ -128,12 +128,29 @@ LISTED: dict[tuple[str, str, int], tuple[str, str]] = {
     (_TASK, "_alert_failure", 1): (BEST_EFFORT, _NOT_RAISED),
     (_TASK, "_fail_parse_ours", 1): (BEST_EFFORT, _NOT_RAISED),
     (_TASK, "dispatch_after_task", 1): (BEST_EFFORT, "beat's backstop runs the next pass"),
-    (_TASK, "_parse_and_extract", 1): (OUR_STEP, "saving the answer: DOC-021 and the fault's alert"),
-    (_TASK, "_finish", 1): (OUR_STEP, "buyer identification: VAL-016 and the fault's alert"),
-    (_TASK, "_finish", 2): (OUR_STEP, "matching: VAL-016 and the fault's alert"),
-    (_TASK, "_finish", 3): (OUR_STEP, "duplicate detection: VAL-016 and the fault's alert"),
+    (_TASK, "_parse_and_extract", 1): (
+        OUR_STEP,
+        "saving: a database outage waits and extracts once more (D-206); else DOC-021 and the alert",
+    ),
+    (_TASK, "_finish", 1): (
+        OUR_STEP,
+        "buyer identification: a database outage waits (D-206); else VAL-016 and the fault's alert",
+    ),
+    (_TASK, "_finish", 2): (OUR_STEP, "matching: a database outage waits (D-206); else VAL-016, alert"),
+    (_TASK, "_finish", 3): (
+        OUR_STEP,
+        "duplicate detection: a database outage waits (D-206); else VAL-016 and the fault's alert",
+    ),
     (_TASK, "_finish", 4): (BEST_EFFORT, "the review digest is a notification, not the document"),
-    (_TASK, "_finish", 5): (OUR_STEP, "validation: DOC-021 and the fault's alert"),
+    (_TASK, "_finish", 5): (OUR_STEP, "validation: a database outage waits (D-206); else DOC-021, alert"),
+    (_TASK, "_wait_for_database", 1): (
+        BEST_EFFORT,
+        "the wait can't be written with the database out: the stuck sweep takes the claim over (D-206)",
+    ),
+    (_TASK, "_may_extract_again", 1): (
+        BEST_EFFORT,
+        "the count can't be read with the database out: wait; the check before the next call holds the limit",
+    ),
     # ── core ────────────────────────────────────────────────────────────────
     (f"{_CORE}/admin_data_access.py", "_cleanup_quietly", 1): (
         BEST_EFFORT,

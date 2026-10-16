@@ -15,6 +15,8 @@ data.
   (`founder_alerts.state_key`, migration 0037), and that every document the
   state hits carries (`documents.fault_keys`). `note_on_document` writes it
   there.
+- `database_unavailable(exc)`: whether the database was out of reach (Q14,
+  D-206): a document then waits instead of failing.
 """
 
 from __future__ import annotations
@@ -31,12 +33,14 @@ from sqlalchemy.orm import Session
 # `app`, and the parse service. A frame anywhere else is a library's.
 OWN_PACKAGES: tuple[str, ...] = ("docflow_core", "app", "parse_service")
 
-# A dropped database connection is not a standing state of our code: it
-# starts and stops. Until the database retry exists (migration 0038, Q14),
-# these two also carry the UTC date in their key, so a second outage in the
-# same release is raised again (founder, 2026-10-13). By class name: the
-# names SQLAlchemy and the driver both use.
-CONNECTION_ERRORS: frozenset[str] = frozenset({"OperationalError", "InterfaceError"})
+# The database out of reach (Q14; founder, 2026-10-16; D-206), by the
+# SQLSTATE the server or the pooler sent: every connection exception (class
+# 08), the server shutting down, crashing or starting up (57P01, 57P02,
+# 57P03) and too many connections (53300). Anything else with a SQLSTATE --
+# a deadlock, a serialization failure, a statement or lock timeout, a bad
+# login -- is not an outage, and fails as before.
+UNAVAILABLE_SQLSTATE_CLASSES: frozenset[str] = frozenset({"08"})
+UNAVAILABLE_SQLSTATES: frozenset[str] = frozenset({"57P01", "57P02", "57P03", "53300"})
 
 # The release when the process isn't on Fly (a developer's machine, CI).
 UNVERSIONED = "unversioned"
@@ -50,6 +54,9 @@ class Fault:
     module: str
     function: str
     line: int
+    # The driver's SQLSTATE, for a database error that carries one (Q14):
+    # part of the key, so a deadlock and a timeout are separate alerts.
+    sqlstate: str | None = None
 
     @property
     def location(self) -> str:
@@ -71,7 +78,56 @@ def describe(exc: BaseException, *, own: tuple[str, ...] = OWN_PACKAGES) -> Faul
             # The qualified name: `Class.method`, as the guard test keys a handler.
             module, function, line = name, tb.tb_frame.f_code.co_qualname, tb.tb_lineno
         tb = tb.tb_next
-    return Fault(exception_type=type(exc).__name__, module=module, function=function, line=line)
+    return Fault(
+        exception_type=type(exc).__name__, module=module, function=function, line=line, sqlstate=sqlstate(exc)
+    )
+
+
+def _driver_error(exc: BaseException) -> BaseException:
+    """The driver's own exception: SQLAlchemy wraps it as `.orig`."""
+    from sqlalchemy.exc import DBAPIError
+
+    if isinstance(exc, DBAPIError) and exc.orig is not None:
+        return exc.orig
+    return exc
+
+
+def sqlstate(exc: BaseException) -> str | None:
+    """The SQLSTATE the server sent, read from the driver's original
+    exception (psycopg's `sqlstate`). None when there is none: not a database
+    error, or one raised before any server answered."""
+    value = getattr(_driver_error(exc), "sqlstate", None)
+    return value if isinstance(value, str) and value else None
+
+
+def database_unavailable(exc: BaseException) -> bool:
+    """
+    Whether the database was out of reach, so the step should wait and try
+    again rather than fail (Q14; founder, 2026-10-16; D-206). Exactly:
+    - SQLAlchemy found the connection closed or broken
+      (`connection_invalidated`; this covers an InterfaceError on a closed
+      connection);
+    - psycopg's ConnectionTimeout (no connection in time; also what a
+      refused connection ends as);
+    - a connect that failed before any server answered: psycopg's base
+      OperationalError with no SQLSTATE (DNS, refused, the pooler out of
+      reach; founder's answer, 2026-10-16). Its subclasses without a
+      SQLSTATE (PipelineAborted, CancellationTimeout) are not this;
+    - a SQLSTATE in class 08, or 57P01, 57P02, 57P03 or 53300.
+    Everything else is not an outage and fails as before.
+    """
+    import psycopg
+    from sqlalchemy.exc import DBAPIError
+
+    if isinstance(exc, DBAPIError) and exc.connection_invalidated:
+        return True
+    driver = _driver_error(exc)
+    if isinstance(driver, psycopg.errors.ConnectionTimeout):
+        return True
+    state = sqlstate(exc)
+    if type(driver) is psycopg.OperationalError and state is None:
+        return True
+    return state is not None and (state[:2] in UNAVAILABLE_SQLSTATE_CLASSES or state in UNAVAILABLE_SQLSTATES)
 
 
 def frames(exc: BaseException) -> str:
@@ -114,8 +170,11 @@ def state_key(
     `release_tag` names the release the fault happened in when that is not
     this process's: a parse job's fault is the parse app's (D-203, PR 1b-i).
 
-    A connection error also carries today's UTC date, by the database's
-    clock, the one that stamps the alert's row (D-170).
+    A database error also carries its SQLSTATE, so a deadlock and a timeout
+    at the same place are separate states (Q14, D-206). The UTC date that
+    connection errors carried until the database retry existed is gone: an
+    outage now waits instead of failing (founder, 2026-10-13 and
+    2026-10-16). `session` reads nothing; it stays for the callers.
     """
     parts = [
         "fault",
@@ -128,9 +187,8 @@ def state_key(
         str(fault.line),
         release_tag or release(),
     ]
-    if fault.exception_type in CONNECTION_ERRORS:
-        day = session.execute(text("SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')")).scalar_one()
-        parts.append(str(day))
+    if fault.sqlstate:
+        parts.append(fault.sqlstate)
     return ":".join(parts)
 
 

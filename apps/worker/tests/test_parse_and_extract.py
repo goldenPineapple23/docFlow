@@ -43,6 +43,11 @@ class _FakeResult:
     def scalar_one_or_none(self):
         return None
 
+    def scalar_one(self):
+        # The only scalar_one read: paid calls whose answer was never saved
+        # (D-206). None here, so the document's first call goes ahead.
+        return 0
+
     def all(self):
         return []
 
@@ -211,8 +216,21 @@ def _drive_successful_task(monkeypatch, *, buyer_id, matcher):
     call, storage and both post-extraction steps replaced. Returns the fake
     session so a test can inspect what was written.
     """
-    import contextlib
     from uuid import uuid4
+
+    mod, session = _stub_successful_task(monkeypatch, buyer_id=buyer_id, matcher=matcher)
+    mod.parse_and_extract(str(uuid4()), str(uuid4()))
+    # Every drive is a success: a stub missing something the task reads must
+    # fail here, not turn quietly into a failed document (Stage 3a CI lesson).
+    assert _to(session, "needs_review") and not _to(session, "failed"), _to(session, "failed")
+    assert len(session.digest_notes) == 1
+    return session
+
+
+def _stub_successful_task(monkeypatch, *, buyer_id, matcher):
+    """The stubs of `_drive_successful_task`, without running the task:
+    returns the task module and the fake session."""
+    import contextlib
 
     from docflow_core.buyers import BuyerIdentification
     from docflow_core.extraction import ExtractionResult
@@ -288,13 +306,7 @@ def _drive_successful_task(monkeypatch, *, buyer_id, matcher):
     monkeypatch.setattr(
         mod.review_digest, "note_needs_review", lambda _session, tid, did: session.digest_notes.append(did)
     )
-
-    mod.parse_and_extract(str(uuid4()), str(uuid4()))
-    # Every drive is a success: a stub missing something the task reads must
-    # fail here, not turn quietly into a failed document (Stage 3a CI lesson).
-    assert _to(session, "needs_review") and not _to(session, "failed"), _to(session, "failed")
-    assert len(session.digest_notes) == 1
-    return session
+    return mod, session
 
 
 def test_matching_runs_after_buyer_identification_with_the_resolved_buyer(monkeypatch):
@@ -1045,3 +1057,137 @@ def test_a_document_task_delivered_on_the_dispatch_queue_claims_nothing_and_goes
     finally:
         mod.parse_and_extract.pop_request()
     assert ran == [document_id]
+
+
+# ── Q14 (D-206): a database outage waits; anything else fails as before ─────
+
+
+def _outage():
+    """The server shutting down under us (57P01), as SQLAlchemy raises it."""
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    return OperationalError("SELECT 1", {}, psycopg.errors.AdminShutdown())
+
+
+def _deadlock():
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    return OperationalError("SELECT 1", {}, psycopg.errors.DeadlockDetected())
+
+
+class _NoMatchesHere:
+    lines_considered = 1
+    lines_matched = 0
+    rules_applied: dict = {}
+
+
+def _drive_outage(monkeypatch, *, broken=None, exc=_outage, unsaved_calls=0, waited=None):
+    """The successful task's stubs with `broken` (a name on the task module)
+    raising `exc()`, the cost record's count of unsaved calls and the time
+    already waited on the database set; returns (session, extract calls,
+    fault alerts)."""
+    from uuid import uuid4
+
+    mod, session = _stub_successful_task(monkeypatch, buyer_id=None, matcher=lambda *a, **k: _NoMatchesHere())
+    # The parse service's answer for the plain-text PO (CI's conftest starts
+    # a real one; these tests need neither it nor a database).
+    answer = mod.parse_client.ParseAnswer(
+        "ok", file_type="txt", parts=[{"type": "text", "text": "PURCHASE ORDER\nPO Number: BCH-2291\n"}]
+    )
+    monkeypatch.setattr(mod.parse_client, "parse_document", lambda content, filename: answer)
+    monkeypatch.setattr(mod.model_provider, "record_success", lambda: None)
+    calls: list[int] = []
+    real_extract = mod.extract_document
+    monkeypatch.setattr(mod, "extract_document", lambda *a, **k: calls.append(1) or real_extract(*a, **k))
+    if broken is not None:
+
+        def raising(*args, **kwargs):
+            raise exc()
+
+        monkeypatch.setattr(mod, broken, raising)
+    monkeypatch.setattr(mod.model_runs, "unsaved_answer_calls", lambda _session, _did: unsaved_calls)
+    monkeypatch.setattr(mod.document_status, "waited_seconds", lambda _session, _did, _cause: waited)
+    monkeypatch.setattr(mod, "_record_unsaved_extraction", lambda *a, **k: None)
+    fault_alerts: list[dict] = []
+    monkeypatch.setattr(
+        mod.founder_alerts, "raise_fault_alert", lambda _session, **kw: fault_alerts.append(kw) or True
+    )
+    mod.parse_and_extract(str(uuid4()), str(uuid4()))
+    return session, calls, fault_alerts
+
+
+def _waits(session) -> list[dict]:
+    return [params for sql, params in session.statements if "wait_cause = :cause" in sql]
+
+
+@pytest.mark.parametrize(
+    "broken, step",
+    [
+        ("identify_and_link_buyer", "buyer_identification"),
+        ("match_document_lines", "matching"),
+        ("detect_document_relationships", "duplicate_detection"),
+        ("validate_document", "validation"),
+        ("_save_extraction", "saving"),
+    ],
+)
+def test_each_step_that_loses_the_database_waits_instead_of_failing(monkeypatch, broken, step):
+    session, calls, fault_alerts = _drive_outage(monkeypatch, broken=broken)
+    (wait,) = _waits(session)
+    assert (wait["cause"], wait["error_label"]) == ("database", f"database:{step}:57P01")
+    assert wait["retry_after"] == 60, "the provider's first step: one minute"
+    assert not _to(session, "failed") and not _to(session, "needs_review")
+    assert fault_alerts == [] and len(calls) == 1
+
+
+def test_a_deadlock_is_not_an_outage_and_fails_the_step_as_before(monkeypatch):
+    session, _, _ = _drive_outage(monkeypatch, broken="match_document_lines", exc=_deadlock)
+    assert _waits(session) == []
+    assert _to(session, "needs_review"), "VAL-016 and review, as before Q14"
+
+
+def test_a_lost_save_after_the_one_extra_call_fails_doc_021(monkeypatch):
+    """The cost record already holds this call and the one before it."""
+    session, _, fault_alerts = _drive_outage(monkeypatch, broken="_save_extraction", unsaved_calls=2)
+    assert _waits(session) == []
+    assert _to(session, "failed")[-1]["v_failure_code"] == "DOC-021"
+    assert [a["step"] for a in fault_alerts] == ["saving"]
+
+
+def test_with_two_unsaved_calls_on_record_no_third_call_is_made(monkeypatch):
+    session, calls, fault_alerts = _drive_outage(monkeypatch, unsaved_calls=2)
+    assert calls == [], "the limit is checked before any paid call"
+    assert _to(session, "failed")[-1]["v_failure_code"] == "DOC-021"
+    (alert,) = fault_alerts
+    assert alert["fault"].exception_type == "unsaved_answer_limit" and alert["step"] == "saving"
+
+
+def test_with_one_unsaved_call_on_record_the_extra_call_is_made(monkeypatch):
+    session, calls, _ = _drive_outage(monkeypatch, unsaved_calls=1)
+    assert len(calls) == 1 and _to(session, "needs_review")
+
+
+def test_the_retry_steps_are_the_providers_and_the_maximum_is_six_hours(monkeypatch):
+    from docflow_core.constants import DATABASE_MAX_WAIT_HOURS
+
+    session, _, _ = _drive_outage(monkeypatch, broken="match_document_lines", waited=10 * 60)
+    assert _waits(session)[0]["retry_after"] == 8 * 60  # 1, 2, 4 then 8 minutes after 7
+
+    session, _, fault_alerts = _drive_outage(
+        monkeypatch, broken="match_document_lines", waited=DATABASE_MAX_WAIT_HOURS * 3600
+    )
+    assert _waits(session) == []
+    assert _to(session, "failed")[-1]["v_failure_code"] == "DOC-021"
+    assert [a["step"] for a in fault_alerts] == ["matching"]
+
+
+def test_when_the_wait_itself_cannot_be_written_the_claim_is_left_for_the_stuck_sweep(monkeypatch):
+    import app.tasks.parse_and_extract as mod
+
+    def lost(*args, **kwargs):
+        raise _outage()
+
+    monkeypatch.setattr(mod.document_status, "to_waiting", lost)
+    session, _, fault_alerts = _drive_outage(monkeypatch, broken="match_document_lines")
+    assert not _to(session, "failed") and not _to(session, "needs_review") and fault_alerts == []

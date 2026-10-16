@@ -4,6 +4,30 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-16 (the Stripe test's fix merged as PR #66; Q14 built; D-205 item 3, D-206)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-16, with PR 1b-i merged and the Stripe test's fix built:** Phase 5.5,
+**Stage 4** (the audit of the broad `except` blocks). **PR 1a is merged** (PR #64, D-203 item 14) and
+**PR 1b-i is merged** (PR #65; `main` is `c1589a3`; D-204 item 10): a parsing block catches only what
+its library raises on a malformed file; anything else is ours, the job answers `error`, and the
+document fails with DOC-030 and the keyed alert; the mutation corpus runs in CI through the real
+image; a library's stdout no longer corrupts the job's answer (a bug since 3c), and a job's stderr is
+logged only as length, hash and category. The Fly gate passed on its head (every self-test PASS,
+A-net IPv6 PASS; evidence `docs/spikes/3c-fly-staging/2026-10-16-sha256-2e5d20af/`). **The Stripe
+test's fix is built and not merged** (branch `phase55/stage4-stripe-test-race`; D-205): the exact
+300-second edge pinned in core on a fixed clock, the API tests given a 30-second margin; no product
+code. **Staging:** `docflow-parse-staging` runs 1b-i; `docflow-worker-staging` has no machines and is
+still v10 with the old `parse_client`, which must not be started against it. The next worker start:
+deploy `main`'s worker first, read the machine's memory (raised to 2 GB; `fly.toml` says 1 GB), then
+start it. Deploy order for 1b-i: the worker, then the parse app (the parse app is already on it).
+Next: the database retry with migration `0038` (Q14), then **PR 1b-ii** (VAL-017 and VAL-018, IMP-011
+and the import's own code; until then an import that hits our bug shows IMP-004), then the Stage 4
+checkpoint. Not fixed, each its own PR, timed at the Stage 4 checkpoint: IMP-003's wording, the
+50,000-row cap, the long catalog commit, and a PO that fails on our side at intake raising no alert.
+If Stage 4 is not merged by 2026-11-02, D-195's two changes go next. The API's and the parse
+machine's auto-stop are on, and the Healthchecks.io check is paused.
+
 ## Replaced on 2026-10-16 (PR 1b-i merged as PR #65; the Stripe test's fix built; D-204 item 10, D-205)
 
 <!-- the paragraph as it stood, starting on the next line -->

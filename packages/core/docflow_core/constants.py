@@ -207,6 +207,14 @@ PROVIDER_PROBE_MINUTES = 2
 # before 3d (Q6).
 STORAGE_WAIT_RETRY_MINUTES = 5
 PARSE_SERVICE_WAIT_RETRY_MINUTES = 2
+# The database (Q14; founder, 2026-10-16; D-206): retried on the model
+# provider's steps (PROVIDER_RETRY_MINUTES), and after this many hours of
+# waiting the document fails with DOC-021 and its alert.
+DATABASE_MAX_WAIT_HOURS = 6
+# Paid extraction calls a document may make whose answer was never saved:
+# the first and one more after a save lost to the database (D-206). A
+# third is refused, and the document fails with DOC-021 and its alert.
+MAX_UNSAVED_EXTRACTION_CALLS = 2
 # The dispatch task's own hard limit: a pass reads counts and marks rows.
 DISPATCH_TASK_TIME_LIMIT_SECONDS = 60
 # The queue only `docflow.dispatch` is sent to, read by the worker machine's
