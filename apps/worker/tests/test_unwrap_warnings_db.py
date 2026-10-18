@@ -86,14 +86,14 @@ def test_a_validation_re_run_keeps_them_acknowledged_or_not(monkeypatch):
         run_extraction(monkeypatch, tenant, document_id, CLEAN)
         before = _parse_warnings(document_id)
         # A reviewer acknowledged the body's warning (the approval path's own
-        # write, reduced to its effect on the row).
+        # write, reduced to its effect on the row; the table requires who).
         with platform_session() as session:
             session.execute(
                 text(
-                    "UPDATE document_warnings SET status = 'acknowledged', acknowledged_at = now() "
-                    "WHERE id = :id"
+                    "UPDATE document_warnings SET status = 'acknowledged', acknowledged_at = now(), "
+                    "acknowledged_by = :user WHERE id = :id"
                 ),
-                {"id": str(before[1]["id"])},
+                {"id": str(before[1]["id"]), "user": str(tenant.user_id)},
             )
 
         with tenant_session(tenant.tenant_id) as session:
