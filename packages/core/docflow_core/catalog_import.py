@@ -53,6 +53,9 @@ KINDS = ("catalog", "buyers")
 # (standard library only) so the parse service's table reader uses the same
 # list without importing this module (Stage 3c).
 TABLE_FORMATS = file_types.TABLE_FORMATS
+# An import whose parse job failed on our side (D-207): an `error` answer,
+# a crash, or an answer the worker refused. A stopped job stays IMP-004.
+IMPORT_PARSE_OURS_CODE = "IMP-011"
 PREVIEW_ROWS = 20
 MAX_REPORTED_ROWS = 50
 
@@ -927,7 +930,7 @@ def run_parse(tenant_id: UUID, import_id: UUID) -> str:
     """
     import logging
 
-    from docflow_core import parse_client
+    from docflow_core import faults, parse_client
     from docflow_core.db import tenant_session
     from docflow_core.storage import (
         StorageError,
@@ -978,6 +981,10 @@ def run_parse(tenant_id: UUID, import_id: UUID) -> str:
     # Stage 3c: the file is opened only by the parse service, which
     # re-validates it first (item 6's table, catalog column).
     code: str | None = None
+    # Set when the parse job failed on our side (IMP-011, D-207): what the
+    # keyed alert names, and the release it happened in.
+    ours: faults.Fault | None = None
+    release_tag = parse_client.UNKNOWN_RELEASE
     try:
         answer = parse_client.parse_table(content, row["original_filename"])
     except parse_client.ParseUnavailable as exc:
@@ -990,32 +997,56 @@ def run_parse(tenant_id: UUID, import_id: UUID) -> str:
         logger.error("import_parse_lost import_id=%s reason=%s", import_id, exc.reason)
         code = "IMP-009"
     except parse_client.ParseAnswerInvalid as exc:
+        # An answer the worker refused is ours, never the file's (D-207).
         logger.error("import_parse_answer_invalid import_id=%s reason=%s", import_id, exc.reason)
-        code = "IMP-004"
+        code = IMPORT_PARSE_OURS_CODE
+        ours = faults.crash_fault("invalid_answer", exc.reason, "docflow_core.parse_client")
     else:
         if answer.outcome == "rejected":
             code = answer.code or "IMP-004"
-        elif answer.outcome in ("stopped", "crashed", "error"):
-            # `error` is our fault, not the file's (D-203); it keeps IMP-004
-            # until the import's own code exists (PR 1b-ii).
+        elif answer.outcome == "stopped":
+            # A limit: the file is too much for one job, as before.
             code = "IMP-004"
+        elif answer.outcome in ("crashed", "error"):
+            # Ours, not the file's (D-203; IMP-011 since D-207).
+            code = IMPORT_PARSE_OURS_CODE
+            release_tag = answer.release
             if answer.outcome == "error":
                 logger.error(
                     "import_parse_error import_id=%s error_type=%s location=%s release=%s",
                     import_id, answer.error_type, answer.location, answer.release,
                 )
+                ours = faults.parse_error_fault(answer.error_type, answer.location)
+            else:
+                logger.error(
+                    "import_parse_crashed import_id=%s cause=%s release=%s",
+                    import_id, answer.cause, answer.release,
+                )
+                ours = faults.crash_fault("crashed", answer.cause or "unknown", "parse_service.job")
             if answer.outcome == "crashed" and answer.cause == "signal_31":
                 # Every seccomp kill alerts, here as in the worker (founder).
                 from docflow_core import founder_alerts
 
                 founder_alerts.alert_seccomp_kill(
-                    tenant_id, where="catalog_import", ref_id=import_id, error_code="IMP-004"
+                    tenant_id, where="catalog_import", ref_id=import_id, error_code=IMPORT_PARSE_OURS_CODE
                 )
     if code is not None:
         # Codes and counts only -- never cell text (Section 7.10).
         logger.info("import_parse_failed import_id=%s code=%s", import_id, code)
         with tenant_session(tenant_id) as session:
             record_parse_failure(session, import_id, code)
+            if ours is not None:
+                from docflow_core import founder_alerts
+
+                # Its own savepoint; never undoes the failed status.
+                founder_alerts.raise_import_fault(
+                    session,
+                    tenant_id=tenant_id,
+                    import_id=import_id,
+                    fault=ours,
+                    error_code=code,
+                    release_tag=release_tag,
+                )
         return "failed"
 
     # An ok table answer always has its header row (parse_client checks it).

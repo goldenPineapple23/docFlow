@@ -249,6 +249,26 @@ test("an alert raised once per state shows its documents, and an acknowledged on
                 affected_documents: null,
                 no_document: "email_intake",
               },
+              {
+                // PR 1b-ii: an import whose parse job failed on our side (IMP-011).
+                id: "a4",
+                type: "import_failed",
+                severity: "high",
+                tenant_id: TENANTS[0].id,
+                tenant_name: TENANTS[0].name,
+                payload: {
+                  import_id: "55555555-5555-5555-5555-555555555555",
+                  step: "catalog_import",
+                  exception_type: "TypeError",
+                  location: "parse_service.parsing.tables:parse_table:157",
+                  release: "deployment-01TEST",
+                  error_code: "IMP-011",
+                },
+                created_at: "2026-10-13T08:00:00Z",
+                acknowledged_at: null,
+                affected_documents: null,
+                no_document: "catalog_import",
+              },
             ],
             still_happening: [
               {
@@ -270,7 +290,7 @@ test("an alert raised once per state shows its documents, and an acknowledged on
   await page.goto("/admin");
 
   const open = page.getByTestId("alerts").locator("li");
-  await expect(open).toHaveCount(3);
+  await expect(open).toHaveCount(4);
   await expect(open.nth(0).getByTestId("affected-documents")).toContainText("Affected documents: 3");
   // An open alert has no "since you acknowledged it".
   await expect(open.nth(0).getByTestId("affected-documents")).not.toContainText("since you acknowledged");
@@ -279,6 +299,9 @@ test("an alert raised once per state shows its documents, and an acknowledged on
   // A keyed alert with no document says where it came from, never "0" (PR 1b-i).
   await expect(open.nth(2).getByTestId("affected-documents")).toHaveText("Email intake, no document");
   await expect(open.nth(2)).not.toContainText("Affected documents");
+  // And one raised by an import (PR 1b-ii), which never makes a document.
+  await expect(open.nth(3).getByTestId("affected-documents")).toHaveText("Catalog import, no document");
+  await expect(open.nth(3)).not.toContainText("Affected documents");
 
   const still = page.getByTestId("alerts-still-happening").locator("li");
   await expect(still).toHaveCount(1);

@@ -28,6 +28,7 @@ from docflow_core import file_types
 from parse_service import fault_origin
 from parse_service.parsing.conversion import (
     ConversionError,
+    Lost,
     PreparedArtifact,
     format_cell_value,
     pil_errors,
@@ -328,14 +329,18 @@ def parse(content: bytes, filename: str) -> dict:
     """
     The job's answer for one document:
     - {"outcome": "rejected", "code": ...} -- a catalog code, as before 3c;
-    - {"outcome": "ok", "file_type": ..., "parts": [...], "image_preview": ...}.
+    - {"outcome": "ok", "file_type": ..., "parts": [...], "image_preview": ...,
+      "lost": [...]} -- `lost` names what an .eml or .msg unwrap couldn't
+      read, as {"code": "VAL-017", "filename": label} or
+      {"code": "VAL-018", "filename": None} (D-207, PR 1b-ii).
     """
     validation = file_types.validate_upload(content, filename)
     if not validation.ok or validation.file_type is None:
         return {"outcome": "rejected", "code": validation.error_code or "DOC-014"}
     file_type = validation.file_type
+    lost: list[Lost] = []
     try:
-        parts = artifact_parts(prepare_artifacts(file_type, content))
+        parts = artifact_parts(prepare_artifacts(file_type, content, lost=lost))
     except ConversionError as exc:
         # The reason (for LibreOffice, its own stderr) goes to the job's
         # stderr, which the service logs as length, hash and category, never
@@ -353,4 +358,5 @@ def parse(content: bytes, filename: str) -> dict:
         "file_type": file_type.name.value,
         "parts": parts,
         "image_preview": preview,
+        "lost": [item.as_answer() for item in lost],
     }

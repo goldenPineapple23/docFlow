@@ -56,7 +56,8 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from docflow_core.errors import Severity, get_error
+from docflow_core.db import rowcount
+from docflow_core.errors import ErrorCatalogEntry, Severity, get_error, render_error
 from docflow_core.numbers import (
     UNUSUAL_DECIMAL_PLACES,
     decimal_places,
@@ -176,6 +177,11 @@ CODE_POSSIBLE_CHANGE_ORDER = "VAL-013"
 CODE_UNREADABLE_NUMBER = "VAL-014"
 CODE_UNUSUAL_PRECISION = "VAL-015"
 CODE_PIPELINE_STEP_FAILED = "VAL-016"
+# Written from the parse answer (`record_parse_warnings`), never computed
+# here: what an .eml or .msg unwrap couldn't read (D-207, PR 1b-ii).
+CODE_ATTACHMENT_UNREAD = "VAL-017"
+CODE_BODY_UNREAD = "VAL-018"
+PARSE_STEP_CODES: frozenset[str] = frozenset({CODE_ATTACHMENT_UNREAD, CODE_BODY_UNREAD})
 
 # The document number fields, as a field name and where it lives.
 NUMERIC_HEADER_FIELDS = ("order_total",)
@@ -1047,6 +1053,11 @@ def sync_warnings(
         soft-deleted. The row, including who acknowledged it and when,
         survives for the audit trail; it simply stops being a live warning.
 
+    The parse step's warnings (VAL-017, VAL-018, `PARSE_STEP_CODES`) are not
+    reconciled: they are written once from the parse answer and left alone
+    here, because a re-run can't recompute what the parse found. A
+    reviewer's acknowledgement is what clears them (D-207).
+
     Nothing here writes to an extracted value. The only table this function
     names is `document_warnings`.
     """
@@ -1055,9 +1066,10 @@ def sync_warnings(
     stored = session.execute(
         text(
             "SELECT id, fingerprint FROM document_warnings "
-            "WHERE document_id = :document_id AND deleted_at IS NULL"
+            "WHERE document_id = :document_id AND deleted_at IS NULL "
+            "AND NOT (code = ANY(CAST(string_to_array(:parse_codes, ',') AS text[])))"
         ),
-        {"document_id": str(document_id)},
+        {"document_id": str(document_id), "parse_codes": ",".join(sorted(PARSE_STEP_CODES))},
     ).mappings().all()
     stored_by_fingerprint = {row["fingerprint"]: UUID(str(row["id"])) for row in stored}
 
@@ -1118,6 +1130,79 @@ def sync_warnings(
     summary.resolved = len(gone)
 
     return summary
+
+
+def warning_entry(code: str, detail: dict[str, Any] | None) -> ErrorCatalogEntry:
+    """
+    The catalog entry a stored warning shows, with its placeholders filled
+    from the warning's own detail: VAL-017's `{filename}` (D-207). Every
+    other warning's entry has none. The review screen and the approval's
+    acknowledgement text both read it, so neither shows a literal
+    placeholder.
+    """
+    if code == CODE_ATTACHMENT_UNREAD:
+        return render_error(code, filename=(detail or {}).get("filename") or "attachment")
+    return get_error(code)
+
+
+def parse_step_warnings(lost: list[dict[str, Any]]) -> list[DocumentWarning]:
+    """
+    The warnings for what an .eml or .msg unwrap couldn't read (D-207), from
+    the parse answer's `lost` list as `parse_client` checked it. VAL-017's
+    detail carries the attachment's sanitized label (the catalog's
+    `{filename}`) and its position among the lost attachments, so two
+    attachments with the same name are two warnings.
+    """
+    warnings: list[DocumentWarning] = []
+    position = 0
+    for item in lost:
+        if item["code"] == CODE_ATTACHMENT_UNREAD:
+            position += 1
+            detail = {"filename": item["filename"], "position": str(position)}
+        else:
+            detail = {"part": "body"}
+        warnings.append(
+            DocumentWarning(code=item["code"], severity=_catalog_severity(item["code"]), detail=detail)
+        )
+    return warnings
+
+
+def record_parse_warnings(
+    session: Session, tenant_id: UUID, document_id: UUID, lost: list[dict[str, Any]]
+) -> int:
+    """
+    Writes the parse step's warnings, in the caller's transaction (the one
+    that saves the extraction, so the answer and its warnings are saved
+    together or not at all). Idempotent by fingerprint, like `sync_warnings`:
+    a row already there -- acknowledged or not -- is left as it is. Returns
+    how many were written.
+    """
+    written = 0
+    for warning in parse_step_warnings(lost):
+        result = session.execute(
+            text(
+                """
+                INSERT INTO document_warnings
+                    (id, tenant_id, document_id, code, severity, detail, fingerprint, status,
+                     created_at, updated_at)
+                VALUES
+                    (:id, :tenant_id, :document_id, :code, :severity, :detail, :fingerprint, 'open',
+                     now(), now())
+                ON CONFLICT (document_id, fingerprint) WHERE deleted_at IS NULL DO NOTHING
+                """
+            ),
+            {
+                "id": str(uuid4()),
+                "tenant_id": str(tenant_id),
+                "document_id": str(document_id),
+                "code": warning.code,
+                "severity": warning.severity,
+                "detail": warning.detail,
+                "fingerprint": warning.fingerprint,
+            },
+        )
+        written += rowcount(result)
+    return written
 
 
 def validate_document(
@@ -1213,5 +1298,5 @@ _ALL_CODES = (
     CODE_UNUSUAL_PRECISION,
     CODE_PIPELINE_STEP_FAILED,
 )
-for _code in _ALL_CODES:
+for _code in (*_ALL_CODES, *PARSE_STEP_CODES):
     get_error(_code)

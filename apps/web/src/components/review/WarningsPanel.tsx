@@ -56,8 +56,10 @@ function goTo(warning: DocumentWarning) {
   target.focus({ preventScroll: true });
 }
 
-// Keys already said in the check's heading.
-const DETAIL_SHOWN_ELSEWHERE = new Set(["field", "scope"]);
+// Keys already said in the check's heading or message, or only there to keep
+// two checks apart: an email attachment's name is in VAL-017's message, and
+// its position and VAL-018's part mean nothing to a reviewer (D-207).
+const DETAIL_SHOWN_ELSEWHERE = new Set(["field", "scope", "filename", "position", "part"]);
 
 /**
  * Warnings, and the acknowledgement gate on approval (CLAUDE.md Section 7.3:
@@ -158,7 +160,10 @@ export function WarningsPanel({
                 data-testid={`ack-${warning.id}`}
                 className="mt-1"
               />
-              <label htmlFor={`ack-${warning.id}`} className="flex-1 cursor-pointer">
+              {/* min-w-0 and overflow-wrap: a check's message can carry an
+                  80-character attachment name with no space to break at
+                  (VAL-017, D-207); it wraps inside the box at any width. */}
+              <label htmlFor={`ack-${warning.id}`} className="min-w-0 flex-1 cursor-pointer [overflow-wrap:anywhere]">
                 <span className="block font-medium text-gray-900">
                   {appeared.has(warning.id) ? (
                     <span

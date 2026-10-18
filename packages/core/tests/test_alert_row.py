@@ -28,6 +28,16 @@ def test_an_intake_alert_has_no_document_and_no_count():
     assert alert["affected_documents"] is None
 
 
+def test_an_import_alert_has_no_document_and_no_count():
+    """PR 1b-ii (D-207): an import never makes a document."""
+    alert = _alert_row(
+        {"id": "a1", "type": "import_failed", **KEYED,
+         "payload": {"import_id": "i1", "step": "catalog_import", "error_code": "IMP-011"}}
+    )
+    assert alert["no_document"] == "catalog_import"
+    assert alert["affected_documents"] is None
+
+
 def test_a_document_alert_keeps_its_count():
     alert = _row({"first_document_id": "d1", "step": "parsing", "error_code": "DOC-030"}, affected_total=3)
     assert alert["no_document"] is None

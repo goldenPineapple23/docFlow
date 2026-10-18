@@ -165,10 +165,12 @@ export type FounderAlert = {
     latest_at: string | null;
   } | null;
   /**
-   * A keyed alert with no document to count (PR 1b-i): an e-mail attachment
-   * refused at intake. Shown as "Email intake, no document".
+   * A keyed alert with no document to count: an e-mail attachment refused at
+   * intake (PR 1b-i), shown as "Email intake, no document", or an import
+   * whose parse job failed on our side (PR 1b-ii), shown as "Catalog import,
+   * no document".
    */
-  no_document?: "email_intake" | null;
+  no_document?: "email_intake" | "catalog_import" | null;
 };
 
 export type OutboxEmail = {

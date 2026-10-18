@@ -74,6 +74,14 @@ _RELEASE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 # A parse app from before 1b-i names no release (deploy order: the worker
 # first, then the parse app).
 UNKNOWN_RELEASE = "unknown"
+# What an .eml or .msg unwrap couldn't read (D-207, PR 1b-ii): VAL-017 names
+# an attachment by the parse service's sanitized label (its alphabet, at most
+# 80 characters), VAL-018 is the body and names nothing. A parse app from
+# before 1b-ii sends no list, which reads as nothing lost.
+LOST_ATTACHMENT = "VAL-017"
+LOST_BODY = "VAL-018"
+MAX_LOST = MAX_PARTS
+_LABEL = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 
 
 class ParseUnavailable(Exception):
@@ -108,6 +116,8 @@ class ParseAnswer:
     file_type: str | None = None
     parts: list[dict] = field(default_factory=list)
     image_preview: dict | None = None  # {"media_type", "kind", "content": bytes}
+    # [{"code": "VAL-017", "filename": label} | {"code": "VAL-018", "filename": None}]
+    lost: list[dict] = field(default_factory=list)
     columns: list[str] = field(default_factory=list)
     rows: list[list[str]] = field(default_factory=list)
     header_row_number: int | None = None
@@ -198,7 +208,27 @@ def _check_document(body: dict) -> ParseAnswer:
             "kind": "converted_image",
             "content": _b64(preview.get("data"), MAX_PREVIEW_BYTES, "preview"),
         }
-    return ParseAnswer("ok", file_type=file_type, parts=checked, image_preview=checked_preview)
+    return ParseAnswer(
+        "ok", file_type=file_type, parts=checked, image_preview=checked_preview, lost=_check_lost(body)
+    )
+
+
+def _check_lost(body: dict) -> list[dict]:
+    lost = body.get("lost", [])
+    if not isinstance(lost, list) or len(lost) > MAX_LOST:
+        raise ParseAnswerInvalid("bad_lost")
+    checked: list[dict] = []
+    for item in lost:
+        if not isinstance(item, dict) or set(item) != {"code", "filename"}:
+            raise ParseAnswerInvalid("bad_lost_item")
+        code, filename = item["code"], item["filename"]
+        if code == LOST_ATTACHMENT and isinstance(filename, str) and _LABEL.match(filename):
+            checked.append({"code": code, "filename": filename})
+        elif code == LOST_BODY and filename is None:
+            checked.append({"code": code, "filename": None})
+        else:
+            raise ParseAnswerInvalid("bad_lost_item")
+    return checked
 
 
 def _release(body: dict) -> str:

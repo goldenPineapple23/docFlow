@@ -66,7 +66,7 @@ from sqlalchemy.orm import Session
 from docflow_core import document_status
 from docflow_core.errors import get_error
 from docflow_core.numbers import is_document_number, plain
-from docflow_core.validation import validate_document
+from docflow_core.validation import validate_document, warning_entry
 
 # ── Catalog codes this module can raise ─────────────────────────────────────
 CODE_UNACKNOWLEDGED_WARNINGS = "REV-001"
@@ -203,9 +203,10 @@ def acknowledgement_text(
     """
     The warning as the reviewer read it, built on the server (M4): where it
     is, the catalog's code, title and message, and the occurrence's own
-    values -- the same parts the review screen renders.
+    values -- the same parts the review screen renders, with VAL-017's
+    attachment name filled in as the screen shows it (D-207).
     """
-    entry = get_error(code)
+    entry = warning_entry(code, detail)
     where = []
     if line_number is not None:
         where.append(f"Line {line_number}")

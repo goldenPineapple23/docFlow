@@ -18,15 +18,20 @@ number, so an edit elsewhere in the file changes nothing here. `scripts/`
 and the tests are out (founder, 2026-10-13).
 
 The kinds, from the audit (BUILD-STATUS "Stage 4 detailed design", B1):
-  BLAMES_INPUT   any failure becomes "this file / this request is the
-                 problem". The audit's target: narrowed to what the library
-                 raises on a bad input: done in PR 1b-i, none left.
-  DROPS_CONTENT  content is skipped with no record. PR 1b-ii adds the warning.
   OUR_STEP       a step of ours failed and says so honestly (a catalog code
                  that doesn't blame the input, and an alert).
   BEST_EFFORT    a side effect that must never fail the main thing: logged,
                  carry on.
   FAIL_CLOSED    any failure means refuse. Broad is the point.
+
+Two kinds the audit found are retired: no entry may use them, because each
+is the defect itself.
+  BLAMES_INPUT   any failure becomes "this file / this request is the
+                 problem". PR 1b-i narrowed every one to what its library
+                 raises on a bad input.
+  DROPS_CONTENT  content is skipped with no record. PR 1b-ii narrowed the
+                 last two (the `.eml` body and attachment) and gave each
+                 loss a warning, VAL-018 and VAL-017 (D-207).
 """
 
 from __future__ import annotations
@@ -46,7 +51,8 @@ DROPS_CONTENT = "drops_content"
 OUR_STEP = "our_step"
 BEST_EFFORT = "best_effort"
 FAIL_CLOSED = "fail_closed"
-KINDS = {BLAMES_INPUT, DROPS_CONTENT, OUR_STEP, BEST_EFFORT, FAIL_CLOSED}
+KINDS = {OUR_STEP, BEST_EFFORT, FAIL_CLOSED}
+RETIRED_KINDS = {BLAMES_INPUT, DROPS_CONTENT}
 
 _API = "apps/api/app"
 _PARSE = "apps/parse/parse_service"
@@ -90,14 +96,6 @@ LISTED: dict[tuple[str, str, int], tuple[str, str]] = {
     (f"{_PARSE}/job.py", "_parse", 1): (
         OUR_STEP,
         "anything no parsing block claimed is ours: `error`, DOC-030 and the keyed alert",
-    ),
-    (f"{_PARSE}/parsing/conversion.py", "unwrap_eml", 1): (
-        DROPS_CONTENT,
-        "an undecodable body; VAL-018 in 1b-ii",
-    ),
-    (f"{_PARSE}/parsing/conversion.py", "unwrap_eml", 2): (
-        DROPS_CONTENT,
-        "an undecodable attachment; VAL-017 in 1b-ii",
     ),
     (f"{_PARSE}/parsing/documents.py", "image_preview", 1): (BEST_EFFORT, "no preview is the right outcome"),
     (f"{_PARSE}/sandbox_init.py", "main", 1): (FAIL_CLOSED, "the sandbox could not be set up"),
@@ -192,6 +190,7 @@ LISTED: dict[tuple[str, str, int], tuple[str, str]] = {
     (_ALERTS, "raise_parse_service_unavailable", 1): (BEST_EFFORT, _NOT_RAISED),
     (_ALERTS, "raise_parse_alert", 1): (BEST_EFFORT, _NOT_RAISED),
     (_ALERTS, "raise_intake_fault", 1): (BEST_EFFORT, _NOT_RAISED),
+    (_ALERTS, "raise_import_fault", 1): (BEST_EFFORT, _NOT_RAISED),
     (_ALERTS, "alert_parse_service_unavailable", 1): (BEST_EFFORT, _NOT_RAISED),
     (_ALERTS, "alert_storage_unavailable", 1): (BEST_EFFORT, _NOT_RAISED),
     (f"{_CORE}/heartbeat.py", "after_pass", 1): (BEST_EFFORT, "no reading, no ping"),
@@ -313,15 +312,21 @@ def test_every_entry_has_a_known_kind_and_says_why():
         assert len(why.strip()) >= 10, key
 
 
-def test_the_kinds_the_audit_still_has_to_change_are_only_where_1b_ii_changes_them():
-    """BLAMES_INPUT and DROPS_CONTENT are the audit's targets. PR 1b-i
-    narrowed every BLAMES_INPUT block; the two DROPS_CONTENT blocks left are
-    the `.eml` body and attachment in `conversion.py`, which PR 1b-ii gives
-    VAL-018 and VAL-017. One anywhere else is a new instance of the defect."""
-    blames = {key for key, (kind, _) in LISTED.items() if kind == BLAMES_INPUT}
-    drops = {key[0] for key, (kind, _) in LISTED.items() if kind == DROPS_CONTENT}
-    assert blames == set()
-    assert drops == {f"{_PARSE}/parsing/conversion.py"}
+def test_no_entry_uses_a_retired_kind():
+    """BLAMES_INPUT and DROPS_CONTENT were the audit's targets: PR 1b-i
+    narrowed every BLAMES_INPUT block and PR 1b-ii the last DROPS_CONTENT
+    ones. A new one anywhere is a new instance of the defect: narrow it."""
+    assert not RETIRED_KINDS & KINDS
+    retired = {key: kind for key, (kind, _) in LISTED.items() if kind in RETIRED_KINDS}
+    assert retired == {}
+
+
+def test_the_email_unwraps_blocks_are_narrow_now():
+    """The two `.eml` blocks that dropped content are no longer broad
+    handlers at all (D-207): what the email library raises on a malformed
+    message is a VAL-0xx warning, anything else is ours (DOC-030)."""
+    source = (REPO / _PARSE / "parsing" / "conversion.py").read_text(encoding="utf-8")
+    assert [h for h in scan(source) if h.function == "unwrap_eml"] == []
 
 
 def test_the_guard_reads_the_product_code_and_nothing_else():
