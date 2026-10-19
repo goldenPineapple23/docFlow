@@ -38,6 +38,17 @@ def test_an_import_alert_has_no_document_and_no_count():
     assert alert["affected_documents"] is None
 
 
+def test_a_webhook_fault_alert_is_email_intake_with_no_document_and_no_count():
+    """Stage 5, blocker 4 (D-210): the inbound webhook's own fault is e-mail
+    intake too, so the Console shows "Email intake, no document"."""
+    alert = _alert_row(
+        {"id": "a1", "type": "intake_failed", **KEYED,
+         "payload": {"step": "email_intake_webhook", "error_code": "INT-011"}}
+    )
+    assert alert["no_document"] == "email_intake"
+    assert alert["affected_documents"] is None
+
+
 def test_a_document_alert_keeps_its_count():
     alert = _row({"first_document_id": "d1", "step": "parsing", "error_code": "DOC-030"}, affected_total=3)
     assert alert["no_document"] is None

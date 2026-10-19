@@ -193,6 +193,8 @@ LISTED: dict[tuple[str, str, int], tuple[str, str]] = {
     (_ALERTS, "raise_import_fault", 1): (BEST_EFFORT, _NOT_RAISED),
     (_ALERTS, "alert_parse_service_unavailable", 1): (BEST_EFFORT, _NOT_RAISED),
     (_ALERTS, "alert_storage_unavailable", 1): (BEST_EFFORT, _NOT_RAISED),
+    # Stage 5, blocker 4 (D-210): the webhook's 500 goes out whatever happens here.
+    (_ALERTS, "alert_intake_failed", 1): (BEST_EFFORT, _NOT_RAISED),
     (f"{_CORE}/heartbeat.py", "after_pass", 1): (BEST_EFFORT, "no reading, no ping"),
     (f"{_CORE}/heartbeat.py", "after_pass", 2): (BEST_EFFORT, "a failed ping never fails a pass"),
     (f"{_CORE}/model_provider.py", "record_failure", 1): (BEST_EFFORT, "the provider's state is best effort"),

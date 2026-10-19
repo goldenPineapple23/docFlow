@@ -418,6 +418,10 @@ INT-010 [warning/both] This account isn't accepting new orders
   what+why: DocFlow has stopped processing new orders for this account. Everything already here stays available to open, review and export.
   next:     Resume billing to start processing again -- nothing has been deleted and no re-setup is needed. Contact DocFlow if you think this is wrong.
 
+INT-011 [warning/founder] An e-mail couldn't be received
+  what+why: A fault in DocFlow stopped an incoming e-mail from being taken in. Nothing from it was saved. Postmark will keep resending it for about 10 hours.
+  next:     Fix the fault named in this alert. If the resends run out first, the e-mail shows as Inbound Error on Postmark's Inbound page. Retry it there once the fix is deployed.
+
 LIFE-001 [warning/founder] This tenant can't be cancelled from here
   what+why: Cancel only applies to an active tenant. This one is already cancelling, suspended, pending deletion or deleted.
   next:     Check the tenant's current status on the Lifecycle tab.

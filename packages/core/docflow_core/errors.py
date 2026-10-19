@@ -1880,6 +1880,26 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="warning",
         audience="both",
     ),
+    # Founder audience: the inbound webhook failed on our side for a known
+    # tenant and answered 500, so Postmark sends the e-mail again (Stage 5,
+    # blocker 4; D-210). The wording is the founder's (2026-10-19). Postmark's
+    # failed inbound messages can be retried through its API (PUT
+    # /messages/inbound/{messageid}/retry; read 2026-10-19).
+    "INT-011": ErrorCatalogEntry(
+        code="INT-011",
+        title="An e-mail couldn't be received",
+        message=(
+            "A fault in DocFlow stopped an incoming e-mail from being taken in. Nothing from it"
+            " was saved. Postmark will keep resending it for about 10 hours."
+        ),
+        action=(
+            "Fix the fault named in this alert. If the resends run out first, the e-mail shows as"
+            " Inbound Error on Postmark's Inbound page. Retry it there once the fix is deployed."
+        ),
+        # As IMP-011: the entry is a warning, the alert itself is high.
+        severity="warning",
+        audience="founder",
+    ),
     # ── LIFE-0xx · tenant lifecycle actions (Section 7.14 / 7.15.4, slice 5.6) ─
     # Founder-audience, like every other Console refusal (CON-0xx, ONB-0xx).
     "LIFE-001": ErrorCatalogEntry(

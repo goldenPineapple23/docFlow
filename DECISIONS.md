@@ -4129,9 +4129,59 @@ Everything else fails as before: a deadlock (40P01), a serialization failure (40
 **7. The outreach-period rules (decided the same day; none of them was in the repository, read 2026-10-19).**
 - **Demo releases are pinned as git tags** (`demo-1`, `demo-2`, ...) and recorded in BUILD-STATUS.
 - **Staging is redeployed only after a merge.** Each redeploy is followed by the demo smoke test, about 15 minutes: upload, review, approve, export, and the dashboard, including E1 and E2a. If the smoke test fails, the last good tag is redeployed.
+  - **Added 2026-10-19 (founder; D-210):** the smoke test also sends one test e-mail to the demo tenant's intake address and confirms it arrives as a document. That catches a deploy that breaks intake for every tenant.
 - **No staging deploy in the 24 hours before a booked demo.**
 - **On demo day, the machines are started 30 minutes early.**
 
 **Not changed:** any existing behaviour; Stage 5's content; D-195; D-208.
 
 **Related:** Sections 3, 7.13, 7.15.3; D-195, D-199, D-208; BUILD-STATUS "Demo readiness"; CHECKPOINTS.md, Stage 4.
+
+
+## D-210 — Stage 5, PR 1 (blocker 4): the inbound webhook's own fault raises an alert (founder, 2026-10-19)
+
+**Context:** a pilot blocker since 2026-10-13 (D-203 item 4). When the inbound webhook failed for a reason of ours, it answered 500 and logged it, and nothing else happened. Postmark retries ten times (1, 5, 10, 10, 10, 15 and 30 minutes, then 1, 2 and 6 hours: about 10 hours 21 minutes), and then shows the message as Inbound Error on its own Inbound page. So an order could be lost with nobody told. The founder made it Stage 5's first PR at the Stage 4 checkpoint and approved the design on 2026-10-19, with the changes below.
+
+**1. What counts as "fails on our side at intake".** Any exception after the credential check, other than the answers the webhook already gives. Those are unchanged and raise no new alert: 401 (refused credentials; already alerted), 400 (a body that isn't JSON, or a malformed payload), 404 (an unknown or inactive token), 503 (Storage unavailable; already alerted), and 200 for every handled outcome. One attachment failing its check on our side stays PR 1b-i's rule: that attachment is refused as DOC-030 with its keyed `document_failed` alert, and the e-mail answers 200.
+
+**2. What the webhook answers: exactly what it answered before.** The router catches the fault, raises the alert, and re-raises. The API's last handler still logs the exception's type and our code locations, never its message, and answers 500 (SYS-001). A 500, never a 403, so Postmark keeps resending.
+
+**3. The alert.**
+- A new type, `intake_failed`, severity high: "An incoming e-mail couldn't be taken in because of a fault on our side".
+- It is raised once per state with 0037's key: `faults.state_key(alert_type="intake_failed", tenant, step="email_intake_webhook", fault)`. The key holds the exception type, our code location, the release, and a database error's SQLSTATE. So Postmark's retries of one e-mail raise one alert, an acknowledged state stays quiet, and a new release or a different place in our code raises a new one.
+- The payload is `step`, `exception_type`, `location`, `release` and `error_code`. There is nothing of the e-mail in it: no sender, subject, Message-ID or body (Section 7.10; the alert is e-mailed).
+- It is written in the tenant's own session, in its own transaction (`tenant_raise`, insert only). The e-mail's own transaction has already rolled back, so nothing of it was kept.
+- It never raises: if it can't be written, the 500 goes out as before and `founder_alert_not_raised ... alert=intake_failed` is logged.
+- The Console shows it as "Email intake, no document": the row maps the step `email_intake_webhook` to `email_intake`.
+
+**4. INT-011, founder audience (the founder's wording).**
+- Title: "An e-mail couldn't be received".
+- Message: "A fault in DocFlow stopped an incoming e-mail from being taken in. Nothing from it was saved. Postmark will keep resending it for about 10 hours."
+- Action: "Fix the fault named in this alert. If the resends run out first, the e-mail shows as Inbound Error on Postmark's Inbound page. Retry it there once the fix is deployed."
+- The last sentence was added because Postmark's documentation says a failed inbound message can be retried (read 2026-10-19). The inbound webhook page (https://postmarkapp.com/developer/webhooks/inbound-webhook, "Errors and retries") says: "If all of the retries have failed, your Inbound page will show the message as Inbound Error. If need be, you can retry a failed inbound message for processing." The Messages API page has "Retry a failed inbound message for processing": `PUT /messages/inbound/{messageid}/retry`. The support article "How to manually retry a failed inbound message" (https://postmarkapp.com/support/article/1309-how-to-manually-retry-a-failed-inbound-message) says: "you have the option of retrying them via the Message API." None of these pages documents a Retry button on the Inbound page; the article points to Postmark's API Explorer, which sends the same request.
+
+**5. A fault before the tenant is known is logged only (founder, Option A). This is the recorded gap.** If `resolve_tenant_by_token`, or reading the request body, fails on our side, there is no tenant to raise the alert under. The only tenant-less insert (0029's `intake_refusal_raise`) accepts `intake_webhook_refused` alone, and widening it would need a migration. So that fault is logged by the API's last handler and answered 500, and no alert is raised.
+- In practice that case is a database outage, when no alert could be written anyway.
+- Postmark keeps resending for about 10 hours, so the e-mail arrives once the database is back.
+- A bug of ours before the tenant is known is limited to that one lookup and the body read.
+- A test pins it: such a fault answers 500 and raises no alert.
+
+**6. The demo smoke test gains one inbound e-mail (founder).** It is added to D-209 item 7: one test e-mail to the demo tenant's address, confirmed to arrive as a document.
+
+**7. Tests.**
+- API, database, `tests/test_intake_fault_alert.py` (13):
+  - a fault of ours answers 500 with one alert, its payload above, nothing of the e-mail in the alert or its e-mail, and nothing of the e-mail kept;
+  - three retries of one e-mail raise one alert;
+  - an acknowledged state stays quiet;
+  - a fault at another place in our code is a second alert;
+  - an alert that can't be written leaves the 500 as it was;
+  - 200, both 400s, 404, 401 and 503 raise no `intake_failed`;
+  - the PR 1b-i attachment answers 200 with its `document_failed` alert and no `intake_failed`;
+  - a fault before the tenant is known answers 500, is logged, and raises no alert.
+- Core, no database: `tests/test_intake_failed_alert.py` (3: the payload and key, never raising, the type and its catalog entry); `test_alert_row.py` +1; the guard's registry +1 (`alert_intake_failed`, best effort); the catalog snapshot +INT-011.
+
+**8. What it touches:** core (`founder_alerts.py`, `errors.py`, `admin_data_access.py`) and the API (`routers/email_intake.py`). No migration, no Fly gate (nothing under `apps/parse` or the worker's `parse_client`), no web change. It opens as a draft PR; all three staging suites run on its final head before it is marked ready for review.
+
+**Not changed:** every answer the webhook already gives; PR 1b-i's per-attachment rule; the tenant-less refusal alert and its policy; any table, column, policy or grant.
+
+**Related:** Sections 7.2, 7.9, 7.10, 7.16.5; D-171, D-203 (item 4), D-204, D-209 (item 7); migration 0029, 0037; BUILD-STATUS "The pilot-blocker subset"; `apps/api/app/routers/email_intake.py`, `packages/core/docflow_core/founder_alerts.py`, `packages/core/docflow_core/errors.py`, `packages/core/docflow_core/admin_data_access.py`.

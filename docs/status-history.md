@@ -4,6 +4,24 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-19 (Stage 5 started; PR 1, blocker 4, built; D-210)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-19, at the Stage 4 checkpoint:** Phase 5.5, **Stage 4 is complete and waits
+for the founder's "go"** (`CHECKPOINTS.md`, Stage 4). Every Stage 4 PR is merged (#60 to #69; `main`
+is `9d3a453`). The checkpoint's runs: both CI push runs on `9d3a453` are green; the staging suites
+on `f8cc120` count (main's code is the same); the three live tests passed for $0.049510. **Next:
+Stage 5 in full, its first PR being the alert for a PO that fails on our side at intake; then E1 and
+E2a; then demo readiness (D-209).** The long catalog commit: a one-hour test through a public
+address is planned and not run (it needs its own grant); if the cut is confirmed, the fix goes
+before demo readiness. The 50,000-row cap and IMP-003's wording: one PR, before pilots, only if a
+pilot prospect has more than 50,000 SKUs. The welding demo comes after the fastener rehearsal and
+never blocks it (D-208). **Staging:** `docflow-parse-staging` runs `main`'s image;
+`docflow-worker-staging` has no machines and is still v10 with the old `parse_client`, which must
+not be started against it: deploy `main`'s worker first, read the machine's memory (raised to 2 GB;
+`fly.toml` says 1 GB), then start it. The API's and the parse machine's auto-stop are on, and the
+Healthchecks.io check is paused.
+
 ## Replaced on 2026-10-19 (the Stage 4 checkpoint, awaiting "go"; CHECKPOINTS.md, D-208, D-209)
 
 <!-- the paragraph as it stood, starting on the next line -->

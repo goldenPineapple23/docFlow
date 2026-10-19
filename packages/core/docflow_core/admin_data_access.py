@@ -1279,9 +1279,14 @@ def _alert_row(row: Any) -> dict[str, Any]:
     payload = alert.get("payload") or {}
     step = payload.get("step")
     without_document = (
-        counted and step in ("email_intake", "catalog_import") and "first_document_id" not in payload
+        counted
+        and step in ("email_intake", "email_intake_webhook", "catalog_import")
+        and "first_document_id" not in payload
     )
-    alert["no_document"] = step if without_document else None
+    # The webhook's own fault (D-210) is e-mail intake too, so the Console
+    # labels it "Email intake, no document" like an attachment refused there.
+    where = "email_intake" if step == "email_intake_webhook" else step
+    alert["no_document"] = where if without_document else None
     alert["affected_documents"] = (
         {"total": int(total), "since_acknowledged": int(since), "latest_at": latest}
         if counted and not without_document
