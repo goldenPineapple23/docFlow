@@ -206,3 +206,18 @@ def test_the_dispatch_process_reads_only_its_queue_and_never_claims_a_document(d
         _wait_for("the document task to be handed back", lambda: queue.llen(documents_queue) == 2)
         assert queue.llen(DISPATCH_QUEUE) == 0
         unclaimed(order)
+
+
+def test_a_worker_started_without_mingle_and_gossip_still_answers_the_consoles_ping(dispatch_worker):
+    """D-212: the launcher's command line turns off mingle and gossip, not
+    remote control. The Console's health strip names the workers that answer
+    `control.ping` (apps/api/app/routers/admin.py, `_worker_heartbeat`), so
+    the worker started exactly as on Fly must still answer it."""
+    answered: list[str] = []
+
+    def pinged() -> bool:
+        answered[:] = [name for reply in celery_app.control.ping(timeout=1) or [] for name in reply]
+        return any(name.startswith("dispatch@") for name in answered)
+
+    _wait_for("the dispatch worker to answer a ping", pinged)
+    assert any(name.startswith("dispatch@") for name in answered), answered

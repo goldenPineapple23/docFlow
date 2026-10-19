@@ -41,8 +41,20 @@ POLL_SECONDS = 0.5
 
 def commands(app: str = "app.celery_app") -> dict[str, list[str]]:
     """The two workers' command lines. Their node names differ, so Celery
-    sees two workers, not one started twice."""
-    celery = [sys.executable, "-m", "celery", "-A", app, "worker", "--loglevel=info"]
+    sees two workers, not one started twice.
+
+    Both start without mingle and without gossip (D-212). For about
+    BROKER_POLL_SECONDS after every start a worker received nothing, a job
+    already waiting included (four starts of four on Fly staging, D-197),
+    read as mingle, Celery's start-up search for neighbours, holding a
+    blocking read open. Nothing in DocFlow uses either: mingle shares revoked
+    tasks, and DocFlow revokes none; gossip tracks the other workers, and
+    nothing reads it. Remote control stays on: the Console's health strip
+    pings the workers through it (apps/api/app/routers/admin.py)."""
+    celery = [
+        sys.executable, "-m", "celery", "-A", app, "worker", "--loglevel=info",
+        "--without-mingle", "--without-gossip",
+    ]
     return {
         "documents": [
             *celery,

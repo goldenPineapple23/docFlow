@@ -4251,3 +4251,63 @@ Everything else fails as before: a deadlock (40P01), a serialization failure (40
 **Not changed:** any product code, table, column, policy or grant; how a normal run's lock behaves; the six counts and the rule that anything but `+0` fails.
 
 **Related:** CLAUDE.md Section 0 rules 4 and 5; D-160, D-165, D-180, D-191, D-197, D-198, D-204 (item 7a), D-207 (items 11 and 12), D-210; RUNBOOK 1.4, 1.6; `apps/api/tests/database_guard.py`, `apps/api/tests/suite_lock.py`, `apps/api/tests/leftover_count.py`, `scripts/run_suites_parallel.py`.
+
+## D-212 — Stage 5, PR 3: the workers start without mingle and gossip; the Fly proof gates the merge (founder, 2026-10-19)
+
+**Context:** at four starts of four on 2026-10-08, each Celery worker received nothing for about 10 s after `ready`; a job already in the queue was received 8.9 s after it (D-197 item 3). Claude's reading, not proven: Celery's start-up search for neighbours (mingle) holds a blocking read open for the poll time (`BROKER_POLL_SECONDS`, 10). The fix to evaluate was added to Stage 5 as its own PR (D-199). The founder approved the design on 2026-10-19 with the changes below.
+
+**1. The change.** `app.run_workers.commands()` starts both workers, `documents` and `dispatch`, with `--without-mingle --without-gossip`. Nothing in DocFlow uses either: mingle shares revoked tasks between workers, and DocFlow revokes none; gossip tracks the other workers, and nothing reads it. **Not changed:** heartbeat (whether to drop it is the founder's open question in RUNBOOK 9.8); remote control, which the Console's health strip pings (`apps/api/app/routers/admin.py`, `_worker_heartbeat`); beat's command; `apps/worker/fly.toml`; core. No migration.
+
+**2. Tests.**
+- `test_celery_app.py::test_both_workers_start_without_mingle_and_gossip_and_keep_heartbeat_and_remote_control`: both command lines carry the two flags and not `--without-heartbeat`; remote control is on; beat's command carries none.
+- `test_dispatch_real_worker.py::test_a_worker_started_without_mingle_and_gossip_still_answers_the_consoles_ping` (Linux, CI): the dispatch worker started from `commands()` itself answers `control.ping`. The test beside it already started that worker from `commands()`, so it now runs with the new flags too.
+- No timing test in CI: it would depend on wall time. The timing is proven on Fly (item 4).
+- **CI counts expected:** worker 253 (+2); core 1062, API 718, parse 581 and 427, web 76, web-live 3 unchanged; each `0 failed, 0 skipped, 0 unapproved`. Locally, with no database: ruff and mypy clean; the three changed or neighbouring worker files `29 passed, 4 skipped` (the four need Linux).
+
+**3. Runs (founder).** No staging suites for this PR: it changes neither core nor a migration, and the local suites don't start a worker through the launcher. CI, then the Fly proof. **The proof gates the merge:** the PR is opened as a draft; after CI is green, the PR's final head (not `main`) is deployed as the owed worker deploy, the proof runs, and the founder marks the PR ready and merges only if it passes. If it fails, nothing is changed and it is reported. The proof's results go into the next PR's records, since recording them here would change the head that was deployed.
+
+**4. The proof, as designed.**
+- **Beat sends nothing at its own start.** Celery 5.6.3 (`celery/beat.py`, line 127) gives a new schedule entry `last_run_at = now`, and beat's schedule file is in `/tmp`, new on every machine start. So the dispatch pass first goes out 30 s after beat starts and the three sweeps after 5 minutes; the nightly rollup runs at 03:15Z only.
+- **Start 1 is the deploy.** It creates and starts the worker and beat machines together (as at v10, D-202). Read: each worker's `ready`, and its first `Received task` after it.
+- **Start 2:** the worker machine alone is stopped, with beat left running, for 6 minutes, then started. Waiting for it then: dispatch ticks on `dispatch` (they expire after 30 s, but Celery logs `Received task` before it checks the expiry: `celery/worker/strategy.py`, lines 161 and 162) and the three sweeps on `bulk`. Two starts in the hour; `worker_restarting` fires at three.
+- **Read from a fresh `flyctl logs --no-tail`:** each worker's `ready` to its first `Received task`. **Passes** if, at start 2, each of the two workers receives its first waiting message within 2 s of `ready` (8.9 s before the fix), and the shutdown at the scale-down still ends with exit 0 inside `kill_timeout` (30 s). Start 1's readings are reported beside them.
+- **Before the deploy grant is asked for (founder):** beat's full schedule, and for every task what a first start would run and how many items are due, with the queries shown before they run: documents that would reach the model, outbox e-mails that would send (held rows written before a sender existed must never be sent), tenant deletions due, Stripe calls, Storage deletes and founder-alert e-mails. **Anything but 0 for model calls, Stripe, or e-mails to anyone but the founder stops the plan, and Claude asks.** The six leftover counts are read before the deploy and after the scale-down, and any change is explained.
+- **Each Fly step is its own grant:** the deploy, the worker's stop and start, and the scale-down. The founder resumes the Healthchecks.io check `docflow-worker-staging_v2` after the deploy and pauses it after the scale-down.
+
+**5. The worker's memory (founder's question).**
+- **Why it was 2 GB:** staging's worker went from 1 GB to 2 GB on 2026-10-13 for PR A's 250,000-item bench and import measurement only, to be set back after (D-199, D-201, D-202). The founder kept it at 2 GB at the scale-down, because setting it back would have been one more start (D-202). Separately, production's worker is 2 GB (D-196, STOP 3: a 24-page scan took the 1 GB machine to 831 MiB of 962), and `fly.toml` stays at 1 GB until Phase 6 makes that change.
+- **What blocker 3's test needs from the worker:** the test sends a 50,000-item catalog commit through a public address. The commit runs in the API's request; the worker only parses the file through the parse service. Measured on 2026-10-13 (D-202): the documents process peaked at 182,096 KiB (178 MiB) during the 50,000-item import, against the 500 MiB recycle limit; the 1 GB machine idles at about 397 MiB (D-196, step 11).
+- **Recommendation: `fly.toml` stays at 1 GB.** By those numbers the import needs about 575 MiB of the 962 usable. A 2 GB staging worker would rehearse production's size, which is Phase 6's change. Not changed in this PR.
+- **The machine's memory is read straight after the deploy creates it,** before the proof. The app has no machines, so there is nothing to read before the start. If it isn't 1 GB, that is reported at once, and resizing it (one more start) is the founder's call.
+
+**6. #72's records** (founder: in this PR's records; #71's are D-210 item 9 and aren't repeated).
+- **CI on the branch's head `2a3abd6`:** push run 39311576714 and pull-request run 39313571908, both green on the first attempt (core 1062, worker 251, API 718 with the leftover line `+0`, parse 581 and 427, web, web-live).
+- **The serial staging suites on `2a3abd6`** (the founder's grant; the logins of the root `.env`; only the staging database and Storage reachable; `DOCFLOW_STAGING_RUN=1`; no paid call, no machine started):
+  - core `1061 passed, 1 skipped in 138.73s (0:02:18)` (19:36:37 to 19:38:58Z; the skip is the blank JWT secret, D-174);
+  - worker `244 passed, 7 skipped in 2401.72s (0:40:01)` (19:39:05 to 20:19:10Z; its own check before 0 and after 0);
+  - API `717 passed, 1 skipped, 3 deselected, 693 warnings in 2663.10s (0:44:23)` (20:20:08 to 21:04:44Z), the leftover line `+0` on all six counts (tenants 35, founder alerts 4, e-mails 30, scheduled jobs 35, platform-admin rows 12, users with no tenant 15).
+  - Memurai answered before the API suite. The dev parse service was started by hand for it and stopped after the parallel proof.
+- **The one parallel proof** (`scripts/run_suites_parallel.py`, 21:05:16 to 21:50:06Z; same environment):
+  - core `1061 passed, 1 skipped in 213.46s (0:03:33)`; worker `244 passed, 7 skipped in 2262.64s (0:37:42)`; API `717 passed, 1 skipped, 3 deselected, 693 warnings in 2677.54s (0:44:37)`; the same skips, with the same reasons, as the serial runs.
+  - **44:50 for all three, against 1:26:42 one after another.** Against tonight's serial times: core +1:15, worker −2:19, API +0:14.
+  - Six counts `+0`. `pg_database_size` 43,453,587 to 43,396,243 bytes.
+  - **Peak connections 26, at 21:12:01Z,** from 495 readings every 5 s, none missed: the suites' logins 13 (worker 6, API 3, admin 3, stripe 1), Supabase's own 13.
+  - **So RUNBOOK 1.4's parallel rule stays** (D-211 item 11), and its two "taken out if the proof fails" markers are removed in this PR.
+- **Nano's published limits** (https://supabase.com/docs/guides/platform/compute-and-disk, "Limits and constraints", read 2026-10-19): "Nano (free) | 5 | 5 | 60 | 200" under "Compute instance | Max Replication Slots | Max WAL Senders | Database Max Connections | Connection Pooler Max Clients", with the footnote "Database max connections are recommended values and can be customized via `max_connections` depending on your use case."
+  - **The peak was 26 of the 60 database connections (43%).** Staging's own `max_connections` was not read.
+  - **The 200 pooler clients were not measured:** the database sees only the pooler's own connections. Each suite process holds one SQLAlchemy pool per login (5, and up to 10 more under load).
+- **Tests that slowed in the parallel run** (from the slowest-25 lists):
+  - core's CPU-bound tests about 2× (the broad-except guard 3.7 to 7.9 s, the full-scan benchmarks);
+  - the worker's daily-threshold test 23.2 to 42.9 s;
+  - two card-billing tests 16.5 to 27.3 s and 16.5 to 25.4 s.
+  - None of these has a time limit, and none takes the shared-state lock. Two other core tests have a 2.0 s window and became thin (item 8).
+- **The UTC-midnight sensitivity of the worker's daily-threshold test** (`test_time_limits.py::test_more_than_the_daily_threshold_of_unfinished_exports_raises_one_alert_that_day`). It counts exports from UTC midnight, and its alert is deduped per UTC day. **A worker run that crosses 00:00Z (20:00 in New York in summer time, 19:00 in winter) can fail at any speed.**
+- **Merged:** PR #72, merge commit `cdc5c5dae1e38c38d49c45fe2d2d2012dac82507`, at 2026-10-19 22:13:08Z. Main's push run 39333359810 on `cdc5c5d`: green, every job on the first attempt (core 1062, worker 251, API 718 with the leftover line `+0`, parse 581 and 427 with the usual IPv6 NOT-RUN warning, web 76, web-live 3).
+
+**7. A rule (founder, 2026-10-19): no worker suite starts if it would run past 23:20Z** (RUNBOOK 1.4). This covers the worker suite alone or through the runner. Because of item 6's midnight sensitivity, the run must end 40 minutes clear of 00:00Z. A worker run takes about 40 minutes alone and 38 to 45 through the runner, so in practice none starts after about 22:35Z.
+
+**8. Added to the warnings and 32-byte test-secret PR (PR 7) (founder):** two `test_parse_client.py` tests, `test_busy_is_retried_then_never_got_in` and `test_busy_then_free_parses`. Each gives the client 3 s to retry, and a 1 s "busy" answer must come back first, so the first request must finish within 2.0 s.
+- Estimated from their durations: about 60% margin serially and 20% and 26% in the parallel run, assuming the test's two requests take equal time.
+- **Before PR 7:** measure their first-request time locally, every outside service blocked, in a quiet run and a run with the CPU busy, and report it against the 2.0 s window. Then propose either removing the dependence on wall time or widening the window. No change before the founder approves.
+
+**Related:** D-196 (step 11, STOP 3), D-197 (item 3), D-199, D-202, D-210 (item 9), D-211; RUNBOOK 1.4, 9.8; `apps/worker/app/run_workers.py`, `apps/worker/app/celery_app.py`.

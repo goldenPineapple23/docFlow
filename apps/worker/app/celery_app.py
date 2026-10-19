@@ -85,13 +85,15 @@ BROKER_VISIBILITY_TIMEOUT_SECONDS = 2 * 60 * 60
 # again (kombu's `polling_interval` option, which sets its BRPOP timeout; 1 s
 # by default). Once a worker is running, the read returns the moment a job
 # arrives, so this is not a delay before a document is picked up: it is how
-# often an idle worker repeats the question. The exception is a worker's
+# often an idle worker repeats the question. The exception was a worker's
 # start: for about this long after `ready` it received nothing, a job already
 # in the queue included (measured on Fly staging at four starts of four,
-# 2026-10-08; D-197. The cause is read as Celery's start-up neighbour search,
-# mingle, and is not proven). At 1 s the two worker processes sent about 7,200
-# commands an hour, half of everything Upstash billed for an idle worker
-# (measured at the first worker deploy; D-196). Two things follow from it:
+# 2026-10-08; D-197), read as Celery's start-up neighbour search, mingle.
+# Since D-212 app.run_workers starts both workers without mingle and gossip;
+# a Fly proof of it gated the merge (D-212). At 1 s the two worker processes
+# sent about 7,200 commands an hour, half of everything Upstash billed for an
+# idle worker (measured at the first worker deploy; D-196). Two things follow
+# from it:
 #   * a stopping worker waits for the read it has open, so shutdown takes up
 #     to this long more: `kill_timeout` in fly.toml must stay well above it
 #     (tests/test_celery_app.py holds the two together);
