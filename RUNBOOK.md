@@ -248,17 +248,57 @@ follow-up, PR #29) merged. Since then:
 
 ### 1.4 Running the test suites against staging
 
-**Standing rule: one suite at a time.** Run core, worker, API and web against
-`docflow-staging` one after another, never at the same time. The suites share
-one database. Several tests create and delete their own tenants, and some
-check a count across the whole table, so one suite's test data can fail
-another suite's test. This happened on 2026-09-26: the API suite's `deal7`
-case failed while the worker suite was running (DECISIONS.md D-160).
+**Standing rule: one suite at a time, or core, worker and API together
+through the runner.** Run core, worker, API and web against
+`docflow-staging` one after another, or start core, worker and API together
+with `scripts/run_suites_parallel.py` (below); never any other overlap. The
+suites share one database. Several tests create and delete their own
+tenants, and some check a count across the whole table, so one suite's test
+data can fail another suite's test. This happened on 2026-09-26: the API
+suite's `deal7` case failed while the worker suite was running (DECISIONS.md
+D-160).
 
-**The API and worker suites enforce it (D-180).** Each run takes a Postgres
-advisory lock when it starts and holds it until it ends. A second run of
-either suite against the same database stops at once, with exit code 3 and a
-message naming the run that holds the lock:
+<!-- parallel-rule:start (D-211: taken out if the parallel proof fails) -->
+**Core, worker and API together, through the runner (D-211).** Serial runs
+stay allowed and unchanged. From the repository root, in the same
+environment a single staging suite's run would have (only the database and
+Storage reachable, `DOCFLOW_STAGING_RUN=1`, the dev parse service up and
+Memurai answering, as below):
+
+```
+apps/api/.venv/Scripts/python scripts/run_suites_parallel.py <a folder outside the repository>
+```
+
+It starts the three suites at once (`pytest -q -rs --durations=25`, one log
+each in that folder) with `DOCFLOW_TEST_PARALLEL_RUN=1`, so their run locks
+take the shared key in shared mode and nothing else can start meanwhile. It
+reads the six leftover counts before it starts them and after the last one
+ends, and fails on anything but `+0`; each suite's own leftover line then
+reads `counted by the parallel runner`. It also prints, read-only, the
+database's size before and after and the peak of its connections during the
+run. **A failed parallel run is read before anything is re-run:** quote the
+failed test and its cause from its log (1.6), and only then decide whether
+to run again, in parallel or one at a time.
+<!-- parallel-rule:end -->
+
+**Every staging run carries `DOCFLOW_STAGING_RUN=1` (D-211).** Each suite's
+conftest refuses to start, before it opens any connection, if a database URL
+points anywhere but `localhost`, `127.0.0.1` or `db.invalid`, unless the
+process's own environment carries `DOCFLOW_STAGING_RUN=1` (never read from
+`.env`). Set it only for a staging run the founder has granted. It replaces
+the shell's block as the protection for the database: on 2026-10-19,
+PowerShell's `$env:DATABASE_URL = ""` deleted the variable instead of
+blanking it, the root `.env`'s staging URL was read, and two "blocked" local
+runs took the run lock on staging. To run with no database, set each URL to
+`postgresql://nobody:nothing@db.invalid:5432/none`, or start the run from Git
+Bash, where `DATABASE_URL=` keeps an empty value.
+
+**The API and worker suites enforce it (D-180; D-211).** Each run takes two
+Postgres advisory locks when it starts and holds them until it ends: its
+suite's own, and one every suite shares, which a normal run takes alone and
+a run the parallel runner started takes in shared mode. A second run of a
+suite, or any run that would overlap a normal one, stops at once, with exit
+code 3 and a message naming the run that holds the lock:
 
 ```
 Exit: Another test run is using this database: docflow-test-run api pid=23972 host=NKPC started=18:53:17Z.
@@ -272,10 +312,11 @@ runs (`--co`) don't take it. It doesn't cover the web suites or scripts such as
 2026-09-29, when two sessions ran the full API suite 76 seconds apart and each
 deleted a tenant the other was counting.
 
-The rule stays until every test uses data only it can see: rows with a unique
-prefix that the test filters on, or a transaction the test rolls back. The
-audit of the "count everything" tests is a Phase 5.5 Stage 5 item
-(`docs/BUILD-STATUS.md`).
+The audit of the "count everything" tests was Stage 5's test-hygiene PR
+(D-211): the counts that could move under another suite were replaced or
+scoped, and the tests that touch the database's global state (the model
+provider's row, the tenant-less provider and dispatcher alerts, the open
+dispatch passes) hold a third lock, `shared_state`, so they never overlap.
 
 **Before the API suite: start the dev parse service** (SETUP.md step 7a:
 from `apps/parse`, `PARSE_ISOLATION=off`, no token, the default port 8100)

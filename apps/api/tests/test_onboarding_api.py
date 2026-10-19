@@ -235,8 +235,10 @@ def test_test_batch_files_are_checked_stored_staged_and_not_sent_to_the_model(cl
 @requires_go_live_schema
 @requires_console_schema
 def test_run_sends_the_batch_through_the_normal_pipeline_and_completion_waits_for_approval(
-    client, stripe, queue
+    client, stripe, queue, shared_state
 ):
+    # Holds the shared state (D-211): a worker's open dispatch pass would mark
+    # the batch dispatched between the run and the check below.
     with _Console() as console:
         tenant_id = _tenant_with_catalog(client, console)
         _upload(client, console, tenant_id, ("po-1.txt", PO_TEXT), ("po-2.txt", PO_TEXT_2))

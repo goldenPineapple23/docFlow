@@ -132,7 +132,9 @@ def test_upload_rejects_zip_bomb(client, monkeypatch):
 
 
 @requires_documents_schema
-def test_upload_accepts_valid_file_and_enqueues(client, monkeypatch):
+def test_upload_accepts_valid_file_and_enqueues(client, monkeypatch, shared_state):
+    # Holds the shared state (D-211): a worker's open dispatch pass would mark
+    # this document dispatched between the upload and the check below.
     monkeypatch.setenv("SUPABASE_JWT_SECRET", JWT_SECRET)
     get_settings.cache_clear()
     fake_celery = _FakeCeleryClient()

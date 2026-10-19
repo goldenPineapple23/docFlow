@@ -95,20 +95,27 @@ def _alerts(tenant_id, alert_type: str = "intake_failed") -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def _all_intake_failed() -> int:
-    with platform_session() as session:
-        return int(
-            session.execute(
-                text("SELECT count(*) FROM founder_alerts WHERE type = 'intake_failed'")
-            ).scalar_one()
-        )
+@pytest.fixture
+def intake_failed_raised(monkeypatch) -> list:
+    """Every call the webhook makes to raise `intake_failed`, the real raise
+    still behind it. A spy, not a count of the table: another run's alerts
+    can't move it (D-211)."""
+    calls: list = []
+    real = founder_alerts.alert_intake_failed
+
+    def spy(tenant_id, exc):
+        calls.append((tenant_id, type(exc).__name__))
+        return real(tenant_id, exc)
+
+    monkeypatch.setattr(founder_alerts, "alert_intake_failed", spy)
+    return calls
 
 
 # ── ours, for a known tenant: one alert, the same 500 ────────────────────────
 
 
 def test_a_fault_of_ours_answers_500_and_raises_one_keyed_alert_with_nothing_of_the_email(
-    lenient_client, monkeypatch, fake_celery, caplog
+    lenient_client, monkeypatch, fake_celery, caplog, intake_failed_raised
 ):
     _breaks(monkeypatch, "process_inbound_email")
     with _TestIntakeTenant("Acme Test Distributor") as tenant:
@@ -116,6 +123,8 @@ def test_a_fault_of_ours_answers_500_and_raises_one_keyed_alert_with_nothing_of_
             response = _post(lenient_client, tenant.token)
 
         assert response.status_code == 500, "a 403 would stop Postmark; anything but 5xx loses the retry"
+        # The spy the "raises nothing" tests read sees this raise.
+        assert intake_failed_raised == [(tenant.tenant_id, "RuntimeError")]
         assert SECRET not in response.text
         (alert,) = _alerts(tenant.tenant_id)
         payload = alert["payload"]
@@ -224,25 +233,23 @@ def test_the_senders_malformed_requests_are_still_400_and_raise_nothing(client, 
         assert _alerts(tenant.tenant_id) == []
 
 
-def test_an_unknown_token_is_still_404_and_raises_nothing(client):
-    before = _all_intake_failed()
+def test_an_unknown_token_is_still_404_and_raises_nothing(client, intake_failed_raised):
     response = client.post(
         f"/intake/email/{uuid4().hex}", json=_pm_payload(SENDER), headers=intake_webhook_headers()
     )
     assert response.status_code == 404
-    assert _all_intake_failed() == before
+    assert intake_failed_raised == []
 
 
 @pytest.mark.usefixtures("cleans_up_refusal_alerts")
-def test_refused_credentials_are_still_401_and_raise_no_intake_failed(client):
-    before = _all_intake_failed()
+def test_refused_credentials_are_still_401_and_raise_no_intake_failed(client, intake_failed_raised):
     response = client.post(
         f"/intake/email/{uuid4().hex}",
         json=_pm_payload(SENDER),
         headers=intake_webhook_headers(password="wrong-for-this-test"),
     )
     assert response.status_code == 401
-    assert _all_intake_failed() == before
+    assert intake_failed_raised == []
 
 
 def test_storage_unavailable_is_still_503_and_raises_no_intake_failed(client, monkeypatch, fake_celery):
@@ -281,16 +288,15 @@ def test_an_attachment_that_fails_on_our_side_is_still_its_doc_030_with_a_200(
 
 
 def test_a_fault_before_the_tenant_is_known_is_logged_and_raises_no_alert(
-    lenient_client, monkeypatch, caplog
+    lenient_client, monkeypatch, caplog, intake_failed_raised
 ):
     _breaks(monkeypatch, "resolve_tenant_by_token")
-    before = _all_intake_failed()
     with caplog.at_level("ERROR"):
         response = lenient_client.post(
             f"/intake/email/{uuid4().hex}", json=_pm_payload(SENDER), headers=intake_webhook_headers()
         )
     assert response.status_code == 500
-    assert _all_intake_failed() == before
+    assert intake_failed_raised == []
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert "unhandled_error" in logged and "RuntimeError" in logged
     assert SECRET not in logged

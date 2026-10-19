@@ -438,26 +438,35 @@ def test_a_failed_order_says_why_in_the_catalogs_words(client):
         assert failure(fine) is None
 
 
-def _delete_provider_alerts_since(started) -> None:
-    """The provider's own alerts this test raised (tenant-less), then their emails."""
+def _provider_alert_ids() -> set[str]:
     with platform_session() as session:
-        outbox = [
-            r[0]
+        return {
+            str(r[0])
             for r in session.execute(
                 text(
-                    "DELETE FROM founder_alerts WHERE tenant_id IS NULL AND created_at >= :s "
-                    "AND type IN ('model_api_failure', 'model_api_recovered') RETURNING email_outbox_id"
-                ),
-                {"s": started},
+                    "SELECT id FROM founder_alerts WHERE tenant_id IS NULL "
+                    "AND type IN ('model_api_failure', 'model_api_recovered')"
+                )
             )
-            if r[0] is not None
-        ]
-        for outbox_id in outbox:
-            session.execute(text("DELETE FROM email_outbox WHERE id = :id"), {"id": str(outbox_id)})
+        }
+
+
+def _delete_provider_alerts_raised_since(before: set[str]) -> None:
+    """The provider's own alerts this test raised (tenant-less), by id -- those
+    that weren't there when it began -- then their emails (D-211). Another
+    suite's are never touched; the shared state keeps its tests out meanwhile."""
+    with platform_session() as session:
+        for alert_id in sorted(_provider_alert_ids() - before):
+            outbox_id = session.execute(
+                text("DELETE FROM founder_alerts WHERE id = CAST(:id AS uuid) RETURNING email_outbox_id"),
+                {"id": alert_id},
+            ).scalar()
+            if outbox_id is not None:
+                session.execute(text("DELETE FROM email_outbox WHERE id = :id"), {"id": str(outbox_id)})
 
 
 @requires_review_schema
-def test_one_failure_on_our_own_configuration_shows_a_waiting_order_as_delayed_at_once(client):
+def test_one_failure_on_our_own_configuration_shows_a_waiting_order_as_delayed_at_once(client, shared_state):
     """
     Founder, 2026-10-01 (3d build, finding 2): "Delayed" only while the
     provider is marked down, and a wrong key, no credit or a retired model
@@ -469,8 +478,7 @@ def test_one_failure_on_our_own_configuration_shows_a_waiting_order_as_delayed_a
     from docflow_core import model_provider
     from docflow_core.provider_errors import ProviderError
 
-    with platform_session() as session:
-        started = session.execute(text("SELECT now()")).scalar_one()
+    before = _provider_alert_ids()
     model_provider.record_success()  # start from "up", as staging normally is
     try:
         with _ReviewTenant("Acme Test Distributor -- delayed") as tenant:
@@ -506,7 +514,7 @@ def test_one_failure_on_our_own_configuration_shows_a_waiting_order_as_delayed_a
             assert shown() == (False, None)
     finally:
         model_provider.record_success()
-        _delete_provider_alerts_since(started)
+        _delete_provider_alerts_raised_since(before)
 
 
 # -- roles are enforced at the API, not in the UI (Section 3) ----------------

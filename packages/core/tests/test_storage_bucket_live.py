@@ -80,12 +80,17 @@ def test_a_hard_delete_empties_the_tenants_folder_in_the_real_bucket():
     delete once answered 400 on Supabase (its body wasn't labelled XML),
     which the in-memory fake could never show."""
     tenant = uuid4()
-    for name in ("one.txt", "two.txt", "three.txt"):
-        storage.save_file(tenant, name, f"hard delete probe {uuid4()}".encode())
-    storage.save_derived(tenant, uuid4(), "extracted_text", b"derived probe")
+    try:
+        for name in ("one.txt", "two.txt", "three.txt"):
+            storage.save_file(tenant, name, f"hard delete probe {uuid4()}".encode())
+        storage.save_derived(tenant, uuid4(), "extracted_text", b"derived probe")
 
-    assert storage.delete_tenant_storage(tenant) == 4
-    assert storage._get_backend().list_keys(f"tenants/{tenant}/") == []
+        assert storage.delete_tenant_storage(tenant) == 4
+        assert storage._get_backend().list_keys(f"tenants/{tenant}/") == []
+    finally:
+        # Whatever failed above, the probe's folder doesn't stay in the real
+        # bucket (the cleanup survey, D-211). Already empty when it passed.
+        storage.delete_tenant_storage(tenant)
 
 
 @requires_bucket

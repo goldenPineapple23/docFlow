@@ -19,6 +19,12 @@ time, with the Fly worker stopped) reads `+0` for each. A run that is
 killed prints nothing, and cleans nothing: that is what the staging sweep is
 for. In CI the line is also a GitHub annotation, because CI's job logs can't
 be read here and annotations can (RUNBOOK 1.6).
+
+**In a parallel run** (D-211: the three suites started together by
+scripts/run_suites_parallel.py) another suite's rows come and go while this
+one runs, so this suite counts nothing and says so. The runner reads the same
+six counts before it starts the suites and after the last one ends, and fails
+on anything but `+0`: the same rule, over the combined run.
 """
 
 from __future__ import annotations
@@ -42,6 +48,7 @@ NODE_ID = "tests/leftover_count.py::left_behind_by_this_run"
 
 _before: dict[str, int] | None = None
 _after: dict[str, int] | None = None
+_by_the_runner = False
 
 
 def take() -> dict[str, int] | None:
@@ -58,8 +65,11 @@ def take() -> dict[str, int] | None:
 
 
 def session_start() -> None:
-    global _before, _after
-    _before, _after = take(), None
+    global _before, _after, _by_the_runner
+    # The flag tests/suite_lock.py reads (parallel_run); read here directly,
+    # because test_leftover_count.py loads this file on its own.
+    _by_the_runner = os.environ.get("DOCFLOW_TEST_PARALLEL_RUN") == "1"
+    _before, _after = (None if _by_the_runner else take()), None
 
 
 def moved() -> list[str]:
@@ -89,6 +99,8 @@ def session_finish(session: Any) -> None:
 
 def line() -> str | None:
     """`left behind by this run (before -> after): tenants 34 -> 34 (+0), ...`"""
+    if _by_the_runner:
+        return "left behind by this run: counted by the parallel runner, before and after all three suites"
     if _before is None:
         return None
     if _after is None:
