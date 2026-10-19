@@ -27,7 +27,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # (.github/workflows/debian-snapshot.yml) moves the date forward and runs
 # the full suite (D-183). Check-Valid-Until is off because an old snapshot's
 # Release files are past their expiry by design; signatures are still checked.
-ARG DEBIAN_SNAPSHOT=20261001T000000Z
+ARG DEBIAN_SNAPSHOT=20261019T000000Z
 RUN sed -i \
       -e "s#http://deb.debian.org/debian-security#http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}#" \
       -e "s#http://deb.debian.org/debian\$#http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}#" \
