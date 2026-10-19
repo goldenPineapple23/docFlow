@@ -4078,3 +4078,60 @@ Everything else fails as before: a deadlock (40P01), a serialization failure (40
 **Not changed:** the wording of DOC-030, VAL-017 and VAL-018; IMP-004 for a stopped job; the intake's per-attachment rule; any threshold; any table, column, policy or grant.
 
 **Related:** Sections 7.2, 7.3, 7.10, 7.11, 7.12, 7.16.5; D-145, D-174, D-199, D-203, D-204, D-206; RUNBOOK 8.1; `docs/spikes/3c-fly-staging/2026-10-18-sha256-e1ac59b6/`; BUILD-STATUS "Stage 4 detailed design" (B2, B3); `apps/parse/parse_service/parsing/conversion.py`, `apps/parse/parse_service/parsing/documents.py`, `packages/core/docflow_core/parse_client.py`, `packages/core/docflow_core/validation.py`, `packages/core/docflow_core/catalog_import.py`, `packages/core/docflow_core/founder_alerts.py`, `apps/worker/app/tasks/parse_and_extract.py`, `apps/api/app/routers/review.py`, `apps/web/src/components/review/WarningsPanel.tsx`.
+
+
+## D-208 — The welding demo: second, after the fastener rehearsal, never in its way (founder, 2026-10-19)
+
+**Context:** demo readiness (BUILD-STATUS, "The plan after the Stage 3 "go"") plans one fastener demo. The product is not only for fasteners, and the founder decided on a second demo, for welding supplies, at the Stage 4 checkpoint.
+
+1. **Fastener goes first.** Demo readiness builds and rehearses the fastener demo as BUILD-STATUS describes it: a realistic catalog; 15 to 20 POs across formats; a bar set in advance; a full rehearsal through both portals.
+2. **Welding starts only after the fastener rehearsal has passed, and never blocks it.** No welding work goes before that rehearsal, or into the same PR as fastener work. If welding work would delay any fastener step, the welding work waits.
+3. **D-195's comparison runs on fastener POs only.** Its 2026-11-16 deadline is unchanged. No welding PO enters the comparison or its result.
+4. **Welding has its own of everything:**
+   - its own catalog, in its own demo tenant (a catalog belongs to one tenant);
+   - its own 15 to 20 synthetic POs, with obviously fake names (Section 0 rule 4) and no prospect's documents;
+   - its own accuracy bar for header fields and the line-match rate, proposed to the founder before anything is measured;
+   - its own full rehearsal through both portals (the Console and the customer portal): e-mail in, extraction, matching, review, export.
+
+**Not changed:** D-195; demo readiness's fastener plan; the rule that prospects' own documents wait for the pilot blockers.
+
+**Related:** Section 0 rule 4; D-195, D-199; BUILD-STATUS "Demo readiness"; CHECKPOINTS.md, Stage 4.
+
+
+## D-209 — E1, E2a and E3a: small additions for the customer, and the outreach-period rules (founder, 2026-10-13, recorded 2026-10-19)
+
+**Context:** the founder decided these in chat on 2026-10-13. They were not recorded then, and are recorded now at the Stage 4 checkpoint, on the founder's instruction. These E numbers are product enhancements. They are not the 3c and 3e designs' E1 to E5, which are start-up checks of the parse service and the logins.
+
+**1. The rules for every enhancement here.**
+- Additions only: no existing behaviour changes.
+- New tests only: no existing test is changed to make room.
+- Each is its own small PR.
+- Nothing is built before the Stage 4 checkpoint.
+
+**2. E1: a tile on the customer's dashboard: "This week: X POs processed, Y min average review".**
+- Review time is `approved_at` minus `review_started_at` (the 7.15.3 measure), leaving out sessions longer than `ABANDONED_REVIEW_CEILING_MIN`.
+- Built as a live query in `packages/core/docflow_core/tenant_home.py`, an API field, and a tile on `apps/web/src/app/dashboard/page.tsx`.
+- No migration. About 1 day. It changes core, so all three suites run.
+- No "hours saved" claim, and no vendor figures such as "8-20 min/PO".
+
+**3. E2a: a "Saved rule · applied N times" label** on lines a learned rule filled in. N is `learned_rules.times_applied`, and the line's provenance is `learned_rule:<id>`. An API read plus the label in `apps/web/src/components/review/confidence.tsx`. About half a day.
+
+**4. E3a: keyboard shortcuts on the review screen:** next and previous line, focus the fields, pick candidate 1 to 5, next PO.
+- There is no shortcut to reject, and none to approve and export.
+- A candidate is accepted only by an explicit key press.
+- Every shortcut has a visible button.
+- About 3 to 5 days, built after pilot feedback.
+
+**5. Dropped:** E2b and E3b.
+
+**6. The order:** Stage 5 in full, then E1 and E2a, then demo readiness. Stage 5 runs in full before demo readiness, as D-199 says.
+
+**7. The outreach-period rules (decided the same day; none of them was in the repository, read 2026-10-19).**
+- **Demo releases are pinned as git tags** (`demo-1`, `demo-2`, ...) and recorded in BUILD-STATUS.
+- **Staging is redeployed only after a merge.** Each redeploy is followed by the demo smoke test, about 15 minutes: upload, review, approve, export, and the dashboard, including E1 and E2a. If the smoke test fails, the last good tag is redeployed.
+- **No staging deploy in the 24 hours before a booked demo.**
+- **On demo day, the machines are started 30 minutes early.**
+
+**Not changed:** any existing behaviour; Stage 5's content; D-195; D-208.
+
+**Related:** Sections 3, 7.13, 7.15.3; D-195, D-199, D-208; BUILD-STATUS "Demo readiness"; CHECKPOINTS.md, Stage 4.
