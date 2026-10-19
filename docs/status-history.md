@@ -4,6 +4,31 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-19 (PR 1b-ii merged as PR #68; D-207 item 14)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-18, with Q14 merged and PR 1b-ii built:** Phase 5.5, **Stage 4** (the audit
+of the broad `except` blocks). **Q14 is merged** (PR #67; `main` is `24e0204`; D-206 item 11): `0038`
+is on staging, and the PR merged before the worker and API staging suites finished; both then passed.
+**PR 1b-ii is built, not merged** (branch `phase55/stage4-pr1b-ii-unwrap-and-import`; D-207): what an
+`.eml` or `.msg` unwrap couldn't read becomes a warning the reviewer must acknowledge, VAL-017 naming
+the attachment (signature logos the body references, contact cards and invites excepted) and VAL-018
+for the body, written with the extraction and left alone by validation; an uploaded email whose
+attachment or body hits our own bug fails whole as DOC-030 (on purpose; intake keeps its
+per-attachment rule); an import whose parse job fails on our side is IMP-011 with a new
+`import_failed` alert ("Catalog import, no document" in the Console); BLAMES_INPUT and DROPS_CONTENT
+are retired from the guard. No migration. **The Fly gate** (the parse service changed) waits for a
+green pull-request run and the founder's word; the PR is opened as a draft. **Recorded:** one local
+core run reached staging Storage on 2026-10-18 (seven probe objects written and deleted); every later
+run blocks every outside service (D-207 item 11). **Staging:** `docflow-parse-staging` runs 1b-i;
+`docflow-worker-staging` has no machines and is still v10 with the old `parse_client`, which must not be
+started against it. The next worker start: deploy `main`'s worker first, read the machine's memory
+(raised to 2 GB; `fly.toml` says 1 GB), then start it. Deploy order for 1b-ii: the worker, then the
+parse app. Next: the Stage 4 checkpoint. Not fixed, each its own PR, timed at the Stage 4 checkpoint:
+IMP-003's wording, the 50,000-row cap, the long catalog commit, and a PO that fails on our side at
+intake raising no alert. If Stage 4 is not merged by 2026-11-02, D-195's two changes go next. The
+API's and the parse machine's auto-stop are on, and the Healthchecks.io check is paused.
+
 ## Replaced on 2026-10-18 (Q14 merged as PR #67; PR 1b-ii built; D-206 item 11, D-207)
 
 <!-- the paragraph as it stood, starting on the next line -->
