@@ -224,24 +224,32 @@ def build_msg(
     subject: str = "PO BCH-2291 from Acme's Test Coffee House",
     sender: str = "orders@acmetestcoffee.example",
     body: str = PO_TEXT,
-    attachments: list[tuple[str, bytes]] | None = None,
+    attachments: list[tuple] | None = None,
+    html_body: bytes | None = None,
 ) -> bytes:
-    """A minimal but genuine Outlook `.msg` (OLE compound file)."""
+    """A minimal but genuine Outlook `.msg` (OLE compound file).
+
+    attachments: (filename, data) or (filename, data, {prop_id: text}) --
+    data None stores the attachment with no file data (as Outlook stores a
+    forwarded message); filename None stores no name; the dict adds text
+    properties such as the MIME tag
+    (370E) or the Content-ID (3712). html_body adds PR_HTML (1013)."""
     children = [
         _msg_text_stream("0037", subject),
         _msg_text_stream("1000", body),
         _msg_text_stream("0C1F", sender),
     ]
-    for index, (filename, data) in enumerate(attachments or []):
+    if html_body is not None:
+        children.append(_Entry(name="__substg1.0_10130102", entry_type=2, data=html_body))
+    for index, attachment in enumerate(attachments or []):
+        filename, data = attachment[0], attachment[1]
+        properties: dict[str, str] = attachment[2] if len(attachment) > 2 else {}
+        streams = [_msg_text_stream("3707", filename)] if filename is not None else []
+        streams += [_msg_text_stream(prop_id, value) for prop_id, value in properties.items()]
+        if data is not None:
+            streams.append(_Entry(name="__substg1.0_37010102", entry_type=2, data=data))
         children.append(
-            _Entry(
-                name=f"__attach_version1.0_#{index:08X}",
-                entry_type=1,
-                children=[
-                    _msg_text_stream("3707", filename),
-                    _Entry(name="__substg1.0_37010102", entry_type=2, data=data),
-                ],
-            )
+            _Entry(name=f"__attach_version1.0_#{index:08X}", entry_type=1, children=streams)
         )
     root = _Entry(name="Root Entry", entry_type=5, children=children)
     return build_ole_container(root)

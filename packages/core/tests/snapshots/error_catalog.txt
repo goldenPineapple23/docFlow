@@ -374,6 +374,10 @@ IMP-010 [warning/founder] This file's stored copy can't be read
   what+why: DocFlow couldn't read its stored copy of this file: it is missing, or the location recorded for it isn't valid. Nothing was imported, and starting this import again would fail the same way.
   next:     Upload the file again as a new import. The log names this import's ID; if the recorded location pointed into another tenant, you have also been alerted.
 
+IMP-011 [warning/founder] Reading this file failed on our side
+  what+why: DocFlow couldn't read this file because of a problem in DocFlow, not in the file. Nothing was imported, and a high alert with the exception type and our code location is in your attention panel.
+  next:     Don't change the file. Once the fix is deployed, start the import again from the same file.
+
 INT-001 [warning/tenant] No attachment to process
   what+why: This email didn't include an attachment DocFlow recognizes as a document, so nothing was processed.
   next:     Resend with the purchase order attached as a PDF, Word, or Excel file.
@@ -681,3 +685,11 @@ VAL-015 [warning/tenant] Unusually precise number, please confirm
 VAL-016 [high/tenant] Some automatic steps didn't finish
   what+why: DocFlow read this order, but one or more of its automatic steps -- recognising the buyer, matching lines to the catalog, or spotting duplicates -- didn't finish. Those parts of the screen may be empty for that reason, not because nothing matched.
   next:     DocFlow has already been alerted. Check the buyer, the catalog matches and any duplicate by hand before approving.
+
+VAL-017 [high/tenant] An email attachment couldn't be read
+  what+why: Part of this email couldn't be read: the attachment "{filename}". The order was read from the rest of the email and may be incomplete.
+  next:     Check it against the original email before approving.
+
+VAL-018 [high/tenant] This email's text couldn't be read
+  what+why: The text of this email couldn't be read. The order was read from its attachments only.
+  next:     Check it against the original email before approving.

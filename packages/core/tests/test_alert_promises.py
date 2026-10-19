@@ -41,6 +41,10 @@ ALERTED_ELSEWHERE = {
     # Stage 4 (D-203, PR 1b-i): a parse job that failed on our side. The worker
     # raises the keyed `document_failed` alert, once per state.
     "DOC-030": "document_failed",
+    # Stage 4 (D-207, PR 1b-ii): an import's parse job that failed on our
+    # side. IMP-011 names the alert in the attention panel; catalog_import
+    # raises the keyed `import_failed` alert, once per state.
+    "IMP-011": "import_failed",
 }
 
 # "We're already on it" (DOC-030) makes the same promise in other words.

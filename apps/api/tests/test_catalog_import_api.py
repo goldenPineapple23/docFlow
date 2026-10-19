@@ -376,10 +376,10 @@ def test_a_header_only_file_fails_with_its_reason_shown(client, stripe):
 
 
 @requires_imports_schema
-def test_an_import_answered_error_keeps_imp_004_until_1b_ii(client, stripe, monkeypatch, caplog):
-    """D-203, PR 1b-i: an `error` answer is our fault, not the file's. Until
-    the import's own code exists (PR 1b-ii) it shows IMP-004, as a crash
-    does -- never an `ok` it isn't. The log names the type and our location."""
+def test_an_import_answered_error_logs_its_type_and_our_location(client, stripe, monkeypatch, caplog):
+    """D-203, PR 1b-i: an `error` answer is our fault, not the file's; the
+    log names the type and our location, never a cell. Since PR 1b-ii it is
+    IMP-011 with its own alert (test_unwrap_and_import_api.py)."""
     from docflow_core import parse_client
 
     location = "parse_service.parsing.tables:parse_table:157"
@@ -392,7 +392,7 @@ def test_an_import_answered_error_keeps_imp_004_until_1b_ii(client, stripe, monk
         with caplog.at_level("ERROR"):
             preview = _import(client, console, tenant_id, CATALOG_V1)
         assert preview["status"] == "failed"
-        assert preview["error"]["code"] == "IMP-004"
+        assert preview["error"]["code"] == "IMP-011"
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert "import_parse_error" in logged and f"location={location}" in logged
 

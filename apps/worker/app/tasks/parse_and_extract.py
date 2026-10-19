@@ -75,7 +75,7 @@ from docflow_core.storage import (
     read_file,
     save_derived,
 )
-from docflow_core.validation import validate_document
+from docflow_core.validation import record_parse_warnings, validate_document
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -460,14 +460,11 @@ def _fail_parse_ours(
 def _crash_fault(kind: str, cause: str, module: str) -> faults.Fault:
     """A crash has no exception of ours to name: its cause stands in the
     code location's place in the state key (founder, 2026-10-16)."""
-    return faults.Fault(exception_type=kind, module=module, function=cause, line=0)
+    return faults.crash_fault(kind, cause, module)
 
 
 def _error_fault(answer: parse_client.ParseAnswer) -> faults.Fault:
-    module, function, line = (answer.location or "unknown:unknown:0").rsplit(":", 2)
-    return faults.Fault(
-        exception_type=answer.error_type or "unknown", module=module, function=function, line=int(line)
-    )
+    return faults.parse_error_fault(answer.error_type, answer.location)
 
 
 def _parse_alert(tenant_id: UUID, document_id: UUID, cause: str) -> None:
@@ -1019,7 +1016,7 @@ def _parse_and_extract(tid: UUID, did: UUID) -> None:
         return
 
     try:
-        _save_extraction(tid, did, plan, result, started.extraction)
+        _save_extraction(tid, did, plan, result, started.extraction, lost=answer.lost)
     except Exception as exc:  # noqa: BLE001 -- the document must not be stranded (M3)
         # Nothing of the answer was written (one transaction). Keep the paid
         # answer on the failed document, with a code, and tell the founder.
@@ -1039,12 +1036,25 @@ def _parse_and_extract(tid: UUID, did: UUID) -> None:
 
 
 def _save_extraction(
-    tid: UUID, did: UUID, plan: ExamplePlan, result: ExtractionResult, started_run_id: UUID | None = None
+    tid: UUID,
+    did: UUID,
+    plan: ExamplePlan,
+    result: ExtractionResult,
+    started_run_id: UUID | None = None,
+    *,
+    lost: list[dict] | None = None,
 ) -> None:
     """The model's answer, the header, the lines and the run record, in one
-    transaction. The status stays `processing`: nothing is reviewable yet."""
+    transaction. The status stays `processing`: nothing is reviewable yet.
+
+    `lost` is what the parse step couldn't read from an .eml or .msg: its
+    warnings (VAL-017, VAL-018) are written here, in the same transaction,
+    so the answer is never saved without them (D-207). A resumed document
+    already has them; validation leaves them alone."""
     header = result.header
     with tenant_session(tid) as session:
+        if lost:
+            record_parse_warnings(session, tid, did, lost)
         # The tenant's field schema decides which fields count towards the
         # document's confidence and which are checked (D-120). Recorded on the
         # document, so a later change never makes its numbers unexplainable.

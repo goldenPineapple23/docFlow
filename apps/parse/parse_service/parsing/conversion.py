@@ -125,6 +125,51 @@ class PreparedArtifact:
     label: str  # provenance for logs only -- never document content
 
 
+# Part of an .eml or .msg the unwrap couldn't read (D-207, PR 1b-ii): never
+# silent. The worker turns each into a warning on the document.
+LOST_ATTACHMENT = "VAL-017"
+LOST_BODY = "VAL-018"
+
+# Attachments whose loss is no loss to the order, so no VAL-017 (founder,
+# 2026-10-18): contact cards and calendar invites -- by extension, or by MIME
+# type only when the attachment has no filename at all. A named file that
+# isn't .vcf or .ics (PO-4471.pdf) counts whatever its type says. The other
+# exception, an inline part the body references by Content-ID (a signature
+# logo), is decided per message.
+_NOT_ORDER_EXTENSIONS = (".vcf", ".ics")
+_NOT_ORDER_MIME_TYPES = frozenset({"text/vcard", "text/x-vcard", "text/directory", "text/calendar"})
+_CID_REFERENCE = re.compile(rb"cid:([^\"'\s>)]+)", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class Lost:
+    """One thing the unwrap couldn't read: an attachment, named by its
+    sanitized label, or the body (no name)."""
+
+    code: str
+    filename: str | None = None
+
+    def as_answer(self) -> dict:
+        return {"code": self.code, "filename": self.filename}
+
+
+def _cid_references(html: bytes) -> set[str]:
+    """The Content-IDs an HTML body references (`cid:...`), lower-cased."""
+    return {match.decode("ascii", "replace").lower() for match in _CID_REFERENCE.findall(html)}
+
+
+def _loss_counts(filename: str | None, mime_type: str, content_id: str, referenced: set[str]) -> bool:
+    """Whether an unread attachment gets VAL-017: not a contact card or a
+    calendar invite, and not an inline part the body references. `filename`
+    is None when the attachment names none."""
+    if filename:
+        if filename.lower().endswith(_NOT_ORDER_EXTENSIONS):
+            return False
+    elif mime_type.lower() in _NOT_ORDER_MIME_TYPES:
+        return False
+    return not (content_id and content_id.strip("<> ").lower() in referenced)
+
+
 # ── Shared helpers ─────────────────────────────────────────────────────────
 
 
@@ -500,6 +545,9 @@ _MSG_SENDER_EMAIL = "0C1F"
 _MSG_ATTACH_LONG_FILENAME = "3707"
 _MSG_ATTACH_FILENAME = "3704"
 _MSG_ATTACH_DATA = "3701"
+_MSG_HTML_BODY = "1013"
+_MSG_ATTACH_MIME_TAG = "370E"
+_MSG_ATTACH_CONTENT_ID = "3712"
 
 
 def _decode_msg_stream(raw: bytes, type_code: str) -> str:
@@ -516,13 +564,20 @@ def _read_msg_property(ole, path_prefix: list[str], prop_id: str) -> tuple[bytes
     return None
 
 
-def unwrap_msg(content: bytes) -> list[tuple[bytes, str]]:
+def unwrap_msg(content: bytes, lost: list[Lost]) -> list[tuple[bytes, str, bool]]:
     """
     ".msg and .eml are unwrapped: the body is read as text and every
     attachment is re-validated from the top of this list" (CLAUDE.md
     Section 7.11). Parsed with `olefile`, a pure-Python reader of the OLE
     container's named streams -- it never executes anything, and no
     LibreOffice or Outlook is involved.
+
+    Each produced attachment carries whether its loss would count (VAL-017,
+    `_loss_counts`), for `prepare_artifacts` to record if re-validation
+    refuses it. An attachment not read here at all -- one stored as an
+    embedded message, or past MAX_EMBEDDED_ATTACHMENTS -- goes on `lost` now.
+    The body is decoded with replacement and never fails, so `.msg` has no
+    VAL-018.
     """
     try:
         import olefile
@@ -556,32 +611,49 @@ def unwrap_msg(content: bytes) -> list[tuple[bytes, str]]:
         if found_body is not None:
             body = _decode_msg_stream(*found_body).strip()
 
-        artifacts: list[tuple[bytes, str]] = []
+        artifacts: list[tuple[bytes, str, bool]] = []
         message_text = "\n".join([*header_lines, "", body]).strip()
         if message_text:
-            artifacts.append((message_text.encode("utf-8"), "message-body.txt"))
+            artifacts.append((message_text.encode("utf-8"), "message-body.txt", False))
+
+        html_found = _read_msg_property(ole, [], _MSG_HTML_BODY)
+        referenced = _cid_references(html_found[0]) if html_found is not None else set()
+
+        def text_property(prefix: list[str], prop_id: str) -> str:
+            found = _read_msg_property(ole, prefix, prop_id)
+            return _decode_msg_stream(*found).strip("\x00 ") if found is not None else ""
 
         storages = sorted(
             "/".join(entry)
             for entry in ole.listdir(streams=False, storages=True)
             if entry and entry[0].startswith("__attach_version1.0")
         )
-        for storage in storages[: file_types.MAX_EMBEDDED_ATTACHMENTS]:
+        for index, storage in enumerate(storages):
             prefix = storage.split("/")
-            name_found = _read_msg_property(
-                ole, prefix, _MSG_ATTACH_LONG_FILENAME
-            ) or _read_msg_property(ole, prefix, _MSG_ATTACH_FILENAME)
+            named = text_property(prefix, _MSG_ATTACH_LONG_FILENAME) or text_property(
+                prefix, _MSG_ATTACH_FILENAME
+            )
+            filename = named or "attachment"
+            counts = _loss_counts(
+                named or None,
+                text_property(prefix, _MSG_ATTACH_MIME_TAG),
+                text_property(prefix, _MSG_ATTACH_CONTENT_ID),
+                referenced,
+            )
+            if index >= file_types.MAX_EMBEDDED_ATTACHMENTS:
+                if counts:
+                    lost.append(Lost(LOST_ATTACHMENT, _sanitize_label(filename)))
+                continue
             data_found = _read_msg_property(ole, prefix, _MSG_ATTACH_DATA)
             if data_found is None:
                 # An attachment stored as an embedded message, not a file:
                 # that is a second level of nesting, which Section 7.11
-                # bounds out.
+                # bounds out. A forwarded email gets VAL-017 (founder).
                 logger.info("msg_attachment_skipped reason=no_file_data")
+                if counts:
+                    lost.append(Lost(LOST_ATTACHMENT, _sanitize_label(filename)))
                 continue
-            filename = "attachment"
-            if name_found is not None:
-                filename = _decode_msg_stream(*name_found).strip("\x00 ") or "attachment"
-            artifacts.append((data_found[0], _sanitize_label(filename)))
+            artifacts.append((data_found[0], _sanitize_label(filename), counts))
 
         if not artifacts:
             raise ConversionError("DOC-017", "Outlook message had no readable body or attachment.")
@@ -590,11 +662,18 @@ def unwrap_msg(content: bytes) -> list[tuple[bytes, str]]:
         ole.close()
 
 
-def unwrap_eml(content: bytes) -> list[tuple[bytes, str]]:
+def unwrap_eml(content: bytes, lost: list[Lost]) -> list[tuple[bytes, str, bool]]:
     """
     Raw RFC 5322 mail, unwrapped with the standard library's own parser --
     no external entity resolution, no network, no active content. Same
     one-level bound as `.msg`.
+
+    Nothing is dropped silently (D-207, PR 1b-ii): a body the library can't
+    decode is VAL-018, and an attachment not read -- no payload (a forwarded
+    email attached as a message), a payload that can't be decoded, past
+    MAX_EMBEDDED_ATTACHMENTS -- is VAL-017, both on `lost`. The two blocks
+    catch what the email library raises on a malformed message; anything
+    else is ours (`error`, DOC-030), as in every parsing block since 1b-i.
     """
     import email
     from email import policy
@@ -614,30 +693,56 @@ def unwrap_eml(content: bytes) -> list[tuple[bytes, str]]:
         if value:
             header_lines.append(f"{label}: {value}")
 
+    # An unknown charset is LookupError (the corpus's VAL-018 case).
+    content_errors = (MessageError, LookupError)
     body = ""
     try:
         body_part = message.get_body(preferencelist=("plain", "html"))
         if body_part is not None:
             body = body_part.get_content()
-    except Exception:  # a malformed part must not take the job down
+    except fault_origin.catchable(content_errors) as exc:
+        if not fault_origin.from_input(exc, content_errors):
+            raise  # ours: the job answers `error` (DOC-030)
         body = ""
+        lost.append(Lost(LOST_BODY))
 
-    artifacts: list[tuple[bytes, str]] = []
+    artifacts: list[tuple[bytes, str, bool]] = []
     message_text = "\n".join([*header_lines, "", str(body)]).strip()
     if message_text:
-        artifacts.append((message_text.encode("utf-8"), "message-body.txt"))
+        artifacts.append((message_text.encode("utf-8"), "message-body.txt", False))
+
+    referenced: set[str] = set()
+    for part in message.walk():
+        if part.get_content_type() == "text/html":
+            try:
+                raw = part.get_payload(decode=True)
+            except fault_origin.catchable(content_errors) as exc:
+                if not fault_origin.from_input(exc, content_errors):
+                    raise
+                raw = None  # no references read: every unread part counts
+            if isinstance(raw, bytes):
+                referenced |= _cid_references(raw)
 
     attachment_count = 0
     for part in message.iter_attachments():
+        named = part.get_filename()
+        filename = named or "attachment"
+        counts = _loss_counts(named or None, part.get_content_type(), str(part.get("Content-ID") or ""), referenced)
         if attachment_count >= file_types.MAX_EMBEDDED_ATTACHMENTS:
-            break
+            if counts:
+                lost.append(Lost(LOST_ATTACHMENT, _sanitize_label(filename)))
+            continue
         try:
             payload = part.get_payload(decode=True)
-        except Exception:
+        except fault_origin.catchable(content_errors) as exc:
+            if not fault_origin.from_input(exc, content_errors):
+                raise  # ours: the job answers `error` (DOC-030)
             payload = None
         if not isinstance(payload, bytes) or not payload:
+            if counts:
+                lost.append(Lost(LOST_ATTACHMENT, _sanitize_label(filename)))
             continue
-        artifacts.append((payload, _sanitize_label(part.get_filename() or "attachment")))
+        artifacts.append((payload, _sanitize_label(filename), counts))
         attachment_count += 1
 
     if not artifacts:
@@ -662,7 +767,12 @@ _UNWRAPPERS = {
 
 
 def prepare_artifacts(
-    file_type: FileType, content: bytes, *, label: str = "document", depth: int = 0
+    file_type: FileType,
+    content: bytes,
+    *,
+    label: str = "document",
+    depth: int = 0,
+    lost: list[Lost] | None = None,
 ) -> list[PreparedArtifact]:
     """
     Turns one validated upload into the list of Tier 1 artifacts extraction
@@ -673,24 +783,31 @@ def prepare_artifacts(
     output is untrusted input like any other (CLAUDE.md Section 7.11).
     Unwrapping (`.msg`/`.eml`) recurses exactly one level: an attachment
     inside an attachment is rejected with DOC-019, never opened.
+
+    `lost` collects what an unwrap couldn't read (D-207, PR 1b-ii): what the
+    unwrap itself skipped, and an attachment re-validation or conversion
+    refused, unless its loss doesn't count (`_loss_counts`). A converter's
+    own pages are not attachments: a refused page fails as before.
     """
     handler = file_type.handler
+    lost = [] if lost is None else lost
 
+    produced: list[tuple[bytes, str, bool]]
     if handler in _UNWRAPPERS:
         if depth >= file_types.MAX_EMBEDDING_DEPTH:
             raise ConversionError(
                 "DOC-019", "Attachment is nested more than one level inside a message."
             )
-        produced = _UNWRAPPERS[handler](content)
+        produced = _UNWRAPPERS[handler](content, lost)
     elif handler in _CONVERTERS:
-        produced = _CONVERTERS[handler](content)
+        produced = [(data, name, False) for data, name in _CONVERTERS[handler](content)]
     else:
         # Already Tier 1 and directly parseable.
         return [PreparedArtifact(file_type=file_type, content=content, label=label)]
 
     artifacts: list[PreparedArtifact] = []
     rejections: list[str] = []
-    for artifact_bytes, artifact_name in produced:
+    for artifact_bytes, artifact_name, loss_counts in produced:
         validation = file_types.validate_upload(artifact_bytes, artifact_name)
         if not validation.ok:
             rejections.append(validation.error_code or "DOC-014")
@@ -699,6 +816,8 @@ def prepare_artifacts(
                 _sanitize_label(label),
                 validation.error_code,
             )
+            if loss_counts:
+                lost.append(Lost(LOST_ATTACHMENT, artifact_name))
             continue
         try:
             artifacts.extend(
@@ -716,6 +835,8 @@ def prepare_artifacts(
                 _sanitize_label(label),
                 exc.error_code,
             )
+            if loss_counts:
+                lost.append(Lost(LOST_ATTACHMENT, artifact_name))
 
     if not artifacts:
         raise ConversionError(

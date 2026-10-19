@@ -83,6 +83,20 @@ def describe(exc: BaseException, *, own: tuple[str, ...] = OWN_PACKAGES) -> Faul
     )
 
 
+def crash_fault(kind: str, cause: str, module: str) -> Fault:
+    """A parse job that crashed, or an answer refused: no exception of ours
+    to name, so the cause stands in the code location's place in the state
+    key (founder, 2026-10-16). The worker's and the import's alike."""
+    return Fault(exception_type=kind, module=module, function=cause, line=0)
+
+
+def parse_error_fault(error_type: str | None, location: str | None) -> Fault:
+    """A parse job's `error` answer -- its type and our code location, as
+    `parse_client` checked them -- as a Fault for the state key."""
+    module, function, line = (location or "unknown:unknown:0").rsplit(":", 2)
+    return Fault(exception_type=error_type or "unknown", module=module, function=function, line=int(line))
+
+
 def _driver_error(exc: BaseException) -> BaseException:
     """The driver's own exception: SQLAlchemy wraps it as `.orig`."""
     from sqlalchemy.exc import DBAPIError

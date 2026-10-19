@@ -287,3 +287,48 @@ def test_an_error_answer_comes_through_with_its_type_location_and_release(servic
     )
     service(_json(200, body))
     assert parse_client.parse_table(b"x", "catalog.xls").outcome == "error"
+
+
+# ── What an email unwrap couldn't read (D-207, PR 1b-ii) ───────────────────
+
+
+def test_what_an_unwrap_lost_comes_through_checked(service):
+    lost = [{"code": "VAL-017", "filename": "old_orders.zip"}, {"code": "VAL-018", "filename": None}]
+    service(_json(200, {**OK_ANSWER, "file_type": "eml", "lost": lost}))
+    assert parse_client.parse_document(b"x", "po.eml").lost == lost
+
+
+def test_an_answer_from_before_1b_ii_has_lost_nothing(service):
+    service(_json(200, OK_ANSWER))
+    assert parse_client.parse_document(b"x", "po.docx").lost == []
+
+
+@pytest.mark.parametrize(
+    "lost, reason",
+    [
+        ("VAL-017", "bad_lost"),
+        ([{"code": "VAL-017", "filename": "a.zip"}] * (parse_client.MAX_LOST + 1), "bad_lost"),
+        (["VAL-017"], "bad_lost_item"),
+        ([{"code": "VAL-017"}], "bad_lost_item"),
+        ([{"code": "VAL-017", "filename": "a.zip", "text": "PO 4471"}], "bad_lost_item"),
+        ([{"code": "VAL-001", "filename": "a.zip"}], "bad_lost_item"),
+        ([{"code": "DOC-030", "filename": None}], "bad_lost_item"),
+        # A label is the parse service's sanitized one: its alphabet, at most 80.
+        ([{"code": "VAL-017", "filename": "Purchase Order.pdf"}], "bad_lost_item"),
+        ([{"code": "VAL-017", "filename": "<b>po</b>.pdf"}], "bad_lost_item"),
+        ([{"code": "VAL-017", "filename": "x" * 81}], "bad_lost_item"),
+        ([{"code": "VAL-017", "filename": ""}], "bad_lost_item"),
+        ([{"code": "VAL-017", "filename": None}], "bad_lost_item"),
+        ([{"code": "VAL-018", "filename": "body.txt"}], "bad_lost_item"),
+    ],
+)
+def test_a_malformed_lost_list_is_refused_not_used(service, lost, reason):
+    service(_json(200, {**OK_ANSWER, "lost": lost}))
+    with pytest.raises(parse_client.ParseAnswerInvalid) as excinfo:
+        parse_client.parse_document(b"x", "po.eml")
+    assert excinfo.value.reason == reason
+
+
+def test_an_80_character_label_is_accepted():
+    body = {**OK_ANSWER, "lost": [{"code": "VAL-017", "filename": "x" * 76 + ".zip"}]}
+    assert parse_client._check_document(body).lost[0]["filename"] == "x" * 76 + ".zip"

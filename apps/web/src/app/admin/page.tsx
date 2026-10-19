@@ -45,12 +45,13 @@ const SEVERITY_STYLE: Record<FounderAlert["severity"], string> = {
  * themselves, so it keeps counting after the alert is acknowledged.
  */
 function AffectedDocuments({ alert }: { alert: FounderAlert }) {
-  if (alert.no_document === "email_intake") {
-    // Refused at intake, before any document existed (PR 1b-i): there is
-    // nothing to count, and "0" would read as "nothing was hit".
+  if (alert.no_document === "email_intake" || alert.no_document === "catalog_import") {
+    // Refused at intake before any document existed (PR 1b-i), or an import
+    // (PR 1b-ii), which never makes one: there is nothing to count, and "0"
+    // would read as "nothing was hit".
     return (
       <p data-testid="affected-documents" className="text-sm text-gray-700">
-        Email intake, no document
+        {alert.no_document === "email_intake" ? "Email intake, no document" : "Catalog import, no document"}
       </p>
     );
   }

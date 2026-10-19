@@ -695,6 +695,31 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="high",
         audience="tenant",
     ),
+    # Stage 4 (D-207, PR 1b-ii): part of an .eml or .msg the unwrap couldn't
+    # read. Written by the worker from the parse answer, never by validation,
+    # which leaves them alone. Founder's wording, final 2026-10-02.
+    # `{filename}` is the parse service's sanitized label, filled by the API.
+    "VAL-017": ErrorCatalogEntry(
+        code="VAL-017",
+        title="An email attachment couldn't be read",
+        message=(
+            'Part of this email couldn\'t be read: the attachment "{filename}". The order was '
+            "read from the rest of the email and may be incomplete."
+        ),
+        action="Check it against the original email before approving.",
+        severity="high",
+        audience="tenant",
+    ),
+    "VAL-018": ErrorCatalogEntry(
+        code="VAL-018",
+        title="This email's text couldn't be read",
+        message=(
+            "The text of this email couldn't be read. The order was read from its attachments only."
+        ),
+        action="Check it against the original email before approving.",
+        severity="high",
+        audience="tenant",
+    ),
     "AUTH-002": ErrorCatalogEntry(
         code="AUTH-002",
         title="Your account can view this, not change it",
@@ -1271,6 +1296,26 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         action=(
             "Upload the file again as a new import. The log names this import's ID; if the"
             " recorded location pointed into another tenant, you have also been alerted."
+        ),
+        severity="warning",
+        audience="founder",
+    ),
+    # Stage 4 (D-207, PR 1b-ii): the parse job failed on our side -- it
+    # answered `error`, crashed, or gave an answer the worker refused -- as
+    # DOC-030 is for a document. A stopped job (a limit) stays IMP-004.
+    # Founder audience: imports run only in the Console (rewrite if tenants
+    # ever run them). The alert itself is high.
+    "IMP-011": ErrorCatalogEntry(
+        code="IMP-011",
+        title="Reading this file failed on our side",
+        message=(
+            "DocFlow couldn't read this file because of a problem in DocFlow, not in the file."
+            " Nothing was imported, and a high alert with the exception type and our code location"
+            " is in your attention panel."
+        ),
+        action=(
+            "Don't change the file. Once the fix is deployed, start the import again from the same"
+            " file."
         ),
         severity="warning",
         audience="founder",

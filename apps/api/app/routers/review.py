@@ -64,6 +64,7 @@ from docflow_core.storage import (
     UnsafeStoragePathError,
     read_file,
 )
+from docflow_core.validation import warning_entry
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -492,8 +493,9 @@ def _warning_payload(w) -> dict[str, Any]:
     # render from the catalog." The UI was being sent a bare code and a
     # key/value payload, so a reviewer read "VAL-002" and a row of numbers
     # and had to infer the rest. The prose belongs to the catalog, so the
-    # catalog is what ships with the warning.
-    entry = get_error(w["code"])
+    # catalog is what ships with the warning. VAL-017's `{filename}` is filled
+    # from the warning's own detail (D-207), never shown as written.
+    entry = warning_entry(w["code"], w["detail"])
     return {
         "id": str(w["id"]),
         "code": w["code"],

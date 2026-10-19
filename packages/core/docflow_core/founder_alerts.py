@@ -107,6 +107,10 @@ ALERT_TYPES: dict[str, str] = {
     # written -- the row before the call, or the one with its outcome. A
     # lost cost record is a data loss, not a side effect (Section 7.9).
     "cost_record_lost": "A model call's cost record couldn't be written",
+    # Stage 4, PR 1b-ii (D-207): a catalog or customer-list import whose parse
+    # job failed on our side (IMP-011). Its own type, so nothing counting
+    # `document_failed` alerts counts imports.
+    "import_failed": "A catalog or customer-list import failed on our side",
 }
 
 # Why a seccomp kill's alert has no syscall number (founder: say so when it
@@ -277,6 +281,7 @@ def raise_fault_alert(
     error_code: str | None = None,
     release_tag: str | None = None,
     intake_rejection_id: UUID | None = None,
+    import_id: UUID | None = None,
 ) -> bool:
     """
     The alert for a fault in one of our own steps (D-203): the exception's
@@ -286,19 +291,22 @@ def raise_fault_alert(
     documents the state has hit. Returns False when the state was already
     raised, open or acknowledged.
 
-    With no document (an e-mail attachment refused at intake, PR 1b-i), the
-    payload names the intake rejection instead; nothing of the e-mail's own
-    -- no body, no sender -- is in it.
+    With no document, the payload names what there is instead: the intake
+    rejection (an e-mail attachment refused at intake, PR 1b-i) or the
+    import (PR 1b-ii). Nothing of the e-mail's or the file's own -- no body,
+    no sender, no cell -- is in it.
 
     No savepoint beyond `raise_alert`'s own, and it swallows no error: the
     caller decides whether an alert that can't be written may undo what it
     is recording.
     """
-    first: dict[str, Any] = (
-        {"first_document_id": str(document_id)}
-        if document_id is not None
-        else {"intake_rejection_id": str(intake_rejection_id)}
-    )
+    first: dict[str, Any]
+    if document_id is not None:
+        first = {"first_document_id": str(document_id)}
+    elif import_id is not None:
+        first = {"import_id": str(import_id)}
+    else:
+        first = {"intake_rejection_id": str(intake_rejection_id)}
     payload: dict[str, Any] = {
         **first,
         "step": step,
@@ -363,6 +371,64 @@ def raise_intake_fault(
         logger.error(
             "founder_alert_not_raised tenant_id=%s error_code=%s %s",
             tenant_id, error_code, faults.for_log(exc),
+        )
+        return False
+    savepoint.commit()
+    return raised
+
+
+# The step an import's parse job belongs to (D-207, PR 1b-ii).
+IMPORT_STEP = "catalog_import"
+
+
+def raise_import_fault(
+    session: Session,
+    *,
+    tenant_id: UUID,
+    import_id: UUID,
+    fault: faults.Fault,
+    error_code: str,
+    release_tag: str | None = None,
+) -> bool:
+    """
+    IMP-011 (founder, 2026-10-18): an import's parse job failed on our side
+    -- it answered `error`, crashed, or gave an answer the worker refused.
+    The keyed `import_failed` alert, once per state (step `catalog_import`);
+    its payload names the import. The Console shows it as "Catalog import,
+    no document". `release_tag` is the parse app's release, as for a
+    document.
+
+    Its own savepoint, and it never raises: the import's failed status must
+    stand if the alert can't be written.
+    """
+    savepoint = session.begin_nested()
+    try:
+        key = faults.state_key(
+            session,
+            alert_type="import_failed",
+            tenant_id=tenant_id,
+            step=IMPORT_STEP,
+            fault=fault,
+            release_tag=release_tag,
+        )
+        raised = raise_fault_alert(
+            session,
+            alert_type="import_failed",
+            severity="high",
+            tenant_id=tenant_id,
+            document_id=None,
+            import_id=import_id,
+            step=IMPORT_STEP,
+            fault=fault,
+            state_key=key,
+            error_code=error_code,
+            release_tag=release_tag,
+        )
+    except Exception as exc:  # noqa: BLE001 -- logged; the import's failed status stands
+        savepoint.rollback()
+        logger.error(
+            "founder_alert_not_raised tenant_id=%s import_id=%s error_code=%s %s",
+            tenant_id, import_id, error_code, faults.for_log(exc),
         )
         return False
     savepoint.commit()

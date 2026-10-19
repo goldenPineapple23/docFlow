@@ -169,6 +169,61 @@ test("approval is blocked until every warning is ticked", async ({ page }) => {
   await expect(page.getByTestId("banner-success")).toContainText("Approved");
 });
 
+test("an email attachment's 80-character name fits its check, and the check gates approval", async ({ page }) => {
+  // PR 1b-ii (D-207; B3, founder 2026-10-02): the longest label the parse
+  // service sends -- 80 characters, no spaces to break at -- must not push
+  // the check out of its box or the page sideways.
+  const label = "Purchase_Order_" + "x".repeat(61) + ".zip";
+  expect(label).toHaveLength(80);
+  const state = {
+    detail: detail({
+      warnings: [
+        {
+          id: WARNING_ID,
+          code: "VAL-017",
+          title: "An email attachment couldn't be read",
+          message: `Part of this email couldn't be read: the attachment "${label}". The order was read from the rest of the email and may be incomplete.`,
+          action: "Check it against the original email before approving.",
+          severity: "high",
+          field_name: null,
+          line_number: null,
+          document_line_id: null,
+          detail: { filename: label, position: "1" },
+          status: "open",
+          acknowledged_at: null,
+        },
+      ],
+    }),
+  };
+  await stubApi(page, state);
+  for (const width of [1280, 768, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`/review/${DOCUMENT_ID}`);
+
+    const check = page.getByTestId("warning-VAL-017");
+    await expect(check).toContainText(label);
+    // The name is in the message; the detail line doesn't repeat it, and the
+    // position (which only keeps two same-named attachments apart) isn't shown.
+    await expect(check).not.toContainText("position");
+    await expect(check).not.toContainText("filename:");
+    const overflow = await check.evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(overflow, `the check overflows its box at ${width}px`).toBeLessThanOrEqual(0);
+    if (width >= 768) {
+      // At phone width the review screen scrolls sideways with no check on it
+      // at all (196px, measured 2026-10-18): not this check's doing.
+      const pageOverflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(pageOverflow, `the page scrolls sideways at ${width}px`).toBeLessThanOrEqual(0);
+    }
+  }
+
+  await expect(page.getByTestId("approve-button")).toBeDisabled();
+  await page.getByTestId(`ack-${WARNING_ID}`).check();
+  await page.getByTestId("approve-button").click();
+  await expect(page.getByTestId("banner-success")).toContainText("Approved");
+});
+
 test("a document carrying an embedded instruction says so before anything else", async ({ page }) => {
   const state = {
     detail: detail({
