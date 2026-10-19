@@ -111,6 +111,9 @@ ALERT_TYPES: dict[str, str] = {
     # job failed on our side (IMP-011). Its own type, so nothing counting
     # `document_failed` alerts counts imports.
     "import_failed": "A catalog or customer-list import failed on our side",
+    # Stage 5, blocker 4 (D-210): the inbound webhook failed on our side for
+    # a known tenant. It answered 500, so Postmark sends the e-mail again.
+    "intake_failed": "An incoming e-mail couldn't be taken in because of a fault on our side",
 }
 
 # Why a seccomp kill's alert has no syscall number (founder: say so when it
@@ -755,6 +758,60 @@ def alert_parse_service_unavailable(tenant_id: UUID, *, where: str, reason: str)
             "founder_alert_not_raised tenant_id=%s alert=parse_service_unavailable %s",
             tenant_id, faults.for_log(exc),
         )
+
+
+# The step of a fault in the inbound webhook itself, and the code its alert
+# names (Stage 5, blocker 4; D-210).
+INTAKE_WEBHOOK_STEP = "email_intake_webhook"
+INTAKE_FAILED_CODE = "INT-011"
+
+
+def alert_intake_failed(tenant_id: UUID, exc: BaseException) -> bool:
+    """
+    The inbound webhook failed on our side for a known tenant (D-210). It
+    answers 500, so Postmark sends the e-mail again, ten times over about
+    ten hours. The keyed `intake_failed` alert is raised once per state, so
+    the retries of one e-mail raise one alert. The payload is the fault
+    only: the exception's type, our code location and the release, never
+    its message and nothing of the e-mail (Section 7.10: it is e-mailed).
+
+    Its own tenant session: the e-mail's own transaction has already rolled
+    back, so nothing of it was kept. Never raises: the caller re-raises the
+    fault, and an alert that can't be written must not change the 500.
+    Returns True when a new alert was written.
+    """
+    from docflow_core.db import tenant_session
+
+    fault = faults.describe(exc)
+    try:
+        with tenant_session(tenant_id) as session:
+            key = faults.state_key(
+                session,
+                alert_type="intake_failed",
+                tenant_id=tenant_id,
+                step=INTAKE_WEBHOOK_STEP,
+                fault=fault,
+            )
+            return raise_alert(
+                session,
+                alert_type="intake_failed",
+                severity="high",
+                tenant_id=tenant_id,
+                payload={
+                    "step": INTAKE_WEBHOOK_STEP,
+                    "exception_type": fault.exception_type,
+                    "location": fault.location,
+                    "release": faults.release(),
+                    "error_code": INTAKE_FAILED_CODE,
+                },
+                state_key=key,
+            )
+    except Exception as alert_exc:  # noqa: BLE001 -- logged; the caller's 500 still goes out
+        logger.error(
+            "founder_alert_not_raised tenant_id=%s alert=intake_failed %s",
+            tenant_id, faults.for_log(alert_exc),
+        )
+        return False
 
 
 def alert_storage_unavailable(tenant_id: UUID, *, where: str) -> None:

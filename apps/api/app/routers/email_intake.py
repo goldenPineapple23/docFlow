@@ -35,6 +35,8 @@ gets a non-200.
 from __future__ import annotations
 
 import logging
+from typing import Any
+from uuid import UUID
 
 from docflow_core import email_intake, founder_alerts
 from docflow_core.storage import StorageUnavailableError
@@ -108,6 +110,10 @@ async def receive_inbound_email(
         # and a 500 alike; only a 403 stops it.
         raise HTTPException(status_code=400, detail="Malformed request body: not valid JSON.") from exc
 
+    # A fault before the tenant is known (here, or reading the body above) has
+    # no tenant to raise an alert under: it is logged only, by the API's last
+    # handler, and answered 500, so Postmark tries again (founder, 2026-10-19,
+    # Option A; the gap is recorded in D-210).
     resolved = email_intake.resolve_tenant_by_token(token)
     if resolved is None or resolved[1] not in ("active", "grace"):
         # Generic 404 whether the token never existed or exists but isn't
@@ -119,6 +125,21 @@ async def receive_inbound_email(
         raise HTTPException(status_code=404)
     tenant_id, address_status = resolved
 
+    try:
+        return _receive_for_tenant(tenant_id, address_status, payload)
+    except HTTPException:
+        # Answered already: a malformed payload (400) or Storage (503).
+        raise
+    except Exception as exc:
+        # Ours, for a known tenant (Stage 5, blocker 4; D-210): the keyed
+        # `intake_failed` alert, once per state, then the same 500 as before
+        # from the API's last handler, which logs the type and our location.
+        # A 500, never a 403, so Postmark sends the e-mail again.
+        founder_alerts.alert_intake_failed(tenant_id, exc)
+        raise
+
+
+def _receive_for_tenant(tenant_id: UUID, address_status: str, payload: Any) -> dict:
     try:
         parsed = email_intake.parse_postmark_payload(payload)
     except email_intake.MalformedPayloadError as exc:
