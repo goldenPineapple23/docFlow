@@ -1,6 +1,11 @@
 import pytest
 from docflow_core.config import get_settings
 
+from tests import database_guard
+
+# First, before anything below can open a connection (D-211).
+database_guard.check()
+
 
 def database_available() -> bool:
     return bool(get_settings().database_url)
@@ -43,6 +48,18 @@ def documents_schema_available() -> bool:
         return True
     except Exception:
         return False
+
+
+@pytest.fixture
+def shared_state():
+    """Hold the database's global state for this test (tests/suite_lock.py,
+    D-211): the model provider's row, the tenant-less provider and dispatcher
+    alerts, and the documents an open dispatch pass can touch. Waits while
+    another suite's test holds it; free in a normal run."""
+    from tests import suite_lock
+
+    with suite_lock.shared_state():
+        yield
 
 
 requires_database = pytest.mark.skipif(

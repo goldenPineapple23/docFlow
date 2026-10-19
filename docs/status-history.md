@@ -4,6 +4,28 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-19 (Stage 5's PR 1 merged; PR 2, test hygiene, built; D-211)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-19, with Stage 5 started:** Phase 5.5, **Stage 5** (the founder's "go" for
+it, 2026-10-19; Stage 4's checkpoint record is PR #70, `main` is `ca5a726`). **PR 1, blocker 4, is
+built, not merged** (D-210; branch `phase55/stage5-intake-fault-alert`, a draft PR): when the inbound
+webhook fails on our side for a known tenant, the keyed `intake_failed` alert (INT-011) is raised once
+per state, and the answer is the same 500 as before, so Postmark keeps resending. A fault before the
+tenant is known is logged only (the gap is recorded in D-210). No migration. The three staging suites
+run on its final head before it is marked ready. **Next, in order:** the test-hygiene PR, the
+worker-start fix with `main`'s worker deploy, M7, D-178, the sweep script, the warnings and the
+32-byte test secret, M10 without the model IDs, the 375 px fix, then counting rows before
+extraction, and the docs PR last. Then E1 and E2a, then demo readiness (D-209). The long catalog
+commit's test through a public address waits until after the worker-start PR; it needs its own
+grant. The 50,000-row cap and IMP-003's wording: one PR, before pilots, only if a pilot prospect has
+more than 50,000 SKUs. The welding demo comes after the fastener rehearsal and never blocks it
+(D-208). **Staging:** `docflow-parse-staging` runs `main`'s image;
+`docflow-worker-staging` has no machines and is still v10 with the old `parse_client`, which must
+not be started against it: deploy `main`'s worker first, read the machine's memory (raised to 2 GB;
+`fly.toml` says 1 GB), then start it. The API's and the parse machine's auto-stop are on, and the
+Healthchecks.io check is paused.
+
 ## Replaced on 2026-10-19 (Stage 5 started; PR 1, blocker 4, built; D-210)
 
 <!-- the paragraph as it stood, starting on the next line -->

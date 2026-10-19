@@ -52,11 +52,19 @@ def _with(**changes: int) -> dict[str, int]:
     return {**CLEAN, **changes}
 
 
-def _run(tmp_path, before, after, *, test_body="assert True", in_ci=False, args=("-q", "-rs")):
+def _run(
+    tmp_path, before, after, *, test_body="assert True", in_ci=False, args=("-q", "-rs"), parallel=False
+):
     (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
     (tmp_path / "conftest.py").write_text(CHILD_CONFTEST, encoding="utf-8")
     (tmp_path / "test_one.py").write_text(f"def test_one():\n    {test_body}\n", encoding="utf-8")
-    env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_ACTIONS", "PYTEST_ADDOPTS")}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("GITHUB_ACTIONS", "PYTEST_ADDOPTS", "DOCFLOW_TEST_PARALLEL_RUN")
+    }
+    if parallel:
+        env["DOCFLOW_TEST_PARALLEL_RUN"] = "1"
     env["LEFTOVER_COUNT_PY"] = str(HERE / "leftover_count.py")
     env["LEFTOVER_SCRIPT"] = json.dumps([before, after])
     if in_ci:
@@ -75,6 +83,9 @@ def _run(tmp_path, before, after, *, test_body="assert True", in_ci=False, args=
 
 @pytest.fixture()
 def counts(monkeypatch):
+    # A normal run's rules, also when this suite is itself in a parallel run.
+    monkeypatch.setattr(leftover_count, "_by_the_runner", False)
+
     def set_counts(before, after):
         monkeypatch.setattr(leftover_count, "_before", before)
         monkeypatch.setattr(leftover_count, "_after", after)
@@ -114,6 +125,16 @@ def test_a_run_with_no_counts_at_all_says_nothing_and_does_not_fail(counts):
     counts(None, None)
     assert leftover_count.failed() is False
     assert leftover_count.line() is None
+
+
+def test_in_a_parallel_run_the_suite_counts_nothing_and_says_the_runner_does(tmp_path):
+    """D-211: the runner counts before and after all three suites."""
+    code, lines, out = _run(tmp_path, _with(tenants=8), _with(tenants=9), parallel=True)
+    assert code == 0, out
+    assert lines[-2] == (
+        "left behind by this run: counted by the parallel runner, before and after all three suites"
+    ), out
+    assert lines[-1].startswith("1 passed in "), out
 
 
 def test_a_clean_run_exits_zero(tmp_path):

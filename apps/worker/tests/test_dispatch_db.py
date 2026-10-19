@@ -10,6 +10,12 @@ These tests share the database with whatever else is on it (staging keeps
 earlier test data), so they assert only on their own tenants' documents and
 put back anything of anyone else's that a pass touched. They leave the model
 provider marked up, as they found it.
+
+Every test here holds the shared state (D-211): the provider's one row, the
+tenant-less alerts and the open passes are the database's, not this suite's,
+so no API test that touches them runs at the same time in a parallel run. And
+a test deletes only the tenant-less alerts it raised itself, by id: those that
+weren't there when it began.
 """
 
 from __future__ import annotations
@@ -118,15 +124,35 @@ def _delete_alerts(where: str, params: dict) -> None:
             session.execute(text("DELETE FROM email_outbox WHERE id = :id"), {"id": str(outbox_id)})
 
 
-def _delete_tenant_less_alerts() -> None:
+# The tenant-less alerts that were there when the running test began: never
+# this test's, so never read as its own and never deleted by it.
+_before_test: set[str] = set()
+
+
+def _tenant_less_ids() -> set[str]:
     # Lists go to Postgres as jsonb in this codebase (db.py), so an array is
     # built from a comma-separated string, as elsewhere.
-    _delete_alerts(
-        "tenant_id IS NULL AND type = ANY(string_to_array(:types, ','))", {"types": ",".join(_TENANT_LESS)}
-    )
+    with platform_session() as session:
+        return {
+            str(r[0])
+            for r in session.execute(
+                text(
+                    "SELECT id FROM founder_alerts "
+                    "WHERE tenant_id IS NULL AND type = ANY(string_to_array(:types, ','))"
+                ),
+                {"types": ",".join(_TENANT_LESS)},
+            )
+        }
+
+
+def _delete_tenant_less_alerts() -> None:
+    """The tenant-less alerts this test raised, by id, and their emails."""
+    for alert_id in sorted(_tenant_less_ids() - _before_test):
+        _delete_alerts("id = CAST(:id AS uuid)", {"id": alert_id})
 
 
 def _alerts(alert_type: str) -> list[dict]:
+    """This test's tenant-less alerts of one type, oldest first."""
     with platform_session() as session:
         return [
             dict(r)
@@ -137,7 +163,23 @@ def _alerts(alert_type: str) -> list[dict]:
                 ),
                 {"t": alert_type},
             ).mappings()
+            if str(r["id"]) not in _before_test
         ]
+
+
+@pytest.fixture(autouse=True)
+def _own_alerts_only_and_the_shared_state(shared_state) -> Iterator[None]:
+    """Holds the shared state, notes the tenant-less alerts already there, and
+    at the end removes only the ones this test raised."""
+    global _before_test
+    _before_test = _tenant_less_ids()
+    try:
+        yield
+    finally:
+        try:
+            _delete_tenant_less_alerts()
+        finally:
+            _before_test = set()
 
 
 @pytest.fixture
@@ -702,13 +744,13 @@ def test_every_registered_alert_type_can_be_raised_end_to_end():
     """Founder's condition, so M6 can't recur: each type in ALERT_TYPES is
     raised through `raise_alert` into the real table."""
     marker = "every-type-test"
-    with platform_session() as session:
-        for alert_type in founder_alerts.ALERT_TYPES:
-            assert founder_alerts.raise_alert(
-                session, alert_type=alert_type, severity="info", tenant_id=None,
-                payload={"test": marker}, dedupe_key=f"{marker}:{alert_type}",
-            ), alert_type
     try:
+        with platform_session() as session:
+            for alert_type in founder_alerts.ALERT_TYPES:
+                assert founder_alerts.raise_alert(
+                    session, alert_type=alert_type, severity="info", tenant_id=None,
+                    payload={"test": marker}, dedupe_key=f"{marker}:{alert_type}",
+                ), alert_type
         with platform_session() as session:
             raised = {
                 r[0]
@@ -741,13 +783,15 @@ def test_m6_the_rollups_stale_alert_is_raised_through_its_own_session():
     # A real open rollup_stale alert on this database is left alone: the
     # raise is then deduped (no row, no error), which proves the same path.
     before = open_ids()
-    with rollup_session() as session:
-        metrics._raise_stale_alert(session, None)  # raised ValueError before M6 was fixed
-    after = open_ids()
-    assert len(after) == 1, after
-    ours = after - before
-    if ours:
-        _delete_alerts("id = CAST(:id AS uuid)", {"id": next(iter(ours))})
+    try:
+        with rollup_session() as session:
+            metrics._raise_stale_alert(session, None)  # raised ValueError before M6 was fixed
+        after = open_ids()
+        assert len(after) == 1, after
+    finally:
+        # Removed even when the assertion fails (the cleanup survey, D-211).
+        for alert_id in sorted(open_ids() - before):
+            _delete_alerts("id = CAST(:id AS uuid)", {"id": alert_id})
 
 
 # ── the functions themselves (Q8 condition) ──────────────────────────────────

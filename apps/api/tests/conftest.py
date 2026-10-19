@@ -4,9 +4,15 @@ from contextlib import contextmanager
 
 import pytest
 from docflow_core.config import get_settings
-from fastapi.testclient import TestClient
 
-from app.main import app
+from tests import database_guard
+
+# First, before anything below can open a connection (D-211).
+database_guard.check()
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.main import app  # noqa: E402
 
 
 @pytest.fixture()
@@ -42,6 +48,18 @@ def pytest_terminal_summary(terminalreporter):
     from tests import leftover_count
 
     leftover_count.report(terminalreporter)
+
+
+@pytest.fixture
+def shared_state():
+    """Hold the database's global state for this test (tests/suite_lock.py,
+    D-211): the model provider's row, the tenant-less provider and dispatcher
+    alerts, and the documents an open dispatch pass can touch. Waits while
+    another suite's test holds it; free in a normal run."""
+    from tests import suite_lock
+
+    with suite_lock.shared_state():
+        yield
 
 
 requires_database = pytest.mark.skipif(

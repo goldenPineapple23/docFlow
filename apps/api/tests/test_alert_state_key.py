@@ -174,17 +174,29 @@ def test_the_tenant_session_that_raises_still_cannot_read_an_alert(client, strip
 @requires_console_schema
 def test_an_integrity_failure_that_is_not_a_duplicate_still_surfaces(client, stripe):
     """Only the two dedupe indexes mean "already raised". An alert for a
-    tenant that doesn't exist is a bug, and must not read as a duplicate."""
-    with pytest.raises(IntegrityError):
+    tenant that doesn't exist is a bug, and must not read as a duplicate.
+
+    Rolled back whatever happens (the refusal rule, D-211): were the database
+    ever to accept the row, it would stay behind under a tenant that doesn't
+    exist, where no cleanup looks."""
+
+    class _RollBack(Exception):
+        pass
+
+    with pytest.raises(_RollBack):
         with platform_session() as session:
-            founder_alerts.raise_alert(
-                session,
-                alert_type="pipeline_step_failed",
-                severity="high",
-                tenant_id=uuid4(),
-                payload={},
-                state_key=f"fault:test:{uuid4()}",
-            )
+            with pytest.raises(IntegrityError):
+                founder_alerts.raise_alert(
+                    session,
+                    alert_type="pipeline_step_failed",
+                    severity="high",
+                    tenant_id=uuid4(),
+                    payload={},
+                    state_key=f"fault:test:{uuid4()}",
+                )
+            # platform_session rolls back on this; a failed check above is
+            # never committed either (the session closes without a commit).
+            raise _RollBack
 
 
 def test_a_state_key_and_a_dedupe_key_are_never_given_together():

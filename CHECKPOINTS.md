@@ -67,6 +67,17 @@ were blocked. Model `claude-sonnet-5`, the root `.env`'s key.
 bill is the source of truth. Stage 3's three were $0.049640. No other paid
 call was made.
 
+**Correction (2026-10-19, after this record merged; D-211 item 1):** the
+run did reach staging's database, once. `DATABASE_URL` was "blanked" with
+PowerShell's `$env:DATABASE_URL = ""`, which deletes the variable, so the
+settings read the staging URL from the root `.env`, and the API conftest's
+run lock opened one session-mode connection to staging's pooler, took the
+advisory lock and released it. The other four logins pointed at
+`db.invalid`, so the leftover count was not read and the schema checks and
+every test session failed to connect: by the code's paths, no table was read
+or written (from the code, not from Supabase's logs; founder: no log check).
+The sentence above is left as it was merged.
+
 ### Verdicts
 
 - **Matching speed (H4's matching part): closed, with one measurement
