@@ -7,6 +7,179 @@ phase."
 
 ---
 
+## Phase 5.5 Stage 4 — Matching speed and the broad-`except` audit — COMPLETE (2026-10-19), awaiting "go"
+
+Every Stage 4 PR is merged, from #60 to #69. The checkpoint is on `main` at
+`9d3a453` (PR #69's merge, 2026-10-19 15:07:08Z). No migration was applied
+at the checkpoint. `0037` and `0038` were applied on `docflow-staging`
+during the stage (D-203 item 13, D-206 item 11). The founder's decisions on
+this record are below, under "Decided". **Waiting for the founder's "go".**
+
+### Test runs
+
+**CI on the checkpoint commit `9d3a453`: two push runs, both green, each
+job on its first attempt.** Run 419 (39275131084, 15:07:14Z to 15:12:30Z)
+and run 420 (39275292324, 15:08:22Z to 15:13:41Z) are both `push` events
+on the same commit. The founder started neither by hand, and why GitHub
+ran two is not known. The counts are the same in both:
+
+| Job | Last line |
+|---|---|
+| core | `1052 tests, 0 failed, 0 skipped, 0 unapproved` |
+| worker | `249 tests, 0 failed, 0 skipped, 0 unapproved` |
+| api | `674 tests, 0 failed, 0 skipped, 0 unapproved`; leftover `+0` on all six counts (users with no tenant 3 -> 3) |
+| parse | `581 tests` unit and `427 tests` HTTP, each `0 failed, 0 skipped, 0 unapproved`; the usual `NOT-RUN A-net:internet-ipv6` warning |
+| web | `76 passed` |
+| web-live | `3 passed` |
+
+**The staging suites: the runs on `f8cc120` count for this checkpoint
+(founder, 2026-10-19; no re-run).** `main`'s code is `f8cc120`'s: between
+the two, only `docs/` and `DECISIONS.md` differ (read 2026-10-19). The
+logins were the root `.env`'s; only the staging database and Storage were
+reachable (D-207 item 14):
+- core: `1051 passed, 1 skipped in 117.97s (0:01:57)`; the skip is the
+  blank JWT secret (D-174).
+- worker: `242 passed, 7 skipped in 2102.32s (0:35:02)`; its own check
+  before 0 and after 0.
+- API: `673 passed, 1 skipped, 3 deselected, 693 warnings in 2459.73s
+  (0:40:59)`; the leftover line `+0` on all six counts.
+
+**The Fly 8.1 gate:** passed on `f8cc120` (evidence
+`docs/spikes/3c-fly-staging/2026-10-18-sha256-e1ac59b6/`). Nothing under
+`apps/parse` or in the worker's `parse_client` has changed since, so no gate
+is owed.
+
+**The three live tests (founder, 2026-10-19), run on `9d3a453`, 15:32:52Z
+to 15:35:09Z.** Anthropic was the only outside service reachable. The run
+had no database (`DATABASE_URL` blank, so the API conftest took no lock and
+no leftover count), and Supabase, Storage, Stripe and every other HTTP host
+were blocked. Model `claude-sonnet-5`, the root `.env`'s key.
+`3 passed, 1 warning in 25.94s` (the warning is starlette's
+`DeprecationWarning`):
+
+| Test | Input tokens (of them examples) | Output tokens | Est. cost | Latency |
+|---|---|---|---|---|
+| golden fixture | 2,621 | 837 | $0.013612 | 11,588 ms |
+| golden fixture with examples | 5,218 (2,604) | 731 | $0.017746 | 6,519 ms |
+| example contamination | 5,156 (2,604) | 784 | $0.018152 | 7,131 ms |
+
+**$0.049510 in all**, from the cost record's own price table; Anthropic's
+bill is the source of truth. Stage 3's three were $0.049640. No other paid
+call was made.
+
+### Verdicts
+
+- **Matching speed (H4's matching part): closed, with one measurement
+  moved.** The pass marks are p95 at or under 100 ms per unmatched line and
+  4 s per 40-line order, both on the 250,000 tenant.
+  - Met in CI at 250,000 items: 36.5 ms a line at p50 (bench run
+    38424636633), with no difference from the full scan on 100 lines.
+  - Met on the Fly worker at 50,000 items: 12.3 ms at p50 and 14.8 ms at
+    p95 a line, and a 40-line order in 1.7 s (D-202 items 13 and 14).
+  - The 250,000 measurement on the Fly worker is not done. The product
+    can't import more than 50,000 items, so it moved to the cap PR
+    (blocker 2, below).
+- **The broad-`except` audit: closed.** Only the exceptions each block
+  expects get a catalog code. Our own bug fails loudly as our error, with a
+  keyed alert raised once per state: DOC-030 on the document path, IMP-011
+  for an import, and the intake keyed alert. A guard test holds every broad
+  `except` in `apps/` and `packages/` to a reviewed list (D-203, D-204,
+  D-207).
+- **The database retry (Q14): closed.** A step after the model call waits
+  out a database outage, and a lost save extracts once more at most (D-206).
+
+### What was built
+
+- **#60, the catalog sizing job** (D-200; `c30926b`).
+- **#61, the matching redesign's records** (D-201; `2b9c163`). The trigram
+  indexes are not built: no variant kept parity on fastener lines.
+- **#62, PR A** (D-202; `2988661`): the fuzzy step scores every item in one
+  call a field, with the old loop kept as the parity reference.
+- **#63, the bench tenant's removal from staging** (D-202 items 16 to 18;
+  `d9b7e8f`).
+- **#64, PR 1a** (D-203; `5df2ddb`): the guard; an alert raised once per
+  state; `cost_record_lost`; migration `0037`.
+- **#65, PR 1b-i** (D-204; `c1589a3`): the `error` parse outcome and
+  DOC-030; the narrowed parsing blocks; the mutation corpus (369 cases);
+  RUNBOOK 8.6.
+- **#66, the Stripe signature test's race** (D-205; `37c914c`): the
+  300-second edge pinned on a fixed clock. No product code.
+- **#67, Q14** (D-206; `24e0204`): the database wait and migration `0038`.
+- **#68, PR 1b-ii** (D-207; `143fd2b`): VAL-017 and VAL-018 for what an
+  email unwrap couldn't read; IMP-011 and the `import_failed` alert.
+- **#69, PR 1b-ii's records** (D-207 item 14; `9d3a453`).
+
+### What was assumed
+
+- Staging stays on Nano with the Free plan, and the measurement on the Fly
+  worker at 50,000 items stands in for the 250,000 one until the cap PR
+  (D-202 item 14).
+- Fly staff's forum statement that 60 seconds with no data closes a
+  connection. It is not established for our setup until the test through a
+  public address (blocker 3).
+- Postmark's documented retry schedule (ten retries over about ten hours;
+  only a 403 stops them; read 2026-10-13).
+
+### Found during Stage 4, not by the tests
+
+- The product's own 50,000-row import cap, found by the measurement
+  (D-202 items 13 and 14).
+- One local core run reached staging Storage: seven probe objects were
+  written and deleted. Since then every local run blocks every outside
+  service (D-207 item 11).
+- D-200's count of "nine" files outside the audit could not be reproduced.
+  The census on `d9b7e8f` found 53 blocks in 20 files (D-203).
+- The premise that Postmark drops a request it gets a 400 for was wrong:
+  any non-200 is retried (D-203).
+- Validation would have cleared the warnings the parse step writes. Found
+  while sizing 1b-ii, and fixed in it (D-207).
+
+### The model re-read (D-195), owed at this checkpoint
+
+Read 2026-10-19 (https://platform.claude.com/docs/en/about-claude/model-deprecations.md
+and the models overview). `claude-haiku-4-5-20251001`: "Active", deprecated
+"N/A", retirement "Not sooner than October 15, 2026". No deprecation
+notice, and no replacement named. The page promises "at least 60 days'
+notice before model retirement". The overview lists Haiku 4.5, and also
+Sonnet 5, under "Legacy models (still available)". `claude-haiku-5-5`:
+Active, "Not sooner than October 7, 2027". `claude-sonnet-5`: Active, "Not
+sooner than June 30, 2027". D-195's 2026-11-16 deadline is unchanged. Its
+"changes 1 and 2 go next" trigger does not fire if the "go" comes before
+2026-11-02, since every Stage 4 PR is merged.
+
+### Open, carried forward
+
+- **The staging worker** has no machines and is still v10 with the old
+  `parse_client`. Before its next start: deploy `main`'s worker, read the
+  machine's memory (raised to 2 GB once; `fly.toml` says 1 GB), then start
+  it. The Healthchecks.io check stays paused until then.
+- The scale gate's 2.9 million sizing run has not been run (D-201 item 1).
+- PR B, the catalog kept between documents, is a known limit and not built
+  (D-201).
+- The second `items (tenant_id, sku)` index: open for a later migration
+  (D-201 item 9), and kept out of `0038` (D-206 item 8).
+- 1b-i's gate README said "B (all 18)". Its own output has 17 B lines.
+  Corrected in this PR.
+
+### Decided (founder, 2026-10-19)
+
+- **The four pilot blockers** (BUILD-STATUS, "The pilot-blocker subset"):
+  - **A PO that fails on our side at intake raises no alert: the first PR
+    of Stage 5.**
+  - **A catalog commit holds one request for minutes.** The one-hour test
+    through a public address is proposed as a plan and not run; it needs
+    its own grant. If the test confirms the cut, the fix goes before demo
+    readiness.
+  - **The 50,000-row cap and IMP-003's wording: one PR, before pilots,
+    only if a pilot prospect has more than 50,000 SKUs.** The founder
+    decides that after the discovery calls.
+- **The order:** Stage 5 in full (as D-199 says), then E1 and E2a, then
+  demo readiness (D-209).
+- **D-208** (the welding demo) and **D-209** (E1, E2a, E3a and the
+  outreach-period rules) are recorded.
+
+---
+
 ## Phase 5.5 Stage 3 — Worker, storage, queue, database logins — COMPLETE (2026-10-09), go given (2026-10-11)
 
 Written as a draft on 2026-10-02, ahead of its evidence, so the founder

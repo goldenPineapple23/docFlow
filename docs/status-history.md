@@ -4,6 +4,27 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-19 (the Stage 4 checkpoint, awaiting "go"; CHECKPOINTS.md, D-208, D-209)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-19, with PR 1b-ii merged:** Phase 5.5, **Stage 4** (the audit of the broad
+`except` blocks). **Every Stage 4 PR is merged:** PR 1b-ii is PR #68 (`main` is `143fd2b`; D-207
+item 14), after PR 1a, PR 1b-i, the Stripe test's fix and Q14 (#64 to #67). What an `.eml` or `.msg`
+unwrap couldn't read is now a warning the reviewer must acknowledge (VAL-017 for an attachment,
+VAL-018 for the body), and an import that fails on our side is IMP-011 with an `import_failed` alert.
+Before the merge the three staging suites passed on its head (core `1051 passed, 1 skipped`, worker
+`242 passed, 7 skipped`, API `673 passed, 1 skipped, 3 deselected`, the leftover line `+0` on all
+six), and so did the Fly gate (every line PASS, A-net IPv6 PASS; evidence in
+`docs/spikes/3c-fly-staging/2026-10-18-sha256-e1ac59b6/`). **Staging:** `docflow-parse-staging` runs
+1b-ii's image, which is `main`'s code; `docflow-worker-staging` has no machines and is still v10 with
+the old `parse_client`, which must not be started against it. Deploy order for 1b-ii: the worker,
+then the parse app, and the parse app is done; so the next worker start is: deploy `main`'s worker
+first, read the machine's memory (raised to 2 GB; `fly.toml` says 1 GB), then start it. Next: **the
+Stage 4 checkpoint.** Not fixed, each its own PR, timed at the Stage 4 checkpoint: IMP-003's
+wording, the 50,000-row cap, the long catalog commit, and a PO that fails on our side at intake
+raising no alert. If Stage 4 is not merged by 2026-11-02, D-195's two changes go next. The API's and
+the parse machine's auto-stop are on, and the Healthchecks.io check is paused.
+
 ## Replaced on 2026-10-19 (PR 1b-ii merged as PR #68; D-207 item 14)
 
 <!-- the paragraph as it stood, starting on the next line -->

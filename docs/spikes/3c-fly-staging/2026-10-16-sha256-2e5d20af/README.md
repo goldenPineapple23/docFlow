@@ -15,7 +15,7 @@ push run 38919537369 was green.
 | Canary (boot) | PASS, all 5, cgroup v1; port open 15:12:50Z | 00 |
 | A (all run) | PASS, **A-net IPv6 PASS**, A3 Upstash PASS, A7 against the live server's port 8100 PASS | 01 |
 | S (all) | PASS; S3 INFO (its control, as in the 3c runs) | 01 |
-| B (all 18) | PASS | 01 |
+| B (all 17) | PASS | 01 |
 | Not run (founder) | A4 stand-in, N1, N2, N3 | -- |
 
 The list of checks is the 3c passing run's (`2026-10-01-sha256-acc99434`)
