@@ -1,0 +1,49 @@
+== fly deploy --config apps/parse/fly.toml --dockerfile apps/parse/Dockerfile --ignorefile apps/parse/Dockerfile.dockerignore --no-public-ips --ha=false --remote-only .
+   (branch phase55/stage4-pr1b-ii-unwrap-and-import at f8cc120, clean tree; built on Fly's remote builder)
+deploy start 2026-10-18T23:48:55Z head f8cc120
+#15 exporting manifest sha256:e1ac59b666501f073a36095a4751466c2d4e048ad88f3723e322cd7f5b226834 done
+#15 pushing manifest for registry.fly.io/docflow-parse-staging:deployment-01M58PP6C38ZXKS3M266HSNYRW@sha256:e1ac59b6665
+image: registry.fly.io/docflow-parse-staging:deployment-01M58PP6C38ZXKS3M266HSNYRW
+image size: 214 MB
+Updating existing machines in 'docflow-parse-staging' with rolling strategy
+> Updating machine config for 863662ce743978
+> Updating 863662ce743978 [app]
+> Updated machine config for 863662ce743978
+> Waiting for machine 863662ce743978 to reach a good state
+> Machine 863662ce743978 reached stopped state
+✔ Machine 863662ce743978 is now in a good state
+deploy exit=0 at 2026-10-18T23:50:31Z
+
+== machine before the deploy (23:48:38Z): stopped, shared-cpu-2x 2048 MB, image deployment-01M52M5R8K2Q22H1M79GYGE4ZS (1b-i, sha256:2e5d20af); fly.toml: shared-cpu-2x, 2gb
+== docflow-worker-staging: no machines (read 23:48:38Z)
+
+== fly machine start 863662ce743978 at 23:51:00Z; boot log (fly logs --no-tail, read 23:53Z)
+2026-10-18T23:51:00Z app[863662ce743978] iad [info]2026-10-18T23:51:00.376380067 [01M58PQ5GFAK43MA64XVKA6X0X:main] Running Firecracker v1.14.4
+2026-10-18T23:51:00Z app[863662ce743978] iad [info]2026-10-18T23:51:00.376523897 [01M58PQ5GFAK43MA64XVKA6X0X:main] Listening on API socket ("/fc.sock").
+2026-10-18T23:51:01Z app[863662ce743978] iad [info] INFO Starting init (commit: 6172d83)...
+2026-10-18T23:51:01Z app[863662ce743978] iad [info] INFO Preparing to run: `/opt/parse/venv/bin/python -m parse_service.server` as root
+2026-10-18T23:51:01Z app[863662ce743978] iad [info] INFO [fly api proxy] listening at /.fly/api
+2026-10-18T23:51:01Z app[863662ce743978] iad [info]2026/10/18 23:51:01 INFO SSH listening listen_address=[fdaa:cb:76d5:a7b:579:9ce4:c6c8:2]:22
+2026-10-18T23:51:01Z runner[863662ce743978] iad [info]Machine started in 968ms
+2026-10-18T23:51:01Z app[863662ce743978] iad [info]canary: cgroup v1
+2026-10-18T23:51:01Z health[863662ce743978] iad [error]Health check 'servicecheck-00-http-8100' on port 8100 has failed. Your app is not responding properly. Services exposed on ports [80, 443] will have intermittent failures until the health check passes.
+2026-10-18T23:51:02Z app[863662ce743978] iad [info]RESULT canary:network PASS -- {"tcp": {"internet-ipv4": "blocked: ENETUNREACH", "internet-ipv6": "blocked: EADDRNOTAVAIL", "fly-dns": "blocked: EADDRNOTAVAIL", "fly-machines-api": "blocked: EADDRNOTAVAIL"}, "dns": {"example.com": "blocked: gaierror"}, "interfaces": ["lo(down)"]}
+2026-10-18T23:51:02Z app[863662ce743978] iad [info]RESULT canary:view PASS -- {"uid": 10001, "CapEff": "0000000000000000", "NoNewPrivs": "1", "Seccomp": "2", "fly_dir": [], "sys_dir": [], "writes": {"/": "EROFS", "/usr": "EROFS", "/etc": "EROFS", "/tmp": "writable", "/var/tmp": "writable", "/opt": "EROFS", "/work": "writable", "/lohome": "writable"}}
+2026-10-18T23:51:02Z app[863662ce743978] iad [info]RESULT canary:seccomp PASS -- {"unshare(NEWUSER)": "EPERM", "mount": "EPERM", "keyctl": "EPERM", "io_uring_setup": "EPERM", "userfaultfd": "EPERM"}
+2026-10-18T23:51:02Z app[863662ce743978] iad [info][    2.544534] Memory cgroup out of memory: Killed process 702 (python) total-vm:145524kB, anon-rss:52480kB, file-rss:5792kB, shmem-rss:0kB, UID:10001 pgtables:164kB oom_score_adj:0
+2026-10-18T23:51:03Z app[863662ce743978] iad [info]RESULT canary:memory-cap-kills PASS -- {"outcome": "stopped", "cause": "memory", "swap": {"memory": "67108864", "memory_swap": "67108864", "machine_has_active_swap": false}, "cgroup_version": 1}
+2026-10-18T23:51:04Z app[863662ce743978] iad [info]RESULT canary:cpu-quota-set-and-budget-kills PASS -- {"outcome": "stopped", "cause": "cpu", "quota": "100000 100000"}
+2026-10-18T23:51:04Z app[863662ce743978] iad [info]canary: PASS
+2026-10-18T23:51:04Z app[863662ce743978] iad [info]parse service listening on port 8100
+2026-10-18T23:51:04Z app[863662ce743978] iad [info]2026-10-18 23:51:04,653 INFO parse_service http "GET /health HTTP/1.1" 200 -
+2026-10-18T23:51:04Z health[863662ce743978] iad [info]Health check 'servicecheck-00-http-8100' on port 8100 is now passing.
+
+== fly ips list (read 23:48:48Z, before the deploy; --no-public-ips)
+ v6 | fdaa:cb:76d5:0:1::3 | private ingress | global | default (nothing else)
+
+== auto-stop: machine status event log (times UTC)
+ started  | start | flyd  | 2026-10-18T23:51:01.195Z
+ started  | cordon | proxy | 2026-10-18T23:56:08.918Z
+ stopping | stop  | proxy | 2026-10-18T23:56:19.037Z
+ stopped  | exit  | flyd  | 2026-10-18T23:56:19.887Z | exit_code=0,oom_killed=false,requested_stop=true
+ (read 23:56:31Z; docflow-worker-staging still no machines; docflow-api-staging 8e7d7eb762d918 stopped, last updated 2026-10-13)
