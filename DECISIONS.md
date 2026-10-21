@@ -4414,14 +4414,18 @@ Everything else fails as before: a deadlock (40P01), a serialization failure (40
 - **Results:** item 2.
 - **The rule (founder, standing):** a staging suite, a Fly action, or any write to staging starts only after a message from the founder that contains the word "grant". A sentence that names a gate, "go as pasted", or a plan that lists the step is not a grant. CLAUDE.md is unchanged; the text goes there only on the founder's word.
 
-**7. The evidence folder for item 4: scanned, held back.**
+**7. The evidence folder for item 4: scanned, then committed on the founder's word.**
 - **The files** are copied to a folder on the founder's machine, outside the repository and outside any temporary folder: the deploy log, eleven `flyctl logs --no-tail` captures, five background-command outputs, the two read-only scripts, and one transcript of console output that was never saved to a file (headed "Transcribed from the session on 2026-10-21, not raw command output").
 - **The secret scan:**
   - **(a) exact match:** every value of 8 characters or more in the root `.env`, the passwords inside its connection strings included, searched for in every file. Only variable names are printed.
   - **(b) patterns:** Fly tokens, Healthchecks ping URLs, connection strings with a password, Anthropic, Stripe and AWS keys, JWTs, private keys, e-mail addresses, and token headers.
   - **(c) a read of every distinct line** across the 20 files (381 lines).
   - **Result:** (a) and (b) found 0. (c) found no secret, but some private values: the Upstash Redis host name (its password masked `**` by Celery), Fly's private `fdaa:` machine addresses, and local Windows paths under the founder's user folder. The first two are already in 9 and 36 tracked files.
-- **Not in this commit.** The folder goes into `docs/spikes/` only on the founder's word on these findings.
+- **The founder's word (2026-10-21):**
+  - The folder goes into `docs/spikes/d212-worker-start-fly-proof/2026-10-21/`, with a README one level up.
+  - The Upstash host and the `fdaa:` addresses stay as captured; stopping that remains a parked option.
+  - In `task_bx8vgfgan.output.txt` and `task_bii1jenrr.output.txt`, the scratchpad's full local path was replaced with `<scratchpad>`, once in each, and the README says so.
+  - The scan was run again on the final folder (21 files, the README included): (a) and (b) found 0, and no local path remains.
 
 **8. Left for M7 (founder):** only the three missing Phase 5 alerts (D-155) and INT-011's wording. Not placed by the founder on 2026-10-21: the RUNBOOK entry for Postmark's inbound retry (2026-10-19, "the same PR" as INT-011's wording). It stays with M7 unless the founder says otherwise.
 

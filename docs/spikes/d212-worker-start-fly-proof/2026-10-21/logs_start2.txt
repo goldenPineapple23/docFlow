@@ -1,0 +1,100 @@
+[2m2026-10-21T16:55:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m][2026-10-21 16:55:45,299: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+[2m2026-10-21T16:56:15Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m][2026-10-21 16:56:15,299: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+[2m2026-10-21T16:56:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m][2026-10-21 16:56:45,201: INFO/MainProcess] Scheduler: Sending due task run-scheduled-jobs (docflow.run_scheduled_jobs)
+[2m2026-10-21T16:56:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m][2026-10-21 16:56:45,261: INFO/MainProcess] Scheduler: Sending due task run-lifecycle-sweep (docflow.run_lifecycle_sweep)
+[2m2026-10-21T16:56:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m][2026-10-21 16:56:45,284: INFO/MainProcess] Scheduler: Sending due task sweep-stuck-documents (docflow.sweep_stuck_documents)
+[2m2026-10-21T16:56:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m][2026-10-21 16:56:45,299: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+[2m2026-10-21T16:57:15Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m][2026-10-21 16:57:15,299: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+[2m2026-10-21T16:57:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m][2026-10-21 16:57:45,299: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+[2m2026-10-21T16:58:15Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m][2026-10-21 16:58:15,299: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+[2m2026-10-21T16:58:28Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]2026-10-21T16:58:28.883467068 [01M5FN52C6Q0WQS5E4DHBR78XX:main] Running Firecracker v1.14.4
+[2m2026-10-21T16:58:28Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]2026-10-21T16:58:28.883605424 [01M5FN52C6Q0WQS5E4DHBR78XX:main] Listening on API socket ("/fc.sock").
+[2m2026-10-21T16:58:29Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][32m INFO[0m Starting init (commit: 8b221cb)...
+[2m2026-10-21T16:58:29Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][32m INFO[0m Preparing to run: `python -m app.run_workers` as docflow
+[2m2026-10-21T16:58:29Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][32m INFO[0m [fly api proxy] listening at /.fly/api
+[2m2026-10-21T16:58:29Z[0m runner[8655604b9e4058] [32miad[0m [[34minfo[0m]Machine started in 998ms
+[2m2026-10-21T16:58:29Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]2026/10/21 16:58:29 INFO SSH listening listen_address=[fdaa:cb:76d5:a7b:249:8c17:1499:2]:22
+[2m2026-10-21T16:58:31Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]run_workers: login check passed as docflow_worker
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m] -------------- dispatch@8655604b9e4058 v5.6.3 (recovery)
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]--- ***** -----
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]-- ******* ---- Linux-6.12.105-fly-x86_64-with-glibc2.41 2026-10-21 16:58:35
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- *** --- * ---
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- [config]
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- .> app:         docflow_worker:0x7fdd4ded6ba0
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- .> transport:   redis://default:**@fly-docflow-staging-redis.upstash.io:6379//
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- .> results:     disabled://
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- *** --- * --- .> concurrency: 1 (prefork)
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]--- ***** -----
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m] -------------- [queues]
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]                .> dispatch         exchange=dispatch(direct) key=dispatch
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][tasks]
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.dispatch
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.generate_export
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.parse_and_extract
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.parse_import
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.run_daily_rollup
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.run_lifecycle_sweep
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.run_scheduled_jobs
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.sweep_stuck_documents
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m] -------------- documents@8655604b9e4058 v5.6.3 (recovery)
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]--- ***** -----
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]-- ******* ---- Linux-6.12.105-fly-x86_64-with-glibc2.41 2026-10-21 16:58:35
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- *** --- * ---
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- [config]
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- .> app:         docflow_worker:0x7f7629ef6ba0
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- .> transport:   redis://default:**@fly-docflow-staging-redis.upstash.io:6379//
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- .> results:     disabled://
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- *** --- * --- .> concurrency: 1 (prefork)
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]--- ***** -----
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m] -------------- [queues]
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]                .> bulk             exchange=bulk(direct) key=bulk
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]                .> interactive      exchange=interactive(direct) key=interactive
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][tasks]
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.dispatch
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.generate_export
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.parse_and_extract
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.parse_import
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.run_daily_rollup
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.run_lifecycle_sweep
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.run_scheduled_jobs
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.sweep_stuck_documents
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:35,528: INFO/MainProcess] Connected to redis://default:**@fly-docflow-staging-redis.upstash.io:6379//
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:35,594: INFO/MainProcess] Connected to redis://default:**@fly-docflow-staging-redis.upstash.io:6379//
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:35,655: INFO/MainProcess] documents@8655604b9e4058 ready.
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:35,660: INFO/MainProcess] Task docflow.run_scheduled_jobs[3de50a7e-f1b0-4612-a7e8-9ec9b3b47b3f] received
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:35,736: INFO/MainProcess] dispatch@8655604b9e4058 ready.
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:35,778: INFO/ForkPoolWorker-1] Task docflow.run_scheduled_jobs[3de50a7e-f1b0-4612-a7e8-9ec9b3b47b3f] succeeded in 0.11750653499999952s: 0
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:35,784: INFO/MainProcess] Task docflow.run_lifecycle_sweep[30ac72f0-e21d-4002-9f51-39aca9e789cb] received
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:35,794: INFO/MainProcess] Task docflow.dispatch[3f565967-8a89-4826-b9c5-4332afc67f04] received
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:35,794: INFO/MainProcess] Discarding revoked task: docflow.dispatch[3f565967-8a89-4826-b9c5-4332afc67f04]
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:35,910: INFO/MainProcess] Task docflow.dispatch[e55d6cd8-2423-45c9-a225-35b85d629ada] received
+[2m2026-10-21T16:58:35Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:35,910: INFO/MainProcess] Discarding revoked task: docflow.dispatch[e55d6cd8-2423-45c9-a225-35b85d629ada]
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,045: INFO/MainProcess] Task docflow.dispatch[20417a8d-21df-4dc3-af28-47782b625151] received
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,045: INFO/MainProcess] Discarding revoked task: docflow.dispatch[20417a8d-21df-4dc3-af28-47782b625151]
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,122: INFO/MainProcess] Task docflow.dispatch[0a70fd4d-9240-44f3-9f22-5b10f2c7ab4c] received
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,123: INFO/MainProcess] Discarding revoked task: docflow.dispatch[0a70fd4d-9240-44f3-9f22-5b10f2c7ab4c]
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,186: INFO/MainProcess] Task docflow.dispatch[3076a16b-549d-4951-aa84-d7c03ef99a87] received
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,186: INFO/MainProcess] Discarding revoked task: docflow.dispatch[3076a16b-549d-4951-aa84-d7c03ef99a87]
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,285: INFO/MainProcess] Task docflow.dispatch[99f7f48b-8cdd-4bc9-b3fc-250a8b49d747] received
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,285: INFO/MainProcess] Discarding revoked task: docflow.dispatch[99f7f48b-8cdd-4bc9-b3fc-250a8b49d747]
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,356: INFO/MainProcess] Task docflow.dispatch[5904fa7b-1ffb-4064-8449-399704bb7499] received
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,356: INFO/MainProcess] Discarding revoked task: docflow.dispatch[5904fa7b-1ffb-4064-8449-399704bb7499]
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,521: INFO/MainProcess] Task docflow.dispatch[81397b7d-3cc9-42a9-b4e2-4855340a19f4] received
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,521: INFO/MainProcess] Discarding revoked task: docflow.dispatch[81397b7d-3cc9-42a9-b4e2-4855340a19f4]
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,635: INFO/MainProcess] Task docflow.dispatch[3a407770-16dc-4b76-864d-6dc25a88bc1c] received
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,635: INFO/MainProcess] Discarding revoked task: docflow.dispatch[3a407770-16dc-4b76-864d-6dc25a88bc1c]
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,702: INFO/MainProcess] Task docflow.dispatch[f30cffbd-3905-4881-8370-0c530b0cac60] received
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,702: INFO/MainProcess] Discarding revoked task: docflow.dispatch[f30cffbd-3905-4881-8370-0c530b0cac60]
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,745: INFO/MainProcess] Task docflow.dispatch[aeb1d8a9-f4df-4c94-8fb9-4e28cfaa842a] received
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,745: INFO/MainProcess] Discarding revoked task: docflow.dispatch[aeb1d8a9-f4df-4c94-8fb9-4e28cfaa842a]
+[2m2026-10-21T16:58:36Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:36,779: INFO/MainProcess] Task docflow.dispatch[821177ae-2ce9-4b3e-a8e2-c7459267aa34] received
+[2m2026-10-21T16:58:37Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:37,329: INFO/ForkPoolWorker-1] Task docflow.dispatch[821177ae-2ce9-4b3e-a8e2-c7459267aa34] succeeded in 0.5481026530000008s: 0
+[2m2026-10-21T16:58:37Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:37,732: INFO/ForkPoolWorker-1] lifecycle_sweep_complete cancels_retried=0 suspended=0 ready_alerted=0 addresses_retired=0 stopped_at_time_box=False
+[2m2026-10-21T16:58:37Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:37,733: INFO/ForkPoolWorker-1] Task docflow.run_lifecycle_sweep[30ac72f0-e21d-4002-9f51-39aca9e789cb] succeeded in 1.9482973340000003s: {'cancels_retried': 0, 'suspended': 0, 'ready_alerted': 0, 'addresses_retired': 0, 'stopped_at_time_box': False}
+[2m2026-10-21T16:58:37Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:37,740: INFO/MainProcess] Task docflow.sweep_stuck_documents[27d604d4-60a9-4619-bc89-1d7c885cd089] received
+[2m2026-10-21T16:58:39Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:39,788: INFO/ForkPoolWorker-1] Task docflow.sweep_stuck_documents[27d604d4-60a9-4619-bc89-1d7c885cd089] succeeded in 2.0467973940000004s: None
+[2m2026-10-21T16:58:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m][2026-10-21 16:58:45,299: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+[2m2026-10-21T16:58:45Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:45,313: INFO/MainProcess] Task docflow.dispatch[53bdf2d7-841e-4168-b21d-46ed09e7b39b] received
+[2m2026-10-21T16:58:45Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:58:45,462: INFO/ForkPoolWorker-1] Task docflow.dispatch[53bdf2d7-841e-4168-b21d-46ed09e7b39b] succeeded in 0.1476889089999993s: 0

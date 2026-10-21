@@ -1,0 +1,84 @@
+[2m2026-10-21T16:36:36Z[0m runner[2879390f916548] [32miad[0m [[34minfo[0m]Pulling container image registry.fly.io/docflow-worker-staging@sha256:48760780e1c49896351ef47e8ea567e7766391eb052efc1c19f33e433cfcee9c
+[2m2026-10-21T16:36:41Z[0m runner[2879390f916548] [32miad[0m [[34minfo[0m]Successfully prepared image registry.fly.io/docflow-worker-staging@sha256:48760780e1c49896351ef47e8ea567e7766391eb052efc1c19f33e433cfcee9c (4.686009454s)
+[2m2026-10-21T16:36:41Z[0m runner[2879390f916548] [32miad[0m [[34minfo[0m]Configuring firecracker
+[2m2026-10-21T16:36:41Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m]2026-10-21T16:36:41.887801755 [01M5FN4QTHEN81K6XQFEHMVXQ6:main] Running Firecracker v1.14.4
+[2m2026-10-21T16:36:41Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m]2026-10-21T16:36:41.887954536 [01M5FN4QTHEN81K6XQFEHMVXQ6:main] Listening on API socket ("/fc.sock").
+[2m2026-10-21T16:36:42Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m][32m INFO[0m Starting init (commit: 6172d83)...
+[2m2026-10-21T16:36:42Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m][32m INFO[0m Preparing to run: `celery -A app.celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule` as docflow
+[2m2026-10-21T16:36:42Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m][32m INFO[0m [fly api proxy] listening at /.fly/api
+[2m2026-10-21T16:36:42Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m]2026/10/21 16:36:42 INFO SSH listening listen_address=[fdaa:cb:76d5:a7b:6e8:9220:c36a:2]:22
+[2m2026-10-21T16:36:42Z[0m runner[2879390f916548] [32miad[0m [[34minfo[0m]Machine created and started in 6.26s
+[2m2026-10-21T16:36:44Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m]celery beat v5.6.3 (recovery) is starting.
+[2m2026-10-21T16:36:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m]__    -    ... __   -        _
+[2m2026-10-21T16:36:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m]LocalTime -> 2026-10-21 16:36:45
+[2m2026-10-21T16:36:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m]Configuration ->
+[2m2026-10-21T16:36:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m]    . broker -> redis://default:**@fly-docflow-staging-redis.upstash.io:6379//
+[2m2026-10-21T16:36:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m]    . loader -> celery.loaders.app.AppLoader
+[2m2026-10-21T16:36:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m]    . scheduler -> celery.beat.PersistentScheduler
+[2m2026-10-21T16:36:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m]    . db -> /tmp/celerybeat-schedule
+[2m2026-10-21T16:36:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m]    . logfile -> [stderr]@%INFO
+[2m2026-10-21T16:36:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m]    . maxinterval -> 5.00 minutes (300s)
+[2m2026-10-21T16:36:45Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m][2026-10-21 16:36:45,130: INFO/MainProcess] beat: Starting...
+[2m2026-10-21T16:36:47Z[0m runner[8655604b9e4058] [32miad[0m [[34minfo[0m]Pulling container image registry.fly.io/docflow-worker-staging@sha256:48760780e1c49896351ef47e8ea567e7766391eb052efc1c19f33e433cfcee9c
+[2m2026-10-21T16:37:02Z[0m runner[8655604b9e4058] [32miad[0m [[34minfo[0m]Successfully prepared image registry.fly.io/docflow-worker-staging@sha256:48760780e1c49896351ef47e8ea567e7766391eb052efc1c19f33e433cfcee9c (14.676423891s)
+[2m2026-10-21T16:37:03Z[0m runner[8655604b9e4058] [32miad[0m [[34minfo[0m]Configuring firecracker
+[2m2026-10-21T16:37:03Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]2026-10-21T16:37:03.330914011 [01M5FN52C6Q0WQS5E4DHBR78XX:main] Running Firecracker v1.14.4
+[2m2026-10-21T16:37:03Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]2026-10-21T16:37:03.331060591 [01M5FN52C6Q0WQS5E4DHBR78XX:main] Listening on API socket ("/fc.sock").
+[2m2026-10-21T16:37:04Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][32m INFO[0m Starting init (commit: 8b221cb)...
+[2m2026-10-21T16:37:04Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][32m INFO[0m Preparing to run: `python -m app.run_workers` as docflow
+[2m2026-10-21T16:37:04Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][32m INFO[0m [fly api proxy] listening at /.fly/api
+[2m2026-10-21T16:37:04Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]2026/10/21 16:37:04 INFO SSH listening listen_address=[fdaa:cb:76d5:a7b:249:8c17:1499:2]:22
+[2m2026-10-21T16:37:04Z[0m runner[8655604b9e4058] [32miad[0m [[34minfo[0m]Machine created and started in 16.593s
+[2m2026-10-21T16:37:05Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]run_workers: login check passed as docflow_worker
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m] -------------- dispatch@8655604b9e4058 v5.6.3 (recovery)
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]--- ***** -----
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]-- ******* ---- Linux-6.12.105-fly-x86_64-with-glibc2.41 2026-10-21 16:37:09
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- *** --- * ---
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- [config]
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- .> app:         docflow_worker:0x7f0ac74faba0
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- .> transport:   redis://default:**@fly-docflow-staging-redis.upstash.io:6379//
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- .> results:     disabled://
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- *** --- * --- .> concurrency: 1 (prefork)
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]--- ***** -----
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m] -------------- [queues]
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]                .> dispatch         exchange=dispatch(direct) key=dispatch
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][tasks]
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.dispatch
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.generate_export
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.parse_and_extract
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.parse_import
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.run_daily_rollup
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.run_lifecycle_sweep
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.run_scheduled_jobs
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.sweep_stuck_documents
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m] -------------- documents@8655604b9e4058 v5.6.3 (recovery)
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]--- ***** -----
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]-- ******* ---- Linux-6.12.105-fly-x86_64-with-glibc2.41 2026-10-21 16:37:09
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- *** --- * ---
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- [config]
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- .> app:         docflow_worker:0x7fb0eb6f6ba0
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- .> transport:   redis://default:**@fly-docflow-staging-redis.upstash.io:6379//
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- ** ---------- .> results:     disabled://
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]- *** --- * --- .> concurrency: 1 (prefork)
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]--- ***** -----
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m] -------------- [queues]
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]                .> bulk             exchange=bulk(direct) key=bulk
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]                .> interactive      exchange=interactive(direct) key=interactive
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][tasks]
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.dispatch
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.generate_export
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.parse_and_extract
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.parse_import
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.run_daily_rollup
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.run_lifecycle_sweep
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.run_scheduled_jobs
+[2m2026-10-21T16:37:09Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m]  . docflow.sweep_stuck_documents
+[2m2026-10-21T16:37:10Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:37:10,120: INFO/MainProcess] Connected to redis://default:**@fly-docflow-staging-redis.upstash.io:6379//
+[2m2026-10-21T16:37:10Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:37:10,213: INFO/MainProcess] Connected to redis://default:**@fly-docflow-staging-redis.upstash.io:6379//
+[2m2026-10-21T16:37:10Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:37:10,242: INFO/MainProcess] dispatch@8655604b9e4058 ready.
+[2m2026-10-21T16:37:10Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:37:10,364: INFO/MainProcess] documents@8655604b9e4058 ready.
+[2m2026-10-21T16:37:15Z[0m app[2879390f916548] [32miad[0m [[34minfo[0m][2026-10-21 16:37:15,237: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+[2m2026-10-21T16:37:15Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:37:15,285: INFO/MainProcess] Task docflow.dispatch[f28b3c2b-c3b5-47f7-bf11-5203e2a06daa] received
+[2m2026-10-21T16:37:15Z[0m app[8655604b9e4058] [32miad[0m [[34minfo[0m][2026-10-21 16:37:15,841: INFO/ForkPoolWorker-1] Task docflow.dispatch[f28b3c2b-c3b5-47f7-bf11-5203e2a06daa] succeeded in 0.5541131099999994s: 0

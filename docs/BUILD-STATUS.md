@@ -37,8 +37,7 @@ SKUs. The welding demo comes after the fastener rehearsal and never blocks it (D
 `docflow-parse-staging` runs the image from before PR B (Pillow 12.3.0). `docflow-worker-staging`
 runs `e95b095`'s image (D-212) with no machines; certifi 2026.10.19 reaches it at its next deploy.
 The API and parse machines are stopped, with auto-stop on, and the Healthchecks.io check is paused.
-D-212's evidence folder is held outside the repository until the founder's word on its scan (D-213
-item 7).
+D-212's evidence is in `docs/spikes/d212-worker-start-fly-proof/` (D-213 item 7).
 
 **That paragraph is the current state only** (founder, 2026-10-05; D-191). When it changes, the
 paragraph it replaces moves, word for word, to the top of `docs/status-history.md`, which is not

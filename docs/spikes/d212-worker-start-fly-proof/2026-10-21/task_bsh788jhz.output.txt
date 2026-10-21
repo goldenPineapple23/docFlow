@@ -1,0 +1,14 @@
+Wed Oct 21 16:53:00 UTC 2026
+2026-10-21T16:52:17Z app[8655604b9e4058] iad [info]worker: Hitting Ctrl+C again will initiate cold shutdown, terminating all running tasks!
+2026-10-21T16:52:17Z app[8655604b9e4058] iad [info]worker: Warm shutdown (MainProcess)
+2026-10-21T16:52:17Z app[8655604b9e4058] iad [info]worker: Hitting Ctrl+C again will initiate cold shutdown, terminating all running tasks!
+2026-10-21T16:52:17Z app[8655604b9e4058] iad [info]worker: Warm shutdown (MainProcess)
+2026-10-21T16:52:17Z app[8655604b9e4058] iad [info] INFO Sending signal SIGINT to main child process w/ PID 639
+2026-10-21T16:52:27Z app[8655604b9e4058] iad [info] INFO Main child exited normally with code: 0
+2026-10-21T16:52:27Z app[8655604b9e4058] iad [info] INFO Starting clean up.
+2026-10-21T16:52:27Z app[8655604b9e4058] iad [info][  923.879251] reboot: Restarting system
+2026-10-21T16:52:45Z app[2879390f916548] iad [info][2026-10-21 16:52:45,298: INFO/MainProcess] Scheduler: Sending due task dispatch-waiting-documents (docflow.dispatch)
+ 8655604b9e4058 │ dawn-meadow-3266 │ stopped │        │ iad    │      │ docflow-worker-staging:deployment-01M5FN3YGFXMT9J8F14838VTPX │ fdaa:cb:76d5:a7b:249:8c17:1499:2 │        │ 2026-10-21T16:36:47Z │ 2026-10-21T16:52:27Z │ worker        │ shared-cpu-1x:1024MB 
+ 2879390f916548 │ misty-water-7431 │ started │        │ iad    │      │ docflow-worker-staging:deployment-01M5FN3YGFXMT9J8F14838VTPX │ fdaa:cb:76d5:a7b:6e8:9220:c36a:2 │        │ 2026-10-21T16:36:36Z │ 2026-10-21T16:36:42Z │ beat          │ shared-cpu-1x:256MB  
+
+[exited with code 0]

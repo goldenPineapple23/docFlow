@@ -1,0 +1,233 @@
+Transcribed from the session on 2026-10-21, not raw command output
+
+These outputs were printed to the console in Claude's session 3d0d9259 and never written to a file. They are copied word for word from that session's tool results. Lines printed by `date -u`, `echo "exit $?"` or other commands in the same shell call are kept and marked. Where a filter (grep) was applied at the time, it is named, and the text is what the filter let through. Fly's terminal colour codes appear as they were printed ("[1m", "[0m").
+
+Only two first_start_due.py readings were taken in this session (16:33:00Z and 16:35:55Z). The first reading before the deploy, on 2026-10-19 at 22:48:27Z, was taken in an earlier session. Its output is not in this session, so it is not transcribed here.
+
+Every script was run from apps/api with that directory's venv:
+  ./.venv/Scripts/python.exe -I <script> [argument]
+first_start_due.py and since_deploy.py are in this folder.
+
+
+======================================================================
+1. first_start_due.py, reading at 2026-10-21 16:33:00Z (before grant 1 was asked for)
+Command: cd apps/api && date -u && ./.venv/Scripts/python.exe -I ".../8c5ae8ae-.../scratchpad/first_start_due.py"; echo "exit $?"
+First line: date -u. Last line: echo.
+======================================================================
+Wed Oct 21 16:32:56 UTC 2026
+transaction_read_only: on
+read at 2026-10-21 16:33:00.636832+00 (stale after 10 min)
+D1 waiting, claimable now or inside the window (dispatch pass): 0
+D2 waiting, retry_at after the window (only a probe could send one): 0
+D3 dispatched, not claimed (stuck sweep returns them; a leftover job could claim one): 0
+D4 processing (stuck sweep retries or fails one past the timeout): 0
+D5 provider state (down = the dispatcher sends a probe): up
+D6 waiting on the provider past the limit (stuck sweep: DOC-024 + alert, no call): 0
+D7 dispatcher_status(): last pass, age s, waiting: 2026-10-19 21:13:09.090442+00 | 155991 | 0
+J1 scheduled jobs due inside the window, by type: none
+J2 the earliest pending job's run_at, and how many are pending at all: none | 0
+L1 Stripe cancels owed (pass 0: Stripe calls): 0
+L2 cancelling tenants due inside the window (pass 1: suspend, Stripe, owner e-mail): 0
+L3 pending_deletion tenants by deletion date (UTC): 2026-10-24=1, 2026-10-27=3
+L4 pending_deletion due inside the window with no open ready-to-delete alert (pass 2: one alert each; never a delete): 0
+L5 grace intake addresses past their end (pass 3: retired, a write, no e-mail): 0
+L6 tenants with held documents past retention and no open alert (pass 3: one alert each): 0
+S1 exports pending past the timeout (EXP-009, no call): 0
+S2 imports parsing past the timeout (IMP-009, no call): 0
+W1 worker starts in the last 60 min (the alert fires at 3): 0
+E1 the outbox by status: held=30
+C tenants: 35
+C founder alerts: 4
+C e-mails: 30
+C scheduled jobs: 35
+C platform-admin rows: 12
+C users with no tenant: 15
+exit 0
+
+
+======================================================================
+2. first_start_due.py, reading at 2026-10-21 16:35:55Z (under grant 1; the stop rule applied to this reading)
+Command: cd apps/api && ./.venv/Scripts/python.exe -I ".../8c5ae8ae-.../scratchpad/first_start_due.py"; echo "exit $?"; ls ~/.fly/bin/; git rev-parse HEAD; git status --short
+After "exit 0": the ls of ~/.fly/bin/, then git rev-parse HEAD. git status --short printed nothing.
+======================================================================
+transaction_read_only: on
+read at 2026-10-21 16:35:55.340377+00 (stale after 10 min)
+D1 waiting, claimable now or inside the window (dispatch pass): 0
+D2 waiting, retry_at after the window (only a probe could send one): 0
+D3 dispatched, not claimed (stuck sweep returns them; a leftover job could claim one): 0
+D4 processing (stuck sweep retries or fails one past the timeout): 0
+D5 provider state (down = the dispatcher sends a probe): up
+D6 waiting on the provider past the limit (stuck sweep: DOC-024 + alert, no call): 0
+D7 dispatcher_status(): last pass, age s, waiting: 2026-10-19 21:13:09.090442+00 | 156166 | 0
+J1 scheduled jobs due inside the window, by type: none
+J2 the earliest pending job's run_at, and how many are pending at all: none | 0
+L1 Stripe cancels owed (pass 0: Stripe calls): 0
+L2 cancelling tenants due inside the window (pass 1: suspend, Stripe, owner e-mail): 0
+L3 pending_deletion tenants by deletion date (UTC): 2026-10-24=1, 2026-10-27=3
+L4 pending_deletion due inside the window with no open ready-to-delete alert (pass 2: one alert each; never a delete): 0
+L5 grace intake addresses past their end (pass 3: retired, a write, no e-mail): 0
+L6 tenants with held documents past retention and no open alert (pass 3: one alert each): 0
+S1 exports pending past the timeout (EXP-009, no call): 0
+S2 imports parsing past the timeout (IMP-009, no call): 0
+W1 worker starts in the last 60 min (the alert fires at 3): 0
+E1 the outbox by status: held=30
+C tenants: 35
+C founder alerts: 4
+C e-mails: 30
+C scheduled jobs: 35
+C platform-admin rows: 12
+C users with no tenant: 15
+exit 0
+fly.exe
+flyctl.exe
+flyctl.exe.old
+wintun.dll
+wintun.dll.old
+e95b095bf5d16a26d2240810d3491c914bdb5ad9
+
+
+======================================================================
+3. Database reading since the deploy, at 2026-10-21 16:42:42Z (after grant 1)
+Command: cd apps/api && ./.venv/Scripts/python.exe -I ".../3d0d9259-.../scratchpad/since_deploy.py"; echo "exit $?"
+This was the script's first version, with SINCE fixed at 2026-10-21 16:36:00+00 and no "since" line. The version in this folder is the later one, which takes SINCE as an argument and prints it; the queries are the same. "documents updated since deploy" failed because documents has no updated_at column; the savepoint caught it and nothing was written.
+Last line: echo.
+======================================================================
+transaction_read_only: on
+read at 2026-10-21 16:42:42.877119+00
+alerts since deploy: 0
+e-mail rows since deploy: 0 (founder address known: True)
+extraction runs since deploy: 0
+documents updated since deploy: NOT READ (ProgrammingError)
+tenants updated since deploy: 0
+worker starts last hour: 1
+dispatcher: 2026-10-21 16:42:15.325361+00 | waiting 0
+C tenants: 35
+C founder alerts: 4
+C e-mails: 30
+C scheduled jobs: 35
+C platform-admin rows: 12
+C users with no tenant: 15
+exit 0
+
+
+======================================================================
+4. flyctl machine stop (grant 2), 2026-10-21 16:52:16.601Z to 16:52:17.752Z
+Command: date -u +%FT%T.%3NZ; ~/.fly/bin/fly.exe machine stop 8655604b9e4058 --app docflow-worker-staging; echo "exit $?"; date -u +%FT%T.%3NZ
+First and last lines: date. "exit 0": echo.
+======================================================================
+2026-10-21T16:52:16.601Z
+Sending kill signal to machine 8655604b9e4058...
+8655604b9e4058 has been successfully stopped
+exit 0
+2026-10-21T16:52:17.752Z
+
+
+======================================================================
+5. Database reading since the stop, at 2026-10-21 16:59:22Z (after grant 2's start)
+Command: cd apps/api && ./.venv/Scripts/python.exe -I ".../3d0d9259-.../scratchpad/since_deploy.py" "2026-10-21 16:52:16+00" 2>&1 | grep -v "documents updated"; echo "exit $?"
+The labels still say "since deploy", but SINCE was 2026-10-21 16:52:16+00, the stop. grep -v removed the "documents updated" line (no updated_at column, as in block 3). "exit 0" is grep's exit code.
+======================================================================
+since 2026-10-21 16:52:16+00
+transaction_read_only: on
+read at 2026-10-21 16:59:22.284264+00
+alerts since deploy: 0
+e-mail rows since deploy: 0 (founder address known: True)
+extraction runs since deploy: 0
+tenants updated since deploy: 0
+worker starts last hour: 2
+dispatcher: 2026-10-21 16:59:15.328981+00 | waiting 0
+C tenants: 35
+C founder alerts: 4
+C e-mails: 30
+C scheduled jobs: 35
+C platform-admin rows: 12
+C users with no tenant: 15
+exit 0
+
+
+======================================================================
+6. flyctl scale count (grant 3), 2026-10-21 17:07:20.143Z to 17:07:32.142Z
+Command: date -u +%FT%T.%3NZ; ~/.fly/bin/fly.exe scale count worker=0 beat=0 --app docflow-worker-staging --yes; echo "exit $?"; date -u +%FT%T.%3NZ
+--yes was added to the granted command; the founder was told only after it ran.
+First and last lines: date. "exit 0": echo.
+======================================================================
+2026-10-21T17:07:20.143Z
+App 'docflow-worker-staging' is going to be scaled according to this plan:
+  -1 machines for group 'worker' on region 'iad' of size 'shared-cpu-1x'
+  -1 machines for group 'beat' on region 'iad' of size 'shared-cpu-1x'
+Executing scale plan
+  Destroyed 2879390f916548 group:beat region:iad size:shared-cpu-1x
+  Destroyed 8655604b9e4058 group:worker region:iad size:shared-cpu-1x
+exit 0
+2026-10-21T17:07:32.142Z
+
+
+======================================================================
+7. flyctl machine list (grant 3), about 2026-10-21 17:07:35Z
+The call printed no time; it ran after the two scale-down log reads that began after 17:07:32.142Z, and before block 8's 17:07:50Z.
+Command, last in the call: ~/.fly/bin/fly.exe machine list --app docflow-worker-staging
+======================================================================
+No machines are available on this app docflow-worker-staging
+
+
+======================================================================
+8. Database reading since 16:36Z, at 2026-10-21 17:07:50Z (after grant 3)
+Command: cd apps/api && ./.venv/Scripts/python.exe -I ".../3d0d9259-.../scratchpad/since_deploy.py" "2026-10-21 16:36:00+00" 2>&1 | grep -v "documents updated"; echo "exit $?"; cd ../.. && git status --short && git rev-parse HEAD
+grep -v removed the "documents updated" line, as in block 5. "exit 0" is grep's exit code. The last line is git rev-parse HEAD; git status --short printed nothing.
+======================================================================
+since 2026-10-21 16:36:00+00
+transaction_read_only: on
+read at 2026-10-21 17:07:50.537795+00
+alerts since deploy: 0
+e-mail rows since deploy: 0 (founder address known: True)
+extraction runs since deploy: 0
+tenants updated since deploy: 0
+worker starts last hour: 2
+dispatcher: 2026-10-21 17:07:15.338565+00 | waiting 0
+C tenants: 35
+C founder alerts: 4
+C e-mails: 30
+C scheduled jobs: 35
+C platform-admin rows: 12
+C users with no tenant: 15
+exit 0
+e95b095bf5d16a26d2240810d3491c914bdb5ad9
+
+
+======================================================================
+Earlier machine lists in this session (not grant 3's), for completeness
+======================================================================
+
+--- 2026-10-21 16:37:12Z, after the deploy (grant 1) ---
+Command: date -u; fly machine list --app docflow-worker-staging; fly machine status 2879390f916548 --app docflow-worker-staging --display-config 2>&1 | grep -i -E "memory|cpu|state|image" | head; fly machine status 8655604b9e4058 ... (same filter)
+The first line is date. The list is unfiltered. The last 8 lines are the two machine status calls through the grep (beat first, then worker).
+
+Wed Oct 21 16:37:12 UTC 2026
+2 machines have been retrieved from app docflow-worker-staging.
+View them in the UI here (https://fly.io/apps/docflow-worker-staging/machines/)
+
+[1mdocflow-worker-staging[0m
+ ID             │ NAME             │ STATE   │ CHECKS │ REGION │ ROLE │ IMAGE                                                        │ IP ADDRESS                       │ VOLUME │ CREATED              │ LAST UPDATED         │ PROCESS GROUP │ SIZE
+ 8655604b9e4058 │ dawn-meadow-3266 │ started │        │ iad    │      │ docflow-worker-staging:deployment-01M5FN3YGFXMT9J8F14838VTPX │ fdaa:cb:76d5:a7b:249:8c17:1499:2 │        │ 2026-10-21T16:36:47Z │ 2026-10-21T16:37:04Z │ worker        │ shared-cpu-1x:1024MB
+ 2879390f916548 │ misty-water-7431 │ started │        │ iad    │      │ docflow-worker-staging:deployment-01M5FN3YGFXMT9J8F14838VTPX │ fdaa:cb:76d5:a7b:6e8:9220:c36a:2 │        │ 2026-10-21T16:36:36Z │ 2026-10-21T16:36:42Z │ beat          │ shared-cpu-1x:256MB
+
+    "cpu_kind": "shared",
+    "cpus": 1,
+    "memory_mb": 256
+  "image": "registry.fly.io/docflow-worker-staging:deployment-01M5FN3YGFXMT9J8F14838VTPX",
+    "cpu_kind": "shared",
+    "cpus": 1,
+    "memory_mb": 1024
+  "image": "registry.fly.io/docflow-worker-staging:deployment-01M5FN3YGFXMT9J8F14838VTPX",
+
+--- just after 2026-10-21 16:52:17Z, during grant 2's stop ---
+Command, after a log read in the same call: fly machine list --app docflow-worker-staging | grep -E "worker|beat"
+The grep kept every line containing "worker" or "beat"; the header line was dropped.
+
+2 machines have been retrieved from app docflow-worker-staging.
+View them in the UI here (https://fly.io/apps/docflow-worker-staging/machines/)
+[1mdocflow-worker-staging[0m
+ 8655604b9e4058 │ dawn-meadow-3266 │ stopping │        │ iad    │      │ docflow-worker-staging:deployment-01M5FN3YGFXMT9J8F14838VTPX │ fdaa:cb:76d5:a7b:249:8c17:1499:2 │        │ 2026-10-21T16:36:47Z │ 2026-10-21T16:52:17Z │ worker        │ shared-cpu-1x:1024MB
+ 2879390f916548 │ misty-water-7431 │ started  │        │ iad    │      │ docflow-worker-staging:deployment-01M5FN3YGFXMT9J8F14838VTPX │ fdaa:cb:76d5:a7b:6e8:9220:c36a:2 │        │ 2026-10-21T16:36:36Z │ 2026-10-21T16:36:42Z │ beat          │ shared-cpu-1x:256MB
+
+The 16:53:00Z list, which shows the worker as "stopped", is already in this folder as raw output: task_bsh788jhz.output.txt.
