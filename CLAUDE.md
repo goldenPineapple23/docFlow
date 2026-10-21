@@ -386,3 +386,9 @@ Sections 0, 3, 7 and 10 above are the prompt's own words and are unchanged. The 
 - A staging suite, a Fly action, or any write to staging starts only after a message from the founder that begins with "Grant" and names the step. A sentence that names what gates a merge, "go", "go as pasted", or a plan that lists the step is not a grant.
 - Read-only commands need no grant: `fly logs`, `fly status`, `fly machine list`, `fly machine status`, and database reads in a read-only transaction. Claude names each one it ran in its next report. `fly ssh console` is not read-only and needs a grant.
 - A command run under a grant is run as the grant gives it. If it must change, a flag included, Claude says what and why before it runs, and waits.
+
+### CLAUDE.md size (founder, 2026-10-21; DECISIONS.md D-215)
+- CLAUDE.md is capped at 28k tokens. CI enforces the matching character limit. It was about 24k when this rule was added.
+- New decisions go in DECISIONS.md. CLAUDE.md gets at most a one-line pointer, and only when the decision must be acted on in every session.
+- Before adding anything to this file, state its size before and after. If the addition would pass the cap, propose what moves out instead and wait for the founder's decision. Never trim, reword, or move Sections 0, 3, 7 or 10 to make room.
+- Every checkpoint summary includes CLAUDE.md's current size.

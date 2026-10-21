@@ -4570,3 +4570,26 @@ The Console's two alert lists render who an alert is about through one component
   - The failure was the reactivate test in item 2, part 3, and changed the design there.
 
 **Related:** D-155 (item 2), D-158, D-203, D-210, D-212, D-213 (items 6, 7); RUNBOOK 1.11, 2.5, 8.1; migrations 0011, 0014, 0017, 0026, 0027, 0028, 0035, 0036; Section 7.15.2 Step 1, 7.15.3, 7.9.
+
+## D-215 — CLAUDE.md capped at 28k tokens, enforced in CI (founder, 2026-10-21)
+
+**Context:** CLAUDE.md is loaded on every turn of every session, and each new founder rule made it longer. `/context` measured it at 24.1k tokens on 2026-10-21 (the copy on the M7 branch, Grants subsection included).
+
+**1. The cap: 28k tokens, enforced as 81,389 characters.**
+- **How the limit was computed:** that same copy is 70,053 characters with LF line endings, as git stores it and CI checks it out (70,441 in the Windows working copy, whose `core.autocrlf` writes CRLF). 70,053 × 28 / 24.1 = 81,389.2, rounded down to 81,389. That ties the limit to the file's real tokens-per-character ratio, not a guess.
+- **How it is counted:** characters, not bytes. The file is read as UTF-8 and CRLF is turned into LF first, so a Windows checkout and CI give the same number.
+- **At this entry:** `main`'s CLAUDE.md with the new subsection is 69,961 characters (~24.1k tokens).
+
+**2. Why a cap, and not a split.** A split into always-loaded and on-demand files was decided against: every rule in CLAUDE.md stays loaded in every session. Instead, new decisions go in DECISIONS.md, and CLAUDE.md gets at most a one-line pointer, only for a decision that must be acted on in every session.
+
+**3. The founder rule:** a new subsection, "CLAUDE.md size", is the last of "Working rules added by the founder", in the founder's words. Sections 0, 3, 7 and 10 and the earlier founder rules are unchanged. An addition that would pass the cap waits for the founder to decide what moves out; Sections 0, 3, 7 and 10 are never trimmed, reworded or moved to make room. Every checkpoint summary states CLAUDE.md's current size.
+
+**4. The CI check:** `scripts/ci/check_claude_md_size.py` (standard library only; the limit is the constant `LIMIT_CHARS`). It prints `CLAUDE.md: <count> / <limit> characters (~<n> k tokens)` and exits non-zero over the limit, naming the founder rule. It runs as the last step of the `core` job, `if: success() || failure()`, so it reports even when an earlier step failed and never hides that step's result. No existing step changed or moved.
+
+**5. Not changed:** no checkpoint-summary template exists to add a line to (`CHECKPOINTS.md` quotes Section 0 rule 3 only), so none was edited; the founder rule's last bullet covers it.
+
+**6. Order with M7 (founder):** this branch is based on `main`. Once M7 (D-214) merges, it is rebased, the Grants subsection is put ahead of "CLAUDE.md size", and the size check is run again before the merge.
+
+**Founder approval:** 2026-10-21.
+
+**Related:** D-191, D-214; `CLAUDE.md` ("CLAUDE.md size"); `scripts/ci/check_claude_md_size.py`; `.github/workflows/ci.yml` (`core`).
