@@ -158,15 +158,17 @@ requires_stage3d_schema = pytest.mark.skipif(
 
 def m7_schema_available() -> bool:
     """True once supabase/migrations/0039_m7_alerts_and_data_api_roles.sql has
-    been applied (the staging-TTL function the rollup calls). CI applies it
-    itself, so these tests never skip there."""
+    been applied (the staging-TTL function the rollup calls). Checked as the
+    worker's login, the only one 0039 lets call it: the default login here is
+    the API's, which it refuses. CI applies 0039 itself, so these tests never
+    skip there."""
     if not database_available():
         return False
-    from docflow_core.db import get_engine
+    from docflow_core.db import engine_for
     from sqlalchemy import text
 
     try:
-        with get_engine().connect() as conn:
+        with engine_for("worker").connect() as conn:
             conn.execute(text("SELECT * FROM public.staging_intakes_past_ttl(36500) LIMIT 0"))
         return True
     except Exception:

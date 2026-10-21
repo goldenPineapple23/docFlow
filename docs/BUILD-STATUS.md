@@ -38,8 +38,8 @@ wording: one PR, before pilots, only if a pilot prospect has more than 50,000 SK
 comes after the fastener rehearsal and never blocks it (D-208). **Staging:** `docflow-parse-staging`
 runs PR B's image (Pillow 13.0.0). `docflow-worker-staging` runs `e95b095`'s image (D-212) with no
 machines; certifi 2026.10.19 reaches it at its next deploy. The API and parse machines are stopped,
-with auto-stop on, and the Healthchecks.io check is paused. The parse gate's evidence waits for the
-founder's word on a scan hit (D-214 item 10).
+with auto-stop on, and the Healthchecks.io check is paused. The parse gate's evidence is in
+`docs/spikes/3c-fly-staging/2026-10-21-sha256-83d911eb/` (D-214 item 10).
 
 **That paragraph is the current state only** (founder, 2026-10-05; D-191). When it changes, the
 paragraph it replaces moves, word for word, to the top of `docs/status-history.md`, which is not
@@ -1471,6 +1471,8 @@ drill; `RUNBOOK.md`; the full UAT plan run and recorded.
   move the tests to a local ES256 key pair, then the founder revokes the legacy secret -- in that order.
 - **Production's Supabase project (founder, 2026-10-21; D-214 item 11):** turn on leaked-password
   protection in Auth, and turn off the Data API in the project settings, since DocFlow never calls it.
+- **Evidence folders (founder, 2026-10-21; D-214 item 11, widened from D-213 item 7):** stop committing
+  internal hostnames and personal identifiers in evidence folders.
 - **Exit:** every test in `docflow-uat-plan.docx` executed; zero open
   Critical/High defects; restore drill succeeded; the Section 12 checklist is
   fully true.

@@ -4462,10 +4462,12 @@ The Console's two alert lists render who an alert is about through one component
     - the foreign-key check from the alert to its e-mail bypasses RLS.
 
   The worker suite tests all three on the real database (item 6).
-- **(3) The `read_all` policies on `tiers` and `setup_fee_presets`** now apply `TO docflow_api, docflow_admin`, the two logins that read those tables in code (the API's tenant pages and the Console). Neither the worker nor the Stripe login reads either table. The Stripe event functions read `tiers` as their owner, which RLS doesn't filter. So anon and authenticated see no row.
+- **(3) The `read_all` policies on `tiers` and `setup_fee_presets`** now apply `TO docflow_tables`. All four DocFlow logins are members of it (0036; confirmed on staging at 20:23:54Z and in CI), so every one reads both tables. anon and authenticated are not members, so they stay outside the policy; with part (5) they also hold no privilege on either table, so the policy is the second layer (founder, 2026-10-21).
+  - **Why not a list of the logins that read them** (as first built, `TO docflow_api, docflow_admin`, the two that read the tables in code). Once (5) revokes every table privilege from anon and authenticated, such a list no longer keeps the Data API out. It only splits DocFlow's own logins, and a login left out of it fails silently. The first push run (item 12) showed that: a worker test runs the Console's reactivate step (`lifecycle.plan_reactivate`) as `docflow_worker`. It `LEFT JOIN`s `tiers`, read no row, and refused with LIFE-004, "no tier on record". In production that function runs only as `docflow_api`, but the next caller might not. The test is left as it is.
 - **(4) The four Advisor functions** (`exports_finished_rows_are_immutable`, `documents_status_guard`, `document_status_transition_allowed`, `users_protect_system_actors`):
   - **`search_path` empty.** The two whose bodies name something are re-created with it schema-qualified: `public.document_status_transition_allowed` in the guard, and `pg_catalog.pg_has_role` and `pg_catalog.pg_class` in the users guard. Operators and built-ins resolve from `pg_catalog`, which Postgres searches first. The other two bodies are unchanged; they get the setting by `ALTER FUNCTION`.
-  - **EXECUTE** is revoked from PUBLIC, anon and authenticated (founder). `document_status_transition_allowed` is granted back to `docflow_api`, `docflow_worker` and `docflow_admin`, the logins that change a document's status (the scripts run as `docflow_admin`). The guard calls it as that login. `docflow_stripe` never changes a status, and now can't.
+  - **EXECUTE** is revoked from PUBLIC, anon and authenticated (founder). `document_status_transition_allowed` is granted back to `docflow_api`, `docflow_worker` and `docflow_admin`, the logins that change a document's status (the scripts run as `docflow_admin`). The guard calls it as that login.
+  - **A deliberate change (founder, 2026-10-21): `docflow_stripe` can no longer change a document's status.** It follows from these EXECUTE grants: the guard calls the transition function as the Stripe login, which may not run it, so the update is refused ("permission denied for function document_status_transition_allowed"). The Stripe webhook never changes a document; until 0039 it could, through PUBLIC. A test pins it.
   - **The three trigger functions** need no grant: Postgres checks EXECUTE on a trigger function when the trigger is created, not when it fires. The tests prove it per login.
   - `service_role` keeps its grants (not named; DocFlow never uses it).
 - **(5) The Data API roles** (founder: "Revoke in 0039"):
@@ -4478,7 +4480,7 @@ The Console's two alert lists render who an alert is about through one component
 - **The reverse,** `supabase/reverse/0039_reverse.sql`, puts every grant, default, policy and function setting back, and the two bodies word for word (their hashes equal staging's and 0027's and 0028's). It drops the function. Alerts already raised stay. Run it only with the code from before 0039.
 - **The grants snapshot,** `scripts/ci/grants_snapshot.py`, is wider than `policy_snapshot.py`. It covers every policy in `public`; every function's definer flag, settings, body hash (CRLF read as LF) and EXECUTE grantees; every table's and sequence's grantees; and `postgres`'s and `supabase_admin`'s default privileges in `public` and in every schema. `policy_snapshot.py` stays as it is, because 0036's two committed states are in its form.
   - **`0039_pre_snapshot.json`:** staging before 0039, read read-only at 20:40:54Z, SHA-256 `b065a7c38b5ef8af0003c3838e50af09d6a1564cfc98967fda725c92edf3f5b2`. A first read at 20:38:27Z hashed function bodies as stored, and staging's bodies carry CRLF (they were pasted into the SQL Editor from a Windows checkout), so they could never equal CI's. The script now reads CRLF as LF, and the second read is the committed one.
-  - **`0039_post_snapshot.json`:** the pre state with exactly the changes `packages/core/tests/test_migration_0039.py` lists by hand, SHA-256 `2f1f62a203bfda9737d5564d3b6e0a70069c576f8198eece591e00b044f43a3a`.
+  - **`0039_post_snapshot.json`:** the pre state with exactly the changes `packages/core/tests/test_migration_0039.py` lists by hand, SHA-256 `bb67bc5ee46580da7a30e38685f203a33748199a840e769309eb077eaaee32e2` (with `read_all` TO `docflow_tables`; the first push carried `2f1f62a2...`, with the two-login list).
   - **CI** fails unless its database shows both states.
 - **The order is the migration first, then the code.** Without 0039, the staging check fails, is logged, and the rollup carries on. RUNBOOK 1.11.
 
@@ -4526,11 +4528,11 @@ The Console's two alert lists render who an alert is about through one component
   - staging: 91 days found, and 89 days, linked and deleted not; the alert raised, deduped, re-raised after an acknowledgement and e-mailed (to a fake address) under the rollup's own policies, with the intake untouched and the prospect never named;
   - a nightly run raising the alerts and a Recompute not; a failing check leaving the run `ok`.
   - The whole-table staging check and the stale-rollup alert are stubbed in the two rollup tests. On docflow-staging they would raise real alerts for real intakes.
-- **API, the real database** (`test_logins_db.py`, +20):
+- **API, the real database** (`test_logins_db.py`, +22):
   - anon and authenticated hold no table or sequence privilege and can execute no function in `public`; `postgres`'s defaults in `public` give them nothing;
   - each Advisor function has an empty `search_path` and exactly its logins;
   - per login, a document's status change runs the state machine (a legal step passes; an illegal one is refused by the guard, not by a grant), and the Stripe login is refused;
-  - `tiers` and `setup_fee_presets` read by the API and Console logins only;
+  - every DocFlow login reads every row of `tiers` and `setup_fee_presets`; anon and authenticated hold no privilege on either, aren't members of `docflow_tables`, and so are outside both `read_all` policies;
   - the staging function the worker's alone, returning ids, times and counts;
   - the rollup flag inserting `rollup_stale` and `staging_ttl_elapsed` on its own login only, and still refused any other type or a tenant id;
   - `staging_intakes_past_ttl(integer)` added to the EXECUTE table; the two `read_all` policies' logins in the flag-policy check.
@@ -4539,21 +4541,32 @@ The Console's two alert lists render who an alert is about through one component
   - core `1086 passed`, plus 1 failed and 3 errors. All four are the live Storage-bucket tests, which the block refuses by design (`ProxyConnectionError`). The run had 1090 tests: CI's 1062 plus the 28 new.
   - web `62 passed`; tsc, eslint, ruff and mypy clean.
   - The worker and API files collect offline (15 and 57).
-- **Expected in CI:** core 1090, worker 268 (253 + 15), API 738 (718 + 20, leftover `+0`), web 79, web-live 3, parse 581 and 427. Plus the two 0039 round-trip steps in the core job: the reverse before 0036's round trip, which compares the whole database with 0036's own post state, and the forward after 0038's.
+- **Expected in CI:** core 1090, worker 268 (253 + 15, none skipped), API 740 (718 + 22, leftover `+0`), web 79, web-live 3, parse 581 and 427. Plus the two 0039 round-trip steps in the core job: the reverse before 0036's round trip, which compares the whole database with 0036's own post state, and the forward after 0038's.
 
 **7. Not run here:** nothing on staging but the read-only reads in item 3, and nothing on Fly. 0039 is applied to staging by the founder after the backup and snapshot at the top of the PR message. Claude then reads the snapshot read-only before and after (RUNBOOK 1.11). Then the three staging suites run, each on its own grant, before the merge.
 
 **8. Left as they are, and why:** `supabase_admin`'s defaults and PUBLIC's global default on new functions (item 2, part 5); `service_role`'s grants; the alerts' constants beyond the new minimum, which already existed and are only now read.
 
-**9. Open:** item 10's evidence folder; carry item 5 (the two thin-margin `test_parse_client.py` tests are measured before PR 7, D-212 item 8).
+**9. Open:** carry item 5 (the two thin-margin `test_parse_client.py` tests are measured before PR 7, D-212 item 8).
 
 **10. PR B's parse Fly gate (RUNBOOK 8.1), run on 2026-10-21 under the founder's grant.**
 - **Deploy:** `b1af531` from a clean tree to `docflow-parse-staging`, 19:32:19Z to 19:34:43Z, exit 0. Image `deployment-01M5FZ6GM647TWWRFE982WWBRW`, `sha256:83d911ebe1d462a871abc0c1b46f6053aa723ce0de511bf36066941086198255`, 214 MB. The deploy left machine `863662ce743978` stopped; `fly machine start` at 19:34:59Z.
 - **Canary:** 5/5 PASS on cgroup v1. The machine was shared-cpu-2x, 2048 MB.
 - **`selftest all` over SSH,** 19:35:37Z to 19:36:57Z: 47 PASS plus S3 INFO (its control), **A-net IPv6 PASS**, B 17. The 48-line summary is identical to 2026-10-18's. The script was delivered base64-encoded into `sh -c` (item 5's plan rule). Its header still says "PR 1b-ii gate", and only its date changed, as planned.
 - **Stop:** auto-stopped at 19:42:17Z (exit 0). The worker app had no machines throughout. Deploy start to stopped: 9 min 59 s. The machine ran 7 min 17 s.
-- **The evidence is not committed yet.** The secret scan (D-213 item 7's three parts) found no secret, but one private value: **the founder's e-mail address**, in Fly's `New SSH session email=...` log line (`06-state-after.txt`, line 33). The same line is already in six committed log files from 2026-10-07 and 2026-10-08 (14 lines). The scan's other hit is the region inside the pooler host name in `run-on-machine.sh`, the same line as in the committed 2026-10-01 and 2026-10-16 scripts. The folder waits on the founder's machine for their word: commit it as captured, or replace the address and say so in a README.
+- **The evidence** is in `docs/spikes/3c-fly-staging/2026-10-21-sha256-83d911eb/`, as captured, with a README.
+  - **The secret scan** (D-213 item 7's three parts) found no secret, but one private value: **the founder's e-mail address**, in Fly's `New SSH session email=...` log line (`06-state-after.txt`, line 33). The scan's other match is the region inside the pooler host name in `run-on-machine.sh`, the same line as in the committed 2026-10-01 and 2026-10-16 scripts.
+  - **The founder's word (2026-10-21):** the address was replaced with `<founder e-mail>`, and the README says so. The scan was run again on the final folder (10 files): no secret, no address. The same log line is already in six committed files from 2026-10-07 and 2026-10-08 (14 lines); they are left as they are.
 
-**11. Phase 6, added (founder, 2026-10-21):** in production's Supabase project, turn on leaked-password protection in Auth, and turn off the Data API in the project settings, since DocFlow never calls it.
+**11. Phase 6, added (founder, 2026-10-21):**
+- In production's Supabase project, turn on leaked-password protection in Auth, and turn off the Data API in the project settings, since DocFlow never calls it.
+- **Widened from D-213 item 7's parked option** (the Upstash host and Fly's `fdaa:` addresses): stop committing internal hostnames and personal identifiers in evidence folders.
+
+**12. The first push, and its fixes.** Push run 39680301902 on `380bf24` (21:37:32Z to 21:42:38Z, attempt 1) was red.
+- **Green:** core, web, web-live and parse. Core's two 0039 round-trip steps matched both committed snapshots.
+- **API, 738 tests, 4 failed:** Claude's document fixture bound one parameter both as a uuid and as text (`AmbiguousParameter`). The hash is now computed in Python. Leftover count `+0`.
+- **Worker, 268 tests, 1 failed and 15 skipped (unapproved):**
+  - The 15 skips were the new rollup-alert tests. Their schema check connected through the default login, the API's, which 0039 rightly refuses the staging function. It now checks as the worker's login.
+  - The failure was the reactivate test in item 2, part 3, and changed the design there.
 
 **Related:** D-155 (item 2), D-158, D-203, D-210, D-212, D-213 (items 6, 7); RUNBOOK 1.11, 2.5, 8.1; migrations 0011, 0014, 0017, 0026, 0027, 0028, 0035, 0036; Section 7.15.2 Step 1, 7.15.3, 7.9.

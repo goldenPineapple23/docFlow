@@ -18,10 +18,13 @@
 --      rollup_enqueue are unchanged (founder, 2026-10-21).
 --
 --   3. The read_all policies on tiers and setup_fee_presets (0011, 0014)
---      apply TO the two logins that read those tables, docflow_api and
---      docflow_admin, instead of every role. anon and authenticated see no
---      row. docflow_stripe and docflow_worker read neither table in code;
---      the Stripe event functions read tiers as their owner.
+--      apply TO docflow_tables instead of every role: all four DocFlow
+--      logins are members of it (0036), so each reads both tables, and anon
+--      and authenticated, who are not, stay outside the policy. With section
+--      5 they also hold no privilege on either table; the policy is the
+--      second layer. Not a list of the logins that read the tables today: a
+--      login left out of such a list reads no row, silently, and a LEFT JOIN
+--      turns that into a missing tier (founder, 2026-10-21; D-214).
 --
 --   4. The four functions Supabase's Security Advisor flags get an empty
 --      search_path, with every function and table they name written with
@@ -85,8 +88,8 @@ alter policy rollup_raise on public.founder_alerts
                 and type in ('rollup_stale', 'staging_ttl_elapsed') and tenant_id is null);
 
 -- ── 3 ────────────────────────────────────────────────────────────────────────
-alter policy read_all on public.tiers to docflow_api, docflow_admin;
-alter policy read_all on public.setup_fee_presets to docflow_api, docflow_admin;
+alter policy read_all on public.tiers to docflow_tables;
+alter policy read_all on public.setup_fee_presets to docflow_tables;
 
 -- ── 4 ────────────────────────────────────────────────────────────────────────
 -- Bodies that name nothing outside pg_catalog: the setting alone.

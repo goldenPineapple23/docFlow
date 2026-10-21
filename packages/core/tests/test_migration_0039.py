@@ -36,7 +36,7 @@ POST = REPO / "supabase" / "reverse" / "0039_post_snapshot.json"
 
 # Changing either committed state is a visible change here too.
 PRE_SHA256 = "b065a7c38b5ef8af0003c3838e50af09d6a1564cfc98967fda725c92edf3f5b2"
-POST_SHA256 = "2f1f62a203bfda9737d5564d3b6e0a70069c576f8198eece591e00b044f43a3a"
+POST_SHA256 = "bb67bc5ee46580da7a30e38685f203a33748199a840e769309eb077eaaee32e2"
 
 # ── The changes, by hand (founder, 2026-10-21) ──────────────────────────────
 DATA_API_ROLES = ("anon", "authenticated")
@@ -53,7 +53,8 @@ ADVISOR_EXECUTE = {
     USERS: ["service_role"],
 }
 EMPTY_SEARCH_PATH = ['search_path=""']
-READ_ALL_LOGINS = ["docflow_admin", "docflow_api"]
+# Every DocFlow login, through the role all four belong to (0036).
+READ_ALL_ROLES = ["docflow_tables"]
 ROLLUP_RAISE_BEFORE = (
     "((current_setting('app.rollup'::text, true) = 'true'::text) AND (type = 'rollup_stale'::text) "
     "AND (tenant_id IS NULL))"
@@ -105,7 +106,7 @@ def expected_post(pre: dict[str, Any]) -> dict[str, Any]:
     post = copy.deepcopy(pre)
     for policy in post["policies"]:
         if policy["name"] == "read_all" and policy["table"] in ("tiers", "setup_fee_presets"):
-            policy["roles"] = READ_ALL_LOGINS
+            policy["roles"] = READ_ALL_ROLES
         if policy["name"] == "rollup_raise" and policy["table"] == "founder_alerts":
             assert policy["with_check"] == ROLLUP_RAISE_BEFORE
             policy["with_check"] = ROLLUP_RAISE_AFTER
@@ -206,8 +207,8 @@ def test_0039_says_exactly_this():
         "grant execute on function public.staging_intakes_past_ttl(integer) to docflow_worker",
         "alter policy rollup_raise on public.founder_alerts with check (current_setting('app.rollup', true) "
         "= 'true' and type in ('rollup_stale', 'staging_ttl_elapsed') and tenant_id is null)",
-        "alter policy read_all on public.tiers to docflow_api, docflow_admin",
-        "alter policy read_all on public.setup_fee_presets to docflow_api, docflow_admin",
+        "alter policy read_all on public.tiers to docflow_tables",
+        "alter policy read_all on public.setup_fee_presets to docflow_tables",
         "alter function public.document_status_transition_allowed(text, text) set search_path = ''",
         "alter function public.exports_finished_rows_are_immutable() set search_path = ''",
         "create or replace function public.documents_status_guard() returns trigger language plpgsql "

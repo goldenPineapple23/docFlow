@@ -935,8 +935,7 @@
    "cmd": "SELECT",
    "name": "read_all",
    "roles": [
-    "docflow_admin",
-    "docflow_api"
+    "docflow_tables"
    ],
    "table": "setup_fee_presets",
    "using": "true",
@@ -1086,8 +1085,7 @@
    "cmd": "SELECT",
    "name": "read_all",
    "roles": [
-    "docflow_admin",
-    "docflow_api"
+    "docflow_tables"
    ],
    "table": "tiers",
    "using": "true",

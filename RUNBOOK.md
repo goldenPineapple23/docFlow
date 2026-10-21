@@ -762,7 +762,8 @@ table or column. It changes who may use what:
 - lets 0017's `rollup_raise` policy also insert `staging_ttl_elapsed` (still
   `TO docflow_worker`, still tenant-less only);
 - gives the `read_all` policies on `tiers` and `setup_fee_presets` a `TO
-  docflow_api, docflow_admin`, so `anon` and `authenticated` see no row;
+  docflow_tables`, so every DocFlow login reads them and `anon` and
+  `authenticated` stay outside the policy;
 - gives the four functions Supabase's Security Advisor flags an empty
   `search_path`, schema-qualifies what they name, revokes EXECUTE from
   `PUBLIC`, `anon` and `authenticated`, and grants
@@ -790,7 +791,7 @@ production. `service_role` keeps its grants.
   Then Claude reads staging read-only with `scripts/ci/grants_snapshot.py`:
   its SHA-256 must equal `supabase/reverse/0039_pre_snapshot.json`'s
   (`b065a7c3...`). Then the migration; then the same read must equal
-  `0039_post_snapshot.json` (`2f1f62a2...`). Then the staging suites, each on
+  `0039_post_snapshot.json` (`bb67bc5e...`). Then the staging suites, each on
   the founder's grant, before the PR merges.
 - **Production follows the same steps** (the standard backup and the
   snapshot, then the migration, then the two SHA-256 checks).

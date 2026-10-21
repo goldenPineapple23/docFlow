@@ -17,13 +17,14 @@ logins:
 - the EXECUTE table, including docflow_api being refused the Stripe event
   function (D-173 closed);
 - migration 0039 (Stage 5, M7; D-214): anon and authenticated hold nothing
-  in public, the two read_all policies serve exactly the logins that read
-  them, and each login still does what it does with the four functions
-  Supabase's Security Advisor flagged.
+  in public, the two read_all policies serve every DocFlow login and neither
+  Data API role, and each login still does what it does with the four
+  functions Supabase's Security Advisor flagged.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -85,11 +86,12 @@ FUNCTION_GRANTS = {
     "staging_intakes_past_ttl(integer)": {"docflow_worker"},
 }
 
-# Policies with no flag that apply TO named logins instead of every role
-# (0039, D-214): only the API and the Console read tiers and setup fees.
+# Policies with no flag that apply TO a role instead of every role (0039,
+# D-214): every DocFlow login reads tiers and setup fees, through
+# docflow_tables, and the Data API roles stay outside the policy.
 NO_FLAG_POLICY_ROLES = {
-    ("tiers", "read_all"): ["docflow_admin", "docflow_api"],
-    ("setup_fee_presets", "read_all"): ["docflow_admin", "docflow_api"],
+    ("tiers", "read_all"): ["docflow_tables"],
+    ("setup_fee_presets", "read_all"): ["docflow_tables"],
 }
 
 
@@ -440,10 +442,15 @@ def pending_document(two_tenants) -> Iterator[tuple[str, str]]:
         session.execute(
             text(
                 "INSERT INTO documents (id, tenant_id, original_filename, storage_path, source, status, "
-                "content_sha256, created_at) VALUES (:id, :t, 'po.txt', :path, 'upload', 'pending', "
-                "encode(sha256(convert_to(:id, 'UTF8')), 'hex'), now())"
+                "content_sha256, created_at) "
+                "VALUES (:id, :t, 'po.txt', :path, 'upload', 'pending', :sha, now())"
             ),
-            {"id": document_id, "t": tenant_id, "path": f"tenants/{tenant_id}/acme-test/po.txt"},
+            {
+                "id": document_id,
+                "t": tenant_id,
+                "path": f"tenants/{tenant_id}/acme-test/po.txt",
+                "sha": hashlib.sha256(document_id.encode("utf-8")).hexdigest(),
+            },
         )
     yield tenant_id, document_id
 
@@ -479,17 +486,46 @@ def test_the_stripe_login_can_no_longer_change_a_documents_status(pending_docume
 
 
 @pytest.mark.parametrize("login", LOGINS)
-def test_tiers_and_setup_fee_presets_are_read_by_the_api_and_the_console_only(login):
-    """0039's read_all TO docflow_api, docflow_admin: those two read every
-    row with no flag at all, as before; the worker and Stripe logins, which
-    read neither table in code, see none (and anon holds no privilege)."""
+def test_every_docflow_login_reads_tiers_and_setup_fee_presets(login):
+    """0039's read_all TO docflow_tables: every login reads every row with no
+    flag at all, as before 0039. A login left out of a list of readers would
+    read none, silently (D-214: the worker's reactivate test found it)."""
+    with platform_session() as session:
+        want = session.execute(
+            text("SELECT (SELECT count(*) FROM tiers), (SELECT count(*) FROM setup_fee_presets)")
+        ).one()
     with _as(login) as conn:
-        tiers = conn.execute(text("SELECT count(*) FROM tiers")).scalar_one()
-        presets = conn.execute(text("SELECT count(*) FROM setup_fee_presets")).scalar_one()
-    if login in ("api", "admin"):
-        assert tiers > 0 and presets > 0, (login, tiers, presets)
-    else:
-        assert (tiers, presets) == (0, 0), login
+        got = conn.execute(
+            text("SELECT (SELECT count(*) FROM tiers), (SELECT count(*) FROM setup_fee_presets)")
+        ).one()
+    assert tuple(got) == tuple(want) and want[0] > 0 and want[1] > 0, (login, tuple(got), tuple(want))
+
+
+@pytest.mark.parametrize("role", DATA_API_ROLES)
+def test_anon_and_authenticated_read_no_row_of_tiers_or_setup_fee_presets(role):
+    """Two layers: neither role holds any privilege on either table, and the
+    read_all policy doesn't apply to it (it isn't a member of docflow_tables),
+    so it would match no row even if a privilege came back."""
+    with platform_session() as session:
+        privileges = session.execute(
+            text(
+                "SELECT t, p FROM unnest(ARRAY['tiers', 'setup_fee_presets']) AS t, "
+                "unnest(CAST(:tab AS text[])) AS p WHERE has_table_privilege(:role, 'public.' || t, p)"
+            ),
+            {"role": role, "tab": _pg_array(TABLE_PRIVILEGES)},
+        ).all()
+        member = session.execute(
+            text("SELECT pg_has_role(:role, 'docflow_tables', 'MEMBER')"), {"role": role}
+        ).scalar_one()
+        policy_roles = session.execute(
+            text(
+                "SELECT DISTINCT unnest(roles)::text FROM pg_policies WHERE schemaname = 'public' "
+                "AND policyname = 'read_all' AND tablename IN ('tiers', 'setup_fee_presets')"
+            )
+        ).scalars().all()
+    assert [tuple(r) for r in privileges] == []
+    assert member is False
+    assert policy_roles == ["docflow_tables"]
 
 
 def test_the_staging_function_answers_the_worker_with_ids_times_and_counts_only():
