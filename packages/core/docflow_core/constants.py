@@ -43,6 +43,11 @@ STRIPE_CLOCK_TOLERANCE_SECONDS = 300
 # ── Alerting and the Console (Section 7.15.3) ───────────────────────────────
 REVIEW_BACKLOG_ALERT_DAYS = 3
 CONFIDENCE_DRIFT_MARGIN = 0.05
+# Confidence drift compares the last 7 complete days with the 30 complete days
+# before them (days 8 to 37). Below this many documents in either window
+# nothing is raised: two orders a week can't show a drift (founder,
+# 2026-10-21; D-214).
+CONFIDENCE_DRIFT_MIN_DOCUMENTS = 20
 ABANDONED_REVIEW_CEILING_MIN = 30
 STUCK_PROCESSING_TIMEOUT_MIN = 30
 # Tries before a document stuck in processing is failed with DOC-022 (D-158).

@@ -114,6 +114,10 @@ ALERT_TYPES: dict[str, str] = {
     # Stage 5, blocker 4 (D-210): the inbound webhook failed on our side for
     # a known tenant. It answered 500, so Postmark sends the e-mail again.
     "intake_failed": "An incoming e-mail couldn't be taken in because of a fault on our side",
+    # Stage 5, M7 (D-214): raised by the nightly rollup (docflow_core.rollup_alerts).
+    "review_backlog": "A tenant's orders have been waiting in review too long",
+    "confidence_drift": "A tenant's extraction confidence has dropped",
+    "staging_ttl_elapsed": "Onboarding files in staging are past their retention period",
 }
 
 # Why a seccomp kill's alert has no syscall number (founder: say so when it

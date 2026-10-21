@@ -156,6 +156,32 @@ requires_stage3d_schema = pytest.mark.skipif(
 )
 
 
+def m7_schema_available() -> bool:
+    """True once supabase/migrations/0039_m7_alerts_and_data_api_roles.sql has
+    been applied (the staging-TTL function the rollup calls). CI applies it
+    itself, so these tests never skip there."""
+    if not database_available():
+        return False
+    from docflow_core.db import get_engine
+    from sqlalchemy import text
+
+    try:
+        with get_engine().connect() as conn:
+            conn.execute(text("SELECT * FROM public.staging_intakes_past_ttl(36500) LIMIT 0"))
+        return True
+    except Exception:
+        return False
+
+
+requires_m7_schema = pytest.mark.skipif(
+    not m7_schema_available(),
+    reason=(
+        "supabase/migrations/0039_m7_alerts_and_data_api_roles.sql has not been applied to this "
+        "database yet."
+    ),
+)
+
+
 @pytest.fixture(autouse=True)
 def _no_real_dispatch_or_provider_state(request, monkeypatch):
     """

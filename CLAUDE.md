@@ -381,3 +381,8 @@ Sections 0, 3, 7 and 10 above are the prompt's own words and are unchanged. The 
 ### Models (founder, 2026-10-08; `DECISIONS.md` D-195)
 - Section 7.1's "Temperature 0" cannot be sent on the extraction call. `claude-sonnet-5` and the three 5.5 models refuse a temperature other than the default (HTTP 400; the 5.5 models were checked live on 2026-10-08), and the Python SDK has no such parameter (D-021). No request sets a temperature. The strict schema and the null-for-missing rule are what hold a value to the page.
 - The founder's model policy of 2026-10-08 is D-195. Once applied it supersedes Section 3's "Extraction model" bullet. No code changes for it before the founder's "go" at the Stage 3 checkpoint.
+
+### Grants (founder, 2026-10-21; DECISIONS.md D-213 item 6)
+- A staging suite, a Fly action, or any write to staging starts only after a message from the founder that begins with "Grant" and names the step. A sentence that names what gates a merge, "go", "go as pasted", or a plan that lists the step is not a grant.
+- Read-only commands need no grant: `fly logs`, `fly status`, `fly machine list`, `fly machine status`, and database reads in a read-only transaction. Claude names each one it ran in its next report. `fly ssh console` is not read-only and needs a grant.
+- A command run under a grant is run as the grant gives it. If it must change, a flag included, Claude says what and why before it runs, and waits.

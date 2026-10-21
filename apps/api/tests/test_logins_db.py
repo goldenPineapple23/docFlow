@@ -15,7 +15,11 @@ logins:
   catalog), and a docflow_api tenant session that sets every flag still sees
   only its own tenant;
 - the EXECUTE table, including docflow_api being refused the Stripe event
-  function (D-173 closed).
+  function (D-173 closed);
+- migration 0039 (Stage 5, M7; D-214): anon and authenticated hold nothing
+  in public, the two read_all policies serve exactly the logins that read
+  them, and each login still does what it does with the four functions
+  Supabase's Security Advisor flagged.
 """
 
 from __future__ import annotations
@@ -56,8 +60,8 @@ FLAG_OWNER = {
     "stripe_webhook": "docflow_stripe",
 }
 
-# The same table as packages/core/tests/test_ci_guards.py, checked here
-# against the live grants.
+# packages/core/tests/test_ci_guards.py's table (0036's grants), plus 0039's
+# staging function, checked here against the live grants.
 FUNCTION_GRANTS = {
     "record_stripe_subscription_event(text, text, timestamptz, text, text, timestamptz, text)": {
         "docflow_stripe"
@@ -77,6 +81,15 @@ FUNCTION_GRANTS = {
     "dispatcher_status()": {"docflow_api", "docflow_worker", "docflow_admin"},
     "provider_state(text)": {"docflow_api", "docflow_worker", "docflow_admin"},
     "worker_starts_last_hour()": {"docflow_api", "docflow_admin"},
+    # 0039 (D-214): the nightly rollup's staging-TTL read.
+    "staging_intakes_past_ttl(integer)": {"docflow_worker"},
+}
+
+# Policies with no flag that apply TO named logins instead of every role
+# (0039, D-214): only the API and the Console read tiers and setup fees.
+NO_FLAG_POLICY_ROLES = {
+    ("tiers", "read_all"): ["docflow_admin", "docflow_api"],
+    ("setup_fee_presets", "read_all"): ["docflow_admin", "docflow_api"],
 }
 
 
@@ -134,8 +147,10 @@ def test_each_login_connects_as_itself_and_is_only_a_member_of_docflow_tables(lo
 
 def test_every_flag_policy_applies_to_exactly_its_login():
     """The catalog half: any policy whose expressions name an app.* flag other
-    than app.tenant_id applies TO exactly that flag's login; every other
-    policy stays open to every role (tenant_isolation, read_all)."""
+    than app.tenant_id applies TO exactly that flag's login; the two read_all
+    policies apply TO the logins in NO_FLAG_POLICY_ROLES (0039); every other
+    policy stays open to every role (tenant_isolation, which needs
+    app.tenant_id, so a Data API caller matches no row)."""
     with platform_session() as session:
         rows = session.execute(
             text(
@@ -149,8 +164,9 @@ def test_every_flag_policy_applies_to_exactly_its_login():
     for table, name, roles, expressions in rows:
         flags = set(re.findall(r"app\.([a-z_]+)", expressions)) - {"tenant_id"}
         if not flags:
-            if list(roles) != ["public"]:
-                wrong.append(f"{table}.{name}: no flag but TO {roles}")
+            want = NO_FLAG_POLICY_ROLES.get((table, name), ["public"])
+            if list(roles) != want:
+                wrong.append(f"{table}.{name}: no flag, TO {list(roles)}, want {want}")
             continue
         flag_policies += 1
         owners = {FLAG_OWNER.get(f, f"<unknown flag app.{f}>") for f in flags}
@@ -197,6 +213,9 @@ def test_an_api_tenant_session_that_sets_every_flag_sees_only_its_own_tenant(two
         ("dispatcher", "model_api_failure", "worker"),
         ("dispatcher", "worker_restarting", "worker"),
         ("intake_refusal", "intake_webhook_refused", "api"),
+        ("rollup", "rollup_stale", "worker"),
+        # 0039 (D-214): the nightly rollup's staging-TTL alert.
+        ("rollup", "staging_ttl_elapsed", "worker"),
     ],
 )
 def test_a_tenant_less_alert_flag_inserts_only_on_its_own_login(flag, alert_type, owner):
@@ -292,6 +311,196 @@ def test_the_three_new_functions_have_an_empty_search_path():
     for name, definer, config in rows:
         assert definer, name
         assert 'search_path=""' in (config or []), (name, config)
+
+
+def test_the_rollup_flag_still_raises_no_other_tenant_less_alert_and_none_with_a_tenant(two_tenants):
+    """0039 widened rollup_raise by one type, no more: on its own login the
+    rollup flag is still refused any other type, and a tenant id."""
+    attempts = [("review_backlog", None), ("staging_ttl_elapsed", two_tenants[0])]
+    for alert_type, tenant_id in attempts:
+        with _as("worker", rollup="true") as conn:
+            nested = conn.begin_nested()
+            try:
+                conn.execute(
+                    text(
+                        "INSERT INTO founder_alerts (id, type, severity, tenant_id, payload) "
+                        "VALUES (:id, :type, 'warning', :tenant, '{}'::jsonb)"
+                    ),
+                    {"id": str(uuid4()), "type": alert_type, "tenant": tenant_id},
+                )
+                allowed = True
+            except Exception:  # noqa: BLE001 -- the refusal is the point
+                allowed = False
+            nested.rollback()
+        assert not allowed, (alert_type, tenant_id)
+
+
+# ── Migration 0039: Supabase's Data API roles (Stage 5, M7; D-214) ─────────
+
+DATA_API_ROLES = ("anon", "authenticated")
+TABLE_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN")
+SEQUENCE_PRIVILEGES = ("SELECT", "UPDATE", "USAGE")
+# The four functions Supabase's Security Advisor flagged -> the DocFlow
+# logins that may EXECUTE each. documents_status_guard calls the first as the
+# login that changes a status; the three trigger functions need no grant
+# (Postgres checks EXECUTE when a trigger is created, not when it fires).
+ADVISOR_FUNCTIONS = {
+    "document_status_transition_allowed(text, text)": {"docflow_api", "docflow_worker", "docflow_admin"},
+    "documents_status_guard()": set(),
+    "exports_finished_rows_are_immutable()": set(),
+    "users_protect_system_actors()": set(),
+}
+
+
+def _pg_array(values: tuple[str, ...]) -> str:
+    return "{" + ",".join(values) + "}"
+
+
+def test_anon_and_authenticated_hold_no_privilege_on_any_table_or_sequence_in_public():
+    with platform_session() as session:
+        checked = session.execute(
+            text(
+                "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')"
+            )
+        ).scalar_one()
+        held = session.execute(
+            text(
+                "SELECT c.relname, r.role, p.privilege "
+                "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "CROSS JOIN unnest(CAST(:roles AS text[])) AS r(role) "
+                "CROSS JOIN LATERAL unnest(CASE WHEN c.relkind = 'S' THEN CAST(:seq AS text[]) "
+                "                               ELSE CAST(:tab AS text[]) END) AS p(privilege) "
+                "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S') "
+                "  AND CASE WHEN c.relkind = 'S' THEN has_sequence_privilege(r.role, c.oid, p.privilege) "
+                "           ELSE has_table_privilege(r.role, c.oid, p.privilege) END"
+            ),
+            {
+                "roles": _pg_array(DATA_API_ROLES),
+                "seq": _pg_array(SEQUENCE_PRIVILEGES),
+                "tab": _pg_array(TABLE_PRIVILEGES),
+            },
+        ).all()
+    assert checked >= 40  # 38 tables and 2 sequences on 2026-10-21
+    assert [tuple(r) for r in held] == []
+
+
+def test_anon_and_authenticated_can_execute_no_function_in_public():
+    with platform_session() as session:
+        callable_ = session.execute(
+            text(
+                "SELECT p.proname, r.role FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                "CROSS JOIN unnest(CAST(:roles AS text[])) AS r(role) "
+                "WHERE n.nspname = 'public' AND has_function_privilege(r.role, p.oid, 'EXECUTE')"
+            ),
+            {"roles": _pg_array(DATA_API_ROLES)},
+        ).all()
+    assert [tuple(r) for r in callable_] == []
+
+
+def test_what_postgres_creates_in_public_later_gives_the_data_api_roles_nothing():
+    with platform_session() as session:
+        granted = session.execute(
+            text(
+                "SELECT d.defaclobjtype, pg_get_userbyid(a.grantee), a.privilege_type "
+                "FROM pg_default_acl d JOIN pg_namespace n ON n.oid = d.defaclnamespace, "
+                "     LATERAL aclexplode(d.defaclacl) a "
+                "WHERE n.nspname = 'public' AND pg_get_userbyid(d.defaclrole) = 'postgres' "
+                "  AND pg_get_userbyid(a.grantee) = ANY(CAST(:roles AS text[]))"
+            ),
+            {"roles": _pg_array(DATA_API_ROLES)},
+        ).all()
+    assert [tuple(r) for r in granted] == []
+
+
+@pytest.mark.parametrize("function", sorted(ADVISOR_FUNCTIONS))
+def test_each_advisor_function_has_an_empty_search_path_and_exactly_its_logins(function):
+    roles = ["docflow_api", "docflow_worker", "docflow_admin", "docflow_stripe", *DATA_API_ROLES]
+    with platform_session() as session:
+        config = session.execute(
+            text("SELECT proconfig FROM pg_proc WHERE oid = CAST(:fn AS regprocedure)"), {"fn": function}
+        ).scalar_one()
+        can = {
+            role
+            for role in roles
+            if session.execute(
+                text("SELECT has_function_privilege(:role, :fn, 'EXECUTE')"), {"role": role, "fn": function}
+            ).scalar_one()
+        }
+    assert 'search_path=""' in (config or []), (function, config)
+    assert can == ADVISOR_FUNCTIONS[function]
+
+
+@pytest.fixture(scope="module")
+def pending_document(two_tenants) -> Iterator[tuple[str, str]]:
+    """One pending document in the first tenant, inserted by the Console's
+    login (the guard's INSERT branch). Removed with the tenant."""
+    tenant_id, document_id = two_tenants[0], str(uuid4())
+    with platform_session() as session:
+        session.execute(
+            text(
+                "INSERT INTO documents (id, tenant_id, original_filename, storage_path, source, status, "
+                "content_sha256, created_at) VALUES (:id, :t, 'po.txt', :path, 'upload', 'pending', "
+                "encode(sha256(convert_to(:id, 'UTF8')), 'hex'), now())"
+            ),
+            {"id": document_id, "t": tenant_id, "path": f"tenants/{tenant_id}/acme-test/po.txt"},
+        )
+    yield tenant_id, document_id
+
+
+@pytest.mark.parametrize("login", ["api", "worker", "admin"])
+def test_each_login_that_changes_a_status_still_runs_the_state_machine(login, pending_document):
+    """documents_status_guard fires on the login's own update and calls
+    document_status_transition_allowed as that login: a legal step passes, an
+    illegal one is still refused by the guard (not by a missing grant)."""
+    tenant_id, document_id = pending_document
+    with _as(login, tenant_id=tenant_id) as conn:
+        moved = conn.execute(
+            text("UPDATE documents SET status = 'processing' WHERE id = :id"), {"id": document_id}
+        ).rowcount
+        assert moved == 1
+        nested = conn.begin_nested()
+        with pytest.raises(Exception) as excinfo:
+            conn.execute(text("UPDATE documents SET status = 'approved' WHERE id = :id"), {"id": document_id})
+        nested.rollback()
+    assert getattr(excinfo.value.orig, "sqlstate", None) == "23514"  # check_violation
+    assert "status processing -> approved is not allowed" in str(excinfo.value)
+
+
+def test_the_stripe_login_can_no_longer_change_a_documents_status(pending_document):
+    """It never does (billing_webhooks touches tenants and its two event
+    functions only); since 0039 the database agrees."""
+    tenant_id, document_id = pending_document
+    with pytest.raises(Exception, match="permission denied for function document_status_transition_allowed"):
+        with _as("stripe", tenant_id=tenant_id) as conn:
+            conn.execute(
+                text("UPDATE documents SET status = 'processing' WHERE id = :id"), {"id": document_id}
+            )
+
+
+@pytest.mark.parametrize("login", LOGINS)
+def test_tiers_and_setup_fee_presets_are_read_by_the_api_and_the_console_only(login):
+    """0039's read_all TO docflow_api, docflow_admin: those two read every
+    row with no flag at all, as before; the worker and Stripe logins, which
+    read neither table in code, see none (and anon holds no privilege)."""
+    with _as(login) as conn:
+        tiers = conn.execute(text("SELECT count(*) FROM tiers")).scalar_one()
+        presets = conn.execute(text("SELECT count(*) FROM setup_fee_presets")).scalar_one()
+    if login in ("api", "admin"):
+        assert tiers > 0 and presets > 0, (login, tiers, presets)
+    else:
+        assert (tiers, presets) == (0, 0), login
+
+
+def test_the_staging_function_answers_the_worker_with_ids_times_and_counts_only():
+    with _as("worker") as conn:
+        result = conn.execute(text("SELECT * FROM staging_intakes_past_ttl(36500)"))
+        columns = list(result.keys())
+        result.all()
+    assert columns == ["intake_id", "created_at", "files"]
+    with pytest.raises(Exception, match="permission denied for function staging_intakes_past_ttl"):
+        with _as("api") as conn:
+            conn.execute(text("SELECT * FROM staging_intakes_past_ttl(36500)"))
 
 
 # ── Start-up checks (3e design, A4 / E2) ────────────────────────────────────

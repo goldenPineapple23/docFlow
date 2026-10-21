@@ -266,6 +266,13 @@ jobs:
       - id: core
         run: pip install --no-deps -e .
       - run: pip install pip-audit
+      # Stage 5, M7 (D-214): 0039 changes policies and grants that 0036's
+      # round trip compares against 0036's committed post-state, so 0039 is
+      # reversed first (against staging's pre-0039 state) and put back after
+      # 0038's round trip, below.
+      - name: Migration 0039 forward state, then reverse (against the committed pre- and post-0039 states)
+        id: roundtrip_0039_reverse
+        run: python "${{ github.workspace }}/scripts/ci/migration_0039_roundtrip.py" reverse
       # Founder's Q5 condition 2 (Stage 3e): the reverse script is tested, not
       # just checked in. Before the logins are turned on, since the reverse
       # drops the roles and forward creates them again.
@@ -295,6 +302,16 @@ jobs:
       - name: Migration 0038 forward -> reverse -> forward
         id: roundtrip_0038
         run: python "${{ github.workspace }}/scripts/ci/migration_0038_roundtrip.py"
+      - name: Migration 0039 forward again (must equal the first forward state)
+        id: roundtrip_0039_forward
+        run: python "${{ github.workspace }}/scripts/ci/migration_0039_roundtrip.py" forward
+      - name: Keep the 0039 forward state CI found
+        if: success() || failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: 0039-forward-state
+          path: packages/core/0039-forward-state.json
+          if-no-files-found: warn
       - name: Turn on the four logins (migration 0036 creates them), as RUNBOOK 10.2 does
         id: app_role
         run: python "${{ github.workspace }}/scripts/ci/create_logins.py"

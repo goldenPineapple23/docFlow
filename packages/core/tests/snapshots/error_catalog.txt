@@ -420,7 +420,7 @@ INT-010 [warning/both] This account isn't accepting new orders
 
 INT-011 [warning/founder] An e-mail couldn't be received
   what+why: A fault in DocFlow stopped an incoming e-mail from being taken in. Nothing from it was saved. Postmark will keep resending it for about 10 hours.
-  next:     Fix the fault named in this alert. If the resends run out first, the e-mail shows as Inbound Error on Postmark's Inbound page. Retry it there once the fix is deployed.
+  next:     Fix the fault named in this alert. If the resends run out first, the e-mail shows as Inbound Error on Postmark's Inbound page. Retry it through Postmark's API (PUT /messages/inbound/{messageid}/retry) once the fix is deployed.
 
 LIFE-001 [warning/founder] This tenant can't be cancelled from here
   what+why: Cancel only applies to an active tenant. This one is already cancelling, suspended, pending deletion or deleted.
