@@ -4,6 +4,31 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-21 (Stage 5's PR 3 and PR A merged; PR B, Pillow 13, built; D-213)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-19, with Stage 5's worker-start PR built:** Phase 5.5, **Stage 5**. **PR 2,
+test hygiene, is merged** (PR #72, `main` is `cdc5c5d`; D-211, with its runs, the parallel proof and
+Nano's connection limits in D-212 item 6): RUNBOOK 1.4's parallel rule stays, and no worker suite
+starts if it would run past 23:20Z (D-212 item 7). **PR 3, the worker-start fix, is built, not
+merged** (D-212; branch `phase55/stage5-worker-start`, a draft PR): both Celery workers start
+without mingle and gossip. No staging suites for it (founder). After CI, the PR's head is deployed
+as the owed worker deploy and proven on Fly; **the proof gates the merge**, and each Fly step
+(deploy, the worker's stop and start, the scale-down) waits for its own grant after the pre-deploy
+report (D-212 item 4). **Next, in order, after PR 3:** M7, D-178, the sweep script, the warnings
+and the 32-byte test secret (with the two thin-margin `test_parse_client.py` tests, D-212 item 8),
+M10 without the model IDs, the 375 px fix, then counting rows before extraction, and the docs PR
+last; INT-011's wording goes into the first of them that touches the core catalog. Then E1 and
+E2a, then demo readiness (D-209). The long catalog commit's test through a public address waits
+until after the worker-start PR; it needs its own grant. The 50,000-row cap and IMP-003's wording:
+one PR, before pilots, only if a pilot prospect has more than 50,000 SKUs. The welding demo comes
+after the fastener rehearsal and never blocks it (D-208). **Staging:** `docflow-parse-staging`
+runs `main`'s image; `docflow-worker-staging` has no machines and is still v10 with the old
+`parse_client`, which must not be started against it (read 2026-10-19 22:25Z: worker no machines,
+API and parse stopped). Its memory is read straight after the deploy creates the machine
+(`fly.toml` says 1 GB, and stays so: D-212 item 5). The API's and the parse machine's auto-stop
+are on, and the Healthchecks.io check is paused.
+
 ## Replaced on 2026-10-19 (Stage 5's PR 2 merged; PR 3, the worker-start fix, built; D-212)
 
 <!-- the paragraph as it stood, starting on the next line -->

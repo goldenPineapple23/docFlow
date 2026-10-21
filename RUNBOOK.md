@@ -1777,7 +1777,7 @@ success and `/fail` goes at once. Passes run every 30 s, so pings land 5:00
 to 5:30 apart, inside the grace.
 
 **Pass marks, tested at the first worker deploy (gate list, 9.2):**
-- stop the worker (`fly scale count worker=0 --app docflow-worker-staging`):
+- stop the worker (`fly scale count worker=0 --app docflow-worker-staging --yes`):
   the Healthchecks.io e-mail within **12 minutes** of the last ping (5 to
   the expected ping, 5 grace, about 1 for e-mail, 1 of slack, since its docs
   don't say how often lateness is evaluated). Record the measured time.
@@ -2061,10 +2061,13 @@ Left off, and why:
 - **The real model reads every document**, the 500 + 1 included. A deployed
   worker has no stand-in for the model.
 - **The Fly worker and beat are stopped at the end of every session**
-  (`fly scale count worker=0 beat=0 --app docflow-worker-staging`), and the
+  (`fly scale count worker=0 beat=0 --app docflow-worker-staging --yes`), and the
   founder pauses the Healthchecks.io check while they are. Two reasons: one
   stack against staging at a time (9.3), and a running dispatcher would
   send the documents the staging test suites create to the real model.
+  The same command is the emergency stop. **`--yes` is required** (founder,
+  2026-10-21; D-213 item 5): without it the command waits for a
+  confirmation, and in a non-interactive session it hangs.
 - **Spend.** The hard limit on model spend is the Anthropic account's
   prepaid balance with auto-reload off (set by the founder; $40.97 on
   2026-10-05). Claude stops the worker and reports when the deploy's total
@@ -2602,7 +2605,7 @@ the cutover** (step 6 removes its URL once the refusal is verified), so
 going back also needs a new one.
 
 1. **Stop the API and the worker.** On Fly, scale each app to zero
-   (`fly scale count 0 --app <app>`); on this machine, stop them.
+   (`fly scale count 0 --app <app> --yes`); on this machine, stop them.
 2. **The founder recreates `docflow_app`, then gives it a new password.**
    The role was dropped on staging on 2026-10-09 (step 7), so it is made
    again first, with its table grants as SETUP.md Step 1.6 made them and

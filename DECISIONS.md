@@ -4311,3 +4311,122 @@ Everything else fails as before: a deadlock (40P01), a serialization failure (40
 - **Before PR 7:** measure their first-request time locally, every outside service blocked, in a quiet run and a run with the CPU busy, and report it against the 2.0 s window. Then propose either removing the dependence on wall time or widening the window. No change before the founder approves.
 
 **Related:** D-196 (step 11, STOP 3), D-197 (item 3), D-199, D-202, D-210 (item 9), D-211; RUNBOOK 1.4, 9.8; `apps/worker/app/run_workers.py`, `apps/worker/app/celery_app.py`.
+
+## D-213 — Stage 5, PR B: Pillow 13.0.0 for the parse service; the records owed since D-212 (founder, 2026-10-21)
+
+**Context:** main's push run 39641911164 on `40435a3` (#73's merge, 2026-10-21 17:13:43Z) failed in five jobs, each only at its dependency-audit step; every test passed. #73's own pull-request run was green on 2026-10-19 on the same code, so the advisory database had changed, not the code (founder: not a flake, no re-run, nothing run locally). The audit output was read from the run's log archive. The founder split the fix into two PRs, both before M7: PR A (#74: certifi and vite) and PR B (this one: Pillow). This PR also carries every record owed since D-212.
+
+**1. What the audit found** (run 39641911164; read from each job's audit step):
+- `certifi` 2026.7.22, PYSEC-2026-4320, fixed in 2026.10.19: core, API and worker. In the API and worker lockfiles; core's CI job installs the worker's. Runtime: the CA bundle under httpx and httpcore.
+- `pillow` 12.3.0, eight advisories (CVE-2026-112395, -112397, -112400, -112404, -112895, -112896, -112897, -112899), each fixed only in 13.0.0: parse. In parse's lockfile. Runtime: the parse service decodes images strangers send.
+- `vite` 8.3.0, GHSA-587h-7wmj-h5pm (high) in its bundled `launch-editor`: web. Dev and test only (vitest, @vitejs/plugin-react); the runtime audit counted 0.
+- Web's other advisories: `braces` passes by its existing exception, and two below high don't fail the job.
+
+**2. PR A (#74), merged.**
+- **The change, lockfiles only:**
+  - `certifi` 2026.7.22 to 2026.10.19, API and worker.
+  - `vite` 8.3.0 to 8.3.3, web; `package.json` unchanged. 8.3.3 is the first vite whose bundled `launch-editor` is 2.14.2, read from the published packages: 8.3.1 and 8.3.2 bundle 2.14.1, and 8.3.3 to 8.3.5 bundle 2.14.2. vitest 5.0.1 and @vitejs/plugin-react 6.1.1 accept `^8`.
+  - vite 8.3.3 needs `rolldown ~1.2.11`, so rolldown and its 15 platform bindings went 1.2.9 to 1.2.11 (the lowest in range; npm's default would have been 1.2.15, published that day), and `@oxc-project/types` 0.150.0 to 0.151.0 (rolldown 1.2.11 pins it). Nothing else moved.
+  - No ignore-list entry.
+  - **Correction to the founder's note:** the registry shows `launch-editor` 2.14.2 published on 2026-10-06 03:12Z, not 2026-10-20. That is how vite 8.3.3 (2026-10-06) carries it.
+- **A one-off exception to the merge bar (founder, 2026-10-21).** CI #434, the pull-request run (39651480125, on `8a5ef53`), and the push run (39650894612) were red in one job only: parse failed only at its dependency-audit step, on the eight Pillow advisories. That is PR B's job. Every parse test passed (581 unit, 427 HTTP, 0 failed). Every required check on `main` was green: api, core, web, worker and web-live; parse service is not one of them. Counts: core 1062, worker 253, API 718 (`+0`), web 76, web-live 3.
+- **The staging suites on `8a5ef53`,** through `scripts/run_suites_parallel.py`, 18:15:25Z to 19:01:45Z:
+  - core `1061 passed, 1 skipped in 154.28s (0:02:34)`
+  - worker `245 passed, 8 skipped in 2390.28s (0:39:50)`
+  - API `717 passed, 1 skipped, 3 deselected, 693 warnings in 2765.92s (0:46:05)`
+  - Six counts `+0` (tenants 35, founder alerts 4, e-mails 30, scheduled jobs 35, platform-admin rows 12, users with no tenant 15).
+  - Database size +180,224 bytes. Peak connections 26, at 18:22:04Z.
+  - **Skip counts.** Worker went from 7 to 8 against D-212 item 6. The new skip is D-212's `test_a_worker_started_without_mingle_and_gossip_still_answers_the_consoles_ping` ("the prefork pool and process groups need Linux"); it runs and passes in CI. Worker's passes went from 244 to 245 with D-212's other new test. The other skips and the API's 693 warnings are the same as on 2026-10-19.
+  - These runs were a process breach (item 6).
+- **Merged:** PR #74, merge commit `9c4286bc5917e9a036c9349a86c1aa8fd9f910e7`, at 2026-10-21 19:08:01Z. Main's push run 39658938406 on `9c4286b` shows the same pattern: the five required jobs green on the first attempt, with the same counts, and parse red only at its audit step.
+
+**3. PR B, this PR: Pillow 12.3.0 to 13.0.0 in `apps/parse/requirements.lock.txt`.** Nothing else changes in the parse service.
+- **`pillow_heif` stays 1.7.0.** It declares `pillow>=11.1.0`, a floor with no ceiling, and so do 1.8.0 and 1.8.1, the latest (PyPI, read 2026-10-21). None names Pillow 13. Every release predates Pillow 13.0.0 (2026-10-16): 1.8.1 is from 2026-10-11. So whether 1.7.0 works with Pillow 13 is shown only by our own tests and the image. Locally, Pillow 13.0.0 imports beside `pillow_heif` 1.7.0 and `register_heif_opener()` runs.
+- **Pillow 13.0.0's release notes** (pillow.readthedocs.io, the 13.0.0 release notes and the deprecations page, read 2026-10-21):
+  - **Removed:** `Image._show`, `ImageCms.ImageCmsProfile.product_name` and `.product_info`, `ExifTags.IFD.Makernote`, `Image.Image.get_child_images()` (moved to `ImageFile`), part of `Image.fromarray`'s `mode`, and saving I-mode images as PNG.
+  - **Changed:** among others, duplicate TIFF tags keep the first value, and `resize()`'s `reducing_gap` now applies to RGBA and LA (and so to `thumbnail()`).
+  - **Python:** 3.10 dropped, 3.11 to 3.15 supported.
+  - **No change** to plugin registration.
+  - **Security:** many fixes in the TIFF, JPEG, PDF, GIF and decompression-bomb paths.
+- **Parse's code against that list:**
+  - No removed API is used.
+  - The image path (`conversion.py` `_frame_to_jpeg`, `documents.py`'s preview) converts every image to RGB before `resize` or `thumbnail`, so the RGBA and LA change doesn't reach it.
+  - The duplicate-TIFF-tag change can only matter for a hostile file with duplicate tags.
+  - The image's Python is Debian trixie's 3.13.
+- **Local runs** (parse's venv, Pillow 13.0.0, every outside service blocked):
+  - ruff and mypy clean.
+  - `578 passed, 3 skipped, 16 warnings in 84.35s (0:01:24)`, which is CI's 581. The three skips are the Linux-only reaper tests.
+  - **The parity tests passed in `exact` mode.** This machine is where `fixtures/baseline.json` was recorded, so the re-encoded TIFF and HEIC pages came out byte-identical. CI compares them by size (`PARITY_REENCODED=size`).
+  - No baseline re-recorded.
+- **CI counts expected:** parse 581 and 427; core 1062, worker 253, API 718 (`+0`), web 76, web-live 3 unchanged; each `0 failed, 0 skipped, 0 unapproved`. With this PR, parse's audit step should be green, and so the whole run.
+- **No staging suites:** parse's code isn't in them, and nothing runs on staging without a grant (item 6).
+- **The parse Fly gate applies:** after a green pull-request run, Claude drafts the plan to deploy parse's image to `docflow-parse-staging`. Nothing runs on Fly without the founder's message containing "grant".
+- No migration.
+
+**4. The D-212 Fly proof, run on 2026-10-21 under three grants.** D-212 item 4 is the design. #73 was then merged as `40435a3` at 17:13:43Z.
+- **Before the deploy:** two `first_start_due.py` readings, read-only (16:33:00Z, and 16:35:55Z under the grant, the one the stop rule applied to). Both read:
+  - 0 documents waiting, dispatched or processing; the provider up
+  - 0 jobs due, 0 Stripe cancels, 0 lifecycle passes due; deletions are due 2026-10-24 (1) and 2026-10-27 (3), outside the window
+  - outbox `held=30` only
+  - six counts 35, 4, 30, 35, 12, 15
+  
+  The stop rule (model calls, Stripe, e-mails to anyone but the founder) read 0.
+- **Grant 1, the deploy:**
+  - **The deploy:** 16:36:08Z to 16:37:05Z, exit 0, with the RUNBOOK command and `--ha=false`. Image `deployment-01M5FN3YGFXMT9J8F14838VTPX` (`sha256:48760780…`).
+  - **Memory:** read straight after the deploy created the machines. Worker 1024 MB, beat 256 MB; as `fly.toml` says, so nothing was resized.
+  - **Login check:** `run_workers: login check passed as docflow_worker` at 16:37:05Z.
+  - **Start 1, not scored:** no task was waiting at either worker's `ready`. From `ready` to the first `Received task`:
+    - dispatch: 5.0 s (16:37:10.242 to 16:37:15.285; beat sends its first dispatch 30 s after it starts)
+    - documents: 4 min 35 s (16:37:10.364 to 16:41:45.300, the first bulk tick)
+  - **Database, 16:42:42Z:** 0 founder alerts, 0 e-mail rows, 0 extraction runs since the deploy; `worker_starts_last_hour` 1.
+- **Grant 2, the stop and start:**
+  - **The stop:** the worker machine alone, at 16:52:16.6Z, with beat running. SIGINT at 16:52:17Z; `Main child exited normally with code: 0` at 16:52:27Z (about 10 s).
+  - **While it was stopped,** beat sent 15 tasks: 12 `dispatch-waiting-documents` on `dispatch`, and the three sweeps on `bulk` at 16:56:45Z.
+  - **The start:** 16:58:28Z, exit 0, after 6 minutes.
+  - **Start 2, the proof:** both readings had a task waiting at `ready`.
+    - documents: `ready` at 16:58:35.655, `run_scheduled_jobs` received at 16:58:35.660, **0.005 s**
+    - dispatch: `ready` at 16:58:35.736, `dispatch` received at 16:58:35.794, **0.058 s**
+    
+    **Both are under 2 s: passed.** The 8.9 s reading before the fix (D-197 item 3) also had a task waiting at `ready`, so the two compare like for like. 11 expired dispatches were discarded; the 16:58:15Z one ran.
+  - **Healthchecks.io** (`docflow-worker-staging_v2`, the founder's reading): down at the end of the stop and up again just after the start, both around 16:58Z. Expected: the ping is throttled to one every 5 minutes, so the last one before the stop was about 16:47Z, and 5 minutes' period plus 5 minutes' grace ran out about a minute before the start. Nothing changes.
+  - **Database, 16:59:22Z:** 0 alerts, 0 e-mails, 0 extraction runs since the stop; `worker_starts_last_hour` 2.
+- **Grant 3, the scale-down:**
+  - **The command:** `fly scale count worker=0 beat=0 --app docflow-worker-staging --yes`, 17:07:20Z to 17:07:32Z, exit 0.
+  - **Worker:** SIGINT 17:07:22Z, SIGTERM 17:07:28Z (from `fly scale count` itself, as in D-197), exit 0 at 17:07:31Z: **9 s**.
+  - **Beat:** exit 0 at 17:07:22Z: **0 s**.
+  - Both are inside the 30 s `kill_timeout`.
+  - **After:** no machines. Database at 17:07:50Z: 0 alerts, 0 e-mails, 0 extraction runs since 16:36Z; dispatcher's last pass 17:07:15Z, 0 waiting; six counts `+0`.
+- **The evidence** is item 7.
+
+**5. `--yes` on the RUNBOOK's scale-down commands (founder, 2026-10-21).**
+- **What happened:** at grant 3, Claude added `--yes` to the granted `fly scale count`. Without it, the command waits for a confirmation that a non-interactive session can't give. The founder: right to add it, wrong to say so only after it ran.
+- **Standing rule:** a change to a granted command is said before it runs.
+- **The RUNBOOK change:** the founder's emergency-stop command had no `--yes` either, so in an emergency it would have hung. RUNBOOK's three scale-to-zero commands now carry `--yes` (9.4's worker stop; 9.7's end-of-session stop, `fly scale count worker=0 beat=0`, which is also the emergency stop; and 10.2's going-back step 1). `apps/worker/fly.toml`'s comment isn't a command one runs from the RUNBOOK, and is unchanged.
+
+**6. A process breach, and a rule (founder, 2026-10-21).**
+- **The breach.** At 18:15:25Z Claude started PR A's three staging suites without a typed grant. The founder's "All three staging suites gate PR A" named what gates the merge; it was not a grant. The founder chose not to stop the run, because a mid-run stop is the bigger risk to staging.
+- **The command:** `run_parallel_staging.ps1`, a copy of the 2026-10-19 parallel-proof wrapper, which ran `apps/api/.venv/Scripts/python scripts/run_suites_parallel.py <a scratchpad folder>`.
+- **The environment:** `DOCFLOW_STAGING_RUN=1`; `SUPABASE_URL=https://supabase.invalid`; Anthropic at `anthropic.invalid` with a dummy key; a dummy Stripe key; `HTTP_PROXY` and `HTTPS_PROXY` at `proxy.invalid:9`; `NO_PROXY` loopback plus the Storage host; `PARSE_SERVICE_URL` unset; the database logins from the root `.env`.
+- **What was unblocked, the same for all three suites:** the staging database, Supabase Storage, and loopback. Only the API suite uses loopback's services: Memurai on 6379 and the dev parse service on 8100.
+- **Paid model calls, machines, e-mails:** no paid model call was possible. No `flyctl` command ran and the suites hold no Fly token. No e-mail was written (30 to 30), and Postmark was unreachable.
+- **Six counts:** read by the runner just before the start (35, 4, 30, 35, 12, 15) and after (the same, `+0`).
+- **Memurai:** checked at 18:14:45Z (Running; `PING` answered `+PONG`).
+- **Results:** item 2.
+- **The rule (founder, standing):** a staging suite, a Fly action, or any write to staging starts only after a message from the founder that contains the word "grant". A sentence that names a gate, "go as pasted", or a plan that lists the step is not a grant. CLAUDE.md is unchanged; the text goes there only on the founder's word.
+
+**7. The evidence folder for item 4: scanned, then committed on the founder's word.**
+- **The files** are copied to a folder on the founder's machine, outside the repository and outside any temporary folder: the deploy log, eleven `flyctl logs --no-tail` captures, five background-command outputs, the two read-only scripts, and one transcript of console output that was never saved to a file (headed "Transcribed from the session on 2026-10-21, not raw command output").
+- **The secret scan:**
+  - **(a) exact match:** every value of 8 characters or more in the root `.env`, the passwords inside its connection strings included, searched for in every file. Only variable names are printed.
+  - **(b) patterns:** Fly tokens, Healthchecks ping URLs, connection strings with a password, Anthropic, Stripe and AWS keys, JWTs, private keys, e-mail addresses, and token headers.
+  - **(c) a read of every distinct line** across the 20 files (381 lines).
+  - **Result:** (a) and (b) found 0. (c) found no secret, but some private values: the Upstash Redis host name (its password masked `**` by Celery), Fly's private `fdaa:` machine addresses, and local Windows paths under the founder's user folder. The first two are already in 9 and 36 tracked files.
+- **The founder's word (2026-10-21):**
+  - The folder goes into `docs/spikes/d212-worker-start-fly-proof/2026-10-21/`, with a README one level up.
+  - The Upstash host and the `fdaa:` addresses stay as captured; stopping that remains a parked option.
+  - In `task_bx8vgfgan.output.txt` and `task_bii1jenrr.output.txt`, the scratchpad's full local path was replaced with `<scratchpad>`, once in each, and the README says so.
+  - The scan was run again on the final folder (21 files, the README included): (a) and (b) found 0, and no local path remains.
+
+**8. Left for M7 (founder):** only the three missing Phase 5 alerts (D-155) and INT-011's wording. Not placed by the founder on 2026-10-21: the RUNBOOK entry for Postmark's inbound retry (2026-10-19, "the same PR" as INT-011's wording). It stays with M7 unless the founder says otherwise.
+
+**Related:** D-155, D-197 (item 3), D-210, D-211, D-212 (items 4, 6); RUNBOOK 1.4, 9.4, 9.7, 9.8, 10.2; `apps/parse/requirements.lock.txt`; `apps/parse/tests/test_parity.py`.
