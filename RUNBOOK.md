@@ -258,8 +258,8 @@ data can fail another suite's test. This happened on 2026-09-26: the API
 suite's `deal7` case failed while the worker suite was running (DECISIONS.md
 D-160).
 
-<!-- parallel-rule:start (D-211: taken out if the parallel proof fails) -->
-**Core, worker and API together, through the runner (D-211).** Serial runs
+**Core, worker and API together, through the runner (D-211; the proof run
+passed on 2026-10-19, D-212 item 6).** Serial runs
 stay allowed and unchanged. From the repository root, in the same
 environment a single staging suite's run would have (only the database and
 Storage reachable, `DOCFLOW_STAGING_RUN=1`, the dev parse service up and
@@ -279,7 +279,15 @@ database's size before and after and the peak of its connections during the
 run. **A failed parallel run is read before anything is re-run:** quote the
 failed test and its cause from its log (1.6), and only then decide whether
 to run again, in parallel or one at a time.
-<!-- parallel-rule:end -->
+
+**No worker suite starts if it would run past 23:20Z (founder, 2026-10-19;
+D-212 item 7),** alone or through the runner. The worker's
+`test_time_limits.py::test_more_than_the_daily_threshold_of_unfinished_exports_raises_one_alert_that_day`
+counts exports from UTC midnight and its alert is deduped per UTC day, so a
+run that crosses 00:00Z (20:00 in New York in summer time, 19:00 in winter)
+can fail at any speed. The worker suite takes about 40 minutes alone and 38
+to 45 through the runner, so in practice none starts after about 22:35Z.
+Read the UTC clock before starting one.
 
 **Every staging run carries `DOCFLOW_STAGING_RUN=1` (D-211).** Each suite's
 conftest refuses to start, before it opens any connection, if a database URL
@@ -2366,9 +2374,11 @@ Three settings follow from that measurement:
   nothing** (four starts of four at the 10 s read; about 1 s at the old
   1 s read): a job already in the queue was received 8.9 s after `ready`.
   Read, not proven, as Celery's start-up neighbour search (mingle) leaving
-  a blocking read open for the poll time. The fix to evaluate is starting
-  the workers without mingle and without gossip: its own PR after Stage
-  3's open work, not built.
+  a blocking read open for the poll time. **Since D-212 both workers start
+  without mingle and without gossip** (`app.run_workers`; heartbeat and
+  remote control stay on). The Fly proof, a waiting message received within
+  2 s of `ready` at a start, gates that PR's merge; its result is in the
+  next PR's records.
 
 **What was owed, as written before those measurements:**
 1. **One idle hour on staging with these settings.** The founder reads

@@ -4,6 +4,31 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-19 (Stage 5's PR 2 merged; PR 3, the worker-start fix, built; D-212)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-19, with Stage 5's test-hygiene PR built:** Phase 5.5, **Stage 5**. **PR 1,
+blocker 4, is merged** (PR #71, `main` is `f1d11e0`; D-210 item 9). **PR 2, test hygiene, is built,
+not merged** (D-211; branch `phase55/stage5-test-hygiene`, a draft PR). Every suite's conftest now
+refuses a database off this machine unless the run carries `DOCFLOW_STAGING_RUN=1`, after two local
+runs reached staging's run lock on 2026-10-19 (an incident, D-211 item 1). The counts and the two
+deletes that could catch another suite's rows are scoped; the tests that touch the database's global
+state hold a shared-state lock; core, worker and API can run together through
+`scripts/run_suites_parallel.py`. No product code. It runs CI, the serial staging suites, then one
+parallel proof; RUNBOOK 1.4's parallel rule stays only if the proof equals the serial results with
+`+0`. **Next, in order:** the worker-start fix with `main`'s worker deploy, M7, D-178, the sweep
+script, the warnings and the 32-byte test secret, M10 without the model IDs, the 375 px fix, then
+counting rows before extraction, and the docs PR last; INT-011's wording goes into the first of them
+that touches the core catalog. Then E1 and E2a, then demo readiness (D-209). The long catalog
+commit's test through a public address waits until after the worker-start PR; it needs its own
+grant. The 50,000-row cap and IMP-003's wording: one PR, before pilots, only if a pilot prospect has
+more than 50,000 SKUs. The welding demo comes after the fastener rehearsal and never blocks it
+(D-208). **Staging:** `docflow-parse-staging` runs `main`'s image;
+`docflow-worker-staging` has no machines and is still v10 with the old `parse_client`, which must
+not be started against it: deploy `main`'s worker first, read the machine's memory (raised to 2 GB;
+`fly.toml` says 1 GB), then start it. The API's and the parse machine's auto-stop are on, and the
+Healthchecks.io check is paused.
+
 ## Replaced on 2026-10-19 (Stage 5's PR 1 merged; PR 2, test hygiene, built; D-211)
 
 <!-- the paragraph as it stood, starting on the next line -->

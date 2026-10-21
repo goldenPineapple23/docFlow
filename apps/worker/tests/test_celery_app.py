@@ -125,6 +125,25 @@ def test_the_document_worker_has_exactly_the_dispatchers_target_and_the_dispatch
         assert "-B" not in argv and "--beat" not in argv
 
 
+def test_both_workers_start_without_mingle_and_gossip_and_keep_heartbeat_and_remote_control():
+    """D-212: about BROKER_POLL_SECONDS of nothing after every start (D-197)
+    is read as mingle. Heartbeat stays: whether to drop it is the founder's
+    open question (RUNBOOK 9.8). Remote control stays: the Console's health
+    strip pings the workers through it."""
+    import tomllib
+    from pathlib import Path
+
+    from app.run_workers import commands
+
+    for name, argv in commands().items():
+        assert "--without-mingle" in argv and "--without-gossip" in argv, name
+        assert "--without-heartbeat" not in argv, name
+    assert celery_app.conf.worker_enable_remote_control is True
+    # Beat sends the schedule; it has no neighbours to search for.
+    config = tomllib.loads((Path(__file__).resolve().parents[1] / "fly.toml").read_text(encoding="utf-8"))
+    assert "--without" not in config["processes"]["beat"]
+
+
 def test_the_fly_worker_runs_exactly_one_beat_and_never_starts_a_second_in_a_deploy():
     """Stage 3d, change C (founder's conditions): beat is its own process
     group; the deploy strategy is rolling, which updates machines in place --
