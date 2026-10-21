@@ -1,0 +1,201 @@
+deploy start 2026-10-21T19:32:19Z head b1af531
+==> Verifying app config
+Validating apps/parse/fly.toml
+[32m✓[0m Configuration is valid
+--> Verified app config
+==> Building image
+Waiting for depot builder...
+
+==> Building image with Depot
+--> build:  (​)
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 4.94kB 0.1s done
+#1 DONE 0.1s
+
+#2 [internal] load metadata for docker.io/library/debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+#2 DONE 0.2s
+
+#3 [ 1/11] FROM docker.io/library/debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+#3 resolve docker.io/library/debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a done
+#3 DONE 0.0s
+
+#4 [internal] load build context
+#4 transferring context: 163.72kB 0.1s
+#4 transferring context: 244.06kB 0.2s done
+#4 DONE 0.2s
+
+#5 [ 2/11] RUN sed -i       -e "s#http://deb.debian.org/debian-security#http://snapshot.debian.org/archive/debian-security/20261001T000000Z#"       -e "s#http://deb.debian.org/debian$#http://snapshot.debian.org/archive/debian/20261001T000000Z#"       /etc/apt/sources.list.d/debian.sources  && ! grep -q deb.debian.org /etc/apt/sources.list.d/debian.sources  && test "$(grep -c "snapshot.debian.org/archive/.*/20261001T000000Z" /etc/apt/sources.list.d/debian.sources)" = 2  && apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=5 update  && apt-get -o Acquire::Retries=5 -y upgrade  && apt-get -o Acquire::Retries=5 install -y --no-install-recommends       python3       python3-venv       python3-seccomp       libseccomp2       util-linux       libreoffice-writer-nogui  && rm -rf /var/lib/apt/lists/*  && command -v unshare && command -v setpriv && command -v soffice
+#5 CACHED
+
+#6 [ 3/11] RUN groupadd --system --gid 10001 parse0  && useradd --system --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin parse0  && groupadd --system --gid 10002 parse1  && useradd --system --uid 10002 --gid 10002 --no-create-home --shell /usr/sbin/nologin parse1  && mkdir -p /work /lohome /opt/parse
+#6 CACHED
+
+#7 [ 4/11] COPY apps/parse/requirements.lock.txt /opt/parse/requirements.lock.txt
+#7 DONE 0.0s
+
+#8 [ 5/11] RUN python3 -m venv --system-site-packages /opt/parse/venv  && /opt/parse/venv/bin/pip install --no-cache-dir --no-deps -r /opt/parse/requirements.lock.txt
+#8 3.998 Collecting cffi==2.1.1 (from -r /opt/parse/requirements.lock.txt (line 1))
+#8 4.162   Downloading cffi-2.1.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.5 kB)
+#8 4.346 Collecting charset-normalizer==3.5.1 (from -r /opt/parse/requirements.lock.txt (line 2))
+#8 4.357   Downloading charset_normalizer-3.5.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (45 kB)
+#8 4.610 Collecting cryptography==50.0.1 (from -r /opt/parse/requirements.lock.txt (line 3))
+#8 4.620   Downloading cryptography-50.0.1-cp311-abi3-manylinux_2_34_x86_64.whl.metadata (4.3 kB)
+#8 4.642 Collecting defusedxml==0.7.1 (from -r /opt/parse/requirements.lock.txt (line 4))
+#8 4.654   Downloading defusedxml-0.7.1-py2.py3-none-any.whl.metadata (32 kB)
+#8 4.676 Collecting et_xmlfile==2.0.0 (from -r /opt/parse/requirements.lock.txt (line 5))
+#8 4.686   Downloading et_xmlfile-2.0.0-py3-none-any.whl.metadata (2.7 kB)
+#8 4.973 Collecting lxml==6.1.3 (from -r /opt/parse/requirements.lock.txt (line 6))
+#8 4.984   Downloading lxml-6.1.3-cp313-cp313-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl.metadata (3.3 kB)
+#8 5.009 Collecting olefile==0.47 (from -r /opt/parse/requirements.lock.txt (line 7))
+#8 5.020   Downloading olefile-0.47-py2.py3-none-any.whl.metadata (9.7 kB)
+#8 5.051 Collecting openpyxl==3.1.5 (from -r /opt/parse/requirements.lock.txt (line 8))
+#8 5.063   Downloading openpyxl-3.1.5-py2.py3-none-any.whl.metadata (2.5 kB)
+#8 5.092 Collecting pdfminer.six==20260107 (from -r /opt/parse/requirements.lock.txt (line 9))
+#8 5.103   Downloading pdfminer_six-20260107-py3-none-any.whl.metadata (4.3 kB)
+#8 5.130 Collecting pdfplumber==0.11.10 (from -r /opt/parse/requirements.lock.txt (line 10))
+#8 5.141   Downloading pdfplumber-0.11.10-py3-none-any.whl.metadata (43 kB)
+#8 5.349 Collecting pillow==13.0.0 (from -r /opt/parse/requirements.lock.txt (line 11))
+#8 5.360   Downloading pillow-13.0.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (9.1 kB)
+#8 5.526 Collecting pillow_heif==1.7.0 (from -r /opt/parse/requirements.lock.txt (line 12))
+#8 5.537   Downloading pillow_heif-1.7.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (9.7 kB)
+#8 5.561 Collecting pycparser==3.0 (from -r /opt/parse/requirements.lock.txt (line 13))
+#8 5.571   Downloading pycparser-3.0-py3-none-any.whl.metadata (8.2 kB)
+#8 5.703 Collecting pypdfium2==5.13.0 (from -r /opt/parse/requirements.lock.txt (line 14))
+#8 5.713   Downloading pypdfium2-5.13.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (66 kB)
+#8 5.738 Collecting python-docx==1.2.0 (from -r /opt/parse/requirements.lock.txt (line 15))
+#8 5.750   Downloading python_docx-1.2.0-py3-none-any.whl.metadata (2.0 kB)
+#8 5.776 Collecting typing_extensions==4.16.0 (from -r /opt/parse/requirements.lock.txt (line 16))
+#8 5.786   Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+#8 5.807 Collecting xlrd==2.0.2 (from -r /opt/parse/requirements.lock.txt (line 17))
+#8 5.817   Downloading xlrd-2.0.2-py2.py3-none-any.whl.metadata (3.5 kB)
+#8 5.854 Downloading cffi-2.1.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (221 kB)
+#8 5.882 Downloading charset_normalizer-3.5.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (250 kB)
+#8 5.911 Downloading cryptography-50.0.1-cp311-abi3-manylinux_2_34_x86_64.whl (4.7 MB)
+#8 9.553    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.7/4.7 MB 1.2 MB/s eta 0:00:00
+#8 9.569 Downloading defusedxml-0.7.1-py2.py3-none-any.whl (25 kB)
+#8 9.593 Downloading et_xmlfile-2.0.0-py3-none-any.whl (18 kB)
+#8 9.615 Downloading lxml-6.1.3-cp313-cp313-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl (5.2 MB)
+#8 16.36    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.2/5.2 MB 765.5 kB/s eta 0:00:00
+#8 16.37 Downloading olefile-0.47-py2.py3-none-any.whl (114 kB)
+#8 16.66 Downloading openpyxl-3.1.5-py2.py3-none-any.whl (250 kB)
+#8 16.95 Downloading pdfminer_six-20260107-py3-none-any.whl (6.6 MB)
+#8 25.03    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.6/6.6 MB 831.0 kB/s eta 0:00:00
+#8 25.04 Downloading pdfplumber-0.11.10-py3-none-any.whl (60 kB)
+#8 25.12 Downloading pillow-13.0.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (7.1 MB)
+#8 31.91    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7.1/7.1 MB 1.1 MB/s eta 0:00:00
+#8 31.92 Downloading pillow_heif-1.7.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (5.6 MB)
+#8 36.32    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.6/5.6 MB 1.3 MB/s eta 0:00:00
+#8 36.33 Downloading pycparser-3.0-py3-none-any.whl (48 kB)
+#8 36.43 Downloading pypdfium2-5.13.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.7 MB)
+#8 38.98    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.7/3.7 MB 1.6 MB/s eta 0:00:00
+#8 38.99 Downloading python_docx-1.2.0-py3-none-any.whl (252 kB)
+#8 39.11 Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+#8 39.16 Downloading xlrd-2.0.2-py2.py3-none-any.whl (96 kB)
+#8 39.29 Installing collected packages: xlrd, typing_extensions, python-docx, pypdfium2, pycparser, pillow_heif, pillow, pdfplumber, pdfminer.six, openpyxl, olefile, lxml, et_xmlfile, defusedxml, cryptography, charset-normalizer, cffi
+#8 41.75 
+#8 41.75 Successfully installed cffi-2.1.1 charset-normalizer-3.5.1 cryptography-50.0.1 defusedxml-0.7.1 et_xmlfile-2.0.0 lxml-6.1.3 olefile-0.47 openpyxl-3.1.5 pdfminer.six-20260107 pdfplumber-0.11.10 pillow-13.0.0 pillow_heif-1.7.0 pycparser-3.0 pypdfium2-5.13.0 python-docx-1.2.0 typing_extensions-4.16.0 xlrd-2.0.2
+#8 DONE 42.3s
+
+#9 [ 6/11] COPY packages/core/pyproject.toml /opt/parse/src/core/pyproject.toml
+#9 DONE 0.0s
+
+#10 [ 7/11] COPY packages/core/docflow_core /opt/parse/src/core/docflow_core
+#10 DONE 0.0s
+
+#11 [ 8/11] COPY apps/parse/pyproject.toml /opt/parse/src/parse/pyproject.toml
+#11 DONE 0.0s
+
+#12 [ 9/11] COPY apps/parse/parse_service /opt/parse/src/parse/parse_service
+#12 DONE 0.0s
+
+#13 [10/11] COPY apps/parse/tests/fixtures/positive/po.doc /opt/parse/selftest/po.doc
+#13 DONE 0.0s
+
+#14 [11/11] RUN /opt/parse/venv/bin/pip install --no-cache-dir --no-deps /opt/parse/src/core /opt/parse/src/parse  && /opt/parse/venv/bin/python -c "import parse_service.server, seccomp, docflow_core.file_types"
+#14 0.520 Processing /opt/parse/src/core
+#14 0.524   Installing build dependencies: started
+#14 1.782   Installing build dependencies: finished with status 'done'
+#14 1.791   Getting requirements to build wheel: started
+#14 2.545   Getting requirements to build wheel: finished with status 'done'
+#14 2.547   Preparing metadata (pyproject.toml): started
+#14 3.151   Preparing metadata (pyproject.toml): finished with status 'done'
+#14 3.155 Processing /opt/parse/src/parse
+#14 3.157   Installing build dependencies: started
+#14 4.103   Installing build dependencies: finished with status 'done'
+#14 4.104   Getting requirements to build wheel: started
+#14 4.702   Getting requirements to build wheel: finished with status 'done'
+#14 4.703   Preparing metadata (pyproject.toml): started
+#14 5.318   Preparing metadata (pyproject.toml): finished with status 'done'
+#14 5.321 Building wheels for collected packages: docflow-core, docflow-parse-service
+#14 5.322   Building wheel for docflow-core (pyproject.toml): started
+#14 6.051   Building wheel for docflow-core (pyproject.toml): finished with status 'done'
+#14 6.052   Created wheel for docflow-core: filename=docflow_core-0.1.0-py3-none-any.whl size=339233 sha256=7c38aa90038e8ecc9882a022865b373db100daa57664dbdeb1df26d6edd66aef
+#14 6.052   Stored in directory: /tmp/pip-ephem-wheel-cache-67ixkq1b/wheels/57/f4/b5/50c96c60015013cd3edaf845fdf83c154161d1244e07920a0f
+#14 6.056   Building wheel for docflow-parse-service (pyproject.toml): started
+#14 6.702   Building wheel for docflow-parse-service (pyproject.toml): finished with status 'done'
+#14 6.704   Created wheel for docflow-parse-service: filename=docflow_parse_service-0.1.0-py3-none-any.whl size=72156 sha256=0f82ca93311a1a4c8377aa7c6b6743cd48ebd65185d34182b441c98c2df77cbc
+#14 6.704   Stored in directory: /tmp/pip-ephem-wheel-cache-67ixkq1b/wheels/9e/b5/aa/8146c38f72da85acbdb5c7f0e277d22a2a7979ee51b2f87180
+#14 6.707 Successfully built docflow-core docflow-parse-service
+#14 6.708 Installing collected packages: docflow-parse-service, docflow-core
+#14 6.993 
+#14 6.997 Successfully installed docflow-core-0.1.0 docflow-parse-service-0.1.0
+#14 DONE 7.3s
+
+#15 exporting to image
+#15 exporting layers
+#15 exporting layers 3.6s done
+#15 exporting manifest sha256:83d911ebe1d462a871abc0c1b46f6053aa723ce0de511bf36066941086198255 done
+#15 exporting config sha256:7fcfb80d9d1f282fe319f103227df228325aa3a3b8c3935e3f517126dfcb8e9d done
+#15 pushing layers for registry.fly.io/docflow-parse-staging:deployment-01M5FZ6GM647TWWRFE982WWBRW@sha256:83d911ebe1d462a871abc0c1b46f6053aa723ce0de511bf36066941086198255
+#15 pushing layer sha256:7fcfb80d9d1f282fe319f103227df228325aa3a3b8c3935e3f517126dfcb8e9d
+#15 pushing layer sha256:70893df5b3d058acaa9c9797b47f97da7da87c37c901a2c455f6907fb6f2773a
+#15 pushing layer sha256:b3297fde76658883a43adea9fa6e97597408d432dce3125b44ac3bd81f72d5b7
+#15 pushing layer sha256:6bf5607868bdf7dddac839d0dc98d4f1c984a92bef65061cc1a7680a6a4c9f98
+#15 pushing layer sha256:a9a5c56c8fb661feaaf730eccf37b0ec82a00a238a672e6385440c8888515a69
+#15 pushing layer sha256:b3df22f859c24f9b609350d66e0303ed17aca9d36a016f06959fb7529825ce2b
+#15 pushing layer sha256:ccf1cb599d26c6bccea4a7c4695067617e2a41b50c74bab593d07a76cdeedb57
+#15 pushing layer sha256:e7fd65a279965cea612b917ef4b23a4ac61239ef8e50e9a4f9a0156c99772a73
+#15 pushing layer sha256:8e288a4c8dae3d7f26ae20993ce6d1fd4c2b7866757dd34864606d5767f80f14 0.0s done
+#15 pushing layer sha256:e90bea08c619870d6e9f462d830865ac805180176fbc7a1c4d2a5a76f79a0470
+#15 pushing layer sha256:b7a02bae258d34eb56abff1418c8efc2edfeff4314149af3a1ca7c15317b31d6
+#15 pushing layer sha256:3590d5dd94f4a5bf335e2db4449b57675728620dc1fc8391a5aa683279e75808
+#15 pushing layer sha256:b3297fde76658883a43adea9fa6e97597408d432dce3125b44ac3bd81f72d5b7 0.5s done
+#15 pushing layer sha256:7fcfb80d9d1f282fe319f103227df228325aa3a3b8c3935e3f517126dfcb8e9d 0.6s done
+#15 pushing layer sha256:a9a5c56c8fb661feaaf730eccf37b0ec82a00a238a672e6385440c8888515a69 0.6s done
+#15 pushing layer sha256:ccf1cb599d26c6bccea4a7c4695067617e2a41b50c74bab593d07a76cdeedb57 0.6s done
+#15 pushing layer sha256:e90bea08c619870d6e9f462d830865ac805180176fbc7a1c4d2a5a76f79a0470 0.6s done
+#15 pushing layer sha256:b7a02bae258d34eb56abff1418c8efc2edfeff4314149af3a1ca7c15317b31d6 0.7s done
+#15 pushing layer sha256:70893df5b3d058acaa9c9797b47f97da7da87c37c901a2c455f6907fb6f2773a 0.7s done
+#15 pushing layer sha256:b3df22f859c24f9b609350d66e0303ed17aca9d36a016f06959fb7529825ce2b 0.7s done
+#15 pushing layer sha256:e7fd65a279965cea612b917ef4b23a4ac61239ef8e50e9a4f9a0156c99772a73 0.7s done
+#15 pushing layer sha256:6bf5607868bdf7dddac839d0dc98d4f1c984a92bef65061cc1a7680a6a4c9f98 1.5s done
+#15 pushing layer sha256:3590d5dd94f4a5bf335e2db4449b57675728620dc1fc8391a5aa683279e75808 3.0s done
+#15 pushing layers for registry.fly.io/docflow-parse-staging:deployment-01M5FZ6GM647TWWRFE982WWBRW@sha256:83d911ebe1d462a871abc0c1b46f6053aa723ce0de511bf36066941086198255 3.0s done
+#15 pushing manifest for registry.fly.io/docflow-parse-staging:deployment-01M5FZ6GM647TWWRFE982WWBRW@sha256:83d911ebe1d462a871abc0c1b46f6053aa723ce0de511bf36066941086198255 0.1s done
+#15 DONE 6.7s
+--> Build Summary:  (​)
+[38;5;252m--> Building image done[0m
+image: registry.fly.io/docflow-parse-staging:deployment-01M5FZ6GM647TWWRFE982WWBRW
+image size: 214 MB
+
+Watch your deployment at https://fly.io/apps/docflow-parse-staging/monitoring
+
+Updating existing machines in 'docflow-parse-staging' with rolling strategy
+> Acquiring lease for 863662ce743978
+> Acquired lease for 863662ce743978
+> Updating machine config for 863662ce743978
+> Updating 863662ce743978 [app]
+> Updated machine config for 863662ce743978
+> Waiting for machine 863662ce743978 to reach a good state
+> Machine 863662ce743978 reached stopped state
+✔ Machine 863662ce743978 is now in a good state
+> Clearing lease for 863662ce743978
+✔ Cleared lease for 863662ce743978
+Checking DNS configuration for docflow-parse-staging.fly.dev
+WARNING: DNS verification failed: read udp 10.100.0.2:54683->8.8.8.8:53: i/o timeout
+Your app is deployed but DNS may take a few minutes to propagate globally
+[33mWARN[0m DNS checks failed: read udp 10.100.0.2:54683->8.8.8.8:53: i/o timeout
+
+
+Your app is deployed but does not have a public or private IP address
+deploy exit 0 at 2026-10-21T19:34:43Z

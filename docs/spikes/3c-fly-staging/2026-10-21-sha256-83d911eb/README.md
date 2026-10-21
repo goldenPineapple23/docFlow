@@ -11,7 +11,7 @@ record is DECISIONS D-214 item 10.
 | Item | Result | File |
 |---|---|---|
 | Before | `docflow-worker-staging` has no machines; the parse machine stopped, shared-cpu-2x 2048 MB, running 1b-ii's image | `00-state-before.txt` |
-| Deploy | 19:32:19Z to 19:34:43Z, exit 0; image `deployment-01M5FZ6GM647TWWRFE982WWBRW`, digest `sha256:83d911ebe1d462a871abc0c1b46f6053aa723ce0de511bf36066941086198255`, 214 MB; the deploy left the machine stopped | `deploy.log` |
+| Deploy | 19:32:19Z to 19:34:43Z, exit 0; image `deployment-01M5FZ6GM647TWWRFE982WWBRW`, digest `sha256:83d911ebe1d462a871abc0c1b46f6053aa723ce0de511bf36066941086198255`, 214 MB; the deploy left the machine stopped | `deploy.txt` |
 | Start | `fly machine start` at 19:34:59.7Z, exit 0 | `01-machine-start.txt` |
 | Canary (boot) | PASS, all 5, cgroup v1 | `02-logs-boot.txt` |
 | Machine | shared-cpu-2x, 2048 MB | `03-machine-status.txt` |
@@ -29,8 +29,9 @@ still reads "PR 1b-ii gate"; only its date was changed for this run.
 
 **Edited before commit (founder, 2026-10-21):** in `06-state-after.txt`,
 line 33, the founder's e-mail address in Fly's `New SSH session email=...`
-log line was replaced with `<founder e-mail>`. Nothing else in the folder
-was changed. The Upstash Redis host name, the Supabase host names and Fly's
+log line was replaced with `<founder e-mail>`. The deploy log, captured as
+`deploy.log`, is saved as `deploy.txt`: the repository ignores `*.log`, so
+the first commit left it out. Nothing else in the folder was changed. The Upstash Redis host name, the Supabase host names and Fly's
 private `fdaa:` addresses are left as captured, as in the earlier gates
 (D-214 item 11 parks stopping that).
 
@@ -44,4 +45,7 @@ private `fdaa:` addresses are left as captured, as in the earlier gates
 No secret was found. The one private value found was the e-mail address
 above. The scan's other match is the region inside the pooler host name in
 `run-on-machine.sh`, the same line as in the committed 2026-10-01 and
-2026-10-16 scripts.
+2026-10-16 scripts. `deploy.txt` was scanned again, all three parts, before
+it was committed: no hit.
+
+The folder holds 10 files, this README included.
