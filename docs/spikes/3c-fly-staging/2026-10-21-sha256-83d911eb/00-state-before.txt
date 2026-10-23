@@ -1,0 +1,9 @@
+2026-10-21T19:32:10Z
+1 machines have been retrieved from app docflow-parse-staging.
+View them in the UI here (​https://fly.io/apps/docflow-parse-staging/machines/)
+
+[1mdocflow-parse-staging[0m
+ ID             │ NAME                  │ STATE   │ CHECKS │ REGION │ ROLE │ IMAGE                                                       │ IP ADDRESS                       │ VOLUME │ CREATED              │ LAST UPDATED         │ PROCESS GROUP │ SIZE                 
+ 863662ce743978 │ patient-mountain-9124 │ stopped │ 0/1    │ iad    │      │ docflow-parse-staging:deployment-01M58PP6C38ZXKS3M266HSNYRW │ fdaa:cb:76d5:a7b:579:9ce4:c6c8:2 │        │ 2026-10-01T19:44:41Z │ 2026-10-18T23:56:22Z │ app           │ shared-cpu-2x:2048MB 
+
+No machines are available on this app docflow-worker-staging

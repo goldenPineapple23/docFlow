@@ -1,0 +1,60 @@
+{
+  "env": {
+    "FLY_PROCESS_GROUP": "app",
+    "PRIMARY_REGION": "iad"
+  },
+  "init": {},
+  "guest": {
+    "cpu_kind": "shared",
+    "cpus": 2,
+    "memory_mb": 2048
+  },
+  "metadata": {
+    "fly_builder_id": "836e6dc7753208",
+    "fly_flyctl_version": "0.4.115",
+    "fly_platform_version": "v2",
+    "fly_process_group": "app",
+    "fly_release_id": "rel_59glz5rq9wxp26k3",
+    "fly_release_version": "6"
+  },
+  "services": [
+    {
+      "protocol": "tcp",
+      "internal_port": 8100,
+      "autostop": true,
+      "autostart": true,
+      "min_machines_running": 0,
+      "ports": [
+        {
+          "port": 80,
+          "handlers": [
+            "http"
+          ]
+        },
+        {
+          "port": 443,
+          "handlers": [
+            "http",
+            "tls"
+          ]
+        }
+      ],
+      "checks": [
+        {
+          "type": "http",
+          "interval": "30s",
+          "timeout": "5s",
+          "grace_period": "1m0s",
+          "method": "GET",
+          "path": "/health"
+        }
+      ],
+      "force_instance_key": null
+    }
+  ],
+  "image": "registry.fly.io/docflow-parse-staging:deployment-01M5FZ6GM647TWWRFE982WWBRW",
+  "restart": {
+    "policy": "on-failure",
+    "max_retries": 10
+  }
+}

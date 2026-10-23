@@ -1,0 +1,22 @@
+[2m2026-10-21T19:33:39Z[0m runner[863662ce743978] [32miad[0m [[34minfo[0m]Pulling container image registry.fly.io/docflow-parse-staging@sha256:83d911ebe1d462a871abc0c1b46f6053aa723ce0de511bf36066941086198255
+[2m2026-10-21T19:33:41Z[0m runner[863662ce743978] [32miad[0m [[34minfo[0m]Successfully prepared image registry.fly.io/docflow-parse-staging@sha256:83d911ebe1d462a871abc0c1b46f6053aa723ce0de511bf36066941086198255 (2.018273052s)
+[2m2026-10-21T19:33:41Z[0m runner[863662ce743978] [32miad[0m [[34minfo[0m]Configuring firecracker
+[2m2026-10-21T19:35:00Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21T19:35:00.520394623 [01M5FZ8XQQVN9XFZ9V72PTTMQA:main] Running Firecracker v1.14.4
+[2m2026-10-21T19:35:00Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21T19:35:00.520515213 [01M5FZ8XQQVN9XFZ9V72PTTMQA:main] Listening on API socket ("/fc.sock").
+[2m2026-10-21T19:35:01Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][32m INFO[0m Starting init (commit: 6172d83)...
+[2m2026-10-21T19:35:01Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][32m INFO[0m Preparing to run: `/opt/parse/venv/bin/python -m parse_service.server` as root
+[2m2026-10-21T19:35:01Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][32m INFO[0m [fly api proxy] listening at /.fly/api
+[2m2026-10-21T19:35:01Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026/10/21 19:35:01 INFO SSH listening listen_address=[fdaa:cb:76d5:a7b:579:9ce4:c6c8:2]:22
+[2m2026-10-21T19:35:01Z[0m runner[863662ce743978] [32miad[0m [[34minfo[0m]Machine started in 908ms
+[2m2026-10-21T19:35:01Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]canary: cgroup v1
+[2m2026-10-21T19:35:01Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]RESULT canary:network PASS -- {"tcp": {"internet-ipv4": "blocked: ENETUNREACH", "internet-ipv6": "blocked: EADDRNOTAVAIL", "fly-dns": "blocked: EADDRNOTAVAIL", "fly-machines-api": "blocked: EADDRNOTAVAIL"}, "dns": {"example.com": "blocked: gaierror"}, "interfaces": ["lo(down)"]}
+[2m2026-10-21T19:35:01Z[0m health[863662ce743978] [32miad[0m [[31merror[0m]Health check 'servicecheck-00-http-8100' on port 8100 has failed. Your app is not responding properly. Services exposed on ports [80, 443] will have intermittent failures until the health check passes.
+[2m2026-10-21T19:35:01Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]RESULT canary:view PASS -- {"uid": 10001, "CapEff": "0000000000000000", "NoNewPrivs": "1", "Seccomp": "2", "fly_dir": [], "sys_dir": [], "writes": {"/": "EROFS", "/usr": "EROFS", "/etc": "EROFS", "/tmp": "writable", "/var/tmp": "writable", "/opt": "EROFS", "/work": "writable", "/lohome": "writable"}}
+[2m2026-10-21T19:35:02Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]RESULT canary:seccomp PASS -- {"unshare(NEWUSER)": "EPERM", "mount": "EPERM", "keyctl": "EPERM", "io_uring_setup": "EPERM", "userfaultfd": "EPERM"}
+[2m2026-10-21T19:35:02Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][    1.590393] Memory cgroup out of memory: Killed process 702 (python) total-vm:145524kB, anon-rss:52480kB, file-rss:5724kB, shmem-rss:0kB, UID:10001 pgtables:172kB oom_score_adj:0
+[2m2026-10-21T19:35:02Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]RESULT canary:memory-cap-kills PASS -- {"outcome": "stopped", "cause": "memory", "swap": {"memory": "67108864", "memory_swap": "67108864", "machine_has_active_swap": false}, "cgroup_version": 1}
+[2m2026-10-21T19:35:03Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]RESULT canary:cpu-quota-set-and-budget-kills PASS -- {"outcome": "stopped", "cause": "cpu", "quota": "100000 100000"}
+[2m2026-10-21T19:35:03Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]canary: PASS
+[2m2026-10-21T19:35:03Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]parse service listening on port 8100
+[2m2026-10-21T19:35:03Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:35:03,867 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:35:04Z[0m health[863662ce743978] [32miad[0m [[34minfo[0m]Health check 'servicecheck-00-http-8100' on port 8100 is now passing.

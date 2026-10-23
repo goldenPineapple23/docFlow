@@ -752,6 +752,56 @@ policy or grant.
   No row is removed. CI runs it, and forward, reverse, forward, on every push
   (`scripts/ci/migration_0038_roundtrip.py`).
 
+### 1.11 Migration 0039: the rollup's alerts, and the Data API roles shut out (Stage 5, M7; D-214)
+
+`supabase/migrations/0039_m7_alerts_and_data_api_roles.sql` changes no row,
+table or column. It changes who may use what:
+
+- adds `staging_intakes_past_ttl(ttl_days)`, a SECURITY DEFINER function only
+  `docflow_worker` may run, for the nightly staging-TTL alert;
+- lets 0017's `rollup_raise` policy also insert `staging_ttl_elapsed` (still
+  `TO docflow_worker`, still tenant-less only);
+- gives the `read_all` policies on `tiers` and `setup_fee_presets` a `TO
+  docflow_tables`, so every DocFlow login reads them and `anon` and
+  `authenticated` stay outside the policy;
+- gives the four functions Supabase's Security Advisor flags an empty
+  `search_path`, schema-qualifies what they name, revokes EXECUTE from
+  `PUBLIC`, `anon` and `authenticated`, and grants
+  `document_status_transition_allowed` back to `docflow_api`,
+  `docflow_worker` and `docflow_admin`;
+- revokes every privilege `anon` and `authenticated` hold on the tables and
+  sequences in `public`, and the defaults that would give them new ones.
+
+**Not changed, and why:** `supabase_admin`'s own default privileges in
+`public` still give `anon` and `authenticated` everything that role creates
+there. `postgres` is not a member of `supabase_admin`, so they can't be
+altered from the SQL Editor (read on staging, 2026-10-21). DocFlow creates
+nothing as `supabase_admin`, and Phase 6 turns the Data API off in
+production. `service_role` keeps its grants.
+
+- **The order is the migration first, then the code.** The code that comes
+  with it calls the new function and raises `staging_ttl_elapsed` from the
+  rollup's session. Without 0039 that one check fails, is logged
+  (`rollup_alert_check_failed check=staging_ttl_elapsed`) and the rollup
+  carries on. Code from before 0039 is unaffected by it.
+- **Staging: the steps are at the top of the PR message.** The standard
+  backup (1.1, 1.2) of `tiers`, `setup_fee_presets` and `founder_alerts` (the
+  three tables whose policies change), and a snapshot of every grant, policy,
+  default and function setting in `public` into `backup_0039.grants_before`.
+  Then Claude reads staging read-only with `scripts/ci/grants_snapshot.py`:
+  its SHA-256 must equal `supabase/reverse/0039_pre_snapshot.json`'s
+  (`b065a7c3...`). Then the migration; then the same read must equal
+  `0039_post_snapshot.json` (`bb67bc5e...`). Then the staging suites, each on
+  the founder's grant, before the PR merges.
+- **Production follows the same steps** (the standard backup and the
+  snapshot, then the migration, then the two SHA-256 checks).
+- **Going back** is `supabase/reverse/0039_reverse.sql`, run only with the
+  code from before 0039 deployed. It puts every grant, policy, default and
+  function body back as 0038 left them (the pre file's state) and drops the
+  function. No row is changed: `staging_ttl_elapsed` alerts already raised
+  stay. CI runs reverse and forward on every push
+  (`scripts/ci/migration_0039_roundtrip.py`), comparing with both files.
+
 ---
 
 ## 2. Inbound email (Postmark)
@@ -963,6 +1013,58 @@ Then set `SUPPORT_EMAIL=support@yourdomain.com` and
 API. The Postmark server API token (`EMAIL_PROVIDER_API_KEY`) waits for the
 automatic-sending stage: while it is blank, every email stays held in the
 Outbox.
+
+### 2.5 When the founder gets an `intake_failed` alert (INT-011): retrying the e-mail (Stage 5, M7; D-210, D-214)
+
+The webhook failed on our side for a known tenant and answered 500, so
+Postmark keeps resending the e-mail for about 10 hours 20 minutes. Nothing
+from it was saved.
+
+1. **Fix the fault the alert names, and deploy the fix.** While the resends
+   last, the next one is taken in normally and nothing else is needed.
+2. **If the resends ran out first,** the e-mail shows as **Inbound Error** on
+   Postmark's **Inbound** page for the server. Open it and note its
+   **MessageID**.
+3. **Open a new PowerShell window with history off** (8.1): run
+   `Set-PSReadLineOption -HistorySaveStyle SaveNothing` before anything else.
+   Every call below needs the **server** token (`EMAIL_PROVIDER_API_KEY`, the
+   inbound server's API token; Postmark: "This request requires server level
+   privileges"), typed into this window only, never pasted into chat:
+
+   ```powershell
+   $h = @{ "Accept" = "application/json"; "X-Postmark-Server-Token" = "<the server token>" }
+   ```
+
+   - **To find the MessageID through the API instead of the page:**
+
+     ```powershell
+     (Invoke-WebRequest -UseBasicParsing -Headers $h -Uri "https://api.postmarkapp.com/messages/inbound?count=50&offset=0&status=failed").Content
+     ```
+
+     Postmark's page names the list in its answer both `Messages` (its
+     table) and `InboundMessages` (its example), so **read `MessageID` from
+     the raw JSON** this prints, rather than relying on either key.
+4. **Retry it:**
+
+   ```powershell
+   Invoke-RestMethod -Method Put -Headers $h -Uri "https://api.postmarkapp.com/messages/inbound/<MessageID>/retry"
+   ```
+
+   This is Postmark's `PUT /messages/inbound/{messageid}/retry`, sent with an
+   empty body as its own example does (`curl -d ""`; Windows PowerShell 5.1
+   drops an empty argument to `curl.exe`, so the PowerShell call is used).
+   Close the window afterwards.
+5. **Read the answer:**
+   - `ErrorCode 0`, "Successfully rescheduled failed message: <id>": done.
+     Postmark sends it to the webhook again.
+   - `701` (PowerShell shows it in the error text): the message was not
+     found, or can't be retried. Check the MessageID, and that it is an
+     Inbound Error.
+   - `703`: Postmark could not retry it. Try again later; if it persists,
+     ask the sender to send the order again.
+   - `10`: the token is wrong or missing (step 3).
+6. **Confirm it arrived:** the order is in the tenant's documents in the
+   Console, or a new INT-011 alert says why it wasn't.
 
 ---
 

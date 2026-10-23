@@ -25,6 +25,7 @@ plain numbers (hours, dollars).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -35,6 +36,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from docflow_core.constants import ABANDONED_REVIEW_CEILING_MIN, ROLLUP_STALE_HOURS
+
+logger = logging.getLogger(__name__)
 
 # Section 7.15.3: "Review time <= 2 min -- Share of documents approved where
 # approved_at - review_started_at <= 120 s".
@@ -342,6 +345,9 @@ def run_rollup(*, days: int = 2, trigger: str = "nightly", tenant_id: UUID | Non
     inside that tenant's own session under the ordinary RLS policies.
 
     Idempotent: re-running a day overwrites it.
+
+    A nightly run then raises the three attention-panel alerts
+    (`docflow_core.rollup_alerts`, D-214); the Console's Recompute does not.
     """
     from docflow_core.db import rollup_session, tenant_session
 
@@ -366,6 +372,7 @@ def run_rollup(*, days: int = 2, trigger: str = "nightly", tenant_id: UUID | Non
         ]
 
     written, first_day, last_day, error = 0, None, None, None
+    alerts_raised: dict[str, int] = {}
     try:
         for tenant in tenants:
             with tenant_session(tenant) as session:
@@ -374,6 +381,8 @@ def run_rollup(*, days: int = 2, trigger: str = "nightly", tenant_id: UUID | Non
                     written += 1
                     first_day = day if first_day is None or day < first_day else first_day
                     last_day = day if last_day is None or day > last_day else last_day
+        if trigger == "nightly":
+            alerts_raised = raise_attention_alerts(tenants)
     except Exception as exc:  # noqa: BLE001 -- recorded on the run, then re-raised
         error = type(exc).__name__
         raise
@@ -406,7 +415,42 @@ def run_rollup(*, days: int = 2, trigger: str = "nightly", tenant_id: UUID | Non
         "rows_written": written,
         "day_from": first_day,
         "day_to": last_day,
+        "alerts_raised": alerts_raised,
     }
+
+
+def raise_attention_alerts(tenants: list[UUID]) -> dict[str, int]:
+    """
+    The nightly run's three alerts (D-214), after every day is written: the
+    backlog and drift checks in each tenant's own session, the staging check
+    in the rollup's. Each check runs in its own transaction, so one that
+    fails -- a database without 0039, a bug of ours -- is logged by type and
+    the others still run; the rollup itself stays `ok`. Returns how many
+    alerts each check wrote.
+    """
+    from docflow_core import rollup_alerts
+    from docflow_core.db import rollup_session, tenant_session
+
+    raised = {"review_backlog": 0, "confidence_drift": 0, "staging_ttl_elapsed": 0}
+    tenant_checks = (
+        ("review_backlog", rollup_alerts.review_backlog),
+        ("confidence_drift", rollup_alerts.confidence_drift),
+    )
+    for tenant in tenants:
+        for name, check in tenant_checks:
+            try:
+                with tenant_session(tenant) as session:
+                    raised[name] += int(check(session, tenant))
+            except Exception as exc:  # noqa: BLE001 -- logged; the rollup and the other checks go on
+                logger.error(
+                    "rollup_alert_check_failed check=%s tenant=%s error=%s", name, tenant, type(exc).__name__
+                )
+    try:
+        with rollup_session() as session:
+            raised["staging_ttl_elapsed"] = rollup_alerts.staging_ttl(session)
+    except Exception as exc:  # noqa: BLE001 -- logged; the rollup and the other checks go on
+        logger.error("rollup_alert_check_failed check=staging_ttl_elapsed error=%s", type(exc).__name__)
+    return raised
 
 
 def _raise_stale_alert(session: Session, previous: dict[str, Any] | None) -> None:

@@ -11,7 +11,7 @@ within 2 s of `ready`: documents 0.005 s, dispatch 0.058 s.**
 | Item | Result | Files |
 |---|---|---|
 | Before the deploy | two read-only `first_start_due.py` readings (16:33:00Z, 16:35:55Z): 0 model calls, 0 Stripe calls, 0 e-mails due; six counts 35, 4, 30, 35, 12, 15 | `transcribed_console_outputs.txt` blocks 1-2, `first_start_due.py` |
-| Grant 1: deploy | 16:36:08Z to 16:37:05Z, exit 0; image `deployment-01M5FN3YGFXMT9J8F14838VTPX`; worker 1024 MB, beat 256 MB | `fly_deploy_e95b095.log`, `deploy_start.txt`, `task_bhopcx08p.output.txt` |
+| Grant 1: deploy | 16:36:08Z to 16:37:05Z, exit 0; image `deployment-01M5FN3YGFXMT9J8F14838VTPX`; worker 1024 MB, beat 256 MB | `fly_deploy_e95b095.txt`, `deploy_start.txt`, `task_bhopcx08p.output.txt` |
 | Start 1 (not scored: no task waiting) | login check 16:37:05Z; dispatch 5.0 s, documents 4 min 35 s from `ready` to the first `Received task` | `logs_read1.txt` to `logs_read4.txt` |
 | Database after the deploy | 0 alerts, 0 e-mails, 0 extraction runs; `worker_starts_last_hour` 1 | `transcribed_console_outputs.txt` block 3, `since_deploy.py` |
 | Grant 2: stop | 16:52:16.6Z; exit 0 at 16:52:27Z (about 10 s) | `logs_stop.txt`, `logs_stop2.txt`, `task_bsh788jhz.output.txt`, block 4 |
@@ -40,3 +40,11 @@ captured.
 - a read of every distinct line
 
 No secret was found.
+
+**Added after #75 (founder, 2026-10-21):** the deploy log, captured as
+`fly_deploy_e95b095.log`, is saved as `fly_deploy_e95b095.txt`. The
+repository ignores `*.log`, so #75's commit left it out. It was scanned
+again, all three parts, before it was committed: no hit.
+
+The folder holds 21 files, this README included: the README and 20 files in
+`2026-10-21/`.

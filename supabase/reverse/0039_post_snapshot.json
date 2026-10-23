@@ -1,0 +1,2107 @@
+{
+ "default_privileges": {
+  "postgres in public: functions": {
+   "service_role": [
+    "EXECUTE"
+   ]
+  },
+  "postgres in public: sequences": {
+   "docflow_tables": [
+    "SELECT",
+    "UPDATE",
+    "USAGE"
+   ],
+   "service_role": [
+    "SELECT",
+    "UPDATE",
+    "USAGE"
+   ]
+  },
+  "postgres in public: tables": {
+   "docflow_tables": [
+    "DELETE",
+    "INSERT",
+    "MAINTAIN",
+    "REFERENCES",
+    "SELECT",
+    "TRIGGER",
+    "TRUNCATE",
+    "UPDATE"
+   ],
+   "service_role": [
+    "DELETE",
+    "INSERT",
+    "MAINTAIN",
+    "REFERENCES",
+    "SELECT",
+    "TRIGGER",
+    "TRUNCATE",
+    "UPDATE"
+   ]
+  },
+  "supabase_admin in public: functions": {
+   "anon": [
+    "EXECUTE"
+   ],
+   "authenticated": [
+    "EXECUTE"
+   ],
+   "service_role": [
+    "EXECUTE"
+   ]
+  },
+  "supabase_admin in public: sequences": {
+   "anon": [
+    "SELECT",
+    "UPDATE",
+    "USAGE"
+   ],
+   "authenticated": [
+    "SELECT",
+    "UPDATE",
+    "USAGE"
+   ],
+   "service_role": [
+    "SELECT",
+    "UPDATE",
+    "USAGE"
+   ]
+  },
+  "supabase_admin in public: tables": {
+   "anon": [
+    "DELETE",
+    "INSERT",
+    "MAINTAIN",
+    "REFERENCES",
+    "SELECT",
+    "TRIGGER",
+    "TRUNCATE",
+    "UPDATE"
+   ],
+   "authenticated": [
+    "DELETE",
+    "INSERT",
+    "MAINTAIN",
+    "REFERENCES",
+    "SELECT",
+    "TRIGGER",
+    "TRUNCATE",
+    "UPDATE"
+   ],
+   "service_role": [
+    "DELETE",
+    "INSERT",
+    "MAINTAIN",
+    "REFERENCES",
+    "SELECT",
+    "TRIGGER",
+    "TRUNCATE",
+    "UPDATE"
+   ]
+  }
+ },
+ "functions": {
+  "clear_dispatched(p_document_id uuid)": {
+   "body_sha256": "72254751cbabf06724438fe35f0b0a6006b27d3f37672628b3e9fa4321f4c2b8",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_worker"
+   ],
+   "security_definer": true
+  },
+  "count_routing_model_failure()": {
+   "body_sha256": "c53e807b8a73561e563fe0220c262330da0e3e8e089e45fc1824de0bb625878a",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_worker"
+   ],
+   "security_definer": true
+  },
+  "dispatch_candidates(p_per_tenant integer)": {
+   "body_sha256": "c3acafbdb3c5253a7cc93fe3dc623ad5e681b37fa328283f3fd9ec2cbbbd5775",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_worker"
+   ],
+   "security_definer": true
+  },
+  "dispatch_unclaimed_age()": {
+   "body_sha256": "6137eeaec1ea11ced630a45e3a1a5977569f32824bffe647aeada466552973b6",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_worker"
+   ],
+   "security_definer": true
+  },
+  "dispatcher_heartbeat()": {
+   "body_sha256": "4566f0576d9e5e8ca7a2c4c35a60cc0ba69b8cf25f7b19ee5d12c71e9b20752b",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_worker"
+   ],
+   "security_definer": true
+  },
+  "dispatcher_status()": {
+   "body_sha256": "4d2119cf162e7d1b5d042c0fa16a6815be2fe1b696e19abfd42bc86df2d484a7",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_admin",
+    "docflow_api",
+    "docflow_worker"
+   ],
+   "security_definer": true
+  },
+  "document_status_transition_allowed(old_status text, new_status text)": {
+   "body_sha256": "d4c65310e9aba47c1b16d01e18539664e75652d4908ed2a3d51778dbb2f91028",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_admin",
+    "docflow_api",
+    "docflow_worker",
+    "service_role"
+   ],
+   "security_definer": false
+  },
+  "documents_status_guard()": {
+   "body_sha256": "c4a500586ea6d6d0e21f56039ba5685c7be4e1b91fff41adb3d137608574cdea",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "service_role"
+   ],
+   "security_definer": false
+  },
+  "exports_finished_rows_are_immutable()": {
+   "body_sha256": "2bcfd87abe5b687f943a45e4c2bc5139a03ee10d9fcac18f7cb674ace037feb1",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "service_role"
+   ],
+   "security_definer": false
+  },
+  "mark_dispatched(p_document_id uuid)": {
+   "body_sha256": "38560b40624211c6634f2d2af763ef8ddcfd030c580eb68d9b285587beda4c8e",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_worker"
+   ],
+   "security_definer": true
+  },
+  "probe_candidate()": {
+   "body_sha256": "2ff89b7c66ee43923bbf89bcda2bb3ffbfcf6517e3f29f9d35d30d8c219d1035",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_worker"
+   ],
+   "security_definer": true
+  },
+  "provider_record_failure(p_provider text, p_cause text, p_error text, p_immediate boolean, p_threshold integer, p_window_min integer)": {
+   "body_sha256": "47670d2f927b4d49d4d6444c7b40444fa7d8fff6d6db8c539727c1139ad0e390",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_worker"
+   ],
+   "security_definer": true
+  },
+  "provider_record_success(p_provider text)": {
+   "body_sha256": "aa258726a3cb2dc75e937ebde5c336b922b699fb9c140e7a286c9f809fc3fbef",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_worker"
+   ],
+   "security_definer": true
+  },
+  "provider_state(p_provider text)": {
+   "body_sha256": "36f2a28f77cd9997a7cc0893a72722ea1dcffe78b517a217262099d392e4201b",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_admin",
+    "docflow_api",
+    "docflow_worker"
+   ],
+   "security_definer": true
+  },
+  "provider_take_probe(p_provider text, p_probe_minutes integer)": {
+   "body_sha256": "c6d12637c7d39f557ff31bd17577a90f110c8abd5b998e17a72264885a087a86",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_worker"
+   ],
+   "security_definer": true
+  },
+  "record_stripe_card_event(p_event_id text, p_event_type text, p_customer_id text, p_kind text, p_amount_cents bigint)": {
+   "body_sha256": "de69be365c849af55c136a2d12adb2d783a74df19bed53b4cf8a4355e9e5e5d7",
+   "config": [
+    "search_path=pg_catalog, public"
+   ],
+   "execute": [
+    "docflow_stripe"
+   ],
+   "security_definer": true
+  },
+  "record_stripe_subscription_event(p_event_id text, p_event_type text, p_event_created timestamp with time zone, p_customer_id text, p_status text, p_period_end timestamp with time zone, p_mode text)": {
+   "body_sha256": "ef9e5961f6621b6d83619f0a94f3f864128de0ee1e4c40c95cad4d25ebc63979",
+   "config": [
+    "search_path=pg_catalog, public"
+   ],
+   "execute": [
+    "docflow_stripe"
+   ],
+   "security_definer": true
+  },
+  "record_worker_start(p_machine text, p_image text)": {
+   "body_sha256": "029f3c6052963cc40fe4088c20fb777f63858e86e9c4913da4494234a01603c9",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_worker"
+   ],
+   "security_definer": true
+  },
+  "staging_intakes_past_ttl(ttl_days integer)": {
+   "body_sha256": "821d9cdf6f633ff84038ae85280898ed6001f45e7f71879e6bf1dc50af27ada0",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_worker"
+   ],
+   "security_definer": true
+  },
+  "users_protect_system_actors()": {
+   "body_sha256": "118cfb4e72e3628accdb9f796a0c4ea045be0136857587418e9a088fe87b2e0f",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "service_role"
+   ],
+   "security_definer": false
+  },
+  "worker_starts_last_hour()": {
+   "body_sha256": "7866da1c5d4ae457e00800fbd98648233cd354e802f687000fbfffa64759e1e0",
+   "config": [
+    "search_path=\"\""
+   ],
+   "execute": [
+    "docflow_admin",
+    "docflow_api"
+   ],
+   "security_definer": true
+  }
+ },
+ "policies": [
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "admin_actions",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "allowance_notices",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "allowance_notices",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "buyer_merge_candidates",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "buyer_merge_candidates",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "buyer_merges",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "buyer_merges",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "buyers",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "buyers",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "catalog_imports",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "catalog_imports",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "document_headers",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "document_headers",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "document_lines",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "document_lines",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "document_snapshots",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "document_snapshots",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "document_warnings",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "document_warnings",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "documents",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "documents",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "INSERT",
+   "name": "dispatcher_enqueue",
+   "roles": [
+    "docflow_worker"
+   ],
+   "table": "email_outbox",
+   "using": null,
+   "with_check": "((current_setting('app.dispatcher'::text, true) = 'true'::text) AND (tenant_id IS NULL) AND (template = 'founder_alert'::text) AND (related_type = 'founder_alert'::text))"
+  },
+  {
+   "cmd": "INSERT",
+   "name": "intake_refusal_enqueue",
+   "roles": [
+    "docflow_api"
+   ],
+   "table": "email_outbox",
+   "using": null,
+   "with_check": "((current_setting('app.intake_refusal'::text, true) = 'true'::text) AND (tenant_id IS NULL) AND (template = 'founder_alert'::text) AND (related_type = 'founder_alert'::text))"
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "email_outbox",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "INSERT",
+   "name": "rollup_enqueue",
+   "roles": [
+    "docflow_worker"
+   ],
+   "table": "email_outbox",
+   "using": null,
+   "with_check": "((current_setting('app.rollup'::text, true) = 'true'::text) AND (tenant_id IS NULL))"
+  },
+  {
+   "cmd": "INSERT",
+   "name": "tenant_enqueue",
+   "roles": [
+    "public"
+   ],
+   "table": "email_outbox",
+   "using": null,
+   "with_check": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)"
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "exports",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "exports",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "extraction_runs",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "extraction_runs",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "INSERT",
+   "name": "dispatcher_raise",
+   "roles": [
+    "docflow_worker"
+   ],
+   "table": "founder_alerts",
+   "using": null,
+   "with_check": "((current_setting('app.dispatcher'::text, true) = 'true'::text) AND (tenant_id IS NULL) AND (type = ANY (ARRAY['model_api_failure'::text, 'model_api_recovered'::text, 'dispatcher_stopped'::text, 'routing_model_failure'::text, 'worker_restarting'::text])))"
+  },
+  {
+   "cmd": "INSERT",
+   "name": "intake_refusal_raise",
+   "roles": [
+    "docflow_api"
+   ],
+   "table": "founder_alerts",
+   "using": null,
+   "with_check": "((current_setting('app.intake_refusal'::text, true) = 'true'::text) AND (type = 'intake_webhook_refused'::text) AND (tenant_id IS NULL))"
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "founder_alerts",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "INSERT",
+   "name": "rollup_raise",
+   "roles": [
+    "docflow_worker"
+   ],
+   "table": "founder_alerts",
+   "using": null,
+   "with_check": "((current_setting('app.rollup'::text, true) = 'true'::text) AND (type = ANY (ARRAY['rollup_stale'::text, 'staging_ttl_elapsed'::text])) AND (tenant_id IS NULL))"
+  },
+  {
+   "cmd": "SELECT",
+   "name": "rollup_read_own",
+   "roles": [
+    "docflow_worker"
+   ],
+   "table": "founder_alerts",
+   "using": "((current_setting('app.rollup'::text, true) = 'true'::text) AND (type = 'rollup_stale'::text))",
+   "with_check": null
+  },
+  {
+   "cmd": "INSERT",
+   "name": "tenant_raise",
+   "roles": [
+    "public"
+   ],
+   "table": "founder_alerts",
+   "using": null,
+   "with_check": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)"
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "import_mapping_templates",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "import_mapping_templates",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "intake_addresses",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "intake_addresses",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "token_lookup",
+   "roles": [
+    "docflow_api"
+   ],
+   "table": "intake_addresses",
+   "using": "(token = NULLIF(current_setting('app.intake_token'::text, true), ''::text))",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "intake_rejections",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "intake_rejections",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "items",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "items",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "learned_rules",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "learned_rules",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "onboarding_intake_files",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "onboarding_intakes",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "platform_admins",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "self_lookup",
+   "roles": [
+    "docflow_api"
+   ],
+   "table": "platform_admins",
+   "using": "(user_id = ( SELECT users.id\n   FROM users\n  WHERE (users.auth_user_id = (NULLIF(current_setting('app.auth_user_id'::text, true), ''::text))::uuid)))",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "raw_emails",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "raw_emails",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "review_actions",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "review_actions",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "rollup_runs",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "rollup_access",
+   "roles": [
+    "docflow_worker"
+   ],
+   "table": "rollup_runs",
+   "using": "(current_setting('app.rollup'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "scheduled_jobs",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "scheduler_access",
+   "roles": [
+    "docflow_worker"
+   ],
+   "table": "scheduled_jobs",
+   "using": "(current_setting('app.scheduler'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "scheduled_jobs",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_write",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "setup_fee_presets",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "name": "read_all",
+   "roles": [
+    "docflow_tables"
+   ],
+   "table": "setup_fee_presets",
+   "using": "true",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "name": "platform_admin_read",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "stripe_webhook_events",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "tenant_daily_metrics",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "tenant_daily_metrics",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "tenant_field_schemas",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "tenant_field_schemas",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "tenant_lifecycle_events",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "tenant_lifecycle_events",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "name": "lifecycle_read",
+   "roles": [
+    "docflow_worker"
+   ],
+   "table": "tenants",
+   "using": "(current_setting('app.lifecycle'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "name": "pipeline_sweep_read",
+   "roles": [
+    "docflow_worker"
+   ],
+   "table": "tenants",
+   "using": "(current_setting('app.pipeline_sweep'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "tenants",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "name": "rollup_read",
+   "roles": [
+    "docflow_worker"
+   ],
+   "table": "tenants",
+   "using": "(current_setting('app.rollup'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "name": "stripe_webhook_lookup",
+   "roles": [
+    "docflow_stripe"
+   ],
+   "table": "tenants",
+   "using": "(current_setting('app.stripe_webhook'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "tenants",
+   "using": "(id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_write",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "tiers",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "SELECT",
+   "name": "read_all",
+   "roles": [
+    "docflow_tables"
+   ],
+   "table": "tiers",
+   "using": "true",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "platform_admin_access",
+   "roles": [
+    "docflow_admin"
+   ],
+   "table": "users",
+   "using": "(current_setting('app.is_platform_admin'::text, true) = 'true'::text)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "self_lookup",
+   "roles": [
+    "docflow_api"
+   ],
+   "table": "users",
+   "using": "(auth_user_id = (NULLIF(current_setting('app.auth_user_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  },
+  {
+   "cmd": "ALL",
+   "name": "tenant_isolation",
+   "roles": [
+    "public"
+   ],
+   "table": "users",
+   "using": "(tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)",
+   "with_check": null
+  }
+ ],
+ "relations": {
+  "admin_actions": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "allowance_notices": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "buyer_merge_candidates": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "buyer_merges": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "buyers": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "catalog_imports": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "dispatcher_state": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "document_headers": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "document_lines": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "document_snapshots": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "document_warnings": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "documents": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "email_outbox": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "exports": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "extraction_runs": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "founder_alerts": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "import_mapping_templates": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "intake_addresses": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "intake_rejections": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "items": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "learned_rules": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "model_provider_state": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "onboarding_intake_files": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "onboarding_intakes": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "platform_admins": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "raw_emails": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "review_actions": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "review_actions_sequence_seq": {
+   "grants": {
+    "docflow_tables": [
+     "SELECT",
+     "UPDATE",
+     "USAGE"
+    ],
+    "service_role": [
+     "SELECT",
+     "UPDATE",
+     "USAGE"
+    ]
+   },
+   "kind": "sequence"
+  },
+  "rollup_runs": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "scheduled_jobs": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "setup_fee_presets": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "stripe_webhook_events": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "tenant_daily_metrics": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "tenant_field_schemas": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "tenant_lifecycle_events": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "tenants": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "tiers": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "users": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "worker_starts": {
+   "grants": {
+    "docflow_tables": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ],
+    "service_role": [
+     "DELETE",
+     "INSERT",
+     "MAINTAIN",
+     "REFERENCES",
+     "SELECT",
+     "TRIGGER",
+     "TRUNCATE",
+     "UPDATE"
+    ]
+   },
+   "kind": "table"
+  },
+  "worker_starts_id_seq": {
+   "grants": {
+    "docflow_tables": [
+     "SELECT",
+     "UPDATE",
+     "USAGE"
+    ],
+    "service_role": [
+     "SELECT",
+     "UPDATE",
+     "USAGE"
+    ]
+   },
+   "kind": "sequence"
+  }
+ }
+}

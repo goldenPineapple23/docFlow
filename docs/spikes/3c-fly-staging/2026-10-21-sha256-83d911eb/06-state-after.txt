@@ -1,0 +1,58 @@
+2026-10-21T19:42:34Z
+1 machines have been retrieved from app docflow-parse-staging.
+View them in the UI here (​https://fly.io/apps/docflow-parse-staging/machines/)
+
+[1mdocflow-parse-staging[0m
+ ID             │ NAME                  │ STATE   │ CHECKS │ REGION │ ROLE │ IMAGE                                                       │ IP ADDRESS                       │ VOLUME │ CREATED              │ LAST UPDATED         │ PROCESS GROUP │ SIZE                 
+ 863662ce743978 │ patient-mountain-9124 │ stopped │ 0/1    │ iad    │      │ docflow-parse-staging:deployment-01M5FZ6GM647TWWRFE982WWBRW │ fdaa:cb:76d5:a7b:579:9ce4:c6c8:2 │        │ 2026-10-01T19:44:41Z │ 2026-10-21T19:42:20Z │ app           │ shared-cpu-2x:2048MB 
+
+No machines are available on this app docflow-worker-staging
+[2m2026-10-21T19:33:39Z[0m runner[863662ce743978] [32miad[0m [[34minfo[0m]Pulling container image registry.fly.io/docflow-parse-staging@sha256:83d911ebe1d462a871abc0c1b46f6053aa723ce0de511bf36066941086198255
+[2m2026-10-21T19:33:41Z[0m runner[863662ce743978] [32miad[0m [[34minfo[0m]Successfully prepared image registry.fly.io/docflow-parse-staging@sha256:83d911ebe1d462a871abc0c1b46f6053aa723ce0de511bf36066941086198255 (2.018273052s)
+[2m2026-10-21T19:33:41Z[0m runner[863662ce743978] [32miad[0m [[34minfo[0m]Configuring firecracker
+[2m2026-10-21T19:35:00Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21T19:35:00.520394623 [01M5FZ8XQQVN9XFZ9V72PTTMQA:main] Running Firecracker v1.14.4
+[2m2026-10-21T19:35:00Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21T19:35:00.520515213 [01M5FZ8XQQVN9XFZ9V72PTTMQA:main] Listening on API socket ("/fc.sock").
+[2m2026-10-21T19:35:01Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][32m INFO[0m Starting init (commit: 6172d83)...
+[2m2026-10-21T19:35:01Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][32m INFO[0m Preparing to run: `/opt/parse/venv/bin/python -m parse_service.server` as root
+[2m2026-10-21T19:35:01Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][32m INFO[0m [fly api proxy] listening at /.fly/api
+[2m2026-10-21T19:35:01Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026/10/21 19:35:01 INFO SSH listening listen_address=[fdaa:cb:76d5:a7b:579:9ce4:c6c8:2]:22
+[2m2026-10-21T19:35:01Z[0m runner[863662ce743978] [32miad[0m [[34minfo[0m]Machine started in 908ms
+[2m2026-10-21T19:35:01Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]canary: cgroup v1
+[2m2026-10-21T19:35:01Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]RESULT canary:network PASS -- {"tcp": {"internet-ipv4": "blocked: ENETUNREACH", "internet-ipv6": "blocked: EADDRNOTAVAIL", "fly-dns": "blocked: EADDRNOTAVAIL", "fly-machines-api": "blocked: EADDRNOTAVAIL"}, "dns": {"example.com": "blocked: gaierror"}, "interfaces": ["lo(down)"]}
+[2m2026-10-21T19:35:01Z[0m health[863662ce743978] [32miad[0m [[31merror[0m]Health check 'servicecheck-00-http-8100' on port 8100 has failed. Your app is not responding properly. Services exposed on ports [80, 443] will have intermittent failures until the health check passes.
+[2m2026-10-21T19:35:01Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]RESULT canary:view PASS -- {"uid": 10001, "CapEff": "0000000000000000", "NoNewPrivs": "1", "Seccomp": "2", "fly_dir": [], "sys_dir": [], "writes": {"/": "EROFS", "/usr": "EROFS", "/etc": "EROFS", "/tmp": "writable", "/var/tmp": "writable", "/opt": "EROFS", "/work": "writable", "/lohome": "writable"}}
+[2m2026-10-21T19:35:02Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]RESULT canary:seccomp PASS -- {"unshare(NEWUSER)": "EPERM", "mount": "EPERM", "keyctl": "EPERM", "io_uring_setup": "EPERM", "userfaultfd": "EPERM"}
+[2m2026-10-21T19:35:02Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][    1.590393] Memory cgroup out of memory: Killed process 702 (python) total-vm:145524kB, anon-rss:52480kB, file-rss:5724kB, shmem-rss:0kB, UID:10001 pgtables:172kB oom_score_adj:0
+[2m2026-10-21T19:35:02Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]RESULT canary:memory-cap-kills PASS -- {"outcome": "stopped", "cause": "memory", "swap": {"memory": "67108864", "memory_swap": "67108864", "machine_has_active_swap": false}, "cgroup_version": 1}
+[2m2026-10-21T19:35:03Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]RESULT canary:cpu-quota-set-and-budget-kills PASS -- {"outcome": "stopped", "cause": "cpu", "quota": "100000 100000"}
+[2m2026-10-21T19:35:03Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]canary: PASS
+[2m2026-10-21T19:35:03Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]parse service listening on port 8100
+[2m2026-10-21T19:35:03Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:35:03,867 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:35:04Z[0m health[863662ce743978] [32miad[0m [[34minfo[0m]Health check 'servicecheck-00-http-8100' on port 8100 is now passing.
+[2m2026-10-21T19:35:33Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:35:33,871 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:35:37Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026/10/21 19:35:37 INFO New SSH session email=<founder e-mail> verified=true
+[2m2026-10-21T19:35:38Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][   37.434284] Memory cgroup out of memory: Killed process 775 (python) total-vm:145524kB, anon-rss:52480kB, file-rss:5736kB, shmem-rss:0kB, UID:10001 pgtables:172kB oom_score_adj:0
+[2m2026-10-21T19:35:53Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][   53.211798] Memory cgroup out of memory: Killed process 976 (python) total-vm:424052kB, anon-rss:248704kB, file-rss:5748kB, shmem-rss:0kB, UID:10001 pgtables:548kB oom_score_adj:0
+[2m2026-10-21T19:35:55Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][   55.075270] Memory cgroup out of memory: Killed process 1001 (python) total-vm:137332kB, anon-rss:85248kB, file-rss:5724kB, shmem-rss:0kB, UID:10001 pgtables:228kB oom_score_adj:0
+[2m2026-10-21T19:35:55Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][   55.099121] Memory cgroup out of memory: Killed process 1003 (python) total-vm:137332kB, anon-rss:94848kB, file-rss:5692kB, shmem-rss:0kB, UID:10001 pgtables:248kB oom_score_adj:0
+[2m2026-10-21T19:35:55Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][   55.125039] Memory cgroup out of memory: Killed process 1000 (python) total-vm:137332kB, anon-rss:125568kB, file-rss:5712kB, shmem-rss:0kB, UID:10001 pgtables:308kB oom_score_adj:0
+[2m2026-10-21T19:36:03Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:36:03,875 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:36:22Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][   82.385695] Memory cgroup out of memory: Killed process 1205 (python) total-vm:18548kB, anon-rss:6264kB, file-rss:7948kB, shmem-rss:0kB, UID:10001 pgtables:76kB oom_score_adj:0
+[2m2026-10-21T19:36:24Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][   84.148724] Memory cgroup out of memory: Killed process 1285 (python) total-vm:1243252kB, anon-rss:771968kB, file-rss:5696kB, shmem-rss:0kB, UID:10001 pgtables:1572kB oom_score_adj:0
+[2m2026-10-21T19:36:33Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:36:33,877 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:37:03Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:37:03,885 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:37:33Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:37:33,888 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:38:03Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:38:03,891 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:38:33Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:38:33,894 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:39:03Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:39:03,897 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:39:33Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:39:33,901 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:40:03Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:40:03,904 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:40:33Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:40:33,907 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:41:03Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:41:03,926 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:41:33Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:41:33,930 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:42:03Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m]2026-10-21 19:42:03,933 INFO parse_service http "GET /health HTTP/1.1" 200 -
+[2m2026-10-21T19:42:17Z[0m proxy[863662ce743978] [32miad[0m [[34minfo[0m]App docflow-parse-staging has excess capacity, autostopping machine 863662ce743978. 0 out of 1 machines left running (region=iad, process group=app)
+[2m2026-10-21T19:42:17Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][32m INFO[0m Sending signal SIGINT to main child process w/ PID 645
+[2m2026-10-21T19:42:18Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][32m INFO[0m Main child exited normally with code: 0
+[2m2026-10-21T19:42:18Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][32m INFO[0m Starting clean up.
+[2m2026-10-21T19:42:18Z[0m app[863662ce743978] [32miad[0m [[34minfo[0m][  438.268625] reboot: Restarting system

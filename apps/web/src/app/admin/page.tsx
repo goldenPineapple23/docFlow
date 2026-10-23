@@ -12,6 +12,7 @@ import {
   type TenantRow,
 } from "@/lib/admin";
 import { ReviewApiError, type CatalogError } from "@/lib/review";
+import { AlertTenant } from "@/components/admin/AlertTenant";
 import { CatalogErrorBox } from "@/components/admin/CatalogErrorBox";
 import { HealthStrip } from "@/components/admin/HealthStrip";
 import { KpiCards } from "@/components/admin/KpiCards";
@@ -127,13 +128,7 @@ export default function ConsoleHome() {
                   <span className="font-medium">{alert.type.replaceAll("_", " ")}</span>
                 </p>
                 <p className="text-sm text-gray-600">
-                  {alert.tenant_id ? (
-                    <Link href={`/admin/tenants/${alert.tenant_id}`} className="text-blue-700 hover:underline">
-                      {alert.tenant_name ?? alert.tenant_id}
-                    </Link>
-                  ) : (
-                    "No tenant"
-                  )}{" "}
+                  <AlertTenant alert={alert} />{" "}
                   · {new Date(alert.created_at).toLocaleString()}
                 </p>
                 <p className="font-mono text-xs text-gray-500">
@@ -178,13 +173,7 @@ export default function ConsoleHome() {
                   <span className="font-medium">{alert.type.replaceAll("_", " ")}</span>
                 </p>
                 <p className="text-sm text-gray-600">
-                  {alert.tenant_id ? (
-                    <Link href={`/admin/tenants/${alert.tenant_id}`} className="text-blue-700 hover:underline">
-                      {alert.tenant_name ?? alert.tenant_id}
-                    </Link>
-                  ) : (
-                    "No tenant"
-                  )}
+                  <AlertTenant alert={alert} />
                   {alert.acknowledged_at
                     ? ` · acknowledged ${new Date(alert.acknowledged_at).toLocaleString()}`
                     : ""}

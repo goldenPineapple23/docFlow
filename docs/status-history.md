@@ -4,6 +4,30 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-21 (Stage 5's PR B merged; the parse gate passed; M7 built; D-214)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-21, with Stage 5's Pillow PR built:** Phase 5.5, **Stage 5**. **PR 3, the
+worker-start fix, is merged** (PR #73, `40435a3`). Its Fly proof passed on 2026-10-21: at start 2,
+each worker received its first waiting task 0.005 s and 0.058 s after `ready` (D-213 item 4). **A
+dependency-audit fix in two PRs comes before M7** (D-213). **PR A is merged** (PR #74, `main` is
+`9c4286b`; certifi and vite), on a one-off exception: parse was red only at its audit step. **PR B,
+Pillow 13.0.0 for the parse service, is built, not merged** (branch `phase55/stage5-pillow-13`, a
+draft PR). After its green pull-request run comes the parse Fly gate: Claude drafts the plan, and
+nothing runs without a grant. **A standing rule since a breach on 2026-10-21 (D-213 item 6): a
+staging suite, a Fly action or any write to staging starts only after a message from the founder
+containing the word "grant".** **Next, in order, after PR B:** M7 (the three missing alerts and
+INT-011's wording), D-178, the sweep script, the warnings and the 32-byte test secret (with the two
+thin-margin `test_parse_client.py` tests, D-212 item 8), M10 without the model IDs, the 375 px fix,
+then counting rows before extraction, and the docs PR last. Then E1 and E2a, then demo readiness
+(D-209). The long catalog commit's test through a public address needs its own grant. The 50,000-row
+cap and IMP-003's wording: one PR, before pilots, only if a pilot prospect has more than 50,000
+SKUs. The welding demo comes after the fastener rehearsal and never blocks it (D-208). **Staging:**
+`docflow-parse-staging` runs the image from before PR B (Pillow 12.3.0). `docflow-worker-staging`
+runs `e95b095`'s image (D-212) with no machines; certifi 2026.10.19 reaches it at its next deploy.
+The API and parse machines are stopped, with auto-stop on, and the Healthchecks.io check is paused.
+D-212's evidence is in `docs/spikes/d212-worker-start-fly-proof/` (D-213 item 7).
+
 ## Replaced on 2026-10-21 (Stage 5's PR 3 and PR A merged; PR B, Pillow 13, built; D-213)
 
 <!-- the paragraph as it stood, starting on the next line -->

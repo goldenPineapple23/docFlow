@@ -4430,3 +4430,143 @@ Everything else fails as before: a deadlock (40P01), a serialization failure (40
 **8. Left for M7 (founder):** only the three missing Phase 5 alerts (D-155) and INT-011's wording. Not placed by the founder on 2026-10-21: the RUNBOOK entry for Postmark's inbound retry (2026-10-19, "the same PR" as INT-011's wording). It stays with M7 unless the founder says otherwise.
 
 **Related:** D-155, D-197 (item 3), D-210, D-211, D-212 (items 4, 6); RUNBOOK 1.4, 9.4, 9.7, 9.8, 10.2; `apps/parse/requirements.lock.txt`; `apps/parse/tests/test_parity.py`.
+
+## D-214 — Stage 5, M7: the three missing alerts, INT-011's retry, and migration 0039 (founder, 2026-10-21)
+
+**Context:** PR B (#75, D-213) merged as `7f3b318bf88144e08a1ef56052fcb4377a7c5aed` at 2026-10-21 19:54:19Z. Main's push run 39665677873 on it was green on attempt 1, all six jobs (19:54:22Z to 19:59:32Z). Next on the Stage 5 list is M7, the review's finding that three Phase 5 alerts were never built (D-155 item 2). The founder answered the design on 2026-10-21 and added two things to its migration: closing the two tables anyone could read through Supabase's Data API, and the four functions Supabase's Security Advisor flags. After a read-only look at staging's grants, they asked for every table privilege of the Data API roles to go too.
+
+**1. The three alerts.** They are raised by the nightly rollup (`metrics.run_rollup`, nightly runs only, never the Console's Recompute), after every day is written. The checks are in `docflow_core.rollup_alerts`.
+- **The pattern:** each check runs in its own transaction (`metrics.raise_attention_alerts`). One that fails is logged by type (`rollup_alert_check_failed check=... error=<exception type>`), and the other checks and the rollup itself carry on.
+- **Dedup:** each is an ordinary dedup key, so there is at most one open alert per key. Once the founder acknowledges one, the next nightly run raises it again if it still holds. That is at most one e-mail a day per key.
+- **Catalog codes:** none (founder): none of the three is a failure, and none reaches a tenant.
+- **Payloads:** ids, counts and numbers only (Section 7.10).
+
+| | `review_backlog` | `confidence_drift` | `staging_ttl_elapsed` |
+|---|---|---|---|
+| **Title** | A tenant's orders have been waiting in review too long | A tenant's extraction confidence has dropped | Onboarding files in staging are past their retention period |
+| **Raised when** | the tenant has a `needs_review` document, not deleted and **not in a test batch**, that reached review more than `REVIEW_BACKLOG_ALERT_DAYS` (3) ago (`processed_at`, else `created_at`). **Only `active` and `cancelling` tenants** (founder). | the mean overall confidence over the **last 7 complete days** is more than `CONFIDENCE_DRIFT_MARGIN` (0.05) below the mean over **the 30 complete days before them, days 8 to 37** (founder: not a window that contains the 7). Days are the tenant's own, the rollup's boundary. Read from `tenant_daily_metrics`, test batches excluded. **Nothing is raised below `CONFIDENCE_DRIFT_MIN_DOCUMENTS` (20, new) in either window** (founder). A drop of exactly the margin is not a drift. | an `onboarding_intakes` row with no linked tenant, not deleted, created more than `STAGING_TTL_DAYS` (90) ago. Nothing is deleted. |
+| **Session** | the tenant's own | the tenant's own | the rollup's own, through 0039's function and its widened `rollup_raise` (item 2) |
+| **Dedup key** | `review_backlog:{tenant}` | `confidence_drift:{tenant}` | `staging_ttl:{intake}` |
+| **Payload** | `documents_waiting`, `oldest_waiting_days`, `oldest_document_id`, `threshold_days` | `mean_7d`, `mean_30d` (decimal strings), `margin`, `documents_7d`, `documents_30d`, `min_documents` | `intake_id`, `staged_on`, `days_unlinked`, `files`, `ttl_days`. Never the prospect's name or address. The design called the date `received_on`; it is the intake's `created_at`, the day it was staged, so it is named `staged_on`. |
+| **Console** | the tenant's link | the tenant's link | "No tenant", linked to `/admin/intakes` (founder; the page exists) |
+
+The Console's two alert lists render who an alert is about through one component, `AlertTenant`. Every other tenant-less alert still reads "No tenant" as plain text.
+
+**2. Migration 0039** (`0039_m7_alerts_and_data_api_roles.sql`). It changes no row, table or column.
+- **(1) `staging_intakes_past_ttl(ttl_days)`:** SECURITY DEFINER, `search_path` empty. It returns the intake id, `created_at` and a file count. EXECUTE is revoked from PUBLIC, anon, authenticated and service_role, and granted to `docflow_worker` alone.
+- **(2) `rollup_raise`** (0017, TO `docflow_worker` since 0036) may insert `type IN ('rollup_stale', 'staging_ttl_elapsed')`, still with `tenant_id IS NULL`.
+  - Asked before it was written (founder: widen it; `rollup_read_own` and `rollup_enqueue` unchanged).
+  - **The founder's condition:** a test each for the dedup on a second run, the re-raise after an acknowledgement, and the alert's e-mail row under the unchanged policies, and a stop before writing any further policy change. **None was needed:**
+    - the e-mail's id is made in Python and inserted with no `RETURNING`;
+    - the dedup is the unique index on open keys, which refuses the second insert without any SELECT policy;
+    - the foreign-key check from the alert to its e-mail bypasses RLS.
+
+  The worker suite tests all three on the real database (item 6).
+- **(3) The `read_all` policies on `tiers` and `setup_fee_presets`** now apply `TO docflow_tables`. All four DocFlow logins are members of it (0036; confirmed on staging at 20:23:54Z and in CI), so every one reads both tables. anon and authenticated are not members, so they stay outside the policy; with part (5) they also hold no privilege on either table, so the policy is the second layer (founder, 2026-10-21).
+  - **Why not a list of the logins that read them** (as first built, `TO docflow_api, docflow_admin`, the two that read the tables in code). Once (5) revokes every table privilege from anon and authenticated, such a list no longer keeps the Data API out. It only splits DocFlow's own logins, and a login left out of it fails silently. The first push run (item 12) showed that: a worker test runs the Console's reactivate step (`lifecycle.plan_reactivate`) as `docflow_worker`. It `LEFT JOIN`s `tiers`, read no row, and refused with LIFE-004, "no tier on record". In production that function runs only as `docflow_api`, but the next caller might not. The test is left as it is.
+- **(4) The four Advisor functions** (`exports_finished_rows_are_immutable`, `documents_status_guard`, `document_status_transition_allowed`, `users_protect_system_actors`):
+  - **`search_path` empty.** The two whose bodies name something are re-created with it schema-qualified: `public.document_status_transition_allowed` in the guard, and `pg_catalog.pg_has_role` and `pg_catalog.pg_class` in the users guard. Operators and built-ins resolve from `pg_catalog`, which Postgres searches first. The other two bodies are unchanged; they get the setting by `ALTER FUNCTION`.
+  - **EXECUTE** is revoked from PUBLIC, anon and authenticated (founder). `document_status_transition_allowed` is granted back to `docflow_api`, `docflow_worker` and `docflow_admin`, the logins that change a document's status (the scripts run as `docflow_admin`). The guard calls it as that login.
+  - **A deliberate change (founder, 2026-10-21): `docflow_stripe` can no longer change a document's status.** It follows from these EXECUTE grants: the guard calls the transition function as the Stripe login, which may not run it, so the update is refused ("permission denied for function document_status_transition_allowed"). The Stripe webhook never changes a document; until 0039 it could, through PUBLIC. A test pins it.
+  - **The three trigger functions** need no grant: Postgres checks EXECUTE on a trigger function when the trigger is created, not when it fires. The tests prove it per login.
+  - `service_role` keeps its grants (not named; DocFlow never uses it).
+- **(5) The Data API roles** (founder: "Revoke in 0039"):
+  - every privilege anon and authenticated held on the 38 tables and 2 sequences in `public` is revoked: SELECT, INSERT, UPDATE, DELETE, **TRUNCATE**, REFERENCES, TRIGGER and MAINTAIN on tables, and SELECT, UPDATE and USAGE on sequences;
+  - `postgres`'s default privileges in `public` no longer give them tables or sequences (founder: revoke them too) or EXECUTE on functions (founder: revoke anon and authenticated).
+  - **Not changed, and recorded (founder: "if altering supabase_admin's defaults isn't permitted, record that rather than working around it"):**
+    - `supabase_admin`'s default privileges in `public` still give anon and authenticated everything it creates there. `postgres` is not a member of `supabase_admin` (and isn't a superuser), read on staging at 20:23:54Z, so it can't alter them. DocFlow creates nothing as `supabase_admin`, and item 11's Data API switch-off covers production.
+    - PUBLIC's EXECUTE on new functions is Postgres's own default and can be changed only for every schema at once. Every DocFlow migration revokes it per function, as 0039 does.
+- **Membership, checked before writing (founder):** no DocFlow login is a member of anon or authenticated, by any path (`pg_has_role`, MEMBER and USAGE; read-only, 20:23:54Z). The logins hold their table rights through `docflow_tables` (0036), which 0039 doesn't touch.
+- **The reverse,** `supabase/reverse/0039_reverse.sql`, puts every grant, default, policy and function setting back, and the two bodies word for word (their hashes equal staging's and 0027's and 0028's). It drops the function. Alerts already raised stay. Run it only with the code from before 0039.
+- **The grants snapshot,** `scripts/ci/grants_snapshot.py`, is wider than `policy_snapshot.py`. It covers every policy in `public`; every function's definer flag, settings, body hash (CRLF read as LF) and EXECUTE grantees; every table's and sequence's grantees; and `postgres`'s and `supabase_admin`'s default privileges in `public` and in every schema. `policy_snapshot.py` stays as it is, because 0036's two committed states are in its form.
+  - **`0039_pre_snapshot.json`:** staging before 0039, read read-only at 20:40:54Z, SHA-256 `b065a7c38b5ef8af0003c3838e50af09d6a1564cfc98967fda725c92edf3f5b2`. A first read at 20:38:27Z hashed function bodies as stored, and staging's bodies carry CRLF (they were pasted into the SQL Editor from a Windows checkout), so they could never equal CI's. The script now reads CRLF as LF, and the second read is the committed one.
+  - **`0039_post_snapshot.json`:** the pre state with exactly the changes `packages/core/tests/test_migration_0039.py` lists by hand, SHA-256 `bb67bc5ee46580da7a30e38685f203a33748199a840e769309eb077eaaee32e2` (with `read_all` TO `docflow_tables`; the first push carried `2f1f62a2...`, with the two-login list).
+  - **CI** fails unless its database shows both states.
+- **The order is the migration first, then the code.** Without 0039, the staging check fails, is logged, and the rollup carries on. RUNBOOK 1.11.
+
+**3. What staging showed, read-only on 2026-10-21, against the migrations.**
+- **Reads, each a read-only transaction as `docflow_admin`, catalog only, no table rows:**
+  - 20:11:31Z and 20:12:06Z: the Data API exposure
+  - 20:23:54Z: role memberships, default ACLs and the four functions' owners and ACLs
+  - 20:38:27Z and 20:40:54Z: the grants snapshot
+- **The same as the migrations:**
+  - the same 38 public tables, all with RLS; **no table made by hand** (no `backup_*` in any schema)
+  - 29 policies open to every role: 25 `tenant_isolation`, the 2 `read_all`, and the insert-only `email_outbox.tenant_enqueue` and `founder_alerts.tenant_raise`, all keyed on `app.tenant_id` except `read_all`
+  - the 16 SECURITY DEFINER functions revoked, with `search_path` set
+  - the 4 others callable by anon
+- **Beyond them:**
+  - anon and authenticated held **TRUNCATE** (and MAINTAIN, REFERENCES and TRIGGER) on every table. RLS doesn't govern TRUNCATE, and the REST and GraphQL verbs can't reach it.
+  - The Realtime publication holds no table.
+  - Staging's exposed schemas can't be read from the catalog.
+
+**4. INT-011 and RUNBOOK 2.5** (decided 2026-10-19; D-210).
+- **INT-011's action** now reads: "Fix the fault named in this alert. If the resends run out first, the e-mail shows as Inbound Error on Postmark's Inbound page. Retry it through Postmark's API (PUT /messages/inbound/{messageid}/retry) once the fix is deployed."
+  - The catalog's snapshot shows the one-line diff.
+  - `{messageid}` is Postmark's placeholder, not ours. INT-011 is read with `get_error()`, never `render_error()`, which would try to fill it; a comment beside the entry says so.
+- **Postmark's API reference** (postmarkapp.com, read 2026-10-21, with the founder's leave):
+  - `PUT https://api.postmarkapp.com/messages/inbound/{messageid}/retry`, with `Accept: application/json` and `X-Postmark-Server-Token` ("This request requires server level privileges")
+  - an empty body in its example (`-d ""`)
+  - errors 701 (not found or not retryable), 703 (could not retry) and 10 (bad token)
+  - the MessageID from `GET /messages/inbound?status=failed`
+- **RUNBOOK 2.5** gives the steps:
+  - a PowerShell window with history off (8.1), the server token typed there only;
+  - the retry through `Invoke-RestMethod -Method Put`, which sends the empty body Postmark's example does. Windows PowerShell 5.1 drops an empty argument to `curl.exe`, so the design's `curl.exe ... -d ""` would have failed there.
+  - **Reading the list (founder):** Postmark's page names the list key both `Messages` (its table) and `InboundMessages` (its example), so the reader takes `MessageID` from the raw JSON (`Invoke-WebRequest ... .Content`) rather than relying on either key.
+
+**5. CLAUDE.md: the Grants rules** (founder, 2026-10-21), at the end of "Working rules added by the founder".
+- **The text** is the one approved on 2026-10-21, with the read-only bullet. **The first bullet's trigger was changed by the founder before it went in.** It was "a message from the founder that contains the word 'grant'". It is now **"a message from the founder that begins with 'Grant' and names the step"**, because M7 is full of SQL GRANT statements and a word match is too loose. Claude's own saved rule says the same.
+- **The plan rule (founder, 2026-10-21):** a changed delivery method goes in the plan, not the report. Delivering PR B's gate script to the machine base64-encoded was fine, but it belonged in the plan.
+
+**6. Tests.**
+- **Core, no database:**
+  - `test_migration_0039.py` (17): the migration's and the reverse's statements; both committed states, pinned by SHA-256; the post state equal to the pre state plus the hand-written list; nothing in `public` left to the Data API roles; every function with its `search_path` set; the reverse's bodies word for word; the round trip's comparisons, each with a broken state it must catch.
+  - `test_rollup_alerts.py` (11): the drift rule at 19 and 20 documents in each window, at a drop of exactly 0.05 and just over it; one failing check logged by type, the others still running, nothing of its message in the log.
+  - The broad-`except` guard lists the two new handlers (BEST_EFFORT).
+- **Worker, the real database** (`test_rollup_alerts_db.py`, 15):
+  - the backlog at 4 and 2 days; deleted and test-batch documents excluded; cancelling covered and suspended not; another tenant's document never counted; the open alert collapsing a second run and coming back after an acknowledgement;
+  - drift at 0.84 and at exactly 0.05, and at 19 documents in either window; today and day 38 outside both windows, day 7 and day 8 in different ones;
+  - staging: 91 days found, and 89 days, linked and deleted not; the alert raised, deduped, re-raised after an acknowledgement and e-mailed (to a fake address) under the rollup's own policies, with the intake untouched and the prospect never named;
+  - a nightly run raising the alerts and a Recompute not; a failing check leaving the run `ok`.
+  - The whole-table staging check and the stale-rollup alert are stubbed in the two rollup tests. On docflow-staging they would raise real alerts for real intakes.
+- **API, the real database** (`test_logins_db.py`, +22):
+  - anon and authenticated hold no table or sequence privilege and can execute no function in `public`; `postgres`'s defaults in `public` give them nothing;
+  - each Advisor function has an empty `search_path` and exactly its logins;
+  - per login, a document's status change runs the state machine (a legal step passes; an illegal one is refused by the guard, not by a grant), and the Stripe login is refused;
+  - every DocFlow login reads every row of `tiers` and `setup_fee_presets`; anon and authenticated hold no privilege on either, aren't members of `docflow_tables`, and so are outside both `read_all` policies;
+  - the staging function the worker's alone, returning ids, times and counts;
+  - the rollup flag inserting `rollup_stale` and `staging_ttl_elapsed` on its own login only, and still refused any other type or a tenant id;
+  - `staging_intakes_past_ttl(integer)` added to the EXECUTE table; the two `read_all` policies' logins in the flag-policy check.
+- **Web:** `AlertTenant.test.tsx` (3).
+- **Local runs** (every outside service blocked):
+  - core `1086 passed`, plus 1 failed and 3 errors. All four are the live Storage-bucket tests, which the block refuses by design (`ProxyConnectionError`). The run had 1090 tests: CI's 1062 plus the 28 new.
+  - web `62 passed`; tsc, eslint, ruff and mypy clean.
+  - The worker and API files collect offline (15 and 57).
+- **Expected in CI:** core 1090, worker 268 (253 + 15, none skipped), API 740 (718 + 22, leftover `+0`), web 79, web-live 3, parse 581 and 427. Plus the two 0039 round-trip steps in the core job: the reverse before 0036's round trip, which compares the whole database with 0036's own post state, and the forward after 0038's.
+
+**7. Not run here:** nothing on staging but the read-only reads in item 3, and nothing on Fly. 0039 is applied to staging by the founder after the backup and snapshot at the top of the PR message. Claude then reads the snapshot read-only before and after (RUNBOOK 1.11). Then the three staging suites run, each on its own grant, before the merge.
+
+**8. Left as they are, and why:** `supabase_admin`'s defaults and PUBLIC's global default on new functions (item 2, part 5); `service_role`'s grants; the alerts' constants beyond the new minimum, which already existed and are only now read.
+
+**9. Open:** carry item 5 (the two thin-margin `test_parse_client.py` tests are measured before PR 7, D-212 item 8).
+
+**10. PR B's parse Fly gate (RUNBOOK 8.1), run on 2026-10-21 under the founder's grant.**
+- **Deploy:** `b1af531` from a clean tree to `docflow-parse-staging`, 19:32:19Z to 19:34:43Z, exit 0. Image `deployment-01M5FZ6GM647TWWRFE982WWBRW`, `sha256:83d911ebe1d462a871abc0c1b46f6053aa723ce0de511bf36066941086198255`, 214 MB. The deploy left machine `863662ce743978` stopped; `fly machine start` at 19:34:59Z.
+- **Canary:** 5/5 PASS on cgroup v1. The machine was shared-cpu-2x, 2048 MB.
+- **`selftest all` over SSH,** 19:35:37Z to 19:36:57Z: 47 PASS plus S3 INFO (its control), **A-net IPv6 PASS**, B 17. The 48-line summary is identical to 2026-10-18's. The script was delivered base64-encoded into `sh -c` (item 5's plan rule). Its header still says "PR 1b-ii gate", and only its date changed, as planned.
+- **Stop:** auto-stopped at 19:42:17Z (exit 0). The worker app had no machines throughout. Deploy start to stopped: 9 min 59 s. The machine ran 7 min 17 s.
+- **The evidence** is in `docs/spikes/3c-fly-staging/2026-10-21-sha256-83d911eb/`, as captured, with a README.
+  - **The secret scan** (D-213 item 7's three parts) found no secret, but one private value: **the founder's e-mail address**, in Fly's `New SSH session email=...` log line (`06-state-after.txt`, line 33). The scan's other match is the region inside the pooler host name in `run-on-machine.sh`, the same line as in the committed 2026-10-01 and 2026-10-16 scripts.
+  - **The founder's word (2026-10-21):** the address was replaced with `<founder e-mail>`, and the README says so. The scan was run again on the final folder (10 files): no secret, no address. The same log line is already in six committed files from 2026-10-07 and 2026-10-08 (14 lines); they are left as they are.
+
+**11. Phase 6, added (founder, 2026-10-21):**
+- In production's Supabase project, turn on leaked-password protection in Auth, and turn off the Data API in the project settings, since DocFlow never calls it.
+- **Widened from D-213 item 7's parked option** (the Upstash host and Fly's `fdaa:` addresses): stop committing internal hostnames and personal identifiers in evidence folders.
+
+**12. The first push, and its fixes.** Push run 39680301902 on `380bf24` (21:37:32Z to 21:42:38Z, attempt 1) was red.
+- **Green:** core, web, web-live and parse. Core's two 0039 round-trip steps matched both committed snapshots.
+- **API, 738 tests, 4 failed:** Claude's document fixture bound one parameter both as a uuid and as text (`AmbiguousParameter`). The hash is now computed in Python. Leftover count `+0`.
+- **Worker, 268 tests, 1 failed and 15 skipped (unapproved):**
+  - The 15 skips were the new rollup-alert tests. Their schema check connected through the default login, the API's, which 0039 rightly refuses the staging function. It now checks as the worker's login.
+  - The failure was the reactivate test in item 2, part 3, and changed the design there.
+
+**Related:** D-155 (item 2), D-158, D-203, D-210, D-212, D-213 (items 6, 7); RUNBOOK 1.11, 2.5, 8.1; migrations 0011, 0014, 0017, 0026, 0027, 0028, 0035, 0036; Section 7.15.2 Step 1, 7.15.3, 7.9.

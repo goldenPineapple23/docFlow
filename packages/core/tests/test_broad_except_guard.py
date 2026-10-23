@@ -197,6 +197,9 @@ LISTED: dict[tuple[str, str, int], tuple[str, str]] = {
     (_ALERTS, "alert_intake_failed", 1): (BEST_EFFORT, _NOT_RAISED),
     (f"{_CORE}/heartbeat.py", "after_pass", 1): (BEST_EFFORT, "no reading, no ping"),
     (f"{_CORE}/heartbeat.py", "after_pass", 2): (BEST_EFFORT, "a failed ping never fails a pass"),
+    # Stage 5, M7 (D-214): one alert check never stops the rollup or the others.
+    (f"{_CORE}/metrics.py", "raise_attention_alerts", 1): (BEST_EFFORT, "a failed tenant check is logged"),
+    (f"{_CORE}/metrics.py", "raise_attention_alerts", 2): (BEST_EFFORT, "a failed staging check is logged"),
     (f"{_CORE}/model_provider.py", "record_failure", 1): (BEST_EFFORT, "the provider's state is best effort"),
     (f"{_CORE}/model_provider.py", "record_success", 1): (BEST_EFFORT, "the provider's state is best effort"),
     (f"{_CORE}/model_provider.py", "alert_routing_failure", 1): (BEST_EFFORT, _NOT_RAISED),

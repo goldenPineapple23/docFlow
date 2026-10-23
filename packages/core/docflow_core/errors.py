@@ -1894,9 +1894,13 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         ),
         action=(
             "Fix the fault named in this alert. If the resends run out first, the e-mail shows as"
-            " Inbound Error on Postmark's Inbound page. Retry it there once the fix is deployed."
+            " Inbound Error on Postmark's Inbound page. Retry it through Postmark's API"
+            " (PUT /messages/inbound/{messageid}/retry) once the fix is deployed."
         ),
         # As IMP-011: the entry is a warning, the alert itself is high.
+        # `{messageid}` is Postmark's own placeholder in its URL, not one of
+        # ours: this entry is read with get_error(), never render_error()
+        # (Stage 5, M7; D-214). RUNBOOK 2.5 has the call in full.
         severity="warning",
         audience="founder",
     ),
