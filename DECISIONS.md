@@ -4569,7 +4569,62 @@ The Console's two alert lists render who an alert is about through one component
   - The 15 skips were the new rollup-alert tests. Their schema check connected through the default login, the API's, which 0039 rightly refuses the staging function. It now checks as the worker's login.
   - The failure was the reactivate test in item 2, part 3, and changed the design there.
 
-**Related:** D-155 (item 2), D-158, D-203, D-210, D-212, D-213 (items 6, 7); RUNBOOK 1.11, 2.5, 8.1; migrations 0011, 0014, 0017, 0026, 0027, 0028, 0035, 0036; Section 7.15.2 Step 1, 7.15.3, 7.9.
+**13. CI on `66a6ebf`, and the third infrastructure flake (D-199).**
+- **Pull-request run 39684673548** (2026-10-21 22:11:37Z to 22:15:59Z, attempt 1): green. core 1090; its 0039 round trip read `b065a7c3…` reversed (= `0039_pre_snapshot.json`) and `bb67bc5e…` forward and forward again (= `0039_post_snapshot.json`). worker 268, 0 skipped; API 740, leftover `+0`; parse 581 / 427; web and web-live green.
+- **Push run 39684668090, attempt 1: red in web-live only**, at "Start the local Supabase stack (applies supabase/migrations/)" (job 119515576429, 22:11:38Z to 22:12:29Z). The other five jobs were green with the same counts.
+- **The cause, from the job's log.** The founder downloaded the run's log archive on 2026-10-23, and Claude read it read-only. The archive stays outside the repository.
+  - At 22:12:26Z Docker could not start `supabase_db_docflow-ci`: `failed to bind host port for 0.0.0.0:54322:172.18.0.2:5432/tcp: address already in use`.
+  - Earlier in the step, 4 `toomanyrequests: Rate exceeded` lines from image pulls (22:11:51Z to 22:11:55Z). The images then downloaded from `public.ecr.aws`.
+  - No migration ran.
+  - The web-live job has no `services:`, and no earlier step in it opens 54322. So the port was already held on the runner: a cause outside our code.
+- **The founder counted it as flake 3 (2026-10-23).** D-199's count is now 3. No commit was made for it; #76's head stayed `66a6ebf`.
+- **Re-run (founder's decision, after the log was read and the flake counted, to clear the required check):** the failed job's attempt 2 (job 120563056882, 2026-10-23 17:40:37Z to 17:44:01Z) was green, and so was every job of the run.
+- **Stage 5's warnings item gains a read-only CI step** (founder, 2026-10-23): in web-live, before `supabase start`, print what is listening on port 54322. Its text waits for the founder's approval.
+
+**14. Staging, 2026-10-23.** Claude's reads were all read-only transactions as `docflow_admin`.
+- **Which step numbers.** This item uses the PR message's numbering (its "Before 0039" section), not the 2026-10-23 handoff's. The PR message's steps 1 and 2 are the handoff's step 1. Its step 3, the grants_before snapshot, is the handoff's step 2. Its steps 4, 5 and 6 are the handoff's 3, 4 and 5. Its step 7 is the handoff's 7. The handoff's step 6, the Memurai check, is inside step 7 here.
+- **Before anything (Claude):** at 00:04:33Z and 16:09:38Z, 0039 was not applied, `backup_0039` did not exist, and the grants snapshot was `b065a7c38b5ef8af0003c3838e50af09d6a1564cfc98967fda725c92edf3f5b2` (= `0039_pre_snapshot.json`).
+- **Steps 1 and 2, the backup and the row count (founder, SQL Editor):** `backup_0039` with tiers, setup_fee_presets and founder_alerts, RLS on each. It was made between 16:18:44Z and 16:26:25Z. live = backup: 3/3, 5/5, 4/4.
+- **Step 3, the grants_before snapshot (the handoff's step 2), failed at its first run and was fixed with one cast before any snapshot was taken.** This is not step 4's pre-check, which never failed.
+  - Claude ran its SELECT read-only at 16:18:28Z: `42725 operator is not unique: text || "char"`, at the PR text's line 63. `pg_default_acl.defaclobjtype` is Postgres's one-byte `"char"` type, which `||` can't join to text.
+  - With `d.defaclobjtype::text` (line 63 of the PR text; nothing else changed) it read 24 / 20 / 80 / 40 at 16:18:44Z.
+  - No file in the repository carries that SQL.
+  - The founder then made `backup_0039.grants_before` between 16:26:50Z and 16:32:56Z: 24 / 20 / 80 / 40, 164 rows, RLS on.
+- **Step 4, the pre-check again (Claude, 16:34:24Z):** `b065a7c3…`. The read was byte-identical to the committed `0039_pre_snapshot.json`.
+- **Step 5, the apply (founder, SQL Editor, as postgres, once):** between 16:34:24Z and 16:39:20Z. It ran the 163-line file at `66a6ebf` (blob `c88a074`, unchanged from HEAD) and printed "Success. No rows returned".
+- **Step 6, the after-check (Claude, 16:39:20Z):** `bb67bc5ee46580da7a30e38685f203a33748199a840e769309eb077eaaee32e2`, byte-identical to the committed `0039_post_snapshot.json`. Each check below was PREPAREd first.
+  - **anon and authenticated:** no privilege on any public table, view or sequence, and no EXECUTE on any public function, counting PUBLIC.
+  - **The four Advisor functions:** `search_path=""`. `document_status_transition_allowed` is executable by docflow_api, docflow_worker and docflow_admin (and service_role, postgres), not docflow_stripe. The three trigger functions by postgres and service_role only.
+  - **`staging_intakes_past_ttl`:** SECURITY DEFINER, `search_path=""`, EXECUTE for docflow_worker only.
+  - **Policies:** both `read_all` policies are `TO docflow_tables`. `rollup_raise` allows `rollup_stale` and `staging_ttl_elapsed`, tenant-less.
+  - **postgres's defaults in public:** no anon or authenticated entry.
+  - **Row counts:** the founder's Editor count after the apply, live = backup, 3/3, 5/5, 4/4.
+- **Step 7, the three staging suites (one founder Grant for all three; RUNBOOK 1.4).** Before the start at 16:48:47Z: HEAD was `66a6ebf` with a clean tree, Memurai was Running and answered PONG, and 8100 was free.
+  - **How they ran:** in parallel through `scripts/run_suites_parallel.py`, 16:49:19Z to 17:32:33Z, exit 0.
+  - **What was reachable:** only the staging database, Storage and loopback. Anthropic, Stripe and Supabase Auth were blocked, `DOCFLOW_STAGING_RUN=1` was set, and the dev parse service was on 8100 for the API suite.
+  - core: `1089 passed, 1 skipped in 147.04s (0:02:27)`
+  - worker: `260 passed, 8 skipped in 2378.83s (0:39:38)`
+  - API: `739 passed, 1 skipped, 3 deselected, 693 warnings in 2580.86s (0:43:00)`
+  - **The six counts, before -> after:** tenants 35 -> 35, founder alerts 4 -> 4, e-mails 30 -> 30, scheduled jobs 35 -> 35, platform-admin rows 12 -> 12, users with no tenant 15 -> 15. All `+0`.
+  - **Database and connections:** the database went 43,756,691 -> 43,764,883 bytes (+8,192). Peak connections were 28, at 16:55:39Z.
+  - **The skips** were the same as PR A's run (D-213), each with its reason in the log.
+  - **What did not happen:** no paid model call, no machine started, no Fly command.
+  - **Afterwards:** the dev parse service was stopped, and 8100 was free at 17:32:59Z.
+- **Kept:** `backup_0039` stays until the founder drops it (RUNBOOK 1.3).
+
+**15. A rule for SQL the founder runs (founder, 2026-10-23; the fourth bullet of CLAUDE.md's "Grants").** SQL the founder will run on staging is first checked by Claude in a read-only transaction.
+- **What Claude checks:** the SELECT of a `CREATE ... AS SELECT`. Other SELECT, INSERT, UPDATE and DELETE statements are PREPAREd: parsed, with their types and operators resolved, and nothing executed. DDL is reported as not checkable, with the CI evidence that covers it.
+- **What Claude reports:** each block as parses, fails or not checkable, with why, before the founder runs it.
+- **Why:** item 14's grants_before snapshot SQL failed at its first run. It did no harm only because the failing statement was the first one.
+- **Three limits, said each time they apply:**
+  1. `docflow_admin` has no USAGE on a backup schema and does not bypass RLS. So a query that names a backup table, or counts every row of a table under RLS, can't be checked or confirmed by Claude. Claude says so, and doesn't switch to another login without asking.
+  2. DDL (a migration, GRANT or REVOKE, the CREATE of a CREATE TABLE AS) can't run read-only, so it is reported as not checkable. For a migration, the CI evidence is its round trip plus the pre-snapshot match.
+  3. A query on a table that an earlier block creates can't be checked until that block has run.
+- **CLAUDE.md:** the rule's one-line pointer, in the founder's words, is the fourth bullet under "Grants". CLAUDE.md went from 70,681 to 71,045 characters of 81,389 (~24.4k tokens; D-215).
+
+**16. Merged (2026-10-23).** PR #76, merge commit `43d85b4f3c06bf17f6a7f6a093487b776e0710c0` (parents `7f3b318` and `66a6ebf`), merged by the founder at 17:46:32Z, after item 13's re-run.
+
+**Related:** D-155 (item 2), D-158, D-199, D-203, D-210, D-212, D-213 (items 6, 7); RUNBOOK 1.1 to 1.4, 1.11, 2.5, 8.1; migrations 0011, 0014, 0017, 0026, 0027, 0028, 0035, 0036; Section 7.15.2 Step 1, 7.15.3, 7.9.
 
 ## D-215 — CLAUDE.md capped at 28k tokens, enforced in CI (founder, 2026-10-21)
 
@@ -4589,6 +4644,7 @@ The Console's two alert lists render who an alert is about through one component
 **5. Not changed:** no checkpoint-summary template exists to add a line to (`CHECKPOINTS.md` quotes Section 0 rule 3 only), so none was edited; the founder rule's last bullet covers it.
 
 **6. Order with M7 (founder):** this branch is based on `main`. Once M7 (D-214) merges, it is rebased, the Grants subsection is put ahead of "CLAUDE.md size", and the size check is run again before the merge.
+- **Done 2026-10-23:** rebased onto `43d85b4` (#76's merge). "Grants" now comes ahead of "CLAUDE.md size" in CLAUDE.md, and D-214 ahead of D-215 here; the text added after `main`'s is exactly this entry's original commit's. The size check read `CLAUDE.md: 70681 / 81389 characters (~24.3 k tokens)`, and `CLAUDE.md: 71045 / 81389 characters (~24.4 k tokens)` with D-214 item 15's pointer added.
 
 **Founder approval:** 2026-10-21.
 
