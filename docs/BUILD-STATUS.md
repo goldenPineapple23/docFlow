@@ -18,13 +18,14 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-10-23, with M7 and Next.js 16.4.1 merged:** Phase 5.5, **Stage 5**. **M7 is
-merged** (PR #76; D-214). The nightly rollup raises the three missing alerts (review backlog,
+**Status, as of 2026-10-23, with M7, Next.js 16.4.1 and zod 4.6.6 merged:** Phase 5.5, **Stage 5**.
+**M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts (review backlog,
 confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5. CLAUDE.md has
 the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots matched and
 the three staging suites passed (D-214 item 14). `backup_0039` stays until the founder drops it.
-**Next.js 16.4.1 is merged** (PR #78, `main` is `6dee751`; D-216): three new advisories fixed. The
-withdrawn braces exception stays on file until its own core PR. **The CI infrastructure flake
+**Next.js 16.4.1 is merged** (PR #78; D-216): three new advisories fixed. The withdrawn braces
+exception stays on file until its own core PR. **zod 4.6.6 is merged** (PR #79, `main` is
+`b5736a2`; D-217): one new dev-only advisory, fixed in the lock file. **The CI infrastructure flake
 count is 3** (D-214 item 13). **D-215 (CLAUDE.md capped at 28k tokens) is rebased onto `main`, not
 merged** (PR #77). **A standing rule (D-213 item 6, tightened in D-214): a staging suite, a Fly
 action or any write to staging starts only after a message from the founder that begins with

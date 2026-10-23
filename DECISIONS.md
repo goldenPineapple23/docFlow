@@ -4706,3 +4706,33 @@ The Console's two alert lists render who an alert is about through one component
 **Founder approval:** 2026-10-23.
 
 **Related:** D-199, D-213 (PR A), D-214 (item 13); `apps/web/package.json`, `apps/web/package-lock.json`, `.github/audit-exceptions.txt`, `scripts/ci/npm_audit.py`, `packages/core/tests/test_npm_audit_exceptions.py`.
+
+## D-217 — zod 4.6.5 -> 4.6.6 for a new advisory (PR #79; founder, 2026-10-23)
+
+**Context:** both CI runs on #77's head `256025e` (push 40023939876, pull request 40023947752) failed only at the web job's dependency audit; every test passed. npm reported one high advisory, GHSA-mrhx-c7xc-m3w5: "Zod can exhaust memory while validating oversized constrained collections".
+- **When it appeared:** GitHub's advisory database shows it published on 2026-10-01 and updated on 2026-10-23 at 18:26:52Z. The same audit passed on `1345b83` at about 20:19Z, so npm began reporting it between then and about 21:05Z.
+- **Not #77's change:** `256025e` changed only CLAUDE.md and DECISIONS.md, and `main` (`6dee751`) had the same lock file.
+- **Not a flake (founder):** a real advisory is a known cause, as in D-216. The count stays at 3 (D-214 item 13). Nothing was re-run.
+
+**1. Where zod comes from: dev-only and transitive.** `apps/web/package.json` doesn't list it. `eslint-plugin-react-hooks` depends on it and `zod-validation-error` names it as a peer, both as `^3.25.0 || ^4.0.0`. 4.6.6 (published 2026-10-11) is the lowest fixed version and is inside both ranges.
+
+**2. The fix, the D-216 way: the lock file only.**
+- **What changed:** `apps/web/package-lock.json`, zod's entry only: `version`, `resolved` and `integrity`, 3 lines out and 3 in. `package.json` is unchanged.
+- **Readers:** the lock file's only reader is `.github/workflows/ci.yml`, as the npm cache key (`cache-dependency-path`). No test reads it.
+- **What ran locally, with every outside service blocked** (the audit reached only the npm registry):
+  - `npm ci`: exit 0, `node_modules/zod` 4.6.6, and the lock file unchanged by it;
+  - lint: 412 errors and 6,669 warnings, all in the local `.next-live/` build output (Stage 5 item 7);
+  - `tsc --noEmit`: passed;
+  - vitest: 62 passed;
+  - the audit: `0 high or critical`. The 2 moderate advisories in vitest's dev chain remain (D-216 item 7).
+- **The build** was proved in CI, as in D-216 item 3.
+
+**3. CI and the merge.**
+- **On `35df111`, both runs green on attempt 1:** push run #462 (40026180079, 21:21:36Z to 21:26:21Z) and pull-request run #463 (40027539510, 21:32:40Z to 22:11:04Z).
+- **Parse's LibreOffice install (step 8) in the pull-request run took 34 min 38 s** (21:33:10Z to 22:07:48Z), against 23 s in the push run: CI slowness, not a flake. It was the third slow install that day, after 43.5 minutes in 40008522235 (D-216 item 8) and 41 min 03 s in 40018101184. The step's timeout is the CI PR's (D-218).
+- **Merged:** PR #79, merge commit `b5736a22930fe51c33bd1985e09d5c168bf03068` (parents `6dee751` and `35df111`), merged by the founder at 22:12:12Z.
+- **Main after the merge:** push run #464 (40032068659) on `b5736a2`, green on attempt 1 (22:12:15Z to 22:43:12Z). Parse's LibreOffice install took 27 min 06 s (22:12:55Z to 22:40:01Z), the fourth slow install that day: CI slowness, not a flake.
+
+**Founder approval:** 2026-10-23.
+
+**Related:** D-199, D-214 (item 13), D-216; `apps/web/package-lock.json`.
