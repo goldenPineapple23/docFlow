@@ -393,3 +393,4 @@ Sections 0, 3, 7 and 10 above are the prompt's own words and are unchanged. The 
 - New decisions go in DECISIONS.md. CLAUDE.md gets at most a one-line pointer, and only when the decision must be acted on in every session.
 - Before adding anything to this file, state its size before and after. If the addition would pass the cap, propose what moves out instead and wait for the founder's decision. Never trim, reword, or move Sections 0, 3, 7 or 10 to make room.
 - Every checkpoint summary includes CLAUDE.md's current size.
+- Before changing any file outside one app, search the repo for every reader of it and run their tests (D-216 item 6).

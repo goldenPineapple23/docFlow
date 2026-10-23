@@ -4583,7 +4583,7 @@ The Console's two alert lists render who an alert is about through one component
 
 **14. Staging, 2026-10-23.** Claude's reads were all read-only transactions as `docflow_admin`.
 - **Which step numbers.** This item uses the PR message's numbering (its "Before 0039" section), not the 2026-10-23 handoff's. The PR message's steps 1 and 2 are the handoff's step 1. Its step 3, the grants_before snapshot, is the handoff's step 2. Its steps 4, 5 and 6 are the handoff's 3, 4 and 5. Its step 7 is the handoff's 7. The handoff's step 6, the Memurai check, is inside step 7 here.
-- **Before anything (Claude):** at 00:04:33Z and 16:09:38Z, 0039 was not applied, `backup_0039` did not exist, and the grants snapshot was `b065a7c38b5ef8af0003c3838e50af09d6a1564cfc98967fda725c92edf3f5b2` (= `0039_pre_snapshot.json`).
+- **Before anything (Claude):** at 00:04:33Z on 2026-10-23 (20:04 on 2026-10-22, New York; the first read, made the evening before) and at 16:09:38Z, 0039 was not applied, `backup_0039` did not exist, and the grants snapshot was `b065a7c38b5ef8af0003c3838e50af09d6a1564cfc98967fda725c92edf3f5b2` (= `0039_pre_snapshot.json`).
 - **Steps 1 and 2, the backup and the row count (founder, SQL Editor):** `backup_0039` with tiers, setup_fee_presets and founder_alerts, RLS on each. It was made between 16:18:44Z and 16:26:25Z. live = backup: 3/3, 5/5, 4/4.
 - **Step 3, the grants_before snapshot (the handoff's step 2), failed at its first run and was fixed with one cast before any snapshot was taken.** This is not step 4's pre-check, which never failed.
   - Claude ran its SELECT read-only at 16:18:28Z: `42725 operator is not unique: text || "char"`, at the PR text's line 63. `pg_default_acl.defaclobjtype` is Postgres's one-byte `"char"` type, which `||` can't join to text.
@@ -4599,6 +4599,10 @@ The Console's two alert lists render who an alert is about through one component
   - **Policies:** both `read_all` policies are `TO docflow_tables`. `rollup_raise` allows `rollup_stale` and `staging_ttl_elapsed`, tenant-less.
   - **postgres's defaults in public:** no anon or authenticated entry.
   - **Row counts:** the founder's Editor count after the apply, live = backup, 3/3, 5/5, 4/4.
+- **Supabase's Security Advisor after the apply (read by the founder in the dashboard):** 0 errors, 1 warning, 7 info.
+  - **The warning:** Leaked Password Protection Disabled, a production item (D-214 item 11's Phase 6 list).
+  - **The 7 info:** `dispatcher_state`, `model_provider_state` and `worker_starts`, plus the four `backup_0039` tables. The four backup tables have RLS on and no policy, deliberately.
+  - **What 0039 fixed:** the four "Function Search Path Mutable" warnings are gone.
 - **Step 7, the three staging suites (one founder Grant for all three; RUNBOOK 1.4).** Before the start at 16:48:47Z: HEAD was `66a6ebf` with a clean tree, Memurai was Running and answered PONG, and 8100 was free.
   - **How they ran:** in parallel through `scripts/run_suites_parallel.py`, 16:49:19Z to 17:32:33Z, exit 0.
   - **What was reachable:** only the staging database, Storage and loopback. Anthropic, Stripe and Supabase Auth were blocked, `DOCFLOW_STAGING_RUN=1` was set, and the dev parse service was on 8100 for the API suite.
@@ -4622,7 +4626,7 @@ The Console's two alert lists render who an alert is about through one component
   3. A query on a table that an earlier block creates can't be checked until that block has run.
 - **CLAUDE.md:** the rule's one-line pointer, in the founder's words, is the fourth bullet under "Grants". CLAUDE.md went from 70,681 to 71,045 characters of 81,389 (~24.4k tokens; D-215).
 
-**16. Merged (2026-10-23).** PR #76, merge commit `43d85b4f3c06bf17f6a7f6a093487b776e0710c0` (parents `7f3b318` and `66a6ebf`), merged by the founder at 17:46:32Z, after item 13's re-run.
+**16. Merged (2026-10-23).** PR #76, merge commit `43d85b4f3c06bf17f6a7f6a093487b776e0710c0` (parents `7f3b318` and `66a6ebf`), merged by the founder at 17:46:32Z, after item 13's re-run. Main's push run on it, 39997842492, was red only at web's dependency audit: D-216.
 
 **Related:** D-155 (item 2), D-158, D-199, D-203, D-210, D-212, D-213 (items 6, 7); RUNBOOK 1.1 to 1.4, 1.11, 2.5, 8.1; migrations 0011, 0014, 0017, 0026, 0027, 0028, 0035, 0036; Section 7.15.2 Step 1, 7.15.3, 7.9.
 
@@ -4649,3 +4653,53 @@ The Console's two alert lists render who an alert is about through one component
 **Founder approval:** 2026-10-21.
 
 **Related:** D-191, D-214; `CLAUDE.md` ("CLAUDE.md size"); `scripts/ci/check_claude_md_size.py`; `.github/workflows/ci.yml` (`core`).
+
+## D-216 — Next.js 16.3.8 -> 16.4.1 for three new advisories (PR #78; founder, 2026-10-23)
+
+**Context:** main's push run 39997842492 on `43d85b4` (#76's merge) failed only at the web job's dependency audit; every test passed. npm reported three advisories in next 16.3.8, all published on 2026-10-22: GHSA-673q-mjm6-r5xr (critical, remote code execution in `use cache` functions returning typed arrays), GHSA-2464-fhr4-w9xw (critical, remote code execution in the Image Optimization API with SVG files) and GHSA-p3m5-59mp-jv5r (high, denial of service through Server Actions).
+- **Not a flake (founder):** a new advisory is a known cause, as on 2026-10-21. The count stays at 3 (D-214 item 13). Nothing was re-run.
+- **web-live in the same run was slow, not failed:** its Playwright browser install took 13 minutes (17:48:59Z to 18:01:58Z), and then its tests passed.
+
+**1. The version: 16.4.1, the lowest that fixes all three.**
+- **No 16.3.x patch exists:** the npm registry has no release after 16.3.8 in that line, and all three advisories name 16.4.1 as the first patched version for 16.x.
+- Later releases (16.4.2, 16.4.3) weren't needed: 16.4.1 already fixes all three.
+- **16.4.0's release notes have no breaking entry.** The items that could touch an app are the removal of `experimental.appNewScrollHandler` and `unstable_eager`, the rename of `unstable_navigation()` and `unstable_prefetch()`, and React 18 deprecated in the Pages Router. None of them is used here: `next.config.ts` has no `experimental` key, `src` calls no `unstable_` API, and there is no middleware or proxy file.
+- **16.4.1's notes are the three security fixes only.**
+- **React fits:** next 16.4.1's peer range for react and react-dom (`^18.2.0 || 19.0.0-rc-de68d2f4-20241204 || ^19.0.0`) is unchanged, and React is 19.2.8.
+
+**2. What changed, against `main`: two files.**
+- **`apps/web/package.json`:** the exact pins `next` and `eslint-config-next` go from 16.3.8 to 16.4.1. They stay exact pins (founder).
+- **`apps/web/package-lock.json`:** 13 entries, version, `resolved` and `integrity` only: the root, next, eslint-config-next, @next/env, @next/eslint-plugin-next and the eight @next/swc-* packages. Nothing was added or removed. The ranges that widened (sharp `^0.35.5`, eslint-plugin-react-hooks `^7.1.0`, typescript-eslint `^8.56.0`) were already met by what was installed.
+
+**3. The build was proved in CI, not locally.** `next/font/google` (in `src/app/layout.tsx`) downloads the Geist fonts from `fonts.googleapis.com` at build time. With every outside service blocked, the local build stopped there. The founder chose CI's web job as the build proof and did not unblock Google Fonts locally.
+- **What ran locally, blocked:**
+  - lint: clean with the local `.next-live/` folder left out;
+  - `tsc --noEmit`: passed;
+  - vitest: 62 passed;
+  - the audit: `0 high or critical`.
+
+**4. The braces advisory: withdrawn, but its line kept on file for now.**
+- **The advisory:** GitHub withdrew GHSA-vfj7-8cjw-p6xm at 12:53Z on 2026-10-23, so npm no longer reports it.
+- **Why the line stays:** `packages/core/tests/test_npm_audit_exceptions.py` reads `.github/audit-exceptions.txt` and uses the braces line.
+- **The cleanup is owed in Stage 5 item 7:** remove the line, and move those 13 tests onto a test-only exceptions file, as its own core PR with the full gate.
+- **What the audit does with it meanwhile:** `scripts/ci/npm_audit.py` prints "stale audit exception" as a notice on every run, before and after the line's review date of 2026-11-05. The "ends soon" warning and the failure apply only to an advisory npm still reports.
+
+**5. The PR's first commit broke 13 core tests; it was not a flake.**
+- **What happened:** `617d806` removed the braces line. In push run 40002162623 and pull-request run #451 (40002500967), core read `13 failed, 1077 passed`, all in `test_npm_audit_exceptions.py`; every other job was green.
+- **The cause:** this PR's own change. Claude had run only web's checks locally, not this core test that reads the same file.
+- **The fix:** `bb5aca8` restored the file exactly as `main` has it. The test then read `36 passed` locally, and the audit passed with the stale notice.
+
+**6. A rule (founder, 2026-10-23):** before changing any file outside one app, search the repo for every reader of it and run their tests. It is a line of CLAUDE.md's founder working rules, next to the size rule, in the founder's words. CLAUDE.md went from 71,045 to 71,164 characters of 81,389 (~24.5k tokens; D-215).
+
+**7. Left as they are:**
+- the 2 moderate advisories in vitest's dev chain (`@vitest/mocker`, `vitest`);
+- the `.next-live/` lint noise: adding `apps/web/.next-live/` to eslint's ignores is a task under Stage 5 item 7 (BUILD-STATUS, "Added 2026-10-23").
+
+**8. CI and the merge.**
+- **On `bb5aca8`, both runs green on attempt 1:** pull-request run #453 (40006537659, 18:50:02Z to 18:54:24Z) and push run #452 (40006529260, 18:49:59Z to 19:02:34Z).
+- **Counts:** core 1090, worker 268, API 740 with leftover `+0`, parse 581 / 427. The web job's end-to-end tests read `76 passed` and web-live's `3 passed`. The web audit printed the stale braces notice only.
+- **Merged:** PR #78, merge commit `6dee7514d20382e2c57a6e28b5f33f713db8a213` (parents `43d85b4` and `bb5aca8`), merged by the founder at 19:04:36Z.
+
+**Founder approval:** 2026-10-23.
+
+**Related:** D-199, D-213 (PR A), D-214 (item 13); `apps/web/package.json`, `apps/web/package-lock.json`, `.github/audit-exceptions.txt`, `scripts/ci/npm_audit.py`, `packages/core/tests/test_npm_audit_exceptions.py`.
