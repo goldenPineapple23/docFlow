@@ -4545,6 +4545,7 @@ The Console's two alert lists render who an alert is about through one component
 - Correction (2026-10-23): "web 79" added M7's 3 vitest tests to Playwright's 76. CI's web job annotates only Playwright; the right expectation is web 76 end-to-end, vitest 62.
 
 **7. Not run here:** nothing on staging but the read-only reads in item 3, and nothing on Fly. 0039 is applied to staging by the founder after the backup and snapshot at the top of the PR message. Claude then reads the snapshot read-only before and after (RUNBOOK 1.11). Then the three staging suites run, each on its own grant, before the merge.
+- Correction (2026-10-23): the three suites ran together through the runner under one Grant naming step 7 and all three (item 14), as RUNBOOK 1.4 allows. "Each on its own grant" was wrong.
 
 **8. Left as they are, and why:** `supabase_admin`'s defaults and PUBLIC's global default on new functions (item 2, part 5); `service_role`'s grants; the alerts' constants beyond the new minimum, which already existed and are only now read.
 
@@ -4586,7 +4587,7 @@ The Console's two alert lists render who an alert is about through one component
 - **Which step numbers.** This item uses the PR message's numbering (its "Before 0039" section), not the 2026-10-23 handoff's. The PR message's steps 1 and 2 are the handoff's step 1. Its step 3, the grants_before snapshot, is the handoff's step 2. Its steps 4, 5 and 6 are the handoff's 3, 4 and 5. Its step 7 is the handoff's 7. The handoff's step 6, the Memurai check, is inside step 7 here.
 - **Before anything (Claude):** at 00:04:33Z on 2026-10-23 (8:04 PM on Thursday 2026-10-22, New York) and at 16:09:38Z, 0039 was not applied, `backup_0039` did not exist, and the grants snapshot was `b065a7c38b5ef8af0003c3838e50af09d6a1564cfc98967fda725c92edf3f5b2` (= `0039_pre_snapshot.json`).
 - **Steps 1 and 2, the backup and the row count (founder, SQL Editor):** `backup_0039` with tiers, setup_fee_presets and founder_alerts, RLS on each. It was made between 16:18:44Z and 16:26:25Z. live = backup: 3/3, 5/5, 4/4.
-- **Step 3, the grants_before snapshot (the handoff's step 2), failed at its first run and was fixed with one cast before any snapshot was taken.** This is not step 4's pre-check, which never failed.
+- **Step 3, the grants_before snapshot (the handoff's step 2), failed at Claude's read-only run (16:18:28Z) and was fixed with one cast before any snapshot was taken.** Whether it was run on staging before that read isn't recorded. This is not step 4's pre-check, which never failed.
   - Claude ran its SELECT read-only at 16:18:28Z: `42725 operator is not unique: text || "char"`, at the PR text's line 63. `pg_default_acl.defaclobjtype` is Postgres's one-byte `"char"` type, which `||` can't join to text.
   - With `d.defaclobjtype::text` (line 63 of the PR text; nothing else changed) it read 24 / 20 / 80 / 40 at 16:18:44Z.
   - No file in the repository carries that SQL.
@@ -4604,7 +4605,7 @@ The Console's two alert lists render who an alert is about through one component
   - **The warning:** Leaked Password Protection Disabled, a production item (D-214 item 11's Phase 6 list).
   - **The 7 info:** `dispatcher_state`, `model_provider_state` and `worker_starts`, plus the four `backup_0039` tables. The four backup tables have RLS on and no policy, deliberately.
   - **What 0039 fixed:** the four "Function Search Path Mutable" warnings are gone.
-- **Step 7, the three staging suites (one founder Grant for all three; RUNBOOK 1.4).** Before the start at 16:48:47Z: HEAD was `66a6ebf` with a clean tree, Memurai was Running and answered PONG, and 8100 was free.
+- **Step 7, the three staging suites (in parallel through the runner, as RUNBOOK 1.4 allows, D-211 item 11 and D-212 item 6; one founder Grant, at 16:48:23Z, naming step 7 and all three suites).** Before the start at 16:48:47Z: HEAD was `66a6ebf` with a clean tree, Memurai was Running and answered PONG, and 8100 was free.
   - **How they ran:** in parallel through `scripts/run_suites_parallel.py`, 16:49:19Z to 17:32:33Z, exit 0.
   - **What was reachable:** only the staging database, Storage and loopback. Anthropic, Stripe and Supabase Auth were blocked, `DOCFLOW_STAGING_RUN=1` was set, and the dev parse service was on 8100 for the API suite.
   - core: `1089 passed, 1 skipped in 147.04s (0:02:27)`
@@ -4620,7 +4621,7 @@ The Console's two alert lists render who an alert is about through one component
 **15. A rule for SQL the founder runs (founder, 2026-10-23; the fourth bullet of CLAUDE.md's "Grants").** SQL the founder will run on staging is first checked by Claude in a read-only transaction.
 - **What Claude checks:** the SELECT of a `CREATE ... AS SELECT`. Other SELECT, INSERT, UPDATE and DELETE statements are PREPAREd: parsed, with their types and operators resolved, and nothing executed. DDL is reported as not checkable, with the CI evidence that covers it.
 - **What Claude reports:** each block as parses, fails or not checkable, with why, before the founder runs it.
-- **Why:** item 14's grants_before snapshot SQL failed at its first run. It did no harm only because the failing statement was the first one.
+- **Why:** item 14's grants_before snapshot SQL, as written in the PR message, could not run (42725). It was caught by Claude's read-only run; whether it was also run on staging first isn't recorded. In a block of several statements, the ones before a failing statement would already have run.
 - **Three limits, said each time they apply:**
   1. `docflow_admin` has no USAGE on a backup schema and does not bypass RLS. So a query that names a backup table, or counts every row of a table under RLS, can't be checked or confirmed by Claude. Claude says so, and doesn't switch to another login without asking.
   2. DDL (a migration, GRANT or REVOKE, the CREATE of a CREATE TABLE AS) can't run read-only, so it is reported as not checkable. For a migration, the CI evidence is its round trip plus the pre-snapshot match.
@@ -4636,7 +4637,7 @@ The Console's two alert lists render who an alert is about through one component
 **Context:** CLAUDE.md is loaded on every turn of every session, and each new founder rule made it longer. `/context` measured it at 24.1k tokens on 2026-10-21 (the copy on the M7 branch, Grants subsection included).
 
 **1. The cap: 28k tokens, enforced as 81,389 characters.**
-- **How the limit was computed:** that same copy is 70,053 characters with LF line endings, as git stores it and CI checks it out (70,441 in the Windows working copy, whose `core.autocrlf` writes CRLF). 70,053 × 28 / 24.1 = 81,389.2, rounded down to 81,389. That ties the limit to the file's real tokens-per-character ratio, not a guess.
+- **How the limit was computed:** that same copy is 70,053 characters with LF line endings, as git stores it and CI checks it out (70,441 in the Windows working copy, whose `core.autocrlf` writes CRLF). 70,053 × 28 / 24.1 = 81,389.4, rounded down to 81,389. That ties the limit to the file's real tokens-per-character ratio, not a guess.
 - **How it is counted:** characters, not bytes. The file is read as UTF-8 and CRLF is turned into LF first, so a Windows checkout and CI give the same number.
 - **At this entry:** `main`'s CLAUDE.md with the new subsection is 69,961 characters (~24.1k tokens).
 
@@ -4690,7 +4691,7 @@ The Console's two alert lists render who an alert is about through one component
 - **The cause:** this PR's own change. Claude had run only web's checks locally, not this core test that reads the same file.
 - **The fix:** `bb5aca8` restored the file exactly as `main` has it. The test then read `36 passed` locally, and the audit passed with the stale notice.
 
-**6. A rule (founder, 2026-10-23):** before changing any file outside one app, search the repo for every reader of it and run their tests. It is a line of CLAUDE.md's founder working rules, the last bullet of "Running the suites", in the founder's words. CLAUDE.md went from 71,045 to 71,164 characters of 81,389 (~24.5k tokens; D-215).
+**6. A rule (founder, 2026-10-23):** before changing any file outside one app, search the repo for every reader of it and run their tests. It is a line of CLAUDE.md's founder working rules, the last bullet of "Running the suites", in the founder's words. CLAUDE.md went from 71,045 to 71,164 characters of 81,389 (~24.5k tokens; D-215). The same day, the second bullet of "Running the suites" was changed to match RUNBOOK 1.4's standing rule (founder): "the same suites, one at a time or core, worker and API together through the runner". CLAUDE.md then went from 71,164 to 71,216 characters (~24.5k tokens).
 
 **7. Left as they are:**
 - the 2 moderate advisories in vitest's dev chain (`@vitest/mocker`, `vitest`);
@@ -4700,7 +4701,7 @@ The Console's two alert lists render who an alert is about through one component
 - **On `bb5aca8`, both runs green on attempt 1:** pull-request run #453 (40006537659, 18:50:02Z to 18:54:24Z) and push run #452 (40006529260, 18:49:59Z to 19:02:34Z).
 - **Counts:** core 1090, worker 268, API 740 with leftover `+0`, parse 581 / 427, web-live 3. Web end-to-end 76 (unchanged since before M7); vitest 62 locally (59 at 7f3b318 + M7's 3 in AlertTenant.test.tsx). The CI web job annotates only Playwright. The web audit printed the stale braces notice only.
 - **Merged:** PR #78, merge commit `6dee7514d20382e2c57a6e28b5f33f713db8a213` (parents `43d85b4` and `bb5aca8`), merged by the founder at 19:04:36Z.
-- Main's push run 40008522235 on 6dee751: green on attempt 1. Parse's LibreOffice install (step 8) took 43.5 minutes, against 0.7 minutes in run 39997842492: CI slowness, not a flake.
+- **Main after the merge:** push run 40008522235 on `6dee751`, green on attempt 1. Parse's LibreOffice install (step 8) took 43.5 minutes, against 0.7 minutes in run 39997842492: CI slowness, not a flake.
 
 **Founder approval:** 2026-10-23.
 
