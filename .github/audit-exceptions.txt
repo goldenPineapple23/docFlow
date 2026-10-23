@@ -21,3 +21,11 @@
 # fails the job again, until the line is removed (a fix exists) or given a
 # new date and reason.
 # A line whose advisory is no longer reported is announced as stale; delete it.
+
+# braces (stack exhaustion on deeply nested brace patterns). Dev-only: it is
+# reached only through the lint chain eslint-config-next ->
+# @next/eslint-plugin-next -> fast-glob -> micromatch -> braces, and
+# `npm audit --omit=dev` reports 0. No patched braces exists (every version up
+# to the latest, 3.0.3, is affected), and npm's only offered fix downgrades
+# eslint-config-next to 14.2.35, which is not taken. Founder, 2026-10-05.
+web GHSA-vfj7-8cjw-p6xm review=2026-11-05  # dev-only lint chain; no patched braces exists
