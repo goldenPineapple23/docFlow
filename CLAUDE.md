@@ -372,6 +372,7 @@ Sections 0, 3, 7 and 10 above are the prompt's own words and are unchanged. The 
 ### Running the suites
 - Run each suite as `pytest -q -rs` with its output to a log file outside the repository, then read the last lines and the failures, not the whole log. `-rs` keeps every skip's reason. Add `--durations=25` on the worker run.
 - This changes how the output is read, not what runs: the same suites, one at a time, against the same staging database (RUNBOOK 1.4).
+- Before changing any file outside one app, search the repo for every reader of it and run their tests (D-216 item 6).
 
 ### Starting a session
 - Read this file and the status paragraph near the top of `docs/BUILD-STATUS.md` ("Status, as of ..."). Then read other files as the task needs them, a named section first, not the whole file.
@@ -393,4 +394,3 @@ Sections 0, 3, 7 and 10 above are the prompt's own words and are unchanged. The 
 - New decisions go in DECISIONS.md. CLAUDE.md gets at most a one-line pointer, and only when the decision must be acted on in every session.
 - Before adding anything to this file, state its size before and after. If the addition would pass the cap, propose what moves out instead and wait for the founder's decision. Never trim, reword, or move Sections 0, 3, 7 or 10 to make room.
 - Every checkpoint summary includes CLAUDE.md's current size.
-- Before changing any file outside one app, search the repo for every reader of it and run their tests (D-216 item 6).

@@ -4542,6 +4542,7 @@ The Console's two alert lists render who an alert is about through one component
   - web `62 passed`; tsc, eslint, ruff and mypy clean.
   - The worker and API files collect offline (15 and 57).
 - **Expected in CI:** core 1090, worker 268 (253 + 15, none skipped), API 740 (718 + 22, leftover `+0`), web 79, web-live 3, parse 581 and 427. Plus the two 0039 round-trip steps in the core job: the reverse before 0036's round trip, which compares the whole database with 0036's own post state, and the forward after 0038's.
+- Correction (2026-10-23): "web 79" added M7's 3 vitest tests to Playwright's 76. CI's web job annotates only Playwright; the right expectation is web 76 end-to-end, vitest 62.
 
 **7. Not run here:** nothing on staging but the read-only reads in item 3, and nothing on Fly. 0039 is applied to staging by the founder after the backup and snapshot at the top of the PR message. Claude then reads the snapshot read-only before and after (RUNBOOK 1.11). Then the three staging suites run, each on its own grant, before the merge.
 
@@ -4583,7 +4584,7 @@ The Console's two alert lists render who an alert is about through one component
 
 **14. Staging, 2026-10-23.** Claude's reads were all read-only transactions as `docflow_admin`.
 - **Which step numbers.** This item uses the PR message's numbering (its "Before 0039" section), not the 2026-10-23 handoff's. The PR message's steps 1 and 2 are the handoff's step 1. Its step 3, the grants_before snapshot, is the handoff's step 2. Its steps 4, 5 and 6 are the handoff's 3, 4 and 5. Its step 7 is the handoff's 7. The handoff's step 6, the Memurai check, is inside step 7 here.
-- **Before anything (Claude):** at 00:04:33Z on 2026-10-23 (20:04 on 2026-10-22, New York; the first read, made the evening before) and at 16:09:38Z, 0039 was not applied, `backup_0039` did not exist, and the grants snapshot was `b065a7c38b5ef8af0003c3838e50af09d6a1564cfc98967fda725c92edf3f5b2` (= `0039_pre_snapshot.json`).
+- **Before anything (Claude):** at 00:04:33Z on 2026-10-23 (8:04 PM on Thursday 2026-10-22, New York) and at 16:09:38Z, 0039 was not applied, `backup_0039` did not exist, and the grants snapshot was `b065a7c38b5ef8af0003c3838e50af09d6a1564cfc98967fda725c92edf3f5b2` (= `0039_pre_snapshot.json`).
 - **Steps 1 and 2, the backup and the row count (founder, SQL Editor):** `backup_0039` with tiers, setup_fee_presets and founder_alerts, RLS on each. It was made between 16:18:44Z and 16:26:25Z. live = backup: 3/3, 5/5, 4/4.
 - **Step 3, the grants_before snapshot (the handoff's step 2), failed at its first run and was fixed with one cast before any snapshot was taken.** This is not step 4's pre-check, which never failed.
   - Claude ran its SELECT read-only at 16:18:28Z: `42725 operator is not unique: text || "char"`, at the PR text's line 63. `pg_default_acl.defaclobjtype` is Postgres's one-byte `"char"` type, which `||` can't join to text.
@@ -4689,7 +4690,7 @@ The Console's two alert lists render who an alert is about through one component
 - **The cause:** this PR's own change. Claude had run only web's checks locally, not this core test that reads the same file.
 - **The fix:** `bb5aca8` restored the file exactly as `main` has it. The test then read `36 passed` locally, and the audit passed with the stale notice.
 
-**6. A rule (founder, 2026-10-23):** before changing any file outside one app, search the repo for every reader of it and run their tests. It is a line of CLAUDE.md's founder working rules, next to the size rule, in the founder's words. CLAUDE.md went from 71,045 to 71,164 characters of 81,389 (~24.5k tokens; D-215).
+**6. A rule (founder, 2026-10-23):** before changing any file outside one app, search the repo for every reader of it and run their tests. It is a line of CLAUDE.md's founder working rules, the last bullet of "Running the suites", in the founder's words. CLAUDE.md went from 71,045 to 71,164 characters of 81,389 (~24.5k tokens; D-215).
 
 **7. Left as they are:**
 - the 2 moderate advisories in vitest's dev chain (`@vitest/mocker`, `vitest`);
@@ -4697,7 +4698,7 @@ The Console's two alert lists render who an alert is about through one component
 
 **8. CI and the merge.**
 - **On `bb5aca8`, both runs green on attempt 1:** pull-request run #453 (40006537659, 18:50:02Z to 18:54:24Z) and push run #452 (40006529260, 18:49:59Z to 19:02:34Z).
-- **Counts:** core 1090, worker 268, API 740 with leftover `+0`, parse 581 / 427. The web job's end-to-end tests read `76 passed` and web-live's `3 passed`. The web audit printed the stale braces notice only.
+- **Counts:** core 1090, worker 268, API 740 with leftover `+0`, parse 581 / 427, web-live 3. Web end-to-end 76 (unchanged since before M7); vitest 62 locally (59 at 7f3b318 + M7's 3 in AlertTenant.test.tsx). The CI web job annotates only Playwright. The web audit printed the stale braces notice only.
 - **Merged:** PR #78, merge commit `6dee7514d20382e2c57a6e28b5f33f713db8a213` (parents `43d85b4` and `bb5aca8`), merged by the founder at 19:04:36Z.
 
 **Founder approval:** 2026-10-23.
