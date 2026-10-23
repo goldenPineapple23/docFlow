@@ -33,17 +33,16 @@ Claude read-only (D-214 item 15), and before a file outside one app is changed, 
 is found and its tests are run (D-216 item 6). **Next, in order:** D-178, the sweep script, the
 warnings and the 32-byte test secret (with the two thin-margin `test_parse_client.py` tests, D-212
 item 8, the port-54322 CI step, D-214 item 13, and the braces exception's core PR, D-216 item 4),
-M10 without the model IDs, the
-375 px fix, then counting rows before extraction, and the docs PR last. Then E1 and E2a, then demo
-readiness (D-209). The long catalog commit's test through a public address needs its own grant.
-The 50,000-row cap and IMP-003's wording: one PR, before pilots, only if a pilot prospect has more
-than 50,000 SKUs. The welding demo comes after the fastener rehearsal and never blocks it (D-208).
-**Staging:** the database has 0039. `docflow-parse-staging` runs PR B's image (Pillow 13.0.0).
-`docflow-worker-staging` runs `e95b095`'s image (D-212) with no machines; certifi 2026.10.19 and
-M7's code reach it at its next deploy. **That staging worker deploy is owed under D-209 (staging is
-redeployed after a merge, then the demo smoke test) before anything relies on staging's worker,
-and it needs a Grant.** The API and parse machines are stopped, with auto-stop on, and the
-Healthchecks.io check is paused.
+M10 without the model IDs, the 375 px fix, then counting rows before extraction, and the docs PR
+last. Then E1 and E2a, then demo readiness (D-209). The long catalog commit's test through a public
+address needs its own grant. The 50,000-row cap and IMP-003's wording: one PR, before pilots, only
+if a pilot prospect has more than 50,000 SKUs. The welding demo comes after the fastener rehearsal
+and never blocks it (D-208). **Staging:** the database has 0039. `docflow-parse-staging` runs PR B's
+image (Pillow 13.0.0). `docflow-worker-staging` runs `e95b095`'s image (D-212) with no machines;
+certifi 2026.10.19 and M7's code reach it at its next deploy. **That staging worker deploy is owed
+under D-209 (staging is redeployed after a merge, then the demo smoke test) before anything relies
+on staging's worker, and it needs a Grant.** The API and parse machines are stopped, with auto-stop
+on, and the Healthchecks.io check is paused.
 
 **That paragraph is the current state only** (founder, 2026-10-05; D-191). When it changes, the
 paragraph it replaces moves, word for word, to the top of `docs/status-history.md`, which is not

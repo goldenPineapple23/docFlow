@@ -4700,6 +4700,7 @@ The Console's two alert lists render who an alert is about through one component
 - **On `bb5aca8`, both runs green on attempt 1:** pull-request run #453 (40006537659, 18:50:02Z to 18:54:24Z) and push run #452 (40006529260, 18:49:59Z to 19:02:34Z).
 - **Counts:** core 1090, worker 268, API 740 with leftover `+0`, parse 581 / 427, web-live 3. Web end-to-end 76 (unchanged since before M7); vitest 62 locally (59 at 7f3b318 + M7's 3 in AlertTenant.test.tsx). The CI web job annotates only Playwright. The web audit printed the stale braces notice only.
 - **Merged:** PR #78, merge commit `6dee7514d20382e2c57a6e28b5f33f713db8a213` (parents `43d85b4` and `bb5aca8`), merged by the founder at 19:04:36Z.
+- Main's push run 40008522235 on 6dee751: green on attempt 1. Parse's LibreOffice install (step 8) took 43.5 minutes, against 0.7 minutes in run 39997842492: CI slowness, not a flake.
 
 **Founder approval:** 2026-10-23.
 
