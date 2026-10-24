@@ -4,6 +4,32 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-23 (M7 merged; 0039 applied to staging; D-214)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-21, with Stage 5's M7 built:** Phase 5.5, **Stage 5**. **PR B, Pillow
+13.0.0 for the parse service, is merged** (PR #75, `main` is `7f3b318`; main's push run
+39665677873 green). Its parse Fly gate passed on 2026-10-21 (image `sha256:83d911eb`; D-214 item
+10). **M7 is built, not merged** (D-214; branch `phase55/stage5-m7-alerts`). The nightly rollup
+raises the three missing alerts (review backlog, confidence drift, staging TTL). INT-011 names
+Postmark's retry API, with RUNBOOK 2.5. CLAUDE.md gains the Grants rules. **Migration 0039** shuts
+Supabase's Data API roles out of `public` and gives the four Advisor functions an empty
+`search_path`. **The founder applies 0039 to staging after the backup and snapshot at the top of the
+PR message. The PR doesn't merge until Claude has checked both snapshots and the three staging
+suites have passed, each on its own grant.** **A standing rule (D-213 item 6, tightened in D-214):
+a staging suite, a Fly action or any write to staging starts only after a message from the founder
+that begins with "Grant" and names the step.** **Next, in order, after M7:** D-178, the sweep
+script, the warnings and the 32-byte test secret (with the two thin-margin `test_parse_client.py`
+tests, D-212 item 8), M10 without the model IDs, the 375 px fix, then counting rows before
+extraction, and the docs PR last. Then E1 and E2a, then demo readiness (D-209). The long catalog
+commit's test through a public address needs its own grant. The 50,000-row cap and IMP-003's
+wording: one PR, before pilots, only if a pilot prospect has more than 50,000 SKUs. The welding demo
+comes after the fastener rehearsal and never blocks it (D-208). **Staging:** `docflow-parse-staging`
+runs PR B's image (Pillow 13.0.0). `docflow-worker-staging` runs `e95b095`'s image (D-212) with no
+machines; certifi 2026.10.19 reaches it at its next deploy. The API and parse machines are stopped,
+with auto-stop on, and the Healthchecks.io check is paused. The parse gate's evidence is in
+`docs/spikes/3c-fly-staging/2026-10-21-sha256-83d911eb/` (D-214 item 10).
+
 ## Replaced on 2026-10-21 (Stage 5's PR B merged; the parse gate passed; M7 built; D-214)
 
 <!-- the paragraph as it stood, starting on the next line -->

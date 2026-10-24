@@ -18,28 +18,32 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-10-21, with Stage 5's M7 built:** Phase 5.5, **Stage 5**. **PR B, Pillow
-13.0.0 for the parse service, is merged** (PR #75, `main` is `7f3b318`; main's push run
-39665677873 green). Its parse Fly gate passed on 2026-10-21 (image `sha256:83d911eb`; D-214 item
-10). **M7 is built, not merged** (D-214; branch `phase55/stage5-m7-alerts`). The nightly rollup
-raises the three missing alerts (review backlog, confidence drift, staging TTL). INT-011 names
-Postmark's retry API, with RUNBOOK 2.5. CLAUDE.md gains the Grants rules. **Migration 0039** shuts
-Supabase's Data API roles out of `public` and gives the four Advisor functions an empty
-`search_path`. **The founder applies 0039 to staging after the backup and snapshot at the top of the
-PR message. The PR doesn't merge until Claude has checked both snapshots and the three staging
-suites have passed, each on its own grant.** **A standing rule (D-213 item 6, tightened in D-214):
-a staging suite, a Fly action or any write to staging starts only after a message from the founder
-that begins with "Grant" and names the step.** **Next, in order, after M7:** D-178, the sweep
-script, the warnings and the 32-byte test secret (with the two thin-margin `test_parse_client.py`
-tests, D-212 item 8), M10 without the model IDs, the 375 px fix, then counting rows before
-extraction, and the docs PR last. Then E1 and E2a, then demo readiness (D-209). The long catalog
-commit's test through a public address needs its own grant. The 50,000-row cap and IMP-003's
-wording: one PR, before pilots, only if a pilot prospect has more than 50,000 SKUs. The welding demo
-comes after the fastener rehearsal and never blocks it (D-208). **Staging:** `docflow-parse-staging`
-runs PR B's image (Pillow 13.0.0). `docflow-worker-staging` runs `e95b095`'s image (D-212) with no
-machines; certifi 2026.10.19 reaches it at its next deploy. The API and parse machines are stopped,
-with auto-stop on, and the Healthchecks.io check is paused. The parse gate's evidence is in
-`docs/spikes/3c-fly-staging/2026-10-21-sha256-83d911eb/` (D-214 item 10).
+**Status, as of 2026-10-23, with M7, Next.js 16.4.1 and zod 4.6.6 merged:** Phase 5.5, **Stage 5**.
+**M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts (review backlog,
+confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5. CLAUDE.md has
+the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots matched and
+the three staging suites passed (D-214 item 14). `backup_0039` stays until the founder drops it.
+**Next.js 16.4.1 is merged** (PR #78; D-216): three new advisories fixed. The withdrawn braces
+exception stays on file until its own core PR. **zod 4.6.6 is merged** (PR #79, `main` is
+`b5736a2`; D-217): one new dev-only advisory, fixed in the lock file. **The CI infrastructure flake
+count is 3** (D-214 item 13). **D-215 (CLAUDE.md capped at 28k tokens) is rebased onto `main`, not
+merged** (PR #77). **A standing rule (D-213 item 6, tightened in D-214): a staging suite, a Fly
+action or any write to staging starts only after a message from the founder that begins with
+"Grant" and names the step.** **Two new rules:** SQL the founder runs on staging is first checked by
+Claude read-only (D-214 item 15), and before a file outside one app is changed, every reader of it
+is found and its tests are run (D-216 item 6). **Next, in order:** D-178, the sweep script, the
+warnings and the 32-byte test secret (with the two thin-margin `test_parse_client.py` tests, D-212
+item 8, the port-54322 CI step, D-214 item 13, and the braces exception's core PR, D-216 item 4),
+M10 without the model IDs, the 375 px fix, then counting rows before extraction, and the docs PR
+last. Then E1 and E2a, then demo readiness (D-209). The long catalog commit's test through a public
+address needs its own grant. The 50,000-row cap and IMP-003's wording: one PR, before pilots, only
+if a pilot prospect has more than 50,000 SKUs. The welding demo comes after the fastener rehearsal
+and never blocks it (D-208). **Staging:** the database has 0039. `docflow-parse-staging` runs PR B's
+image (Pillow 13.0.0). `docflow-worker-staging` runs `e95b095`'s image (D-212) with no machines;
+certifi 2026.10.19 and M7's code reach it at its next deploy. **That staging worker deploy is owed
+under D-209 (staging is redeployed after a merge, then the demo smoke test) before anything relies
+on staging's worker, and it needs a Grant.** The API and parse machines are stopped, with auto-stop
+on, and the Healthchecks.io check is paused.
 
 **That paragraph is the current state only** (founder, 2026-10-05; D-191). When it changes, the
 paragraph it replaces moves, word for word, to the top of `docs/status-history.md`, which is not
@@ -331,6 +335,20 @@ are PyJWT's `InsecureKeyLengthWarning` from short test keys and 1 is a
   - the four live-bucket tests in `test_storage_bucket_live.py` fail, not
     skip, where Storage is configured but can't be reached. Kept that way on
     purpose: a run meant to reach Storage that can't must not read green.
+- **Added 2026-10-23 (founder; D-214 item 13, D-216 items 4 and 7), to the warnings
+  item (Stage 5's item 7):**
+  - a read-only CI step in web-live, before `supabase start`, that prints
+    what is listening on port 54322 (flake 3). Its text waits for the
+    founder's approval;
+  - remove the braces exception (GHSA-vfj7-8cjw-p6xm, withdrawn by GitHub
+    on 2026-10-23) from `.github/audit-exceptions.txt`, and move the 13
+    tests in `packages/core/tests/test_npm_audit_exceptions.py` that use it
+    onto a test-only exceptions file. It is its own core PR, with the full
+    gate;
+  - add `apps/web/.next-live/` (the live end-to-end suite's local build
+    folder) to eslint's ignores. A local `npm run lint` on 2026-10-23 read
+    7,081 problems (412 errors, 6,669 warnings), all in that folder
+    (D-216 item 7).
 
 **D-195 (the model policy) in this order:**
 - Change 1, the model config module, goes at the start of demo readiness,

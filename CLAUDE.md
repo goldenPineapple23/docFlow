@@ -371,7 +371,8 @@ Sections 0, 3, 7 and 10 above are the prompt's own words and are unchanged. The 
 
 ### Running the suites
 - Run each suite as `pytest -q -rs` with its output to a log file outside the repository, then read the last lines and the failures, not the whole log. `-rs` keeps every skip's reason. Add `--durations=25` on the worker run.
-- This changes how the output is read, not what runs: the same suites, one at a time, against the same staging database (RUNBOOK 1.4).
+- This changes how the output is read, not what runs: the same suites, one at a time or core, worker and API together through the runner, against the same staging database (RUNBOOK 1.4).
+- Before changing any file outside one app, search the repo for every reader of it and run their tests (D-216 item 6).
 
 ### Starting a session
 - Read this file and the status paragraph near the top of `docs/BUILD-STATUS.md` ("Status, as of ..."). Then read other files as the task needs them, a named section first, not the whole file.
@@ -386,3 +387,10 @@ Sections 0, 3, 7 and 10 above are the prompt's own words and are unchanged. The 
 - A staging suite, a Fly action, or any write to staging starts only after a message from the founder that begins with "Grant" and names the step. A sentence that names what gates a merge, "go", "go as pasted", or a plan that lists the step is not a grant.
 - Read-only commands need no grant: `fly logs`, `fly status`, `fly machine list`, `fly machine status`, and database reads in a read-only transaction. Claude names each one it ran in its next report. `fly ssh console` is not read-only and needs a grant.
 - A command run under a grant is run as the grant gives it. If it must change, a flag included, Claude says what and why before it runs, and waits.
+- SQL the founder will run on staging is first checked by Claude in a read-only transaction (the SELECT of a CREATE ... AS SELECT; other SELECT/INSERT/UPDATE/DELETE statements PREPAREd; DDL reported as not checkable, with the CI evidence that covers it), each block reported as parses, fails or not checkable, with why, before the founder runs it (D-214 item 15).
+
+### CLAUDE.md size (founder, 2026-10-21; DECISIONS.md D-215)
+- CLAUDE.md is capped at 28k tokens. CI enforces the matching character limit. It was about 24k when this rule was added.
+- New decisions go in DECISIONS.md. CLAUDE.md gets at most a one-line pointer, and only when the decision must be acted on in every session.
+- Before adding anything to this file, state its size before and after. If the addition would pass the cap, propose what moves out instead and wait for the founder's decision. Never trim, reword, or move Sections 0, 3, 7 or 10 to make room.
+- Every checkpoint summary includes CLAUDE.md's current size.

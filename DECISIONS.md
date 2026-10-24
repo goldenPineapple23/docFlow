@@ -4542,8 +4542,10 @@ The Console's two alert lists render who an alert is about through one component
   - web `62 passed`; tsc, eslint, ruff and mypy clean.
   - The worker and API files collect offline (15 and 57).
 - **Expected in CI:** core 1090, worker 268 (253 + 15, none skipped), API 740 (718 + 22, leftover `+0`), web 79, web-live 3, parse 581 and 427. Plus the two 0039 round-trip steps in the core job: the reverse before 0036's round trip, which compares the whole database with 0036's own post state, and the forward after 0038's.
+- Correction (2026-10-23): "web 79" added M7's 3 vitest tests to Playwright's 76. CI's web job annotates only Playwright; the right expectation is web 76 end-to-end, vitest 62.
 
 **7. Not run here:** nothing on staging but the read-only reads in item 3, and nothing on Fly. 0039 is applied to staging by the founder after the backup and snapshot at the top of the PR message. Claude then reads the snapshot read-only before and after (RUNBOOK 1.11). Then the three staging suites run, each on its own grant, before the merge.
+- Correction (2026-10-23): the three suites ran together through the runner under one Grant naming step 7 and all three (item 14), as RUNBOOK 1.4 allows. "Each on its own grant" was wrong.
 
 **8. Left as they are, and why:** `supabase_admin`'s defaults and PUBLIC's global default on new functions (item 2, part 5); `service_role`'s grants; the alerts' constants beyond the new minimum, which already existed and are only now read.
 
@@ -4569,4 +4571,168 @@ The Console's two alert lists render who an alert is about through one component
   - The 15 skips were the new rollup-alert tests. Their schema check connected through the default login, the API's, which 0039 rightly refuses the staging function. It now checks as the worker's login.
   - The failure was the reactivate test in item 2, part 3, and changed the design there.
 
-**Related:** D-155 (item 2), D-158, D-203, D-210, D-212, D-213 (items 6, 7); RUNBOOK 1.11, 2.5, 8.1; migrations 0011, 0014, 0017, 0026, 0027, 0028, 0035, 0036; Section 7.15.2 Step 1, 7.15.3, 7.9.
+**13. CI on `66a6ebf`, and the third infrastructure flake (D-199).**
+- **Pull-request run 39684673548** (2026-10-21 22:11:37Z to 22:15:59Z, attempt 1): green. core 1090; its 0039 round trip read `b065a7c3…` reversed (= `0039_pre_snapshot.json`) and `bb67bc5e…` forward and forward again (= `0039_post_snapshot.json`). worker 268, 0 skipped; API 740, leftover `+0`; parse 581 / 427; web and web-live green.
+- **Push run 39684668090, attempt 1: red in web-live only**, at "Start the local Supabase stack (applies supabase/migrations/)" (job 119515576429, 22:11:38Z to 22:12:29Z). The other five jobs were green with the same counts.
+- **The cause, from the job's log.** The founder downloaded the run's log archive on 2026-10-23, and Claude read it read-only. The archive stays outside the repository.
+  - At 22:12:26Z Docker could not start `supabase_db_docflow-ci`: `failed to bind host port for 0.0.0.0:54322:172.18.0.2:5432/tcp: address already in use`.
+  - Earlier in the step, 4 `toomanyrequests: Rate exceeded` lines from image pulls (22:11:51Z to 22:11:55Z). The images then downloaded from `public.ecr.aws`.
+  - No migration ran.
+  - The web-live job has no `services:`, and no earlier step in it opens 54322. So the port was already held on the runner: a cause outside our code.
+- **The founder counted it as flake 3 (2026-10-23).** D-199's count is now 3. No commit was made for it; #76's head stayed `66a6ebf`.
+- **Re-run (founder's decision, after the log was read and the flake counted, to clear the required check):** the failed job's attempt 2 (job 120563056882, 2026-10-23 17:40:37Z to 17:44:01Z) was green, and so was every job of the run.
+- **Stage 5's warnings item gains a read-only CI step** (founder, 2026-10-23): in web-live, before `supabase start`, print what is listening on port 54322. Its text waits for the founder's approval.
+
+**14. Staging, 2026-10-23.** Claude's reads were all read-only transactions as `docflow_admin`.
+- **Which step numbers.** This item uses the PR message's numbering (its "Before 0039" section), not the 2026-10-23 handoff's. The PR message's steps 1 and 2 are the handoff's step 1. Its step 3, the grants_before snapshot, is the handoff's step 2. Its steps 4, 5 and 6 are the handoff's 3, 4 and 5. Its step 7 is the handoff's 7. The handoff's step 6, the Memurai check, is inside step 7 here.
+- **Before anything (Claude):** at 00:04:33Z on 2026-10-23 (8:04 PM on Thursday 2026-10-22, New York) and at 16:09:38Z, 0039 was not applied, `backup_0039` did not exist, and the grants snapshot was `b065a7c38b5ef8af0003c3838e50af09d6a1564cfc98967fda725c92edf3f5b2` (= `0039_pre_snapshot.json`).
+- **Steps 1 and 2, the backup and the row count (founder, SQL Editor):** `backup_0039` with tiers, setup_fee_presets and founder_alerts, RLS on each. It was made between 16:18:44Z and 16:26:25Z. live = backup: 3/3, 5/5, 4/4.
+- **Step 3, the grants_before snapshot (the handoff's step 2), failed at Claude's read-only run (16:18:28Z) and was fixed with one cast before any snapshot was taken.** Whether it was run on staging before that read isn't recorded. This is not step 4's pre-check, which never failed.
+  - Claude ran its SELECT read-only at 16:18:28Z: `42725 operator is not unique: text || "char"`, at the PR text's line 63. `pg_default_acl.defaclobjtype` is Postgres's one-byte `"char"` type, which `||` can't join to text.
+  - With `d.defaclobjtype::text` (line 63 of the PR text; nothing else changed) it read 24 / 20 / 80 / 40 at 16:18:44Z.
+  - No file in the repository carries that SQL.
+  - The founder then made `backup_0039.grants_before` between 16:26:50Z and 16:32:56Z: 24 / 20 / 80 / 40, 164 rows, RLS on.
+- **Step 4, the pre-check again (Claude, 16:34:24Z):** `b065a7c3…`. The read was byte-identical to the committed `0039_pre_snapshot.json`.
+- **Step 5, the apply (founder, SQL Editor, as postgres, once):** between 16:34:24Z and 16:39:20Z. It ran the 163-line file at `66a6ebf` (blob `c88a074`, unchanged from HEAD) and printed "Success. No rows returned".
+- **Step 6, the after-check (Claude, 16:39:20Z):** `bb67bc5ee46580da7a30e38685f203a33748199a840e769309eb077eaaee32e2`, byte-identical to the committed `0039_post_snapshot.json`. Each check below was PREPAREd first.
+  - **anon and authenticated:** no privilege on any public table, view or sequence, and no EXECUTE on any public function, counting PUBLIC.
+  - **The four Advisor functions:** `search_path=""`. `document_status_transition_allowed` is executable by docflow_api, docflow_worker and docflow_admin (and service_role, postgres), not docflow_stripe. The three trigger functions by postgres and service_role only.
+  - **`staging_intakes_past_ttl`:** SECURITY DEFINER, `search_path=""`, EXECUTE for docflow_worker only.
+  - **Policies:** both `read_all` policies are `TO docflow_tables`. `rollup_raise` allows `rollup_stale` and `staging_ttl_elapsed`, tenant-less.
+  - **postgres's defaults in public:** no anon or authenticated entry.
+  - **Row counts:** the founder's Editor count after the apply, live = backup, 3/3, 5/5, 4/4.
+- **Supabase's Security Advisor after the apply (read by the founder in the dashboard):** 0 errors, 1 warning, 7 info.
+  - **The warning:** Leaked Password Protection Disabled, a production item (D-214 item 11's Phase 6 list).
+  - **The 7 info:** `dispatcher_state`, `model_provider_state` and `worker_starts`, plus the four `backup_0039` tables. The four backup tables have RLS on and no policy, deliberately.
+  - **What 0039 fixed:** the four "Function Search Path Mutable" warnings are gone.
+- **Step 7, the three staging suites (in parallel through the runner, as RUNBOOK 1.4 allows, D-211 item 11 and D-212 item 6; one founder Grant, at 16:48:23Z, naming step 7 and all three suites).** Before the start at 16:48:47Z: HEAD was `66a6ebf` with a clean tree, Memurai was Running and answered PONG, and 8100 was free.
+  - **How they ran:** in parallel through `scripts/run_suites_parallel.py`, 16:49:19Z to 17:32:33Z, exit 0.
+  - **What was reachable:** only the staging database, Storage and loopback. Anthropic, Stripe and Supabase Auth were blocked, `DOCFLOW_STAGING_RUN=1` was set, and the dev parse service was on 8100 for the API suite.
+  - core: `1089 passed, 1 skipped in 147.04s (0:02:27)`
+  - worker: `260 passed, 8 skipped in 2378.83s (0:39:38)`
+  - API: `739 passed, 1 skipped, 3 deselected, 693 warnings in 2580.86s (0:43:00)`
+  - **The six counts, before -> after:** tenants 35 -> 35, founder alerts 4 -> 4, e-mails 30 -> 30, scheduled jobs 35 -> 35, platform-admin rows 12 -> 12, users with no tenant 15 -> 15. All `+0`.
+  - **Database and connections:** the database went 43,756,691 -> 43,764,883 bytes (+8,192). Peak connections were 28, at 16:55:39Z.
+  - **The skips** were the same as PR A's run (D-213), each with its reason in the log.
+  - **What did not happen:** no paid model call, no machine started, no Fly command.
+  - **Afterwards:** the dev parse service was stopped, and 8100 was free at 17:32:59Z.
+- **Kept:** `backup_0039` stays until the founder drops it (RUNBOOK 1.3).
+
+**15. A rule for SQL the founder runs (founder, 2026-10-23; the fourth bullet of CLAUDE.md's "Grants").** SQL the founder will run on staging is first checked by Claude in a read-only transaction.
+- **What Claude checks:** the SELECT of a `CREATE ... AS SELECT`. Other SELECT, INSERT, UPDATE and DELETE statements are PREPAREd: parsed, with their types and operators resolved, and nothing executed. DDL is reported as not checkable, with the CI evidence that covers it.
+- **What Claude reports:** each block as parses, fails or not checkable, with why, before the founder runs it.
+- **Why:** item 14's grants_before snapshot SQL, as written in the PR message, could not run (42725). It was caught by Claude's read-only run; whether it was also run on staging first isn't recorded. In a block of several statements, the ones before a failing statement would already have run.
+- **Three limits, said each time they apply:**
+  1. `docflow_admin` has no USAGE on a backup schema and does not bypass RLS. So a query that names a backup table, or counts every row of a table under RLS, can't be checked or confirmed by Claude. Claude says so, and doesn't switch to another login without asking.
+  2. DDL (a migration, GRANT or REVOKE, the CREATE of a CREATE TABLE AS) can't run read-only, so it is reported as not checkable. For a migration, the CI evidence is its round trip plus the pre-snapshot match.
+  3. A query on a table that an earlier block creates can't be checked until that block has run.
+- **CLAUDE.md:** the rule's one-line pointer, in the founder's words, is the fourth bullet under "Grants". CLAUDE.md went from 70,681 to 71,045 characters of 81,389 (~24.4k tokens; D-215).
+
+**16. Merged (2026-10-23).** PR #76, merge commit `43d85b4f3c06bf17f6a7f6a093487b776e0710c0` (parents `7f3b318` and `66a6ebf`), merged by the founder at 17:46:32Z, after item 13's re-run. Main's push run on it, 39997842492, was red only at web's dependency audit: D-216.
+
+**Related:** D-155 (item 2), D-158, D-199, D-203, D-210, D-212, D-213 (items 6, 7); RUNBOOK 1.1 to 1.4, 1.11, 2.5, 8.1; migrations 0011, 0014, 0017, 0026, 0027, 0028, 0035, 0036; Section 7.15.2 Step 1, 7.15.3, 7.9.
+
+## D-215 — CLAUDE.md capped at 28k tokens, enforced in CI (founder, 2026-10-21)
+
+**Context:** CLAUDE.md is loaded on every turn of every session, and each new founder rule made it longer. `/context` measured it at 24.1k tokens on 2026-10-21 (the copy on the M7 branch, Grants subsection included).
+
+**1. The cap: 28k tokens, enforced as 81,389 characters.**
+- **How the limit was computed:** that same copy is 70,053 characters with LF line endings, as git stores it and CI checks it out (70,441 in the Windows working copy, whose `core.autocrlf` writes CRLF). 70,053 × 28 / 24.1 = 81,389.4, rounded down to 81,389. That ties the limit to the file's real tokens-per-character ratio, not a guess.
+- **How it is counted:** characters, not bytes. The file is read as UTF-8 and CRLF is turned into LF first, so a Windows checkout and CI give the same number.
+- **At this entry:** `main`'s CLAUDE.md with the new subsection is 69,961 characters (~24.1k tokens).
+
+**2. Why a cap, and not a split.** A split into always-loaded and on-demand files was decided against: every rule in CLAUDE.md stays loaded in every session. Instead, new decisions go in DECISIONS.md, and CLAUDE.md gets at most a one-line pointer, only for a decision that must be acted on in every session.
+
+**3. The founder rule:** a new subsection, "CLAUDE.md size", is the last of "Working rules added by the founder", in the founder's words. Sections 0, 3, 7 and 10 and the earlier founder rules are unchanged. An addition that would pass the cap waits for the founder to decide what moves out; Sections 0, 3, 7 and 10 are never trimmed, reworded or moved to make room. Every checkpoint summary states CLAUDE.md's current size.
+
+**4. The CI check:** `scripts/ci/check_claude_md_size.py` (standard library only; the limit is the constant `LIMIT_CHARS`). It prints `CLAUDE.md: <count> / <limit> characters (~<n> k tokens)` and exits non-zero over the limit, naming the founder rule. It runs as the last step of the `core` job, `if: success() || failure()`, so it reports even when an earlier step failed and never hides that step's result. No existing step changed or moved.
+
+**5. Not changed:** no checkpoint-summary template exists to add a line to (`CHECKPOINTS.md` quotes Section 0 rule 3 only), so none was edited; the founder rule's last bullet covers it.
+
+**6. Order with M7 (founder):** this branch is based on `main`. Once M7 (D-214) merges, it is rebased, the Grants subsection is put ahead of "CLAUDE.md size", and the size check is run again before the merge.
+- **Done 2026-10-23:** rebased onto `43d85b4` (#76's merge). "Grants" now comes ahead of "CLAUDE.md size" in CLAUDE.md, and D-214 ahead of D-215 here; the text added after `main`'s is exactly this entry's original commit's. The size check read `CLAUDE.md: 70681 / 81389 characters (~24.3 k tokens)`, and `CLAUDE.md: 71045 / 81389 characters (~24.4 k tokens)` with D-214 item 15's pointer added.
+
+**Founder approval:** 2026-10-21.
+
+**Related:** D-191, D-214; `CLAUDE.md` ("CLAUDE.md size"); `scripts/ci/check_claude_md_size.py`; `.github/workflows/ci.yml` (`core`).
+
+## D-216 — Next.js 16.3.8 -> 16.4.1 for three new advisories (PR #78; founder, 2026-10-23)
+
+**Context:** main's push run 39997842492 on `43d85b4` (#76's merge) failed only at the web job's dependency audit; every test passed. npm reported three advisories in next 16.3.8, all published on 2026-10-22: GHSA-673q-mjm6-r5xr (critical, remote code execution in `use cache` functions returning typed arrays), GHSA-2464-fhr4-w9xw (critical, remote code execution in the Image Optimization API with SVG files) and GHSA-p3m5-59mp-jv5r (high, denial of service through Server Actions).
+- **Not a flake (founder):** a new advisory is a known cause, as on 2026-10-21. The count stays at 3 (D-214 item 13). Nothing was re-run.
+- **web-live in the same run was slow, not failed:** its Playwright browser install took 13 minutes (17:48:59Z to 18:01:58Z), and then its tests passed.
+
+**1. The version: 16.4.1, the lowest that fixes all three.**
+- **No 16.3.x patch exists:** the npm registry has no release after 16.3.8 in that line, and all three advisories name 16.4.1 as the first patched version for 16.x.
+- Later releases (16.4.2, 16.4.3) weren't needed: 16.4.1 already fixes all three.
+- **16.4.0's release notes have no breaking entry.** The items that could touch an app are the removal of `experimental.appNewScrollHandler` and `unstable_eager`, the rename of `unstable_navigation()` and `unstable_prefetch()`, and React 18 deprecated in the Pages Router. None of them is used here: `next.config.ts` has no `experimental` key, `src` calls no `unstable_` API, and there is no middleware or proxy file.
+- **16.4.1's notes are the three security fixes only.**
+- **React fits:** next 16.4.1's peer range for react and react-dom (`^18.2.0 || 19.0.0-rc-de68d2f4-20241204 || ^19.0.0`) is unchanged, and React is 19.2.8.
+
+**2. What changed, against `main`: two files.**
+- **`apps/web/package.json`:** the exact pins `next` and `eslint-config-next` go from 16.3.8 to 16.4.1. They stay exact pins (founder).
+- **`apps/web/package-lock.json`:** 13 entries, version, `resolved` and `integrity` only: the root, next, eslint-config-next, @next/env, @next/eslint-plugin-next and the eight @next/swc-* packages. Nothing was added or removed. The ranges that widened (sharp `^0.35.5`, eslint-plugin-react-hooks `^7.1.0`, typescript-eslint `^8.56.0`) were already met by what was installed.
+
+**3. The build was proved in CI, not locally.** `next/font/google` (in `src/app/layout.tsx`) downloads the Geist fonts from `fonts.googleapis.com` at build time. With every outside service blocked, the local build stopped there. The founder chose CI's web job as the build proof and did not unblock Google Fonts locally.
+- **What ran locally, blocked:**
+  - lint: clean with the local `.next-live/` folder left out;
+  - `tsc --noEmit`: passed;
+  - vitest: 62 passed;
+  - the audit: `0 high or critical`.
+
+**4. The braces advisory: withdrawn, but its line kept on file for now.**
+- **The advisory:** GitHub withdrew GHSA-vfj7-8cjw-p6xm at 12:53Z on 2026-10-23, so npm no longer reports it.
+- **Why the line stays:** `packages/core/tests/test_npm_audit_exceptions.py` reads `.github/audit-exceptions.txt` and uses the braces line.
+- **The cleanup is owed in Stage 5 item 7:** remove the line, and move those 13 tests onto a test-only exceptions file, as its own core PR with the full gate.
+- **What the audit does with it meanwhile:** `scripts/ci/npm_audit.py` prints "stale audit exception" as a notice on every run, before and after the line's review date of 2026-11-05. The "ends soon" warning and the failure apply only to an advisory npm still reports.
+
+**5. The PR's first commit broke 13 core tests; it was not a flake.**
+- **What happened:** `617d806` removed the braces line. In push run 40002162623 and pull-request run #451 (40002500967), core read `13 failed, 1077 passed`, all in `test_npm_audit_exceptions.py`; every other job was green.
+- **The cause:** this PR's own change. Claude had run only web's checks locally, not this core test that reads the same file.
+- **The fix:** `bb5aca8` restored the file exactly as `main` has it. The test then read `36 passed` locally, and the audit passed with the stale notice.
+
+**6. A rule (founder, 2026-10-23):** before changing any file outside one app, search the repo for every reader of it and run their tests. It is a line of CLAUDE.md's founder working rules, the last bullet of "Running the suites", in the founder's words. CLAUDE.md went from 71,045 to 71,164 characters of 81,389 (~24.5k tokens; D-215). The same day, the second bullet of "Running the suites" was changed to match RUNBOOK 1.4's standing rule (founder): "the same suites, one at a time or core, worker and API together through the runner". CLAUDE.md then went from 71,164 to 71,216 characters (~24.5k tokens).
+
+**7. Left as they are:**
+- the 2 moderate advisories in vitest's dev chain (`@vitest/mocker`, `vitest`);
+- the `.next-live/` lint noise: adding `apps/web/.next-live/` to eslint's ignores is a task under Stage 5 item 7 (BUILD-STATUS, "Added 2026-10-23").
+
+**8. CI and the merge.**
+- **On `bb5aca8`, both runs green on attempt 1:** pull-request run #453 (40006537659, 18:50:02Z to 18:54:24Z) and push run #452 (40006529260, 18:49:59Z to 19:02:34Z).
+- **Counts:** core 1090, worker 268, API 740 with leftover `+0`, parse 581 / 427, web-live 3. Web end-to-end 76 (unchanged since before M7); vitest 62 locally (59 at 7f3b318 + M7's 3 in AlertTenant.test.tsx). The CI web job annotates only Playwright. The web audit printed the stale braces notice only.
+- **Merged:** PR #78, merge commit `6dee7514d20382e2c57a6e28b5f33f713db8a213` (parents `43d85b4` and `bb5aca8`), merged by the founder at 19:04:36Z.
+- **Main after the merge:** push run 40008522235 on `6dee751`, green on attempt 1. Parse's LibreOffice install (step 8) took 43.5 minutes, against 0.7 minutes in run 39997842492: CI slowness, not a flake.
+
+**Founder approval:** 2026-10-23.
+
+**Related:** D-199, D-213 (PR A), D-214 (item 13); `apps/web/package.json`, `apps/web/package-lock.json`, `.github/audit-exceptions.txt`, `scripts/ci/npm_audit.py`, `packages/core/tests/test_npm_audit_exceptions.py`.
+
+## D-217 — zod 4.6.5 -> 4.6.6 for a new advisory (PR #79; founder, 2026-10-23)
+
+**Context:** both CI runs on #77's head `256025e` (push 40023939876, pull request 40023947752) failed only at the web job's dependency audit; every test passed. npm reported one high advisory, GHSA-mrhx-c7xc-m3w5: "Zod can exhaust memory while validating oversized constrained collections".
+- **When it appeared:** GitHub's advisory database shows it published on 2026-10-01 and updated on 2026-10-23 at 18:26:52Z. The same audit passed on `1345b83` at about 20:19Z, so npm began reporting it between then and about 21:05Z.
+- **Not #77's change:** `256025e` changed only CLAUDE.md and DECISIONS.md, and `main` (`6dee751`) had the same lock file.
+- **Not a flake (founder):** a real advisory is a known cause, as in D-216. The count stays at 3 (D-214 item 13). Nothing was re-run.
+
+**1. Where zod comes from: dev-only and transitive.** `apps/web/package.json` doesn't list it. `eslint-plugin-react-hooks` depends on it and `zod-validation-error` names it as a peer, both as `^3.25.0 || ^4.0.0`. 4.6.6 (published 2026-10-11) is the lowest fixed version and is inside both ranges.
+
+**2. The fix, the D-216 way: the lock file only.**
+- **What changed:** `apps/web/package-lock.json`, zod's entry only: `version`, `resolved` and `integrity`, 3 lines out and 3 in. `package.json` is unchanged.
+- **Readers:** the lock file's only reader is `.github/workflows/ci.yml`, as the npm cache key (`cache-dependency-path`). No test reads it.
+- **What ran locally, with every outside service blocked** (the audit reached only the npm registry):
+  - `npm ci`: exit 0, `node_modules/zod` 4.6.6, and the lock file unchanged by it;
+  - lint: 412 errors and 6,669 warnings, all in the local `.next-live/` build output (Stage 5 item 7);
+  - `tsc --noEmit`: passed;
+  - vitest: 62 passed;
+  - the audit: `0 high or critical`. The 2 moderate advisories in vitest's dev chain remain (D-216 item 7).
+- **The build** was proved in CI, as in D-216 item 3.
+
+**3. CI and the merge.**
+- **On `35df111`, both runs green on attempt 1:** push run #462 (40026180079, 21:21:36Z to 21:26:21Z) and pull-request run #463 (40027539510, 21:32:40Z to 22:11:04Z).
+- **Parse's LibreOffice install (step 8) in the pull-request run took 34 min 38 s** (21:33:10Z to 22:07:48Z), against 23 s in the push run: CI slowness, not a flake. It was the third slow install that day, after 43.5 minutes in 40008522235 (D-216 item 8) and 41 min 03 s in 40018101184. The step's timeout is the CI PR's (D-218).
+- **Merged:** PR #79, merge commit `b5736a22930fe51c33bd1985e09d5c168bf03068` (parents `6dee751` and `35df111`), merged by the founder at 22:12:12Z.
+- **Main after the merge:** push run #464 (40032068659) on `b5736a2`, green on attempt 1 (22:12:15Z to 22:43:12Z). Parse's LibreOffice install took 27 min 06 s (22:12:55Z to 22:40:01Z), the fourth slow install that day: CI slowness, not a flake.
+
+**Founder approval:** 2026-10-23.
+
+**Related:** D-199, D-214 (item 13), D-216; `apps/web/package-lock.json`.

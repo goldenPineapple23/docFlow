@@ -330,6 +330,11 @@ jobs:
         run: python "${{ github.workspace }}/scripts/ci/check_skips.py" core junit.xml
       - name: Dependency audit (fail on known vulnerabilities)
         run: pip-audit
+      # D-215: CLAUDE.md is capped at 28k tokens, checked as characters.
+      # Runs even when an earlier step failed, so it never hides their result.
+      - name: CLAUDE.md size (cap ~28k tokens; founder rule in CLAUDE.md, D-215)
+        if: success() || failure()
+        run: python3 "${{ github.workspace }}/scripts/ci/check_claude_md_size.py"
 
   api:
     name: api (lint, typecheck, test, audit)
