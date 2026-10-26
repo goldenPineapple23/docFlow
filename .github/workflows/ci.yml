@@ -103,11 +103,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v2.1.2
+        # Normally under 10 s; hung 70 min on 2026-10-26 (run #469), cause
+        # unknown. Past 5 min the job fails instead (D-218).
+        timeout-minutes: 5
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Show what is listening on port 54322 before the stack starts (read-only; D-199 flake 3)
+        continue-on-error: true
+        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" before
       - name: Start the local Supabase stack (applies supabase/migrations/)
         id: supabase
         run: supabase start
+      - name: Show what is listening on port 54322 after the stack failed to start, and every container (read-only; D-199 flake 3)
+        if: failure() && steps.supabase.outcome == 'failure'
+        continue-on-error: true
+        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" after
       - name: Point Storage at this runner's own bucket (Stage 3b)
         working-directory: ${{ github.workspace }}
         run: python3 scripts/ci/local_storage_env.py
@@ -244,12 +254,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v2.1.2
+        # Normally under 10 s; hung 70 min on 2026-10-26 (run #469), cause
+        # unknown. Past 5 min the job fails instead (D-218).
+        timeout-minutes: 5
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Show what is listening on port 54322 before the stack starts (read-only; D-199 flake 3)
+        continue-on-error: true
+        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" before
       - name: Start the local Supabase stack (applies supabase/migrations/)
         id: supabase
         working-directory: ${{ github.workspace }}
         run: supabase start
+      - name: Show what is listening on port 54322 after the stack failed to start, and every container (read-only; D-199 flake 3)
+        if: failure() && steps.supabase.outcome == 'failure'
+        continue-on-error: true
+        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" after
       - name: Point Storage at this runner's own bucket (Stage 3b)
         working-directory: ${{ github.workspace }}
         run: python3 scripts/ci/local_storage_env.py
@@ -350,12 +370,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v2.1.2
+        # Normally under 10 s; hung 70 min on 2026-10-26 (run #469), cause
+        # unknown. Past 5 min the job fails instead (D-218).
+        timeout-minutes: 5
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Show what is listening on port 54322 before the stack starts (read-only; D-199 flake 3)
+        continue-on-error: true
+        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" before
       - name: Start the local Supabase stack (applies supabase/migrations/)
         id: supabase
         working-directory: ${{ github.workspace }}
         run: supabase start
+      - name: Show what is listening on port 54322 after the stack failed to start, and every container (read-only; D-199 flake 3)
+        if: failure() && steps.supabase.outcome == 'failure'
+        continue-on-error: true
+        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" after
       - name: Point Storage at this runner's own bucket (Stage 3b)
         working-directory: ${{ github.workspace }}
         run: python3 scripts/ci/local_storage_env.py
@@ -431,12 +461,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v2.1.2
+        # Normally under 10 s; hung 70 min on 2026-10-26 (run #469), cause
+        # unknown. Past 5 min the job fails instead (D-218).
+        timeout-minutes: 5
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Show what is listening on port 54322 before the stack starts (read-only; D-199 flake 3)
+        continue-on-error: true
+        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" before
       - name: Start the local Supabase stack (applies supabase/migrations/)
         id: supabase
         working-directory: ${{ github.workspace }}
         run: supabase start
+      - name: Show what is listening on port 54322 after the stack failed to start, and every container (read-only; D-199 flake 3)
+        if: failure() && steps.supabase.outcome == 'failure'
+        continue-on-error: true
+        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" after
       - name: Point Storage at this runner's own bucket (Stage 3b)
         working-directory: ${{ github.workspace }}
         run: python3 scripts/ci/local_storage_env.py
@@ -524,6 +564,9 @@ jobs:
       - run: pip install pip-audit
       - name: Install LibreOffice (the in-process .doc tests)
         id: libreoffice
+        # Normally under a minute; stalled 25–45 min four times on 2026-10-23 on
+        # a slow mirror. Past 15 min the job fails instead (D-218).
+        timeout-minutes: 15
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer
       - id: ruff
         run: ruff check .
