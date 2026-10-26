@@ -4,6 +4,40 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-26 (the undici fix merged; the CI PR built; D-218, D-221)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-26, with D-215 merged and the undici fix built:** Phase 5.5, **Stage 5**.
+**M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts (review backlog,
+confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5. CLAUDE.md has
+the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots matched and
+the three staging suites passed (D-214 item 14). `backup_0039` stays until the founder drops it.
+**Next.js 16.4.1 is merged** (PR #78; D-216): three new advisories fixed. The withdrawn braces
+exception stays on file until its own core PR. **zod 4.6.6 is merged** (PR #79; D-217): one new
+dev-only advisory, fixed in the lock file. **D-215 (CLAUDE.md capped at 28k tokens) is merged** (PR
+#77, `main` is `089296c`). **`main`'s push run on it is red at the web audit only:** a new dev-only
+undici advisory (D-221). **The undici fix is built, not merged** (D-221; branch
+`phase55/stage5-undici-7.30.1`): undici 7.30.1 in the web lock file, in its own PR so `main` turns
+green without waiting on the CI PR. **The CI infrastructure flake count is 3** (D-214 item 13). **A
+standing rule (D-213 item 6, tightened in D-214): a staging suite, a Fly action or any write to
+staging starts only after a message from the founder that begins with "Grant" and names the
+step.** **Two new rules:** SQL the founder runs on staging is first checked by Claude read-only
+(D-214 item 15), and before a file outside one app is changed, every reader of it is found and its
+tests are run (D-216 item 6). **Next, in order:** the undici PR (D-221), the CI PR (D-218: the
+port-54322 step, D-214 item 13, and a 15-minute timeout on parse's LibreOffice install), the audit
+PR (D-219), D-178 (D-220), the sweep script, the warnings and the 32-byte test secret (with the two
+thin-margin `test_parse_client.py` tests, D-212 item 8, and the braces exception's core PR, D-216
+item 4), M10 without the model IDs, the 375 px fix, then counting rows before extraction, and the
+docs PR last. Then E1 and E2a, then demo readiness (D-209). The long catalog commit's test through a
+public address needs its own grant. The 50,000-row cap and IMP-003's wording: one PR, before pilots,
+only if a pilot prospect has more than 50,000 SKUs. The welding demo comes after the fastener
+rehearsal and never blocks it (D-208). **Staging:** the database has 0039.
+`docflow-parse-staging` runs PR B's image (Pillow 13.0.0). `docflow-worker-staging` runs
+`e95b095`'s image (D-212) with no machines; certifi 2026.10.19 and M7's code reach it at its next
+deploy. **That staging worker deploy is owed under D-209 (staging is redeployed after a merge, then
+the demo smoke test) before anything relies on staging's worker, and it needs a Grant.** The API
+and parse machines are stopped, with auto-stop on, and the Healthchecks.io check is paused.
+
 ## Replaced on 2026-10-26 (D-215 merged; the undici fix built; D-221)
 
 <!-- the paragraph as it stood, starting on the next line -->
