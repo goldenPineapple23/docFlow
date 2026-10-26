@@ -1,0 +1,80 @@
+name: Dependency audit (daily)
+
+# D-219 (founder, 2026-10-23). Every day on main, and by hand from the Actions
+# tab ("Run workflow"): what each app ships is audited, always blocking.
+#   web:    npm. A high or critical advisory in a runtime dependency fails;
+#           a dev-only one warns (scripts/ci/npm_audit.py).
+#   python: pip-audit 2.10.1 on the API's, the worker's and parse's locks
+#           (core ships inside the API and worker images, pinned by the
+#           worker's lock); any known vulnerability fails. Parse's dev tools
+#           only warn (scripts/ci/pip_audit.py).
+# In ci.yml the same audits block only when that app's dependency files
+# changed, so this run is what catches an advisory published against a file
+# nobody touched.
+#
+# A failed run is GitHub's email to whoever last changed the schedule line
+# below; failed-workflow emails must be on in that account's notification
+# settings. GitHub disables a scheduled workflow in a public repository after
+# 60 days without activity, and emails a warning first.
+#
+# A production advisory found here gets a fix PR the next working day
+# (founder, 2026-10-23; RUNBOOK 8.5).
+
+on:
+  schedule:
+    - cron: "30 6 * * *" # daily, 06:30 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: web (npm audit)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      # npm audit reads package-lock.json; nothing is installed.
+      - name: Dependency audit (runtime high/critical fails; dev warns)
+        run: |
+          npm audit --json > npm-audit.json || true
+          npm audit --omit=dev --json > npm-audit-runtime.json || true
+          python3 "${{ github.workspace }}/scripts/ci/npm_audit.py" web npm-audit.json npm-audit-runtime.json --blocking yes
+
+  python:
+    name: python (pip-audit)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install pip-audit==2.10.1
+      # pip-audit reads each requirements file itself; nothing is installed.
+      # Each app is its own step, and each runs whatever happened before it,
+      # so all three report.
+      - name: api
+        if: success() || failure()
+        working-directory: apps/api
+        run: |
+          pip-audit -r requirements.lock.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-runtime.json || true
+          python "${{ github.workspace }}/scripts/ci/pip_audit.py" api --blocking yes runtime=pip-audit-runtime.json
+      - name: worker (and core)
+        if: success() || failure()
+        working-directory: apps/worker
+        run: |
+          pip-audit -r requirements.lock.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-runtime.json || true
+          python "${{ github.workspace }}/scripts/ci/pip_audit.py" worker --blocking yes runtime=pip-audit-runtime.json
+      - name: parse
+        if: success() || failure()
+        working-directory: apps/parse
+        run: |
+          pip-audit -r requirements.lock.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-runtime.json || true
+          pip-audit -r requirements-dev.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-dev.json || true
+          python "${{ github.workspace }}/scripts/ci/pip_audit.py" parse --blocking yes runtime=pip-audit-runtime.json dev=pip-audit-dev.json

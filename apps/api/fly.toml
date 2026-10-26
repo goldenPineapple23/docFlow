@@ -2,7 +2,7 @@
 # item 12). Private only: no public IP (N1/N2). Reached for the G tests over
 # `fly proxy 8000 --app docflow-api-staging`. Stopped when idle.
 #
-# Deploy from the repository root:
+# Deploy from the repository root, after RUNBOOK 11's dependency audit passes:
 #
 #     fly deploy --config apps/api/fly.toml --dockerfile apps/api/Dockerfile \
 #         --ignorefile apps/api/Dockerfile.dockerignore --no-public-ips --ha=false .
