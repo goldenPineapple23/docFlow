@@ -81,7 +81,9 @@ def repo(tmp_path, env) -> Path:
     return path
 
 
-def _run(cwd: Path, env: dict[str, str], tmp_path: Path, event: str, before: str = "", sha: str = "", files=FILES):
+def _run(
+    cwd: Path, env: dict[str, str], tmp_path: Path, event: str, before: str = "", sha: str = "", files=FILES
+):
     out = tmp_path / "github_output"
     out.write_text("", encoding="utf-8")
     run_env = {**env, "EVENT": event, "BEFORE": before, "SHA": sha, "GITHUB_OUTPUT": out.as_posix()}

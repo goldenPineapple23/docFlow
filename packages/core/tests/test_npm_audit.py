@@ -249,7 +249,10 @@ def test_the_two_real_reports_pass_through_the_command_line(blocking, capsys):
     argv = ["npm_audit.py", "web", str(REPORT), str(RUNTIME_REPORT), "--blocking", blocking]
     assert _npm_audit().main(argv) == 0
     out = capsys.readouterr().out
-    assert f"web: 1 advisories reported, 1 high or critical (0 in runtime dependencies, 1 dev-only); blocking: {blocking}" in out
+    assert (
+        "web: 1 advisories reported, 1 high or critical (0 in runtime dependencies, 1 dev-only); "
+        f"blocking: {blocking}"
+    ) in out
 
 
 def test_the_exceptions_file_and_its_code_are_retired():

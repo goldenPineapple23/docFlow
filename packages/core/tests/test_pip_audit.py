@@ -76,7 +76,9 @@ def test_a_clean_report_passes_either_way(blocking, capsys):
     assert code == 0
     assert "::error" not in out and "::warning" not in out
     mode = "blocking: yes" if blocking else "blocking: no (requirements files unchanged)"
-    assert f"::notice title=api: dependency audit::78 packages audited, 0 with a known vulnerability; {mode}" in out
+    assert (
+        f"::notice title=api: dependency audit::78 packages audited, 0 with a known vulnerability; {mode}"
+    ) in out
 
 
 def test_a_runtime_finding_blocks_when_blocking(capsys):
@@ -101,7 +103,10 @@ def test_a_dev_tool_finding_warns_either_way(blocking, capsys):
     code, out = _run(capsys, _report(), dev=_plant({"dependencies": []}), blocking=blocking, app="parse")
     assert code == 0
     assert f"::warning title=parse: known vulnerability in a dev tool (warning only)::{PLANTED_TEXT}" in out
-    assert "::notice title=parse (dev tools): dependency audit::1 packages audited, 1 with a known vulnerability; warning only" in out
+    assert (
+        "::notice title=parse (dev tools): dependency audit::"
+        "1 packages audited, 1 with a known vulnerability; warning only"
+    ) in out
     assert "::error" not in out
 
 
@@ -156,7 +161,8 @@ def test_missing_or_broken_files_fail_once_each(tmp_path, capsys):
     for blocking in ("yes", "no"):
         assert module.main(["pip_audit.py", "api", "--blocking", blocking, f"runtime={absent}"]) == 1
         assert module.main(["pip_audit.py", "api", "--blocking", blocking, f"runtime={broken}"]) == 1
-        assert module.main(["pip_audit.py", "parse", "--blocking", blocking, f"runtime={good}", f"dev={absent}"]) == 1
+        argv = ["pip_audit.py", "parse", "--blocking", blocking, f"runtime={good}", f"dev={absent}"]
+        assert module.main(argv) == 1
     assert capsys.readouterr().out.count("could not be read") == 6
 
 
@@ -188,10 +194,22 @@ def test_the_real_report_passes_through_the_command_line(blocking, capsys):
 AUDIT_FLAGS = "--no-deps --disable-pip --strict --progress-spinner off -f json -o"
 JOBS = {
     # job: (runtime requirements, dev requirements, files whose change blocks)
-    "core": ("../../apps/worker/requirements.lock.txt", None, "packages/core/pyproject.toml apps/worker/requirements.lock.txt"),
+    "core": (
+        "../../apps/worker/requirements.lock.txt",
+        None,
+        "packages/core/pyproject.toml apps/worker/requirements.lock.txt",
+    ),
     "api": ("requirements.lock.txt", None, "apps/api/requirements.txt apps/api/requirements.lock.txt"),
-    "worker": ("requirements.lock.txt", None, "apps/worker/requirements.txt apps/worker/requirements.lock.txt"),
-    "parse": ("requirements.lock.txt", "requirements-dev.txt", "apps/parse/requirements.txt apps/parse/requirements.lock.txt"),
+    "worker": (
+        "requirements.lock.txt",
+        None,
+        "apps/worker/requirements.txt apps/worker/requirements.lock.txt",
+    ),
+    "parse": (
+        "requirements.lock.txt",
+        "requirements-dev.txt",
+        "apps/parse/requirements.txt apps/parse/requirements.lock.txt",
+    ),
 }
 ORDER = ["web", "web-live", "core", "api", "worker", "parse"]
 
@@ -247,5 +265,7 @@ def test_the_daily_python_audit_always_blocks_and_every_app_reports():
     assert "dev=pip-audit-dev.json" in python
     assert "--blocking no" not in python
     assert python.count("        if: success() || failure()\n") == 3
-    assert python.count(f"pip-audit -r requirements.lock.txt {AUDIT_FLAGS} pip-audit-runtime.json || true\n") == 3
-    assert python.count(f"pip-audit -r requirements-dev.txt {AUDIT_FLAGS} pip-audit-dev.json || true\n") == 1
+    runtime = f"pip-audit -r requirements.lock.txt {AUDIT_FLAGS} pip-audit-runtime.json || true\n"
+    dev = f"pip-audit -r requirements-dev.txt {AUDIT_FLAGS} pip-audit-dev.json || true\n"
+    assert python.count(runtime) == 3
+    assert python.count(dev) == 1
