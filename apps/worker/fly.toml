@@ -4,7 +4,7 @@
 # sessions (founder's Q6, option B): `fly scale count 0 --process-group
 # worker --process-group beat` / `fly scale count worker=1 beat=1`.
 #
-# Deploy from the repository root:
+# Deploy from the repository root, after RUNBOOK 11's dependency audit passes:
 #
 #     fly deploy --config apps/worker/fly.toml --dockerfile apps/worker/Dockerfile \
 #         --ignorefile apps/worker/Dockerfile.dockerignore --no-public-ips --ha=false .

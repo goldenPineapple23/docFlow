@@ -1455,7 +1455,8 @@ database login (F-1, section 10): never `docflow_app` shared between apps,
 never `postgres` or the service role.
 
 The procedure:
-1. Deploy the change to Fly staging first.
+1. Deploy the change to Fly staging first, after section 11's dependency
+   audit passes.
 2. Check the canary's startup log: every line PASS.
 3. Run the self-tests on Fly staging (every line PASS; A-net IPv6 must be
    PASS there, not NOT-RUN), and keep the output in
@@ -1597,6 +1598,17 @@ waiting for Monday.
 A build never changes by itself: until the date moves, a rebuild installs
 exactly what the last one did. If snapshot.debian.org is down, the build
 fails; it never falls back to the live archive.
+
+**The daily dependency audit (founder, 2026-10-23; D-219).**
+`.github/workflows/dependency-audit.yml` audits what every app ships, every
+day at 06:30 UTC (section 11 says what blocks). **A production advisory it
+finds gets a fix PR the next working day:** the pin moves in that app's
+lock file (for parse, steps 1 to 4 above), and the PR's own CI run blocks
+on the advisory until it is fixed. A failed run is GitHub's email to
+whoever last changed the workflow's schedule line; failed-workflow emails
+must be on in that account's notification settings. GitHub disables a
+scheduled workflow in a public repository after 60 days without activity,
+and emails a warning first: re-enable it from the Actions tab.
 
 ### 8.6 When the founder gets a DOC-030 alert (D-203, PR 1b-i)
 
@@ -2232,7 +2244,8 @@ Left off, and why:
    `fly ips list` shows one private IPv6 address and nothing else.
 6. **Claude:** read `worker_starts_last_hour` (9.2, "Straight after the
    worker starts", item 1).
-7. **Claude:** deploy the worker (`fly deploy`, rolling, one `worker`
+7. **Claude:** after section 11's dependency audit passes, deploy the
+   worker (`fly deploy`, rolling, one `worker`
    machine and one `beat` machine; 9.3). **Founder:** the `worker_starts`
    query in 9.2. **Claude:** `/healthz` moved by one; the launcher's log
    shows both Celery workers up and the login check passed as
@@ -2771,3 +2784,41 @@ grant (section 1, "A migration that changes policies or grants").
 Rotate one at a time. A leaked URL is rotated the same day; the login's
 policies limit what it could reach, but a worker or Stripe URL in the wrong
 hands still writes as that service.
+
+---
+
+## 11. Before any deploy: the dependency audit (founder, 2026-10-23; D-219)
+
+Every deploy of an app, to staging or production, checks three things
+first. A failed check means no deploy, until it is fixed or the founder
+decides otherwise.
+
+1. **The deploy commit's CI run is green.** Its dependency audit blocks
+   only when that app's dependency files changed in the commit's own
+   changes, so a green run doesn't prove the dependencies are clean today.
+2. **The latest daily audit on `main` is green, or its failure is
+   explained.** It is "Dependency audit (daily)" in the Actions tab
+   (`.github/workflows/dependency-audit.yml`, every day at 06:30 UTC).
+3. **The app's dependencies are clean today.** From the repository root,
+   at the commit being deployed:
+   ```
+   bash scripts/ci/predeploy_audit.sh <api|worker|parse|web>
+   ```
+   It audits the app's lock file as it is now, always blocking, and exits
+   0 only when nothing known is found. A Python app needs pip-audit 2.10.1
+   on PATH (the api venv has it); web needs npm. It reaches only PyPI's
+   vulnerability API or the npm registry, and installs nothing. Its last
+   line is a `::notice` with the count; an `::error` line names the
+   package, the advisory and the fixed version.
+
+**What blocks:**
+- **Python:** any known vulnerability, of any severity, in what the app
+  ships. That is the API's and the worker's whole locks (dev tools
+  included, until they move to `requirements-dev.txt` files; BUILD-STATUS
+  item 7) and parse's lock. There is no exceptions mechanism.
+- **Web:** a high or critical advisory in a runtime dependency.
+- **Dev-only findings** (parse's `requirements-dev.txt`, web's dev
+  dependencies) warn and never block.
+
+A production advisory found by the daily audit gets a fix PR the next
+working day (8.5).

@@ -55,6 +55,10 @@ jobs:
         working-directory: apps/web
     steps:
       - uses: actions/checkout@v7
+        # Two commits: the dependency audit compares a pull request's merge
+        # commit with its first parent (scripts/ci/deps_changed.sh; D-219).
+        with:
+          fetch-depth: 2
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
@@ -82,20 +86,25 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: End-to-end tests (playwright)
         run: npm run test:e2e
-      # Dev dependencies stay in the audit. It fails on every high or critical
-      # advisory except the ones listed one by one, each with a reason and a
-      # review date, in .github/audit-exceptions.txt. An exception ends on its
-      # review date: the job warns for 7 days before, then fails again. npm
-      # exits non-zero when it finds anything, so its exit code is dropped and
-      # the check reads the report; a report it can't read fails.
-      # The second report leaves dev dependencies out and can only add a
-      # failure: an exception is for a dev-only advisory, so an excepted
-      # advisory that shows up there too fails the job.
-      - name: Dependency audit (fail on high/critical; exceptions in .github/audit-exceptions.txt)
+      # D-219: a high or critical advisory in a runtime dependency blocks
+      # only when apps/web/package.json or package-lock.json changed;
+      # otherwise it warns, and the daily audit (dependency-audit.yml)
+      # blocks on it. A dev-only one always warns. There are no exceptions.
+      # npm exits non-zero when it finds anything, so its exit code is
+      # dropped and the check reads both reports; a report it can't read
+      # fails in every case.
+      - name: Did a dependency file change? (decides whether the audit blocks; D-219)
+        id: deps_changed
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: bash "${{ github.workspace }}/scripts/ci/deps_changed.sh" apps/web/package.json apps/web/package-lock.json
+      - name: Dependency audit (runtime high/critical blocks when a package file changed; dev warns; D-219)
         run: |
           npm audit --json > npm-audit.json || true
           npm audit --omit=dev --json > npm-audit-runtime.json || true
-          python3 "${{ github.workspace }}/scripts/ci/npm_audit.py" web npm-audit.json npm-audit-runtime.json
+          python3 "${{ github.workspace }}/scripts/ci/npm_audit.py" web npm-audit.json npm-audit-runtime.json --blocking "${{ steps.deps_changed.outputs.blocking }}"
 
   web-live:
     name: web-live (the review screen against the real API)
@@ -253,6 +262,10 @@ jobs:
         working-directory: packages/core
     steps:
       - uses: actions/checkout@v7
+        # Two commits: the dependency audit compares a pull request's merge
+        # commit with its first parent (scripts/ci/deps_changed.sh; D-219).
+        with:
+          fetch-depth: 2
       - uses: supabase/setup-cli@v2.1.2
         # Normally under 10 s; hung 70 min on 2026-10-26 (run #469), cause
         # unknown. Past 5 min the job fails instead (D-218).
@@ -285,7 +298,7 @@ jobs:
         run: pip install -r ../../apps/worker/requirements.lock.txt
       - id: core
         run: pip install --no-deps -e .
-      - run: pip install pip-audit
+      - run: pip install pip-audit==2.10.1
       # Stage 5, M7 (D-214): 0039 changes policies and grants that 0036's
       # round trip compares against 0036's committed post-state, so 0039 is
       # reversed first (against staging's pre-0039 state) and put back after
@@ -348,8 +361,23 @@ jobs:
           # Which earlier step failed, so a missing test report names it.
           CI_STEPS: ${{ toJSON(steps) }}
         run: python "${{ github.workspace }}/scripts/ci/check_skips.py" core junit.xml
-      - name: Dependency audit (fail on known vulnerabilities)
-        run: pip-audit
+      # D-219: a known vulnerability in what this app ships blocks only when
+      # its requirements files changed; otherwise it warns, and the daily
+      # audit (dependency-audit.yml) blocks on it. pip-audit reads the
+      # requirements file itself, not this machine's environment; its exit
+      # code is dropped and pip_audit.py decides. A report it can't read
+      # fails in every case.
+      - name: Did a dependency file change? (decides whether the audit blocks; D-219)
+        id: deps_changed
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: bash "${{ github.workspace }}/scripts/ci/deps_changed.sh" packages/core/pyproject.toml apps/worker/requirements.lock.txt
+      - name: Dependency audit (blocks when this app's requirements changed; D-219)
+        run: |
+          pip-audit -r ../../apps/worker/requirements.lock.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-runtime.json || true
+          python "${{ github.workspace }}/scripts/ci/pip_audit.py" core --blocking "${{ steps.deps_changed.outputs.blocking }}" runtime=pip-audit-runtime.json
       # D-215: CLAUDE.md is capped at 28k tokens, checked as characters.
       # Runs even when an earlier step failed, so it never hides their result.
       - name: CLAUDE.md size (cap ~28k tokens; founder rule in CLAUDE.md, D-215)
@@ -369,6 +397,10 @@ jobs:
         working-directory: apps/api
     steps:
       - uses: actions/checkout@v7
+        # Two commits: the dependency audit compares a pull request's merge
+        # commit with its first parent (scripts/ci/deps_changed.sh; D-219).
+        with:
+          fetch-depth: 2
       - uses: supabase/setup-cli@v2.1.2
         # Normally under 10 s; hung 70 min on 2026-10-26 (run #469), cause
         # unknown. Past 5 min the job fails instead (D-218).
@@ -399,7 +431,7 @@ jobs:
         run: pip install -r requirements.lock.txt
       - id: core
         run: pip install --no-deps -e ../../packages/core
-      - run: pip install pip-audit
+      - run: pip install pip-audit==2.10.1
       - name: Turn on the four logins (migration 0036 creates them), as RUNBOOK 10.2 does
         id: app_role
         run: python "${{ github.workspace }}/scripts/ci/create_logins.py"
@@ -440,8 +472,23 @@ jobs:
           # Which earlier step failed, so a missing test report names it.
           CI_STEPS: ${{ toJSON(steps) }}
         run: python "${{ github.workspace }}/scripts/ci/check_skips.py" api junit.xml
-      - name: Dependency audit (fail on known vulnerabilities)
-        run: pip-audit
+      # D-219: a known vulnerability in what this app ships blocks only when
+      # its requirements files changed; otherwise it warns, and the daily
+      # audit (dependency-audit.yml) blocks on it. pip-audit reads the
+      # requirements file itself, not this machine's environment; its exit
+      # code is dropped and pip_audit.py decides. A report it can't read
+      # fails in every case.
+      - name: Did a dependency file change? (decides whether the audit blocks; D-219)
+        id: deps_changed
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: bash "${{ github.workspace }}/scripts/ci/deps_changed.sh" apps/api/requirements.txt apps/api/requirements.lock.txt
+      - name: Dependency audit (blocks when this app's requirements changed; D-219)
+        run: |
+          pip-audit -r requirements.lock.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-runtime.json || true
+          python "${{ github.workspace }}/scripts/ci/pip_audit.py" api --blocking "${{ steps.deps_changed.outputs.blocking }}" runtime=pip-audit-runtime.json
 
   worker:
     name: worker (lint, typecheck, test, audit)
@@ -460,6 +507,10 @@ jobs:
       DATABASE_URL: postgresql://docflow_worker:ci-local-only@127.0.0.1:54322/postgres
     steps:
       - uses: actions/checkout@v7
+        # Two commits: the dependency audit compares a pull request's merge
+        # commit with its first parent (scripts/ci/deps_changed.sh; D-219).
+        with:
+          fetch-depth: 2
       - uses: supabase/setup-cli@v2.1.2
         # Normally under 10 s; hung 70 min on 2026-10-26 (run #469), cause
         # unknown. Past 5 min the job fails instead (D-218).
@@ -490,7 +541,7 @@ jobs:
         run: pip install -r requirements.lock.txt
       - id: core
         run: pip install --no-deps -e ../../packages/core
-      - run: pip install pip-audit
+      - run: pip install pip-audit==2.10.1
       - name: Turn on the four logins (migration 0036 creates them), as RUNBOOK 10.2 does
         id: app_role
         run: python "${{ github.workspace }}/scripts/ci/create_logins.py"
@@ -531,8 +582,23 @@ jobs:
           # Which earlier step failed, so a missing test report names it.
           CI_STEPS: ${{ toJSON(steps) }}
         run: python "${{ github.workspace }}/scripts/ci/check_skips.py" worker junit.xml
-      - name: Dependency audit (fail on known vulnerabilities)
-        run: pip-audit
+      # D-219: a known vulnerability in what this app ships blocks only when
+      # its requirements files changed; otherwise it warns, and the daily
+      # audit (dependency-audit.yml) blocks on it. pip-audit reads the
+      # requirements file itself, not this machine's environment; its exit
+      # code is dropped and pip_audit.py decides. A report it can't read
+      # fails in every case.
+      - name: Did a dependency file change? (decides whether the audit blocks; D-219)
+        id: deps_changed
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: bash "${{ github.workspace }}/scripts/ci/deps_changed.sh" apps/worker/requirements.txt apps/worker/requirements.lock.txt
+      - name: Dependency audit (blocks when this app's requirements changed; D-219)
+        run: |
+          pip-audit -r requirements.lock.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-runtime.json || true
+          python "${{ github.workspace }}/scripts/ci/pip_audit.py" worker --blocking "${{ steps.deps_changed.outputs.blocking }}" runtime=pip-audit-runtime.json
 
   parse:
     # Stage 3c: the parse service. CI is the only place before Fly where the
@@ -551,6 +617,10 @@ jobs:
       PARITY_REENCODED: size
     steps:
       - uses: actions/checkout@v7
+        # Two commits: the dependency audit compares a pull request's merge
+        # commit with its first parent (scripts/ci/deps_changed.sh; D-219).
+        with:
+          fetch-depth: 2
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
@@ -561,7 +631,7 @@ jobs:
         run: pip install -r requirements.lock.txt -r requirements-dev.txt
       - id: core
         run: pip install --no-deps -e ../../packages/core -e .
-      - run: pip install pip-audit
+      - run: pip install pip-audit==2.10.1
       - name: Install LibreOffice (the in-process .doc tests)
         id: libreoffice
         # Normally under a minute; stalled 25–45 min four times on 2026-10-23 on
@@ -630,5 +700,21 @@ jobs:
       - name: The service's log
         if: success() || failure()
         run: docker logs docflow-parse 2>&1 | tail -200 || true
-      - name: Dependency audit (fail on known vulnerabilities)
-        run: pip-audit
+      # D-219: a known vulnerability in what this app ships blocks only when
+      # its requirements files changed; otherwise it warns, and the daily
+      # audit (dependency-audit.yml) blocks on it. pip-audit reads the
+      # requirements file itself, not this machine's environment; its exit
+      # code is dropped and pip_audit.py decides. A report it can't read
+      # fails in every case.
+      - name: Did a dependency file change? (decides whether the audit blocks; D-219)
+        id: deps_changed
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: bash "${{ github.workspace }}/scripts/ci/deps_changed.sh" apps/parse/requirements.txt apps/parse/requirements.lock.txt
+      - name: Dependency audit (runtime blocks when its requirements changed; dev tools warn; D-219)
+        run: |
+          pip-audit -r requirements.lock.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-runtime.json || true
+          pip-audit -r requirements-dev.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-dev.json || true
+          python "${{ github.workspace }}/scripts/ci/pip_audit.py" parse --blocking "${{ steps.deps_changed.outputs.blocking }}" runtime=pip-audit-runtime.json dev=pip-audit-dev.json

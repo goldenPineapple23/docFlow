@@ -3,7 +3,8 @@
 # by the worker over Flycast (http://docflow-parse-staging.flycast). Stopped
 # when idle and started by the first request (founder's Q6, option B).
 #
-# Deploy from the repository root (the image's build context):
+# Deploy from the repository root (the image's build context), after RUNBOOK
+# 11's dependency audit passes:
 #
 #     fly deploy --config apps/parse/fly.toml --dockerfile apps/parse/Dockerfile \
 #         --ignorefile apps/parse/Dockerfile.dockerignore --no-public-ips --ha=false .
