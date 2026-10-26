@@ -4736,3 +4736,29 @@ The Console's two alert lists render who an alert is about through one component
 **Founder approval:** 2026-10-23.
 
 **Related:** D-199, D-214 (item 13), D-216; `apps/web/package-lock.json`.
+
+## D-221 — undici 7.29.1 -> 7.30.1 for a new advisory, in its own PR (founder, 2026-10-26)
+
+**Context:** `main`'s push run #467 (40043921078) on `089296c`, #77's merge commit, failed only at the web job's dependency audit (step 11, 2026-10-24 00:15:25Z to 00:15:26Z). The api, worker, core, parse and web-live jobs passed on attempt 1, and the web job's Playwright run read `76 passed (24.5s)`. npm reported one high advisory, GHSA-xjj6-f33q-929c: "undici vulnerable to Denial of Service via unhandled error on excessive content-encodings". The same step printed the stale braces notice, as before (D-216 item 4).
+- **When it appeared:** GitHub's advisory database shows it published on 2026-10-23 at 22:14:31Z. #77's runs on `d7d6030` (push 40036081995, pull request 40036087161) passed the same audit, so npm began reporting it after them.
+- **Not #77's change:** #77 changed no lock file (`ci.yml`, CLAUDE.md, the records and `scripts/ci/check_claude_md_size.py`).
+- **Not a flake (founder):** a new advisory is a known cause, as in D-216 and D-217. The count stays at 3 (D-214 item 13). Nothing was re-run.
+
+**1. Where undici comes from: dev-only and transitive.** `apps/web/package.json` doesn't list it. `jsdom`, a dev dependency and vitest's test environment (`vitest.config.mts`), asks for `^7.25.0`. In the 7.x line the advisory covers 7.18.0 up to, but not including, 7.30.1. 7.30.1 (published 2026-10-15) is the first fixed 7.x version and is inside jsdom's range. `npm ls undici --all` prints one path, `web@0.1.0` -> `jsdom@29.1.1` -> `undici@7.30.1`; with `--omit=dev` the tree is empty.
+
+**2. The fix, the D-217 way: the lock file only.**
+- **What changed:** `apps/web/package-lock.json`, undici's entry only: `version`, `resolved` and `integrity`, 3 lines out and 3 in. Its `engines` (`node >=20.18.1`) and its lack of dependencies are the same in 7.30.1. `package.json` is unchanged.
+- **Readers:** the lock file's only reader is `.github/workflows/ci.yml`, as the npm cache key (`cache-dependency-path`). No test reads it.
+- **What ran locally on 2026-10-26, with every outside service blocked** (`npm ci` and the audit reached only the npm registry):
+  - `npm ci`: exit 0, `node_modules/undici` 7.30.1, and the lock file unchanged by it;
+  - lint: 412 errors and 6,669 warnings, all in 204 files of the local `.next-live/` build output (Stage 5 item 7), as in D-217;
+  - `tsc --noEmit`: passed;
+  - vitest: 62 passed (11 files);
+  - the audit, through CI's `scripts/ci/npm_audit.py`: `web: 2 advisories reported, 0 high or critical`, and GHSA-xjj6-f33q-929c not reported. The 2 moderate advisories in vitest's dev chain remain (D-216 item 7), and the stale braces notice is printed as before.
+- **The build** is proved in CI, as in D-216 item 3.
+
+**3. Why its own PR (founder, 2026-10-26).** It turns `main` green without waiting on the CI PR. That PR comes first in the order, and its own runs would fail at the same audit step until undici is fixed. This changes the founder's decision of 2026-10-24 on undici. The numbers stay as given: D-218 is the CI PR, D-219 the audit PR, D-220 D-178, and this entry is D-221. The order is now this PR, the CI PR, the audit PR, then D-178.
+
+**Founder approval:** 2026-10-26.
+
+**Related:** D-199, D-214 (item 13), D-216, D-217; `apps/web/package-lock.json`.
