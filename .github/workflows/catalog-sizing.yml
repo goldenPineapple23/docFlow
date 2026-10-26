@@ -61,6 +61,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v2.1.2
+        # Normally under 10 s; hung 70 min on 2026-10-26 (run #469), cause
+        # unknown. Past 5 min the job fails instead (D-218).
+        timeout-minutes: 5
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
       - name: Start the local Supabase stack (applies supabase/migrations/)

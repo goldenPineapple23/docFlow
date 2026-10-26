@@ -3389,6 +3389,7 @@ Neither change starts before the founder's "go".
 - **2026-10-09, the Supabase stack again:** push run 38000939499 on `8cb7d95`, first attempt. The worker job failed at the step "Start the local Supabase stack (applies supabase/migrations/)", 42 seconds in. Its annotation, as printed: `worker: no test report: pytest never ran: the step "Start the local Supabase stack" failed first, so nothing was tested. That step's own log has the cause.` The other five jobs were green, the same step passed in that run's api and core jobs, and the commit changed one line of DECISIONS.md. The founder re-ran the failed job; the second attempt was green (`198 tests, 0 failed, 0 skipped, 0 unapproved`, 22:57:29 to 23:01:27).
 - **No cause is established for any of the three:** the job logs cannot be read here. No workaround was proposed or made. The step that starts the Supabase stack has now failed twice, on 2026-09-30 and on 2026-10-09. The two runs of 2026-10-11 in item 1 were green at the first attempt.
 - **The rule (founder, 2026-10-11): at the third flake, stop and read the log. The count starts from the two of 2026-10-09:** the image build on `a284b3d` is the first and the Supabase-stack start on `8cb7d95` is the second, so the next one is the third. The run of 2026-09-30 is recorded here and is not counted.
+- **The count since (added 2026-10-26): 4.** Flake 3 is push run 39684668090 on 2026-10-21, web-live at "Start the local Supabase stack", port 54322 already in use (D-214 item 13). Flake 4 is pull-request run #469 (40378719035) on 2026-10-26, web-live at step 3 "Run supabase/setup-cli@v2.1.2", hung 1 h 10 min 49 s, cancelled and re-run, cause unknown (D-221 item 4). From the CI PR (D-218), a step timeout on `supabase/setup-cli` or on parse's LibreOffice install counts as an infrastructure flake.
 
 **Not changed:** any gate, pass mark, limit or constant; any product code (the PR is test code and documents). Nothing of Stage 4, Stage 5, demo readiness or the Phase 6 subset is built.
 
@@ -4737,6 +4738,55 @@ The Console's two alert lists render who an alert is about through one component
 
 **Related:** D-199, D-214 (item 13), D-216; `apps/web/package-lock.json`.
 
+## D-218 — CI: the port-54322 steps, and step timeouts on setup-cli and the LibreOffice install (founder, 2026-10-23 and 2026-10-26)
+
+**Context:** two kinds of CI failure outside our code. Flake 3 (D-199 item 10; D-214 item 13): web-live's "Start the local Supabase stack" failed because port 54322 was already in use. And parse's LibreOffice install (step 8) stalled 25 to 45 minutes four times on 2026-10-23 (D-216 item 8, D-217 item 3). On 2026-10-26 a third kind joined them: flake 4, `supabase/setup-cli` hung for 1 h 10 min 49 s (D-221 item 4).
+
+**1. The order and the scope (founder, 2026-10-23).** A CI-only PR goes next after #77, ahead of D-178. Its scope is the port-54322 diagnostic step and step 8's hardening. The braces cleanup and the `.next-live` eslint ignore stayed under Stage 5 item 7; the braces cleanup has since moved to the audit PR (D-219). The audit PR (D-219) was put after this PR the same day, so the order became: zod PR, #77, this PR, the audit PR, D-178 (D-220).
+- **The undici fix (2026-10-24, changed 2026-10-26).** The founder's decision of 2026-10-24 put the undici fix in this PR as its own first commit. On 2026-10-26 it moved to its own PR, #80, merged before this one (D-221 item 3).
+
+**2. The port-54322 steps, in every job that runs `supabase start`.**
+- **The script:** `scripts/ci/show_port_54322.sh before|after`, read-only. Both print what is listening on 54322 (`sudo ss -ltnp`). `before` adds the containers publishing 54322. `after` adds every container, running or stopped (`docker ps -a`). Every command ends in `|| true`; a missing or wrong argument exits 2 with a usage line.
+- **Before the stack starts:** a step between `supabase/setup-cli` and "Start the local Supabase stack", with `continue-on-error: true`.
+- **After a failed start:** a step straight after it, with `if: failure() && steps.supabase.outcome == 'failure'` (the founder's narrower condition) and `continue-on-error: true`.
+- **Why the second copy (founder):** on a fresh GitHub-hosted VM, the likeliest holder of 54322 is `supabase start`'s own half-started db container, from a retry after the image-pull rate limits. The check before the start alone would miss that.
+- **It may print nothing (founder):** if `supabase start` removes its own containers when it fails, the second copy shows no container, and that is itself a finding.
+- **Where:** core, api, worker and web-live (the founder widened it from web-live alone). The steps have no `id`, so the skip check's `STEP_NAMES` is unchanged.
+- **Not in `catalog-sizing.yml` (founder, 2026-10-26):** it is a manual job, and no port flake has been seen there. Its start step gets no `id`.
+- **No proof run (founder):** a green run never executes the second copy, and no run was made with the port held on purpose. CI's own runs prove the first copy.
+
+**3. `supabase/setup-cli`: `timeout-minutes: 5` on every use (founder, 2026-10-26).**
+- **Why:** pull-request run #469 (40378719035), whose web-live step 3, "Run supabase/setup-cli@v2.1.2", hung for 1 h 10 min 49 s against a normal 4 to 5 s, and was cancelled and re-run (flake 4; D-221 item 4). Its cause is unknown.
+- **Every use:** a search of `.github/workflows/` found five: `ci.yml` in web-live, core, api and worker, and `catalog-sizing.yml` (line 63). Each step gets the timeout and the comment "Normally under 10 s; hung 70 min on 2026-10-26 (run #469), cause unknown. Past 5 min the job fails instead (D-218)."
+- **catalog-sizing's run:** the change makes `catalog-sizing.yml` run on this PR, on its small mix. It isn't a required check, but it must be green before this PR merges (founder).
+- **D-199:** a timeout on this step counts as an infrastructure flake (founder).
+
+**4. Parse's LibreOffice install (step 8): `timeout-minutes: 15`.**
+- **The cause, from the log of run 40018101184** (read 2026-10-23; the archive stays outside the repository). The step runs `sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer`. `apt-get update` took 7 s, with no wait for the dpkg lock. The download of 50 packages from azure.archive.ubuntu.com took 40 min 45 s ("Fetched 70.0 MB in 40min 45s (28.6 kB/s)"): slow from the first package, with two stalled downloads that apt gave up on and fetched again by itself (libreoffice-core after 10 min 44 s, libreoffice-writer after 1 min 58 s). Unpacking took 10 s.
+- **Normal installs on 2026-10-23 took 19 to 42 s** (founder; 39997842492 took 0.7 min). The four slow ones that day: 43.5 min (40008522235), 41 min 03 s (40018101184), 34 min 38 s (40027539510) and 27 min 06 s (40032068659). On 2026-10-26 main's push run #470 took 10 min 24 s, inside the 15 minutes.
+- **The step:** its `id: libreoffice` and its name's start, "Install LibreOffice", are kept, since the skip check names it by them. Its comment (founder): "Normally under a minute; stalled 25–45 min four times on 2026-10-23 on a slow mirror. Past 15 min the job fails instead (D-218)."
+- **D-199 (founder, 2026-10-23):** if this timeout fires, that job's failure counts as an infrastructure flake.
+- **Not done:** apt's own retry or timeout options (noble's apt already retried, and its read timeout never tripped while data trickled in), and an `actions/cache` package cache (its key would have to track package versions; a later PR, if wanted).
+
+**5. What a timed-out step reads as.**
+- **GitHub's docs** say only that the step's process is killed after that many minutes.
+- **The runner's source** (`actions/runner`, `src/Runner.Worker/StepsRunner.cs`) logs "The action '…' has timed out after N minutes." and sets the step's result to `Failed`; `Canceled` is used only when the job itself is cancelled. That `Failed` shows as `failure` in `steps.<id>.outcome` is in a runner file not read.
+- **In the parse job:** a timed-out step 8 is a failure. The skip check still runs and names "Install LibreOffice".
+- **In core, api and worker:** a timed-out setup-cli step leaves "Start the local Supabase stack" skipped, so the skip check prints its generic line: "pytest wrote no junit.xml, and no named step before it failed. The first failed step in the job's step list says why." The after-failure port step doesn't run, because the start step didn't fail.
+
+**6. `debian-snapshot.yml` gets the `ci.yml` changes too.** It calls `ci.yml` as a reusable workflow (`uses: ./.github/workflows/ci.yml`, line 32), so its weekly run includes all of the above. It has no setup-cli step of its own.
+
+**7. Readers and local checks (D-216 item 6), on 2026-10-26, with every outside service blocked.**
+- **Readers of the changed files:** `packages/core/tests/test_ci_guards.py` (the core, api and worker job blocks: required strings, step ids, the order of the round trips), `packages/core/tests/test_npm_audit_exceptions.py` (the web block only), `packages/core/tests/test_bench_catalog.py` (`catalog-sizing.yml`, including its `timeout-minutes: 350`) and `scripts/ci/check_skips.py` (step ids). No assertion forbids the new steps.
+- **A YAML parse of the three workflows, and a structural check of each new step:** every check passed.
+- **shellcheck 0.11.0** on the script: no findings by default. With `--enable=all` it lists only style suggestions (SC2292 `[[ ]]`, SC2250 braces); `parse_image.sh` is written the same way, so they were left.
+- **The three reader test files:** `131 passed in 9.91s`.
+- **The full core suite:** `1 failed, 1086 passed, 3 errors in 297.22s (0:04:57)`. The four are the live-bucket tests in `test_storage_bucket_live.py`, which fail when Storage is blocked (D-207 item 12). 1,086 plus 4 is CI's 1,090.
+
+**Founder approval:** 2026-10-23 (the plan, with changes); 2026-10-26 (the setup-cli timeouts, catalog-sizing, step 8's comment).
+
+**Related:** D-199 (item 10), D-207 (item 12), D-214 (item 13), D-216 (items 6 and 8), D-217, D-219, D-221; `.github/workflows/ci.yml`, `.github/workflows/catalog-sizing.yml`, `scripts/ci/show_port_54322.sh`.
+
 ## D-221 — undici 7.29.1 -> 7.30.1 for a new advisory, in its own PR (founder, 2026-10-26)
 
 **Context:** `main`'s push run #467 (40043921078) on `089296c`, #77's merge commit, failed only at the web job's dependency audit (step 11, 2026-10-24 00:15:25Z to 00:15:26Z). The api, worker, core, parse and web-live jobs passed on attempt 1, and the web job's Playwright run read `76 passed (24.5s)`. npm reported one high advisory, GHSA-xjj6-f33q-929c: "undici vulnerable to Denial of Service via unhandled error on excessive content-encodings". The same step printed the stale braces notice, as before (D-216 item 4).
@@ -4757,7 +4807,18 @@ The Console's two alert lists render who an alert is about through one component
   - the audit, through CI's `scripts/ci/npm_audit.py`: `web: 2 advisories reported, 0 high or critical`, and GHSA-xjj6-f33q-929c not reported. The 2 moderate advisories in vitest's dev chain remain (D-216 item 7), and the stale braces notice is printed as before.
 - **The build** is proved in CI, as in D-216 item 3.
 
-**3. Why its own PR (founder, 2026-10-26).** It turns `main` green without waiting on the CI PR. That PR comes first in the order, and its own runs would fail at the same audit step until undici is fixed. This changes the founder's decision of 2026-10-24 on undici. The numbers stay as given: D-218 is the CI PR, D-219 the audit PR, D-220 D-178, and this entry is D-221. The order is now this PR, the CI PR, the audit PR, then D-178.
+**3. Why its own PR (founder, 2026-10-26).** It turns `main` green without waiting on the CI PR. That PR comes first in the order, and its own runs would fail at the same audit step until undici is fixed. The founder's decision of 2026-10-24 was to fix undici inside the CI PR as its own first commit, recorded in D-218. On 2026-10-26 it was changed to a separate PR merged before the CI PR, so main turns green without waiting for the CI PR's review. D-218 to D-220 keep their numbers. The order is now this PR, the CI PR, the audit PR, then D-178.
+
+**4. CI, the fourth infrastructure flake (D-199), and the merge.**
+- **On `66574b2`, push run #468** (40378318011, 18:30:20Z to 18:36:08Z): green, all six jobs on attempt 1.
+- **Pull-request run #469** (40378719035), attempt 1: core, worker, api, parse and web green.
+- **Web-live hung at step 3, "Run supabase/setup-cli@v2.1.2".** The step started at 18:33:12Z and was still running when the founder cancelled the run; it ended, cancelled, at 19:44:01Z, after 1 h 10 min 49 s. The job ran 18:33:05Z to 19:44:04Z. The same step took 4 to 5 s in five green runs (40378318011, 40036087161, 40032068659, 40043921078, 40036081995).
+- **Cause unknown.** The job's log wasn't read; the step's run time is the only evidence.
+- **Flake 4 (founder, 2026-10-26).** The founder cancelled the run and re-ran the failed job, and counted that re-run as D-199's fourth infrastructure flake. The count is now 4 (D-199 item 10).
+- **The re-run:** web-live's attempt 2 (19:44:45Z to 19:55:14Z) was green: step 3 took 5 s, the Playwright install 8 min 03 s, the tests 22 s. Run #469 finished green at 19:55:15Z.
+- **What follows from it:** the CI PR puts a 5-minute timeout on every `supabase/setup-cli` step (D-218 item 3).
+- **Merged:** PR #80, merge commit `959d03571243e46b1a88478f0015564ef1471531` (parents `089296c` and `66574b2`), merged by the founder at 20:00:01Z.
+- **Main after the merge:** push run #470 (40391723758) on `959d035`, green on attempt 1 (20:00:04Z to 20:15:52Z). Parse's LibreOffice install (step 8) took 10 min 24 s (20:00:33Z to 20:10:57Z): slow, not a flake.
 
 **Founder approval:** 2026-10-26.
 
