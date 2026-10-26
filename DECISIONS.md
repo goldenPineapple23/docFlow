@@ -4783,9 +4783,82 @@ The Console's two alert lists render who an alert is about through one component
 - **The three reader test files:** `131 passed in 9.91s`.
 - **The full core suite:** `1 failed, 1086 passed, 3 errors in 297.22s (0:04:57)`. The four are the live-bucket tests in `test_storage_bucket_live.py`, which fail when Storage is blocked (D-207 item 12). 1,086 plus 4 is CI's 1,090.
 
+**8. CI and the merge (PR #81).**
+- **On `8e08e82`, all three runs green on attempt 1:** CI push run #471 (40396156089, 20:29:52Z to 20:35:01Z), CI pull-request run #472 (40396454359, 20:31:48Z to 20:42:41Z) and catalog-sizing's small-mix run #11 (40396454385, 20:31:48Z to 20:35:08Z).
+- **The new steps:** in all eight jobs that start the Supabase stack, the "before" port step succeeded in 0 to 1 s and the "after" step was skipped, as the start succeeded; setup-cli took 3 to 6 s (catalog sizing 4 s); parse's LibreOffice install took 25 s and 20 s.
+- **The watcher on #81's runs failed from 20:30 to 20:45Z (a stray \r in the run ids), was fixed, and the runs were confirmed by a manual read at 20:46:25Z.**
+- **Merged:** PR #81, merge commit `7d374e62a32226ecd258be8bc1ad42c37e44a86e` (parents `959d035` and `8e08e82`), merged by the founder at 20:47:42Z.
+- **Main after the merge:** push run #473 (40398806963) on `7d374e6`, green on attempt 1 (20:47:46Z to 20:52:55Z). setup-cli 3 to 5 s, the "before" port steps ran and the "after" ones were skipped, and parse's LibreOffice install took 1 min 08 s.
+
 **Founder approval:** 2026-10-23 (the plan, with changes); 2026-10-26 (the setup-cli timeouts, catalog-sizing, step 8's comment).
 
 **Related:** D-199 (item 10), D-207 (item 12), D-214 (item 13), D-216 (items 6 and 8), D-217, D-219, D-221; `.github/workflows/ci.yml`, `.github/workflows/catalog-sizing.yml`, `scripts/ci/show_port_54322.sh`.
+
+## D-219 — The dependency audits: production blocks, dev warns, a daily run, and a check before every deploy (founder, 2026-10-23)
+
+**Context:** until this PR, every push and pull-request run blocked on any high or critical npm advisory, dev dependencies included, unless `.github/audit-exceptions.txt` excepted it. On 2026-10-23 and 2026-10-24, three new advisories turned red runs whose commits hadn't touched the web lock file: Next.js (D-216, a runtime dependency), zod (D-217) and undici (D-221), the last two dev-only. The four Python jobs ran a bare `pip-audit` on their whole CI environment, failing on any known vulnerability. Nothing audited `main` on a schedule, and nothing checked dependencies before a deploy.
+
+**1. The decisions (founder, 2026-10-23).**
+- **Exceptions:** retired, the file and the code. The tests kept are the ones that matter: runtime blocks, dev warns, an unreadable report fails.
+- **When a run blocks:** only when that app's dependency files changed, on pull requests and on pushes, `main` included. Otherwise a runtime finding warns, and the daily audit blocks on it.
+- **The daily audit's failure notice:** GitHub's failed-run email. It goes to whoever last changed the schedule line, and failed-workflow emails must be on in that account's notification settings. GitHub disables a scheduled workflow in a public repository after 60 days without activity, and emails a warning first.
+- **The rule for what it finds:** a production advisory found by the daily audit gets a fix PR the next working day. It is in RUNBOOK 8.5 and here only; there is no CLAUDE.md pointer.
+- **pip-audit is in the policy too,** pinned to exactly **2.10.1** in `ci.yml` and the daily workflow. CI pinned no version before (four bare `pip install pip-audit` lines); 2.10.1 is the version in the API's and the worker's venvs.
+- **For Python, "blocks" means any known vulnerability of any severity, with no exceptions mechanism.** pip-audit reports no severity.
+- **The braces exception** (GHSA-vfj7-8cjw-p6xm, withdrawn by GitHub on 2026-10-23) goes with the file. Its cleanup moved here from Stage 5 item 7.
+
+**2. Web: `scripts/ci/npm_audit.py`, rewritten.**
+- It reads two reports, `npm audit` and `npm audit --omit=dev`. An advisory in the runtime report is a runtime finding; one in the whole report only is dev-only.
+- A high or critical runtime finding is an `::error` with `--blocking yes` and a `::warning` "(not blocking: no package file changed)" with `--blocking no`. A dev-only one is always a `::warning`. Moderates print nothing, as before.
+- A report that can't be read, or that counts high or critical findings it doesn't list, fails in both modes.
+- The recorded reports of 2026-10-05 stay as fixtures. Braces in them is now the recorded dev-only case.
+
+**3. Python: `scripts/ci/pip_audit.py`, new.** pip-audit reads each requirements file itself (`pip-audit -r <file> --no-deps --disable-pip --strict --progress-spinner off -f json -o <report> || true`), not the CI machine's environment. The wrapper decides, not pip-audit's exit code.
+
+| Job | Runtime file (blocks when its files changed) | Dev file (warns) | Files whose change makes it block |
+|---|---|---|---|
+| api | `apps/api/requirements.lock.txt` (the whole lock, as the image installs it) | none | `apps/api/requirements.txt`, `apps/api/requirements.lock.txt` |
+| worker | `apps/worker/requirements.lock.txt` (the same) | none | `apps/worker/requirements.txt`, `apps/worker/requirements.lock.txt` |
+| parse | `apps/parse/requirements.lock.txt` | `apps/parse/requirements-dev.txt` | `apps/parse/requirements.txt`, `apps/parse/requirements.lock.txt` |
+| core | `apps/worker/requirements.lock.txt` (what its job installs) | none | `packages/core/pyproject.toml`, `apps/worker/requirements.lock.txt` |
+
+- **What stops being audited:** the CI machine's own tools (pip, setuptools, pip-audit's dependencies), which are in no image.
+- **Parse's dev audit covers the four tools listed** (pytest, ruff, mypy, xlwt). Their own dependencies aren't in `requirements-dev.txt`, and `--no-deps` doesn't resolve them.
+- **Core** has no lock of its own: its runtime dependencies ship inside the API and worker images, pinned by their locks.
+- **In every mode,** a missing or unreadable report, or a package pip-audit couldn't audit (with `--strict` it then writes no report), fails.
+
+**4. How a change is detected: `scripts/ci/deps_changed.sh`, new.** It writes `blocking=yes|no` and `changed=<files>` to `$GITHUB_OUTPUT` before each job's audit step.
+- **pull_request:** the merge commit against its first parent, so each of the five jobs' checkouts has `fetch-depth: 2`. A change that landed on the base branch meanwhile isn't counted.
+- **push** (`main` included): `before..sha`, after fetching `before`.
+- **It blocks whenever it can't tell:** any other event (the weekly debian snapshot's call runs as `schedule`), an all-zero `before` (the first push of a new branch), a `before` it can't fetch, or any git error.
+
+**5. The daily audit: `.github/workflows/dependency-audit.yml`, new.** Every day at 06:30 UTC and by hand, on `main`, `permissions: contents: read`. The web job runs both `npm audit` commands with `--blocking yes`, from the lock file alone, with nothing installed (checked locally on a copy of the two files). The python job runs pip-audit 2.10.1 on the API's, the worker's and parse's locks and on parse's dev file, with `--blocking yes`. Each app is its own step with `if: success() || failure()`, so all three report.
+
+**6. The check before every deploy: RUNBOOK 11, new.** There is no deploy workflow; deploys are hand-run `fly deploy` commands, and the web app isn't deployed anywhere yet. Before any deploy, three checks:
+- the deploy commit's CI run is green;
+- the latest daily audit on `main` is green or explained;
+- `bash scripts/ci/predeploy_audit.sh <api|worker|parse|web>` passes. It audits that app's runtime dependencies at the checked-out commit, always blocking.
+- **Where it's referenced:** RUNBOOK 8.1 step 1, 9.7 step 7 and the API's deploy command in `apps/api/fly.toml`. RUNBOOK 8.5 gets the next-working-day rule.
+
+**7. A new Stage 5 item-7 task, after D-178 (founder, 2026-10-23).** The API's and the worker's locks include their dev tools: pytest, mypy and ruff, and coverage in the API's. Their Dockerfiles install the whole lock, so those tools are in the deployed images. They move into `requirements-dev.txt` files, following parse's split, before `docflow-prod` exists. Until then they count as runtime and block.
+
+**8. Readers and local checks (D-216 item 6), on 2026-10-26, with every outside service blocked except where named.**
+- **Readers:**
+  - `ci.yml`: `test_ci_guards.py` (required strings, step ids, round-trip order; no assertion forbids the new steps), `check_skips.py` (`STEP_NAMES` unchanged; `deps_changed` isn't in it), the new tests, `debian-snapshot.yml`.
+  - `npm_audit.py` and the removed exceptions file: the rewritten tests (`test_npm_audit_exceptions.py` became `test_npm_audit.py`).
+  - `RUNBOOK.md`: `apps/api/tests/test_healthz_dispatcher.py`, which reads 9.4 only. 9.4 is byte-identical to `main`'s. The API suite can't start without a database, so it wasn't run.
+  - `apps/api/fly.toml`: nothing reads it.
+- **New tests:** `test_npm_audit.py`, `test_pip_audit.py` (on pip-audit's real report for the API's lock of 2026-10-26, `fixtures/pip_audit/api_2026-10-26.json`, unedited) and `test_deps_changed.py` (real git repositories, the real script, run with bash; on Windows, Git for Windows' own bash). `103 passed in 22.75s`.
+- **The full core suite:** `1 failed, 1153 passed, 3 errors in 313.04s (0:05:13)`. The four are the live-bucket tests (Storage blocked; D-207 item 12). 1,157 is 1,090, less the 36 old npm tests, plus the 103 new ones.
+- **shellcheck 0.11.0:** no findings on `deps_changed.sh` or `predeploy_audit.sh`.
+- **YAML:** `ci.yml`, `dependency-audit.yml`, `debian-snapshot.yml` and `catalog-sizing.yml` parse.
+- **Real audits, reaching only PyPI or the npm registry:**
+  - `predeploy_audit.sh` for api (78 packages, 0 known), worker (67, 0), parse (17, 0) and web (`2 advisories reported, 0 high or critical`), each exit 0;
+  - parse's and core's CI command lines, both ways: parse 17 and dev 4, core 67, all 0 known.
+
+**Founder approval:** 2026-10-23 (the plan, the four decisions and the pip-audit revision with three changes).
+
+**Related:** D-199, D-216 (items 4, 6 and 7), D-217, D-218, D-221; Stage 5 item 7; `scripts/ci/npm_audit.py`, `scripts/ci/pip_audit.py`, `scripts/ci/deps_changed.sh`, `scripts/ci/predeploy_audit.sh`, `.github/workflows/ci.yml`, `.github/workflows/dependency-audit.yml`, RUNBOOK 8.1, 8.5, 9.7 and 11.
 
 ## D-221 — undici 7.29.1 -> 7.30.1 for a new advisory, in its own PR (founder, 2026-10-26)
 
