@@ -4838,7 +4838,7 @@ The Console's two alert lists render who an alert is about through one component
 - the deploy commit's CI run is green;
 - the latest daily audit on `main` is green or explained;
 - `bash scripts/ci/predeploy_audit.sh <api|worker|parse|web>` passes. It audits that app's runtime dependencies at the checked-out commit, always blocking.
-- **Where it's referenced:** RUNBOOK 8.1 step 1, 9.7 step 7 and the API's deploy command in `apps/api/fly.toml`. RUNBOOK 8.5 gets the next-working-day rule.
+- **Where it's referenced:** RUNBOOK 8.1 step 1, 9.7 step 7, and the deploy command in the header of each app's `fly.toml` (API, worker, parse; the founder added the worker's and parse's, 2026-10-26). RUNBOOK 8.5 gets the next-working-day rule.
 
 **7. A new Stage 5 item-7 task, after D-178 (founder, 2026-10-23).** The API's and the worker's locks include their dev tools: pytest, mypy and ruff, and coverage in the API's. Their Dockerfiles install the whole lock, so those tools are in the deployed images. They move into `requirements-dev.txt` files, following parse's split, before `docflow-prod` exists. Until then they count as runtime and block.
 
@@ -4847,7 +4847,8 @@ The Console's two alert lists render who an alert is about through one component
   - `ci.yml`: `test_ci_guards.py` (required strings, step ids, round-trip order; no assertion forbids the new steps), `check_skips.py` (`STEP_NAMES` unchanged; `deps_changed` isn't in it), the new tests, `debian-snapshot.yml`.
   - `npm_audit.py` and the removed exceptions file: the rewritten tests (`test_npm_audit_exceptions.py` became `test_npm_audit.py`).
   - `RUNBOOK.md`: `apps/api/tests/test_healthz_dispatcher.py`, which reads 9.4 only. 9.4 is byte-identical to `main`'s. The API suite can't start without a database, so it wasn't run.
-  - `apps/api/fly.toml`: nothing reads it.
+  - `apps/api/fly.toml` and `apps/parse/fly.toml`: nothing reads them.
+  - `apps/worker/fly.toml`: three tests in `apps/worker/tests/test_celery_app.py` parse it with `tomllib`. The change is one comment line; both edited files parse to the same config as before. The worker suite can't start without a database, so those three tests were run on their own with its conftest off and every outside service blocked: `3 passed, 12 deselected in 2.23s`.
 - **New tests:** `test_npm_audit.py`, `test_pip_audit.py` (on pip-audit's real report for the API's lock of 2026-10-26, `fixtures/pip_audit/api_2026-10-26.json`, unedited) and `test_deps_changed.py` (real git repositories, the real script, run with bash; on Windows, Git for Windows' own bash). `103 passed in 22.75s`.
 - **The full core suite:** `1 failed, 1153 passed, 3 errors in 313.04s (0:05:13)`. The four are the live-bucket tests (Storage blocked; D-207 item 12). 1,157 is 1,090, less the 36 old npm tests, plus the 103 new ones.
 - **shellcheck 0.11.0:** no findings on `deps_changed.sh` or `predeploy_audit.sh`.
