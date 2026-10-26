@@ -4856,6 +4856,8 @@ The Console's two alert lists render who an alert is about through one component
 - **Real audits, reaching only PyPI or the npm registry:**
   - `predeploy_audit.sh` for api (78 packages, 0 known), worker (67, 0), parse (17, 0) and web (`2 advisories reported, 0 high or critical`), each exit 0;
   - parse's and core's CI command lines, both ways: parse 17 and dev 4, core 67, all 0 known.
+- **Core failed on `a27599a`**, in push run #474 (40403054192) and pull-request run #475 (40403390752), at "Run ruff check .": nine over-length lines in the new test files. Lint wasn't run locally. Not a flake; D-199's count stays 4. Fixed in `7dee31e`; no assertion changed. After the fix, core's `ruff check .` (ruff 0.16.8, as CI installs it) reads `All checks passed!`, ruff with core's config passes on `scripts/ci/npm_audit.py` and `pip_audit.py`, and the three test files with `test_ci_guards.py` read `129 passed in 25.86s`.
+- **The rule (founder, 2026-10-26):** before reporting local results, run each touched app's lint step exactly as CI runs it.
 
 **Founder approval:** 2026-10-23 (the plan, the four decisions and the pip-audit revision with three changes).
 

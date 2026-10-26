@@ -364,6 +364,8 @@ are PyJWT's `InsecureKeyLengthWarning` from short test keys and 1 is a
   tools are in the deployed images. It must be done before `docflow-prod`
   exists; until then the dependency audit counts them as runtime, and they
   block.
+- **Added 2026-10-26 (founder; D-219 item 8):** CI doesn't lint
+  `scripts/ci/`.
 
 **D-195 (the model policy) in this order:**
 - Change 1, the model config module, goes at the start of demo readiness,
