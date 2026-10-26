@@ -3389,7 +3389,7 @@ Neither change starts before the founder's "go".
 - **2026-10-09, the Supabase stack again:** push run 38000939499 on `8cb7d95`, first attempt. The worker job failed at the step "Start the local Supabase stack (applies supabase/migrations/)", 42 seconds in. Its annotation, as printed: `worker: no test report: pytest never ran: the step "Start the local Supabase stack" failed first, so nothing was tested. That step's own log has the cause.` The other five jobs were green, the same step passed in that run's api and core jobs, and the commit changed one line of DECISIONS.md. The founder re-ran the failed job; the second attempt was green (`198 tests, 0 failed, 0 skipped, 0 unapproved`, 22:57:29 to 23:01:27).
 - **No cause is established for any of the three:** the job logs cannot be read here. No workaround was proposed or made. The step that starts the Supabase stack has now failed twice, on 2026-09-30 and on 2026-10-09. The two runs of 2026-10-11 in item 1 were green at the first attempt.
 - **The rule (founder, 2026-10-11): at the third flake, stop and read the log. The count starts from the two of 2026-10-09:** the image build on `a284b3d` is the first and the Supabase-stack start on `8cb7d95` is the second, so the next one is the third. The run of 2026-09-30 is recorded here and is not counted.
-- **The count since (added 2026-10-26): 4.** Flake 3 is push run 39684668090 on 2026-10-21, web-live at "Start the local Supabase stack", port 54322 already in use (D-214 item 13). Flake 4 is pull-request run #469 (40378719035) on 2026-10-26, web-live at step 3 "Run supabase/setup-cli@v2.1.2", hung 1 h 10 min 49 s, cancelled and re-run, cause unknown (D-221 item 4). From the CI PR (D-218), a step timeout on `supabase/setup-cli` or on parse's LibreOffice install counts as an infrastructure flake.
+- **The count since (added 2026-10-26): 8.** Flakes 5 to 7 are parse's LibreOffice install (step 8) hitting its 15-min timeout on 2026-10-26, each its own flake (founder): push run #474 (40403054192) and pull-request run #475 (40403390752) on `a27599a`, and pull-request run #477 (40404128910) on `0230769`; a slow mirror (D-219 items 8 and 9). Flake 8 is the same timeout on the cache PR's first commit, now step 10, in pull-request run #480 (40412247609) on `9135240`, on the miss path, before any cache existed (founder's pre-approval; D-222 item 8). Flake 3 is push run 39684668090 on 2026-10-21, web-live at "Start the local Supabase stack", port 54322 already in use (D-214 item 13). Flake 4 is pull-request run #469 (40378719035) on 2026-10-26, web-live at step 3 "Run supabase/setup-cli@v2.1.2", hung 1 h 10 min 49 s, cancelled and re-run, cause unknown (D-221 item 4). From the CI PR (D-218), a step timeout on `supabase/setup-cli` or on parse's LibreOffice install counts as an infrastructure flake.
 
 **Not changed:** any gate, pass mark, limit or constant; any product code (the PR is test code and documents). Nothing of Stage 4, Stage 5, demo readiness or the Phase 6 subset is built.
 
@@ -4857,11 +4857,30 @@ The Console's two alert lists render who an alert is about through one component
   - `predeploy_audit.sh` for api (78 packages, 0 known), worker (67, 0), parse (17, 0) and web (`2 advisories reported, 0 high or critical`), each exit 0;
   - parse's and core's CI command lines, both ways: parse 17 and dev 4, core 67, all 0 known.
 - **Core failed on `a27599a`**, in push run #474 (40403054192) and pull-request run #475 (40403390752), at "Run ruff check .": nine over-length lines in the new test files. Lint wasn't run locally. Not a flake; D-199's count stays 4. Fixed in `7dee31e`; no assertion changed. After the fix, core's `ruff check .` (ruff 0.16.8, as CI installs it) reads `All checks passed!`, ruff with core's config passes on `scripts/ci/npm_audit.py` and `pip_audit.py`, and the three test files with `test_ci_guards.py` read `129 passed in 25.86s`.
+- **Parse also failed on `a27599a`, in the same two runs:** its LibreOffice install (step 8) hit the 15-min timeout, 21:17:32Z to 21:32:44Z in #474 and 21:20:08Z to 21:35:21Z in #475. These are D-199 flakes 5 and 6 (founder): a slow mirror, not the PR. They were found at 21:50Z, after the founder had said not to wait for those runs. Before that, Claude had wrongly reported #477's timeout (item 9) as the first time the timeout fired.
 - **The rule (founder, 2026-10-26):** before reporting local results, run each touched app's lint step exactly as CI runs it.
+
+**9. CI on `0230769`, the seventh infrastructure flake (D-199), the merge and the first daily-audit run.**
+- **Push run #476** (40404119663, 21:24:45Z to 21:29:50Z): green, all six jobs on attempt 1.
+- **Pull-request run #477** (40404128910), attempt 1 (21:24:49Z to 21:40:37Z): core, api, worker, web and web-live green.
+  - **Parse failed:** its LibreOffice install (step 8) hit the 15-min timeout (21:25:17Z to 21:40:29Z). GitHub's annotation reads "The action 'Install LibreOffice (the in-process .doc tests)' has timed out after 15 minutes".
+  - **Follow-on steps:** steps 12, 19, 20 and 21 then failed only because nothing after step 8 ran; the skip check's annotation says so.
+  - **The step's log (founder):** apt-get update was fast (12.6 MB in 1 s, azure.archive.ubuntu.com). The 96.7 MB package download from the same mirror ran steadily at about 55–80 kB/s (libreoffice-common 20.3 MB in ~5 min; libreoffice-core 43 MB started 21:36:32). Not a stall. It would have finished around 21:48 (~23 min) but hit the 15-min timeout at 21:40:29. A slow mirror, same as 2026-10-23 (28.6 kB/s then). Not apt, not the PR.
+  - **Flake 7 (founder).** With flakes 5 and 6 (item 8), the count went from 4 to 7 (D-199 item 10).
+- **The re-run:** the founder re-ran the failed job. Parse's attempt 2 (21:54:04Z to 21:57:22Z) was green, its step 8 taking 20 s, and run #477 finished green at 21:57:23Z.
+- **The watcher:** the one on these runs stopped after its fourth read at 21:40:01Z without a final summary, so the result above came from a manual read at 21:45:17Z.
+  - **Fix (21:47Z to 21:52Z, founder's request):** every exit now prints a final block, including when the watcher is stopped during its sleep, and a re-run counts as finished only when its new attempt has.
+  - **Proof:** tested on `a27599a`'s finished runs, then on #477's attempt 2 (final block at 22:02:25Z).
+- **Merged:** PR #82, merge commit `433d14bf5262434e21d158c621c3967fdbecf327` (parents `7d374e6` and `0230769`), merged by the founder at 22:03:20Z.
+- **Main after the merge:** push run #478 (40409423707) on `433d14b`, green on attempt 1 (22:03:23Z to 22:08:21Z). Parse's step 8 took 24 s.
+- **The first run of `dependency-audit.yml`**, started by the founder by hand (`workflow_dispatch`) on `main` after #478: run #1 (40412114446, 22:23:57Z to 22:24:18Z), both jobs green.
+  - **python:** api 78 packages, worker 67 and parse 17, each "0 with a known vulnerability; blocking: yes"; parse's dev tools 4, 0, warning only.
+  - **web:** no annotation, so no high or critical advisory, runtime or dev-only. The total count is printed only in the job's log.
+- **The scheduled-run account:** GitHub sends scheduled-run failure emails to goldenPineapple23, the account behind `582a416`, the commit that added the schedule, and behind the merge.
 
 **Founder approval:** 2026-10-23 (the plan, the four decisions and the pip-audit revision with three changes).
 
-**Related:** D-199, D-216 (items 4, 6 and 7), D-217, D-218, D-221; Stage 5 item 7; `scripts/ci/npm_audit.py`, `scripts/ci/pip_audit.py`, `scripts/ci/deps_changed.sh`, `scripts/ci/predeploy_audit.sh`, `.github/workflows/ci.yml`, `.github/workflows/dependency-audit.yml`, RUNBOOK 8.1, 8.5, 9.7 and 11.
+**Related:** D-199, D-216 (items 4, 6 and 7), D-217, D-218, D-221, D-222; Stage 5 item 7; `scripts/ci/npm_audit.py`, `scripts/ci/pip_audit.py`, `scripts/ci/deps_changed.sh`, `scripts/ci/predeploy_audit.sh`, `.github/workflows/ci.yml`, `.github/workflows/dependency-audit.yml`, RUNBOOK 8.1, 8.5, 9.7 and 11.
 
 ## D-221 — undici 7.29.1 -> 7.30.1 for a new advisory, in its own PR (founder, 2026-10-26)
 
@@ -4899,3 +4918,85 @@ The Console's two alert lists render who an alert is about through one component
 **Founder approval:** 2026-10-26.
 
 **Related:** D-199, D-214 (item 13), D-216, D-217; `apps/web/package-lock.json`.
+
+## D-222 — CI: cache parse's LibreOffice .debs (founder, 2026-10-26)
+
+**Context:** parse's step 8, "Install LibreOffice (the in-process .doc tests)", downloaded about 97 MB from the Ubuntu mirror on every run. Seven installs were slow or stalled:
+- **2026-10-23: four stalls of 27 to 43 min.** 43.5 min (40008522235), 41 min 03 s (40018101184), 34 min 38 s (40027539510) and 27 min 06 s (40032068659), on a mirror serving 28.6 kB/s (D-216 item 8, D-217 item 3, D-218 item 4).
+- **2026-10-26: three timeouts at 15 min.** #474 (40403054192), #475 (40403390752) and #477 (40404128910), D-199 flakes 5 to 7 (D-219 items 8 and 9). In #477 the download ran steadily at about 55–80 kB/s and would have needed about 23 min.
+- **Also 2026-10-26:** main's #470 took 10 min 24 s, inside the timeout.
+
+**1. The order (founder, 2026-10-26).** A small PR caching the .debs comes after #82 and before D-178, which waits on the founder's Supabase screenshots anyway.
+
+**2. The key and the path.**
+- **Key:** `libreoffice-debs-<RUNNER_OS>-<ImageOS>-<ImageVersion>-v1`, built in a step from the runner's own variables, which the `env` expression context can't see. A new runner image means a new key. `-v1` is bumped by hand if the package list (`libreoffice-writer`) changes.
+- **Fallback (`restore-keys`, founder: yes):** `libreoffice-debs-<RUNNER_OS>-<ImageOS>-`, so after an image change the last image's .debs are restored and apt downloads only what changed.
+- **Path:** `~/apt-libreoffice/*.deb`, the .debs only. apt's lock and `partial/` are never cached. apt downloads into and installs from that folder (`-o Dir::Cache::Archives=`, `-o APT::Keep-Downloaded-Packages=true`).
+- **Actions:** `actions/cache/restore@v6` and `actions/cache/save@v6`. The latest release is v6.1.0 (2026-06-26), pinned by major tag as elsewhere in `ci.yml`.
+
+**3. The steps in the parse job, in order.**
+- **"LibreOffice cache key"** (`id: lo_key`): creates `~/apt-libreoffice/partial` (founder) and writes the key and the prefix.
+- **"Restore LibreOffice's .debs"** (`id: lo_cache`).
+- **Step 8**, its `id: libreoffice`, name, 15-min timeout and D-218 comment kept, plus one line for the cache. In order it:
+  1. emits a notice: hit, partial, miss, or restore failed;
+  2. runs `apt-get update`, then a notice of when it finished, so a timeout shows whether the mirror's lists or the download stalled;
+  3. checks the cached .debs (item 4);
+  4. installs, then emits apt's "Need to get" line as a notice.
+- **"Prepare LibreOffice's .debs for the cache"** (`id: lo_prep`): only when the exact key missed and step 8 succeeded. It runs `apt-get autoclean` on the folder so stale .debs don't pile up under the fallback key, then `chown -R` back to the runner user so the save can read it (both founder), then a notice with the count and size.
+- **"Save LibreOffice's .debs"**: only after the prepare step succeeds, so a later test failure still keeps the cache.
+- **Notices:** they carry the evidence because Claude can read annotations, and job logs return 403 for Claude.
+
+**4. The check of the cached .debs (founder: approved, with two conditions).**
+- **Why it's needed:** as Claude reads apt's source, apt reuses a file in its archive folder whose name and size match, without checking its hash. This was not confirmed by running apt.
+- **The check:** after `apt-get update`, each cached .deb's SHA256 is compared with the one in the signed lists just read, for the package and version its own control fields name. Its file name must also be the one apt gives that package, version and architecture, with an epoch's `:` written `%3a`.
+- **A file that fails is deleted,** and apt downloads it again. The notice reads "N cached .debs checked against the signed lists, M dropped".
+- **The check can't fail step 8 (condition 2).** It runs in its own `bash -e` process. If it fails for any reason, every cached .deb is deleted, a notice says so, and the install downloads them all. Only apt's own failure fails step 8.
+- **An epoch file name (condition 1)** is in the behaviour test and is matched, not dropped.
+
+**5. A miss, an image change, or a failing cache step.**
+- **A miss:** the same as before this PR: the full download, the same 15-min timeout, then the save.
+- **An image change:** the fallback restores the last image's .debs. The check drops any that no longer match, and apt downloads those.
+- **The restore, prepare and save steps:** `continue-on-error: true`, and the restore and save have `timeout-minutes: 5` (founder). A timed-out step reads as failed (D-218 item 5), so without `continue-on-error` a timeout there would fail the job. With it, a timeout or error is reported and the install downloads, as before.
+- **Scope:** a pull request's cache is visible only to that pull request, and `main`'s to every pull request. The repository's cache limit is 10 GB and evicts the least recently used entry; parse's image layer cache shares it. An evicted entry means a miss, never a failure.
+
+**6. D-199 after this PR (founder).** A step-8 timeout is still an infrastructure flake.
+- **Exception:** on a run whose notice says "hit", a timeout is first treated as a possible defect in this cache.
+- **Unless:** `apt-get update` itself is what stalled, which remains a mirror flake as usual. Its "finished" notice tells the two apart.
+
+**7. Readers and local checks (D-216 item 6), on 2026-10-26, with every outside service blocked except PyPI.**
+- **Readers of `ci.yml`:**
+  - `scripts/ci/check_skips.py` names step 8 by its unchanged `id` and name. The new steps can't fail the job, so it needn't name them.
+  - `test_ci_guards.py`, `test_npm_audit.py` and `test_pip_audit.py`: `112 passed in 1.80s`.
+  - `debian-snapshot.yml` calls `ci.yml`, so its weekly run includes the cache.
+- **Core's lint step as CI runs it** (`ruff check .`, ruff 0.16.8 from the worker's lock): `All checks passed!`. The PR touches no Python.
+- **YAML:** `ci.yml` parses.
+- **actionlint 1.7.12 with shellcheck 0.11.0** (both from PyPI): no new findings; main's two remain, at lines 138 and 219. A planted unquoted variable inside the new check was reported, which shows shellcheck reads that code. A first run had not called shellcheck at all; the planted bug showed that.
+- **A behaviour test of step 8 and the prepare step,** extracted from `ci.yml` and run under `bash -e` with stub `sudo`, `apt-get`, `apt-cache`, `dpkg-deb` and `sha256sum`. All eight cases passed:
+  1. a miss, then three .debs saved;
+  2. a hit, including `libreoffice-core_4%3a24.2.7-0ubuntu0.24.04.1_amd64.deb`, with 0 dropped and nothing to download;
+  3. a tampered .deb, dropped and downloaded again;
+  4. a failed restore, then a download and a save;
+  5. a partial restore with a stale .deb, which is dropped;
+  6. a failed install: step 8 fails with apt's code, 100, through `tee`, and nothing is saved;
+  7. a correct file under another package's name, dropped;
+  8. the check itself failing: all deleted, the notice, a full download, and step 8 passes.
+
+**8. CI on the first commit (`9135240`): the miss path, in both scopes, and the eighth infrastructure flake.** The proof needs each scope, the branch and the pull request, to save a cache once; a scope whose miss run times out saves nothing (founder). Each save below is confirmed in GitHub's cache list (`/actions/caches`, readable without a token), not only by the save step's tick, which `continue-on-error` would keep green.
+- **Push run #479** (40411651700, 22:20:19Z to 22:38:35Z): green, all six jobs on attempt 1.
+  - **The install (now step 10)** took 14 min 9 s (22:20:51Z to 22:35:00Z), just inside the timeout.
+  - **Its notices:** "miss; downloading"; `apt-get update` finished at 22:20:56Z; "0 cached .debs checked against the signed lists, 0 dropped"; "Need to get 96.7 MB of archives."; "50 .debs, 93 MB, to save as libreoffice-debs-Linux-ubuntu24-20261023.334.3-v1".
+  - **Saved:** 96.4 MB for `refs/heads/phase55/stage5-libreoffice-deb-cache` at 22:35:04Z.
+- **Pull-request run #480** (40412247609), attempt 1 (22:24:58Z to 22:40:42Z): every job but parse green.
+  - **Parse's install** hit the 15-min timeout (22:25:23Z to 22:40:35Z).
+  - **Its notices:** "miss; downloading"; `apt-get update` finished at 22:25:29Z, 6 s in. So the package download stalled, not the lists: a slow mirror.
+  - **Prepare and save were skipped,** so this scope saved nothing.
+  - **Flake 8** under the founder's pre-approval ("if a commit-1 miss run times out at step 10, that's a D-199 flake"); D-199 item 10.
+- **The re-run:** the founder re-ran the failed job. Parse's attempt 2 (22:43:06Z to 22:47:36Z) was green.
+  - **The install** took 21 s, a miss again: "Need to get 96.7 MB of archives."; "50 .debs, 93 MB".
+  - **Saved:** 96.4 MB for `refs/pull/83/merge` at 22:44:00Z.
+  - **Parse's tests:** 427 unit and 581 HTTP, 0 failed, 0 skipped. Run #480 finished green at 22:47:37Z.
+- **The second commit (the records) was pushed only once both scopes had a saved cache** (founder). Its runs must show "hit", "Need to get 0 B" and "0 dropped" (founder's proof bar). Once they do, the fix is marked done in BUILD-STATUS; no owed-list line is added (founder).
+
+**Founder approval:** 2026-10-26 (the plan, four additions and four decisions; `continue-on-error` and the check, with two conditions; the pre-approval for miss-run timeouts).
+
+**Related:** D-199 (item 10), D-216 (item 8), D-217 (item 3), D-218 (items 4 and 5), D-219 (items 8 and 9); `.github/workflows/ci.yml`, `scripts/ci/check_skips.py`.

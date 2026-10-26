@@ -632,12 +632,107 @@ jobs:
       - id: core
         run: pip install --no-deps -e ../../packages/core -e .
       - run: pip install pip-audit==2.10.1
+      # LibreOffice's .debs (about 97 MB) are cached, so the install no longer
+      # downloads them from the mirror on every run (D-222). The key changes with
+      # the runner image; the fallback key restores the last image's .debs, and
+      # apt checks each one against the signed package lists before using it.
+      # The cache steps never fail the job: a slow or failed restore means the
+      # install downloads, as before.
+      - name: LibreOffice cache key
+        id: lo_key
+        run: |
+          mkdir -p ~/apt-libreoffice/partial
+          prefix="libreoffice-debs-${RUNNER_OS}-${ImageOS:-unknown}-"
+          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+          echo "key=${prefix}${ImageVersion:-unknown}-v1" >> "$GITHUB_OUTPUT"
+      - name: Restore LibreOffice's .debs
+        id: lo_cache
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/apt-libreoffice/*.deb
+          key: ${{ steps.lo_key.outputs.key }}
+          restore-keys: ${{ steps.lo_key.outputs.prefix }}
       - name: Install LibreOffice (the in-process .doc tests)
         id: libreoffice
         # Normally under a minute; stalled 25–45 min four times on 2026-10-23 on
         # a slow mirror. Past 15 min the job fails instead (D-218).
+        # From D-222 the .debs come from the cache, so the mirror matters on a miss.
         timeout-minutes: 15
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer
+        env:
+          RESTORE_OUTCOME: ${{ steps.lo_cache.outcome }}
+          CACHE_HIT: ${{ steps.lo_cache.outputs.cache-hit }}
+          MATCHED_KEY: ${{ steps.lo_cache.outputs.cache-matched-key }}
+        run: |
+          set -o pipefail
+          if [ "$RESTORE_OUTCOME" != "success" ]; then
+            cache="restore failed or timed out; downloading"
+          elif [ "$CACHE_HIT" = "true" ]; then
+            cache="hit ($MATCHED_KEY)"
+          elif [ -n "$MATCHED_KEY" ]; then
+            cache="partial, an earlier image's .debs ($MATCHED_KEY)"
+          else
+            cache="miss; downloading"
+          fi
+          echo "::notice title=LibreOffice cache::$cache"
+          sudo apt-get update
+          echo "::notice title=LibreOffice install::apt-get update finished at $(date -u +%H:%M:%SZ)"
+          # apt reuses a cached .deb whose name and size match without checking
+          # its hash, so each one is checked here against the signed lists just
+          # read; one whose hash or name doesn't match is deleted and downloaded
+          # again. The check runs in its own shell: if it fails, every cached
+          # .deb is deleted and all are downloaded, so only apt fails this step.
+          check_cached_debs() {
+            shopt -s nullglob
+            local checked=0 dropped=0 deb pkg ver arch want have
+            for deb in "$HOME"/apt-libreoffice/*.deb; do
+              checked=$((checked + 1))
+              pkg=$(dpkg-deb -f "$deb" Package 2>/dev/null) || pkg=""
+              ver=$(dpkg-deb -f "$deb" Version 2>/dev/null) || ver=""
+              arch=$(dpkg-deb -f "$deb" Architecture 2>/dev/null) || arch=""
+              want=$(apt-cache show --no-all-versions "$pkg=$ver" 2>/dev/null | sed -n 's/^SHA256: //p' | head -1)
+              have=$(sha256sum < "$deb")
+              have=${have%% *}
+              # apt names the file package_version_arch.deb, the epoch's ":" as "%3a"
+              if [ -z "$want" ] || [ "$have" != "$want" ] || [ "${deb##*/}" != "${pkg}_${ver//:/%3a}_${arch}.deb" ]; then
+                echo "dropping ${deb##*/}: not in the signed lists, or its hash or name differs"
+                rm -f "$deb"
+                dropped=$((dropped + 1))
+              fi
+            done
+            echo "::notice title=LibreOffice cache::$checked cached .debs checked against the signed lists, $dropped dropped"
+          }
+          export -f check_cached_debs
+          if ! bash -e -c check_cached_debs; then
+            sudo rm -f "$HOME"/apt-libreoffice/*.deb || true
+            echo "::notice title=LibreOffice cache::the check of the cached .debs failed, so all of them were deleted; downloading"
+          fi
+          sudo apt-get install -y --no-install-recommends \
+            -o Dir::Cache::Archives="$HOME/apt-libreoffice/" \
+            -o APT::Keep-Downloaded-Packages=true \
+            libreoffice-writer | tee "$RUNNER_TEMP/apt-install.txt"
+          need=$(grep -m1 '^Need to get' "$RUNNER_TEMP/apt-install.txt" || echo "no download line")
+          echo "::notice title=LibreOffice install::$need"
+      - name: Prepare LibreOffice's .debs for the cache
+        id: lo_prep
+        if: steps.lo_cache.outputs.cache-hit != 'true' && steps.libreoffice.outcome == 'success'
+        continue-on-error: true
+        run: |
+          sudo apt-get autoclean -o Dir::Cache::Archives="$HOME/apt-libreoffice/"
+          sudo chown -R "$(id -u):$(id -g)" ~/apt-libreoffice
+          shopt -s nullglob
+          debs=(~/apt-libreoffice/*.deb)
+          size=$(du -cm "${debs[@]}" /dev/null | tail -1 | cut -f1)
+          echo "::notice title=LibreOffice cache::${#debs[@]} .debs, ${size} MB, to save as ${{ steps.lo_key.outputs.key }}"
+      - name: Save LibreOffice's .debs
+        if: steps.lo_prep.outcome == 'success'
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          path: ~/apt-libreoffice/*.deb
+          key: ${{ steps.lo_key.outputs.key }}
       - id: ruff
         run: ruff check .
       - id: mypy
