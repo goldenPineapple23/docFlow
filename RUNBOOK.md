@@ -2961,3 +2961,43 @@ stopped too.
    action, so it needs the founder's Grant (D-213 item 6).
 
 `fly.toml` stays as it is (founder).
+
+## 12. The staging sweep: old test tenants (founder, 2026-10-27; D-224)
+
+A stopped test run leaves its tenants behind on `docflow-staging`.
+`scripts/sweep_test_tenants.py` lists the "Acme Test" tenants older than a
+day, and removes one at a time. Run it from the repository root with
+`apps/api/.venv`'s Python. The process environment must carry the two
+flags; the root `.env` gives the database and Storage settings:
+
+```
+DOCFLOW_STAGING_RUN=1 DOCFLOW_ENV=staging apps/api/.venv/Scripts/python.exe scripts/sweep_test_tenants.py list
+```
+
+1. **`list`** is read-only: a read-only transaction and Storage list calls.
+   It needs no Grant, and the report names it among the reads.
+   - **What it shows:** each tenant's rows by table, its Storage objects,
+     its users' e-mail addresses, and its marks.
+   - **Marked tenants are never removed:** LIVE, DELETED BY THE PRODUCT,
+     PENDING DELETION, NAMED IN RECORDS and SEED NAME.
+2. **`delete <tenant id> --name "<exact name>"`** needs a Grant from the
+   founder that names that tenant's id and name. One tenant per run.
+   - **The backup folder:** `--backup-folder` names a new or empty folder
+     outside the repository. The default is
+     `~/docflow-sweep-backups/<id>-<UTC time>`.
+   - **What it prints:** what will be lost, then each backup file with its
+     SHA-256, then the Supabase Auth accounts left behind, which are out of
+     scope.
+3. **If it refuses:**
+   - **Exit 2:** not staging.
+   - **Exit 3:** a test suite holds the run lock. Wait for the suite to
+     finish.
+   - **Exit 4:** the tenant may not be swept. The message says why.
+
+   In every case, nothing was removed.
+4. **While a sweep runs,** an API or worker suite that starts refuses with
+   exit 3, naming `docflow-sweep`. The core suite takes no lock (D-224 item
+   6).
+5. **After a delete:** the tenant is recorded by id only, never by name
+   (D-224 item 9). Keep the backup folder until the end-of-build cleanup is
+   done.

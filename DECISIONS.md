@@ -5247,3 +5247,80 @@ The plan was approved on 2026-10-23, with the founder's answers and three change
 **Founder approval:** 2026-10-27 (option A, fix first; the regeneration method; RUNBOOK 11.1; no staging suites, and the rule; the list item).
 
 **Related:** D-213, D-216 (item 6), D-219, D-220; `apps/api/requirements.lock.txt`; RUNBOOK 11 and 11.1.
+
+## D-224 — The staging sweep: old test tenants listed, and removed one at a time under a Grant (founder, 2026-10-27)
+
+**Context:** a stopped test run can't clean up after itself, because a killed process runs no `finally`. So Stage 5 adds a staging sweep script: it lists tenants named "Acme Test …" older than a day, with what each one holds, and deletes a tenant only on the founder's per-action OK (the Stage 5 notes of 2026-09-26; Section 0 rule 5). The plan was approved on 2026-10-27, with the founder's answers on the guard, the lock, the boundary test, the Storage check and the records.
+
+**1. The script:** `scripts/sweep_test_tenants.py`, with two commands.
+- **`list`** is read-only. For every "Acme Test" tenant older than a day, oldest first, it shows:
+  - the id, name, created date, status, onboarding status and `went_live_at`;
+  - every row the purge would remove, by `table.column`;
+  - the Storage object count;
+  - the users' e-mail addresses;
+  - its marks.
+- **`delete <id> --name "<exact name>"`** removes one tenant. It prints what will be lost, then runs items 3 to 5.
+- **Exit codes:** 2 refused by the guard, 3 the run lock held, 4 the tenant refused.
+
+**2. The guard lives in the script and nowhere else** (founder: "No flag or setting anywhere turns the guard off"). `check_environment` refuses unless all of these hold:
+- `DOCFLOW_STAGING_RUN=1` and `DOCFLOW_ENV=staging` are in the process environment. They are read from `os.environ`, never from `.env` or the settings. The settings default `docflow_env` to "staging", so a guard that read them would pass with the variable unset.
+- `ADMIN_DATABASE_URL` names staging's project: the direct host `db.<ref>.supabase.co`, or the pooler with `<login>.<ref>` as the user.
+- `STORAGE_S3_ENDPOINT` names staging's project, `<ref>.storage.supabase.co`. This was the founder's addition: the script deletes from Storage too.
+- All four Storage settings are set.
+- **Nothing from `apps/api` loads before the guard passes** (founder's condition). The script imports only the standard library at module level. The purge module is imported inside the command, after the guard. So core's CI job, which tests the guard, needs no API.
+
+**3. The checks live in `purge_swept_tenant`** (`apps/api/tests/tenant_cleanup.py`), so no caller can skip them. It refuses, and touches nothing, unless all of these hold:
+- **The transaction:** it runs in one REPEATABLE READ transaction from `sweep_session`.
+- **The tenant:** it exists (locked `FOR UPDATE`); the typed name is exactly its name; the name starts "Acme Test"; it was created more than a day ago on the database's clock.
+- **No mark.** A marked tenant is listed but always refused:
+  - **LIVE:** `onboarding_status` is live, or `went_live_at` is set.
+  - **DELETED BY THE PRODUCT:** `status` is deleted.
+  - **PENDING DELETION:** `status` is pending_deletion.
+  - **NAMED IN RECORDS:** its id (the first eight characters, as the records quote ids) or its exact name appears in a Markdown file git tracks. The output gives each `file:line`.
+  - **SEED NAME:** a name a `scripts/seed_*.py` creates, exactly or by an f-string's fixed start.
+  - The mark-readers fail closed: with no records or no seed names found, nothing is swept.
+- **No link it can't back up:** no link from a table without `tenant_id` would delete or blank a row the backup doesn't hold.
+  - On staging's schema (read 2026-10-27) every such link is NO ACTION, apart from the two the test purge already handles (`admin_actions.target_tenant_id`, deleted; `onboarding_intakes.linked_tenant_id`, unlinked).
+  - So a missed link fails the delete and rolls everything back.
+
+**4. The backup, before anything is removed** (founder's answer 3). It goes to one folder outside the repository. The folder must be new or empty; the default is `~/docflow-sweep-backups/<id>-<UTC time>`. It holds:
+- **`rows.json`:** every row the deletes touch, as Postgres's `to_jsonb` text, so money stays exact;
+- **`storage/…`:** every object under `tenants/{id}/`;
+- **`manifest.json`:** the row counts, each object's key, SHA-256 and size, the orphaned Auth e-mails, and every file's SHA-256.
+
+Before any delete, every file is read back against its SHA-256. The rows in `rows.json` are counted, and each set is counted again in the database. Any difference refuses the run.
+
+**5. One connection, one transaction, the lock on it** (founder: "hold the advisory lock on the same database session the purge's delete transaction runs on").
+- **The connection:** `sweep_session` opens one connection as `docflow_admin` through the pooler's session mode (5432, as `suite_lock.py` does), with REPEATABLE READ. It sets `application_name` to `docflow-sweep … pid=… host=… started=…`.
+- **The lock:** the script takes `pg_try_advisory_xact_lock(5_150_292_026)` (`SUITE_LOCK_KEY`) on that transaction, then runs the purge on the same session.
+- **A suite that's running:** the API and worker suites hold the key for their whole run, shared in a parallel run and exclusive otherwise, so the sweep refuses while either runs. Its message names the holder.
+- **A suite that starts during a sweep** refuses with exit 3: "Another test run is using this database: docflow-sweep delete …". It doesn't wait.
+- **The order:** the checks; the backup; the deletes; the check that nothing points at the tenant (`rows_left`, plus the creation request row); then the files, after the rows and before the commit.
+- **Releasing the lock:** the commit releases it.
+- **If the connection drops:** before the files go, the rollback leaves everything and releases the lock. After the files go, the rows stay and the files are in the backup. Removing the files after the commit would instead leave files with no row to find them by.
+- **A file that changes between the backup and the removal** stops the sweep, and the rollback keeps every row.
+
+**6. A known gap, left as is (founder, 2026-10-27):** the core suite takes no run lock. "A core-only run can overlap a sweep; low risk, since parallel runs already block it through the API and worker suites."
+
+**7. The boundary test's one exception (founder, option a).**
+- `test_tenant_cleanup.py` still fails if any product folder or script names the test purge, except `scripts/sweep_test_tenants.py`.
+- A new test checks that the file exists, that it calls `purge_swept_tenant`, and that it never names `purge_test_tenant` or `register_test_tenant`.
+
+**8. Out of scope, and deferred.**
+- **Supabase Auth accounts stay as they are** (founder's answer 7). The output and the backup list the orphaned addresses.
+- **D-220 item 8's append-only trigger on `admin_actions`** (a gate before the first pilot) is deferred (founder's answer 6). The sweep deletes the Console's audit rows about the tenant it removes. **Once that trigger lands, the sweep stops working on staging, so the trigger's design must account for it.**
+
+**9. The records and the marks (founder).**
+- The proof tenant is not named in any record before its delete. After the delete it is recorded by id only, never by name.
+- Tests create tenants with fixed names, and a recorded name would mark every future tenant with that name as NAMED IN RECORDS.
+- The same holds for the names this PR's tests use.
+
+**10. Staging steps.**
+- **`list` is a read:** a read-only transaction, plus Storage list calls (founder's answer 4). It is named among the read-only commands run.
+- **Each delete is its own Grant,** naming the tenant's id and name. The proof delete is on an unmarked tenant that `list` shows holding at least one Storage object (founder's answer 5).
+- **The staging suites on the PR's head:** under their own Grant.
+- **The deletions themselves** wait for the end-of-build cleanup.
+
+**Founder approval:** 2026-10-27 (the plan and answers 1 to 7; the lock in the script, on the purge's own transaction; option (a) for the boundary test; the Storage endpoint check; the guard's tests in core; the records rule).
+
+**Related:** Section 0 rule 5, Section 7.10; D-180, D-197, D-211, D-213 (item 6), D-220 (item 8); `scripts/sweep_test_tenants.py`, `apps/api/tests/tenant_cleanup.py`, `apps/api/tests/suite_lock.py`; RUNBOOK 1.4 and 12.
