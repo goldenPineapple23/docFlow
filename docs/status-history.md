@@ -4,6 +4,50 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-27 (the LibreOffice cache PR merged; D-178 built; D-222, D-220)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-26, with the audit PR merged and the LibreOffice cache PR built:** Phase 5.5,
+**Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
+(review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
+CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
+matched and the three staging suites passed (D-214 item 14). `backup_0039` stays until the founder
+drops it. **Next.js 16.4.1 is merged** (PR #78; D-216): three new advisories fixed. **zod 4.6.6 is
+merged** (PR #79; D-217) and **undici 7.30.1 is merged** (PR #80; D-221): new dev-only advisories,
+each fixed in the lock file. **D-215 (CLAUDE.md capped at 28k tokens) is merged** (PR #77). **The CI
+PR is merged** (PR #81; D-218): the port-54322 before/after steps in the four jobs that start the
+Supabase stack, and step timeouts on `supabase/setup-cli` (5 min, every use) and parse's LibreOffice
+install (15 min). **The audit PR is merged** (PR #82, `main` is `433d14b`; D-219): a known
+vulnerability in what an app ships blocks only when that app's dependency files changed, a dev-only
+one warns, and there are no exceptions; pip-audit 2.10.1 audits each app's requirements files; a
+daily audit of `main`; and a check before every deploy (RUNBOOK 11). `main`'s push run on it is
+green, and so is the daily audit's first run, started by hand (D-219 item 9). **The LibreOffice
+cache PR is built, not merged** (PR #83; D-222; branch `phase55/stage5-libreoffice-deb-cache`):
+parse's LibreOffice .debs are cached under a key that follows the runner image, each one is checked
+against the signed package lists before apt uses it, and a miss downloads as before. **The CI
+infrastructure flake count is 8** (D-199 item 10; flakes 5 to 8 are parse's LibreOffice install
+timing out at 15 min on 2026-10-26, D-219 items 8 and 9 and D-222 item 8). **A standing rule (D-213 item 6, tightened
+in D-214): a staging suite, a Fly action or any write to staging starts only after a message from
+the founder that begins with "Grant" and names the step.** **Two new rules:** SQL the founder runs
+on staging is first checked by Claude read-only (D-214 item 15), and before a file outside one app
+is changed, every reader of it is found and its tests are run (D-216 item 6). **Next, in order:**
+the cache PR (D-222), D-178 (D-220; the founder's Supabase Auth screenshots are in, and two
+read-only checks come first: whether Supabase's auth server limits MFA code verification, and
+whether sign-in and MFA verification reach Supabase from the browser or through our API), the
+sweep script, the warnings and the 32-byte test secret (with the two thin-margin
+`test_parse_client.py` tests, D-212 item 8, and the dev tools out of the API's and the worker's
+images, D-219 item 7, before `docflow-prod` exists), M10 without the model IDs, the 375 px fix, then
+counting rows before extraction, and the docs PR last. Then E1 and E2a, then demo readiness (D-209).
+The long catalog commit's test through a public address needs its own grant. The 50,000-row cap and
+IMP-003's wording: one PR, before pilots, only if a pilot prospect has more than 50,000 SKUs. The
+welding demo comes after the fastener rehearsal and never blocks it (D-208). **Staging:** the
+database has 0039. `docflow-parse-staging` runs PR B's image (Pillow 13.0.0).
+`docflow-worker-staging` runs `e95b095`'s image (D-212) with no machines; certifi 2026.10.19 and
+M7's code reach it at its next deploy. **That staging worker deploy is owed under D-209 (staging is
+redeployed after a merge, then the demo smoke test) before anything relies on staging's worker, and
+it needs a Grant.** The API and parse machines are stopped, with auto-stop on, and the
+Healthchecks.io check is paused.
+
 ## Replaced on 2026-10-26 (the audit PR merged; the LibreOffice cache PR built; D-219, D-222)
 
 <!-- the paragraph as it stood, starting on the next line -->
