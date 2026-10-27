@@ -2943,3 +2943,67 @@ nothing else moved:
    `web-live` jobs install the exact lock.
 
 Delete the throwaway environment afterwards.
+
+### 11.2 A staging step through `fly proxy` (founder, 2026-10-27; D-220 item 11)
+
+`fly proxy` traffic doesn't keep the machine up. `docflow-api-staging`
+has auto-stop on (`auto_stop_machines = "stop"`, `min_machines_running =
+0`) and no address, so nothing wakes a stopped machine. A deploy leaves it
+stopped too.
+
+1. **Start the machine first:** `fly machine start <id> --app <app>`.
+   Then open `fly proxy 8000 --app <app>`, and `GET /healthz` through it.
+2. **Expect it to stop after a few idle minutes.** On 2026-10-27 it
+   stopped 6 to 8 minutes after each of three starts.
+3. **A step that waits** (a step-up code older than 330 s, for example):
+   right before the request, check the machine with `fly machine list`
+   (read-only), and start it again if it has stopped. A start is a Fly
+   action, so it needs the founder's Grant (D-213 item 6).
+
+`fly.toml` stays as it is (founder).
+
+## 12. The staging sweep: old test tenants (founder, 2026-10-27; D-224)
+
+A stopped test run leaves its tenants behind on `docflow-staging`.
+`scripts/sweep_test_tenants.py` lists the "Acme Test" tenants older than a
+day, and removes one at a time. Run it from the repository root with
+`apps/api/.venv`'s Python. The process environment must carry the two
+flags; the root `.env` gives the database and Storage settings. In Git
+Bash, set the flags inline, on the command itself:
+
+```
+DOCFLOW_STAGING_RUN=1 DOCFLOW_ENV=staging apps/api/.venv/Scripts/python.exe scripts/sweep_test_tenants.py list
+```
+
+Never set them for the whole shell (`export`, or PowerShell's `$env:`):
+`DOCFLOW_STAGING_RUN=1` would stay set, and a test run started later in
+that window would pass the suites' database guard and reach staging (the
+2026-10-19 staging touches, D-211).
+
+1. **`list`** is read-only: a read-only transaction and Storage list calls.
+   It needs no Grant, and the report names it among the reads.
+   - **What it shows:** each tenant's rows by table, its Storage objects,
+     its users' e-mail addresses, and its marks.
+   - **Marked tenants are never removed:** LIVE, DELETED BY THE PRODUCT,
+     PENDING DELETION, NAMED IN RECORDS and SEED NAME.
+2. **`delete <tenant id> --name "<exact name>"`** needs a Grant from the
+   founder that names that tenant's id and name. One tenant per run.
+   - **The backup folder:** `--backup-folder` names a new or empty folder
+     outside the repository. The default is
+     `~/docflow-sweep-backups/<id>-<UTC time>`.
+   - **What it prints:** what will be lost, then each backup file with its
+     SHA-256, then the Supabase Auth accounts left behind, which are out of
+     scope.
+3. **If it refuses:**
+   - **Exit 2:** not staging.
+   - **Exit 3:** a test suite holds the run lock. Wait for the suite to
+     finish.
+   - **Exit 4:** the tenant may not be swept. The message says why.
+
+   In every case, nothing was removed.
+4. **While a sweep runs,** an API or worker suite that starts refuses with
+   exit 3, naming `docflow-sweep`. The core suite takes no lock (D-224 item
+   6).
+5. **After a delete:** the tenant is recorded by id only, never by name
+   (D-224 item 9). Keep the backup folder until the end-of-build cleanup is
+   done.
