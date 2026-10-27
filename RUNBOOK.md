@@ -1254,10 +1254,33 @@ password.
 
 Every Console change records its outcome next to the request: **Done**, or
 **Failed** with its catalog code. **"Outcome unknown: no outcome was recorded.
-Check the tenant's current state before retrying."** means the request
-stopped midway: the API crashed, or the machine stopped, after the request
-was recorded and before its result was. The change may or may not have
-happened.
+Check the tenant's current state before retrying."** means the request was
+recorded and its result was not. What that covers depends on the kind of
+change:
+
+- **Console routes** (catalog and customer-list imports, test batch, go
+  live, cancel, reactivate, buyer merges, learned rules, field schema,
+  example prompting, quarantine, intake address, sender settings, card
+  request): **Failed** when the route ends with a catalog code or a bare HTTP
+  error (shown as its status). **Outcome unknown** when the request stopped
+  midway: an unexpected error in the API (logged as `console_write_crashed`
+  with the request's id), the machine stopped, or the outcome itself could
+  not be written (logged as `console_outcome_not_recorded`). The change may or
+  may not have happened. A request refused for bad input (422) leaves no line
+  at all: it is checked before it is recorded.
+- **Acting-as changes** (review and export inside a tenant): the same, with
+  one more case. A request refused for bad input (422) also reads **Outcome
+  unknown**, because acting-as records the request before its input is
+  checked. Nothing ran.
+- **The seven same-transaction actions** (create intake, add an intake file,
+  create tenant, deal terms, tier change, invite, hard delete) never read
+  **Outcome unknown**: the request and its outcome are written together. Any
+  error, an unexpected one included, rolls the work back and reads
+  **Failed** (with no code for an unexpected error; its type is in the
+  outcome's detail). If the machine stops midway, or the failure itself
+  cannot be written (logged as `console_failure_not_recorded`), there is **no
+  line at all**, and a step outside the database (a Stripe call, a file
+  removal) may already have happened.
 
 1. Look at the tenant's current state on the page the action belongs to
    (Overview, Lifecycle, Catalog...) before doing anything again.
