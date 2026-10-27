@@ -54,7 +54,7 @@ def _admin_actions(tenant_id, action: str) -> list[dict]:
             dict(r)
             for r in session.execute(
                 text(
-                    "SELECT action, target_type, target_id, payload FROM admin_actions "
+                    "SELECT id, action, target_type, target_id, payload FROM admin_actions "
                     "WHERE target_tenant_id = :t AND action = :a ORDER BY created_at"
                 ),
                 {"t": str(tenant_id), "a": action},
@@ -132,7 +132,14 @@ def test_a_console_edit_is_in_the_tenants_trail_as_docflow_support(client):
             # The tenant's own view of its trail labels it.
             trail = client.get(f"/review/documents/{document}", headers=tenant.headers()).json()["trail"]
             assert any(entry["by_docflow_support"] for entry in trail)
-            assert _admin_actions(tenant.tenant_id, "acting_as_write")
+            writes = _admin_actions(tenant.tenant_id, "acting_as_write")
+            assert writes
+            # Its outcome (D-178, D-220): the gate records how the route ended.
+            outcomes = {
+                o["payload"]["intent_id"]: o["payload"]["result"]
+                for o in _admin_actions(tenant.tenant_id, "outcome")
+            }
+            assert outcomes.get(str(writes[-1]["id"])) == "succeeded"
         finally:
             _forget_admin_actions(tenant.tenant_id)
 

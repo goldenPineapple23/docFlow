@@ -76,6 +76,9 @@ ALERT_TYPES: dict[str, str] = {
     "stripe_event_future_dated": "A Stripe event was stamped in the future and was not applied",
     # D-177: the Console accepts password-only sessions until this is fixed.
     "console_mfa_enforcement_off": "Console MFA enforcement is off (CONSOLE_MFA_ENFORCED=false)",
+    # D-178 (D-220): one platform admin account was refused by the Console
+    # (AUTH-006 or AUTH-007) CONSOLE_REFUSAL_ALERT_COUNT times in the window.
+    "console_refusals_repeated": "A platform admin account was refused by the Console repeatedly",
     # Stage 3b (Q3): Storage couldn't be reached. Once an hour for the whole
     # platform, not per tenant: one outage hits every tenant at once.
     "storage_unavailable": "File storage couldn't be reached",

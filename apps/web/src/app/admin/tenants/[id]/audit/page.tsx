@@ -3,6 +3,7 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { getTenantAudit, getTenantOverview, type AuditEntry } from "@/lib/admin";
+import { outcomeText } from "@/lib/auditOutcome";
 import { ReviewApiError, UNEXPECTED, type CatalogError } from "@/lib/review";
 import { CatalogErrorBox } from "@/components/admin/CatalogErrorBox";
 
@@ -72,6 +73,7 @@ const LABELS: Record<string, string> = {
   example_prompting_set: "Changed example prompting",
   acting_as_write: "Changed an order (as DocFlow support)",
   acting_as_read: "Opened an order (as DocFlow support)",
+  console_refused: "Refused at the Console's sign-in check",
   quarantine_read: "Viewed held documents",
   read: "Viewed",
 };
@@ -93,9 +95,19 @@ function value(v: unknown): string {
   return Array.isArray(v) ? v.map(String).join(", ") : String(v);
 }
 
+// Bookkeeping, not something the founder did: the Result column says it.
+const HIDDEN_KEYS = new Set(["outcome_expected"]);
+
+const OUTCOME_TONE = {
+  ok: "text-green-800",
+  failed: "font-medium text-red-700",
+  unknown: "font-medium text-amber-800",
+  muted: "text-gray-500",
+} as const;
+
 function details(payload: Record<string, unknown>): string {
   return Object.entries(payload)
-    .filter(([, v]) => v !== null && v !== undefined && v !== "")
+    .filter(([k, v]) => !HIDDEN_KEYS.has(k) && v !== null && v !== undefined && v !== "")
     .map(([k, v]) => `${k.replace(/_/g, " ")}: ${value(v)}`)
     .join(" · ");
 }
@@ -175,30 +187,37 @@ export default function AuditPage({ params }: { params: Promise<{ id: string }> 
                 <th className="px-4 py-2">When</th>
                 <th className="px-4 py-2">What</th>
                 <th className="px-4 py-2">Who</th>
+                <th className="px-4 py-2">Result</th>
                 <th className="px-4 py-2">Details</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {entries.map((e, i) => (
-                <tr key={`${e.at}-${i}`} data-testid="audit-row">
-                  <td className="whitespace-nowrap px-4 py-2 tabular-nums text-gray-700">
-                    {new Date(e.at).toLocaleString()}
-                  </td>
-                  <td className="px-4 py-2">
-                    {auditLabel(e.event)}
-                    <span className="ml-2 text-xs text-gray-500">
-                      {e.source === "lifecycle" ? "account" : "Console"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2">
-                    {e.actor_email ?? "DocFlow (automatic)"}
-                    {e.actor_is_docflow ? (
-                      <span className="ml-2 text-xs text-gray-500">DocFlow support</span>
-                    ) : null}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-gray-600">{details(e.payload)}</td>
-                </tr>
-              ))}
+              {entries.map((e, i) => {
+                const result = outcomeText(e.outcome_state, e.outcome);
+                return (
+                  <tr key={`${e.at}-${i}`} data-testid="audit-row">
+                    <td className="whitespace-nowrap px-4 py-2 tabular-nums text-gray-700">
+                      {new Date(e.at).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-2">
+                      {auditLabel(e.event)}
+                      <span className="ml-2 text-xs text-gray-500">
+                        {e.source === "lifecycle" ? "account" : "Console"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2">
+                      {e.actor_email ?? "DocFlow (automatic)"}
+                      {e.actor_is_docflow ? (
+                        <span className="ml-2 text-xs text-gray-500">DocFlow support</span>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-2 text-xs" data-testid="audit-result">
+                      {result ? <span className={OUTCOME_TONE[result.tone]}>{result.text}</span> : null}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-gray-600">{details(e.payload)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </section>

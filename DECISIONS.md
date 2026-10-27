@@ -3389,7 +3389,7 @@ Neither change starts before the founder's "go".
 - **2026-10-09, the Supabase stack again:** push run 38000939499 on `8cb7d95`, first attempt. The worker job failed at the step "Start the local Supabase stack (applies supabase/migrations/)", 42 seconds in. Its annotation, as printed: `worker: no test report: pytest never ran: the step "Start the local Supabase stack" failed first, so nothing was tested. That step's own log has the cause.` The other five jobs were green, the same step passed in that run's api and core jobs, and the commit changed one line of DECISIONS.md. The founder re-ran the failed job; the second attempt was green (`198 tests, 0 failed, 0 skipped, 0 unapproved`, 22:57:29 to 23:01:27).
 - **No cause is established for any of the three:** the job logs cannot be read here. No workaround was proposed or made. The step that starts the Supabase stack has now failed twice, on 2026-09-30 and on 2026-10-09. The two runs of 2026-10-11 in item 1 were green at the first attempt.
 - **The rule (founder, 2026-10-11): at the third flake, stop and read the log. The count starts from the two of 2026-10-09:** the image build on `a284b3d` is the first and the Supabase-stack start on `8cb7d95` is the second, so the next one is the third. The run of 2026-09-30 is recorded here and is not counted.
-- **The count since (added 2026-10-26): 8.** Flakes 5 to 7 are parse's LibreOffice install (step 8) hitting its 15-min timeout on 2026-10-26, each its own flake (founder): push run #474 (40403054192) and pull-request run #475 (40403390752) on `a27599a`, and pull-request run #477 (40404128910) on `0230769`; a slow mirror (D-219 items 8 and 9). Flake 8 is the same timeout on the cache PR's first commit, now step 10, in pull-request run #480 (40412247609) on `9135240`, on the miss path, before any cache existed (founder's pre-approval; D-222 item 8). Flake 3 is push run 39684668090 on 2026-10-21, web-live at "Start the local Supabase stack", port 54322 already in use (D-214 item 13). Flake 4 is pull-request run #469 (40378719035) on 2026-10-26, web-live at step 3 "Run supabase/setup-cli@v2.1.2", hung 1 h 10 min 49 s, cancelled and re-run, cause unknown (D-221 item 4). From the CI PR (D-218), a step timeout on `supabase/setup-cli` or on parse's LibreOffice install counts as an infrastructure flake.
+- **The count since (added 2026-10-26): 9.** Flake 9 is `main`'s push run #483 (40417642377) on `051000c`, #83's merge commit, 2026-10-26: the same install timing out on the miss path before `main` had a cache (D-222 item 9). Flakes 5 to 7 are parse's LibreOffice install (step 8) hitting its 15-min timeout on 2026-10-26, each its own flake (founder): push run #474 (40403054192) and pull-request run #475 (40403390752) on `a27599a`, and pull-request run #477 (40404128910) on `0230769`; a slow mirror (D-219 items 8 and 9). Flake 8 is the same timeout on the cache PR's first commit, now step 10, in pull-request run #480 (40412247609) on `9135240`, on the miss path, before any cache existed (founder's pre-approval; D-222 item 8). Flake 3 is push run 39684668090 on 2026-10-21, web-live at "Start the local Supabase stack", port 54322 already in use (D-214 item 13). Flake 4 is pull-request run #469 (40378719035) on 2026-10-26, web-live at step 3 "Run supabase/setup-cli@v2.1.2", hung 1 h 10 min 49 s, cancelled and re-run, cause unknown (D-221 item 4). From the CI PR (D-218), a step timeout on `supabase/setup-cli` or on parse's LibreOffice install counts as an infrastructure flake.
 
 **Not changed:** any gate, pass mark, limit or constant; any product code (the PR is test code and documents). Nothing of Stage 4, Stage 5, demo readiness or the Phase 6 subset is built.
 
@@ -4997,6 +4997,185 @@ The Console's two alert lists render who an alert is about through one component
   - **Parse's tests:** 427 unit and 581 HTTP, 0 failed, 0 skipped. Run #480 finished green at 22:47:37Z.
 - **The second commit (the records) was pushed only once both scopes had a saved cache** (founder). Its runs must show "hit", "Need to get 0 B" and "0 dropped" (founder's proof bar). Once they do, the fix is marked done in BUILD-STATUS; no owed-list line is added (founder).
 
+**9. The hit runs, the merge, `main`'s first run and the ninth infrastructure flake (recorded in D-178's PR, founder).**
+- **Push run #481** (40415834101, 22:53:22Z to 23:05:43Z) and **pull-request run #482** (40415840596, 22:53:25Z to 22:58:00Z) on `6c4c23f`: both green, all six jobs on attempt 1.
+  - **The proof bar, met in both:** the notices read "hit (libreoffice-debs-Linux-ubuntu24-20261023.334.3-v1)", "50 cached .debs checked against the signed lists, 0 dropped" and "Need to get 0 B/96.7 MB of archives.".
+  - **The install** took 30 s in #481 and 36 s in #482. The prepare and save steps were skipped, as they are on an exact hit. Parse's tests: 427 unit and 581 HTTP, 0 failed, 0 skipped.
+- **Merged:** PR #83, merge commit `051000c1aaae006248d42cd7e2b1e712a590bf5b` (parents `433d14b` and `6c4c23f`), merged by the founder at 23:08:19Z.
+- **`main`'s push run #483** (40417642377), attempt 1 (23:08:22Z to 23:24:10Z): parse's install hit the 15-min timeout, on the miss path (`main` had no cache yet).
+  - **Its notices:** "miss; downloading"; `apt-get update` finished at 23:08:56Z, 5 s in, so the package download stalled, not the lists.
+  - **Flake 9** (founder); D-199 item 10.
+- **The re-run:** the founder re-ran the failed job. Parse's attempt 2 (00:14:25Z to 00:19:15Z, 2026-10-27) was green, its install taking 34 s (00:14:52Z to 00:15:26Z). Run #483 finished green at 00:19:16Z.
+- **`main`'s cache:** saved 00:15:30Z, 96,389,028 bytes, for `refs/heads/main`, confirmed in GitHub's cache list at 00:22:55Z. Every pull request now restores from it.
+- **The fix is done** (BUILD-STATUS).
+
+**10. The first branch and pull request to read `main`'s cache (D-178's PR #84, `a6d6b23`; founder: "That's the proof that PRs read main's cache, and it confirms main saved").**
+- **Push run #484** (40433422576) and **PR run #485** (40438166466), each green on its first attempt. Parse's notices on both: "hit (libreoffice-debs-Linux-ubuntu24-20261023.334.3-v1)", "50 cached .debs checked against the signed lists, 0 dropped" and "Need to get 0 B/96.7 MB of archives."
+- **Where they read it:** GitHub's cache list, read after both runs had finished (the watcher's last read, 02:30:28Z), held the key for three refs only: `refs/heads/main` (last read 02:24:12Z, 6 s before #485's `apt-get update` finished), and #83's two scopes (last read 22:54Z on 2026-10-26). Neither D-178's branch nor `refs/pull/84/merge` has an entry, and another branch's scope isn't readable from either, so both runs restored `main`'s.
+
 **Founder approval:** 2026-10-26 (the plan, four additions and four decisions; `continue-on-error` and the check, with two conditions; the pre-approval for miss-run timeouts).
 
 **Related:** D-199 (item 10), D-216 (item 8), D-217 (item 3), D-218 (items 4 and 5), D-219 (items 8 and 9); `.github/workflows/ci.yml`, `scripts/ci/check_skips.py`.
+
+## D-220 — The Console's audit trail: refused attempts recorded, and every write's outcome (D-178; founder, 2026-10-23 and 2026-10-27)
+
+**Context:** the second lost-device drill (D-178, 2026-09-28) found two gaps, both to be fixed before any pilot, with tests:
+- **Refusals left no trace.** A Console request refused with AUTH-006 (no authenticator on the sign-in) or AUTH-007 (the code too old for a destructive action) wrote nothing. Both gates raise before any write.
+- **A failed action read as done.** Every Console action writes its `admin_actions` row before the work, and nothing recorded how the work ended.
+
+The plan was approved on 2026-10-23, with the founder's answers and three changes, then a revision approved with the simple cap. No branch was cut until the audit PR merged. The order then changed twice: the LibreOffice cache PR (D-222) went first, and D-178 waited on the founder's Supabase screenshots. Built on 2026-10-27, branch `phase55/stage5-d178-audit-trail` from `051000c`. No migration.
+
+**1. Refusals are recorded (AUTH-006, AUTH-007).**
+- **The exception:** the two gates in `deps.py` raise `ConsoleRefused`, an `HTTPException` with the same 403 catalog body, carrying who was refused and, for AUTH-007, the code's age.
+- **The handler:** `main.py` registers a handler for it, whose function lives in the admin router, the only module allowed to write the audit (`test_admin_import_boundary.py`).
+  - **The row:** action `console_refused`; payload `{code, method, path_template, mfa_challenge_age_seconds}`; the tenant when the path names one that exists. `target_tenant_id` is a foreign key, so a made-up id is left out.
+  - **The answer is then the same 403 as before,** through FastAPI's own handler.
+- **Who can reach it:** only an active platform admin's sign-in. Everyone else still gets the 404 first (7.15.1). So a refusal is the founder, or someone holding the founder's password.
+- **The cap (founder, 2026-10-23: the simple one):** at most `CONSOLE_REFUSAL_ALERT_COUNT` (5) rows per account per rolling `CONSOLE_REFUSAL_WINDOW_MINUTES` (15), counted on the database's clock under a per-account advisory lock, so two refusals at once can't both find room.
+  - **The 5th row** raises one high-severity `console_refusals_repeated` alert. The dedupe key is per account, so there is one open alert at a time.
+  - **Past the cap:** a log line only (`console_refused_not_recorded code=… account=… path=…`). No counter.
+- **If recording fails:** the 403 still goes out, and the error type is logged (`console_refusal_record_failed`).
+- **Constants:** both are in `constants.py` and RUNBOOK 9.6. Their values are the approved ones. They stand until the step-up measurement (item 7) says otherwise.
+
+**2. Every Console write records its outcome.**
+- **`_console_write`,** in the admin router, replaces `_console_act` for the 21 write routes:
+  - it writes the intent marked `"outcome_expected": true`;
+  - it runs the work;
+  - it writes an `outcome` row with payload `{intent_id, result, code}`.
+- **The results:**
+  - `succeeded` on a normal exit;
+  - `failed` with the catalog code when the work ends with one (an `HTTPException` carrying a code, or a `ConsoleError`);
+  - `failed` with `detail: {status}` for a bare 404 or 409.
+- **An uncaught exception writes no outcome.** That is D-178's "stopped midway". The crash is logged with the intent's id (`console_write_crashed`).
+- **If writing the outcome fails after the work,** the answer is unchanged and the error is logged. Turning a real success into a failure would invite a retry.
+- **`_console_act` is now for reads only** (`read`, `acting_as_read`, `quarantine_read`). Reads get no outcome row. `test_console_outcome_guard.py` holds every call to its kind, and was shown to catch a write moved back to `_console_act`.
+- **Acting-as writes too.** The gate that mounts the tenant's own review and export routes under `/admin/tenants/{id}/act` became a `yield` dependency, so the route's result comes back to it. In FastAPI 0.141.1, success, an `HTTPException` and a crash each reach the dependency, checked on a scratch app before building.
+  - **A crash writes no outcome here either (founder's question, 2026-10-26).** Acting-as and the Console routes share `_console_write`, so an acting-as crash reads "Outcome unknown", never "Failed". One difference, checked on a scratch app: the gate records the request before FastAPI checks the body, so an acting-as write refused with a 422 reaches the gate as `RequestValidationError` and reads "Outcome unknown" although nothing ran. A Console route's 422 leaves no line (it is checked before the route records anything), as does a body that isn't JSON at all on either path. RUNBOOK 4.5 states what "Outcome unknown" covers for each kind, the seven same-transaction actions included (item 3).
+- **Out of scope:** writes with no tenant (intakes, tier versions, the rollup recompute) aren't on any tenant's Audit tab. The intake pair records outcomes anyway (item 3).
+
+**3. Actions that write their row in the same transaction as the work** (create tenant, deal terms, tier change, invite, intake create and add file, hard delete).
+- **The request row first (founder, 2026-10-27, item 10):** `_attempt` in `admin_data_access` commits the request row, marked `outcome_expected`, in a short transaction of its own before the work starts. If it can't be written, the error stands and the work never runs. A machine that stops after it leaves the request with no outcome, which reads "Outcome unknown".
+- **On success:** the `succeeded` outcome is written in the work's own transaction, so it commits with the work. Its `detail` holds what the work found or did, which the request row, written first, can't: the tier used, files moved and the deal for a creation; before and after for deal terms and a tier change; rows deleted and objects removed for a hard delete.
+  - **A change from the plan:** the plan had the route write the outcome after the function returned. Writing it in the transaction leaves no window between the commit and the record.
+- **On failure (founder's change A):** the rollback takes the work and its `succeeded` outcome. A new transaction then writes a `failed` outcome pointing at the request row. The outcome's `detail` holds what had already happened outside the database:
+  - **Tier change:** `stripe`: `called`, `refused` or `accepted`.
+  - **Hard delete:** `stage`: `check`, `storage` or `database`, and `objects_removed`, a count, or `unknown` when Storage itself failed.
+  - **Create tenant:** `files_copied`, and the Stripe customer's fate (`created, then deleted` or `created, not deleted`).
+  - **A failure with no catalog code:** `error_type`.
+- **A tenant creation's request row is committed before the tenant exists,** so it leaves `target_tenant_id` (a foreign key) empty and names the tenant by `target_id`. Its `succeeded` outcome, written with the tenant, names it. `tenant_audit` lists a request row with an empty tenant, `target_type` `tenant` and that `target_id` on the tenant's Audit tab, and the test purge (`tenant_cleanup.py`) removes it. A creation that failed or stopped has no tenant, so its record is on no Audit tab.
+- **If the failure record itself can't be written,** the error is logged (`console_failure_not_recorded`) and the original error still reaches the founder.
+- **A known risk, not fixed here (founder):** the tier change calls Stripe inside the database transaction. A commit that fails after Stripe accepts leaves the two out of step. The record says `stripe: accepted`, so the founder knows to look at Stripe.
+
+**4. The Audit tab.**
+- `tenant_audit` attaches each outcome to its intent. Outcome rows are not lines of their own, and they're not counted in the total.
+- **Each Console line carries `outcome_state`:**
+  - `succeeded` and `failed` (with the code);
+  - `unknown`, for an intent marked `outcome_expected` with no outcome. The page shows the founder's wording: "Outcome unknown: no outcome was recorded. Check the tenant's current state before retrying.";
+  - `not_recorded`, for a write from before this change: "Outcome not recorded (before D-178)".
+- Reads, refusals and lifecycle events show no result.
+- **The page:** a Result column. `outcome_expected` is hidden from the details. Refusal rows read "Refused at the Console's sign-in check".
+
+**5. Supabase Auth on staging: the facts behind option A** (founder's screenshots, 2026-10-26; source read 2026-10-26 to 27).
+- **Version:** staging's auth server is GoTrue **v2.197.0**. One read-only GET of `/auth/v1/health` with the anon key at 00:17:57Z, approved by the founder, returned HTTP 200. Its source, at that release tag, is what was read.
+- **MFA code verification is rate-limited per IP address, not per account.**
+  - **The limit:** `POST /factors/{id}/verify` has its own limiter (`FactorVerify`): `MFA.RateLimitChallengeAndVerify` / 60 a second, default 15 a minute, burst 30, keyed by the client's IP.
+  - **It isn't on the dashboard's Rate Limits page.**
+  - **No lockout:** a wrong code returns 422, with no lockout per factor or per user. TOTP accepts the current code and one either side (`Skew: 1`).
+  - **A wrong code doesn't use up the challenge:** it stays valid for 5 minutes from the same IP, about 105 guesses per challenge.
+- **Wrong codes write no auth audit entry.** The 422 returns before `verification_attempted` is written, which happens only on success. `challenge_created` is logged.
+- **The dashboard (founder's screenshots):**
+  - **Rate Limits:** token verifications (OTP and magic link) 30 per 5 min per IP; sign-ups and sign-ins 30 per 5 min per IP; token refreshes 150 per 5 min per IP; emails 2 an hour; IP address forwarding off.
+  - **Multi-Factor:** TOTP on, at most 10 factors per user, SMS MFA off (Pro plan), "Limit duration of AAL1 sessions" on.
+  - **Audit Logs:** "Write audit logs to the database" off. That is why `auth.audit_log_entries` showed nothing in the drill. Separately, `docflow_admin` is refused on the `auth` schema (42501, 2026-10-23).
+  - **Attack Protection:** CAPTCHA off, leaked-password protection off.
+- **The 15-minute AAL1 limit** applies only when a session's level is below the user's highest possible level, which is aal2 only with a verified factor (`HighestPossibleAAL`). Tenant users have no factor, so it doesn't touch them. For the founder, a sign-in not stepped up within 15 minutes ends.
+- **Every sign-in and every MFA verify goes from the browser straight to Supabase,** so the per-IP limits apply to the user's own IP.
+  - **Sign-in:** `login/page.tsx` calls `signInWithPassword`.
+  - **MFA verify:** `lib/mfa.ts` calls `challengeAndVerify`. Its callers are `AuthenticatorSetup`, `StepUpDialog` and `/admin/security`, all browser components.
+  - **Our servers** call only Supabase's admin `generate_link`, for invites, and the JWKS.
+- **Decided (founder, 2026-10-27): option A.** These facts and the residual risk are recorded here. AUTH-008 (a wrong code) stays unreported to our API: no option B.
+- **The residual risk:** with the password, one IP can try about 21,600 codes a day, about a 6% chance of a hit per day. More IPs go faster. Only the founder's account has a factor today.
+
+**6. Per-account protection against code guessing: a hard gate before the first pilot (founder, 2026-10-27).**
+- **Option C, Supabase's "MFA Verification Attempt" auth hook:** it would count failures per user and refuse past N. It needs the Team or Enterprise plan, and the org is on Free (founder's screenshot of Authentication → Auth Hooks). Out, unless the org moves to Team for other reasons.
+- **Option D, verifying codes through our API with our own per-account limit:** the gate.
+  - **Its costs:** a new endpoint, and a failure counter, which is a migration.
+  - **It reverses D-177's browser-direct design.**
+  - **Supabase's per-IP limit** would see our server's IP for every account, unless "IP address forwarding" is turned on, which needs Supabase's secret API keys.
+- **Option E, WebAuthn (a security key or passkey) as the second factor:**
+  - **The auth server supports it:** v2.197.0 has `MFA.WebAuthn.EnrollEnabled` and `VerifyEnabled`, and `mfa/webauthn` is an aal2 claim.
+  - **Our client library has it, marked experimental:** supabase-js 2.116.0, every method `@experimental`.
+  - **The docs don't offer it:** Supabase documents MFA as TOTP and phone only, and passkeys only as an experimental first-factor sign-in. There's no pricing row, and staging's Multi-Factor page shows only TOTP and Phone.
+  - **If Supabase enabled it on a hosted Pro project, E would replace D:** no code to guess, resistant to phishing, AUTH-006 unchanged, and the step-up check would read the WebAuthn entry's time too.
+  - **Next step:** ask Supabase support.
+- **Not recommended:** turning on database audit logs for detection. Wrong codes leave no entry, and the only trace, challenges never verified, misses a short burst. The same signal is in `auth.mfa_challenges` without it.
+
+**7. Measurements.**
+- **The MFA rate limit:** taken from the source, not measured (founder, 2026-10-27).
+- **The step-up measurement** (a normal sign-in and step-up on the real stack, counting refusals, to confirm the threshold) stays as planned and needs "Grant … D-178 step-up measurement". Sign-in was measured on 2026-09-28 at 0 refusals.
+- **The step-up measurement, done 2026-10-27 under the founder's Grant.**
+  - **The setup:** the local API and web app from `8a9f551` (its code is `954f0ef`'s), against staging, with `CONSOLE_MFA_ENFORCED` true (no "enforcement is off" warning at startup). The tenant was "Acme Test Sweep A" (`73602e07-9ab2-4050-9693-a31909f289e5`), the 2026-09-28 drill's: active, `tenant_created`, never live, no intake address. Memurai answered PONG first.
+  - **What the founder did:** signed in to the Console normally, with the first code at 14:06Z. Then, more than 5.5 minutes later, ran Replace intake address. That was refused with AUTH-007. The founder entered a fresh code at 14:15Z, and the action stopped at QUA-004, as planned.
+  - **The API log:** 165 requests, 13:52Z to 14:18Z: 163 answered 200, one 403 (the first rotate) and one 409 (the second rotate, QUA-004). No 404, and no `console_refused_not_recorded` or `console_refusal_record_failed` line. The access log carries no catalog code; the rows below do.
+  - **The rows written to staging:** 57 `admin_actions` rows from one account: 52 `read`, 2 `quarantine_read` and these three.
+    - `console_refused`, 14:15:30Z: AUTH-007, POST `/admin/tenants/{tenant_id}/intake-address/rotate`, the code 545 s old (the limit is 330 s), on the tenant.
+    - `intake_address_rotate`, 14:15:49Z: the request row, `outcome_expected`, the code 0 s old.
+    - `outcome`, 14:15:49Z: `failed`, QUA-004, pointing at that request row.
+  - **No founder alert** was raised. Before the run, staging had no `console_refused` or `outcome` row.
+  - **The count:** AUTH-006 0, at the sign-in, as on 2026-09-28. AUTH-007 1, for one stale step-up. So a normal sign-in and step-up uses 1 of the 5 the alert allows in 15 minutes. `CONSOLE_REFUSAL_ALERT_COUNT` (5) and `CONSOLE_REFUSAL_WINDOW_MINUTES` (15) stay as approved.
+  - **After it:** the API and the web app were stopped, and ports 8000, 3000 and 8100 are free.
+
+**8. Recorded here, built elsewhere.**
+- **Before the first pilot:**
+  - an append-only trigger on `admin_actions` (a migration, its own item; the table is append-only by convention until then);
+  - item 6's per-account gate;
+  - custom SMTP, since the project sends 2 emails an hour without it;
+  - the founder's item, word for word: "choose the Supabase plan for docflow-prod (at least Pro: backups, no pausing, leaked-password protection, SMTP)".
+- **Before `docflow-prod`:** decide Supabase's auth audit logs. They stay off on staging (founder).
+
+**9. Readers and local checks (D-216 item 6), 2026-10-27, every outside service blocked.**
+- **Readers:**
+  - `deps.py`: the API's tests through the app.
+  - `admin.py` and `main.py`: the API's tests. No test calls the gate or `_console_act` directly.
+  - `admin_data_access.py`: core's `test_hard_delete_order.py`, changed. A failed file removal now writes exactly its own record, two `admin_actions` inserts. The final-sweep test counts 3 audit inserts, not 2.
+  - `founder_alerts.ALERT_TYPES`: `test_alert_types_registered.py`.
+  - **`test_broad_except_guard.py` (D-203):** the first full core run failed it on the three new handlers that log and carry on (`_record_outcome_quietly`, `console_refused_handler`, `_Attempt.failed`). Each is now listed as `BEST_EFFORT`, with why broad is right there. The two that end in a bare `raise` are exempt by rule.
+  - `constants.py` and RUNBOOK 9.6.
+  - **The 25 test lines that read `admin_actions`,** each checked: all filter by an action name, which outcome rows never match, or clean up by admin or by tenant. The leftover counts are kept at `+0` by a fixture that removes the refusal alerts and their emails.
+  - **The web:** `lib/admin.ts`, the Audit page, and `e2e/example-prompting.spec.ts`, whose stub rows carry no outcome and still pass.
+- **New tests:**
+  - **Core, no database** (`test_console_outcomes.py`, 13, 18 after item 10): `_attempt`'s success, catalog failure, crash, failed commit, never-created tenant and unrecordable failure; the tier change's `stripe` detail (refused, accepted then commit failed, succeeded); hard delete at each stage, and success.
+  - **The guard** (`test_console_outcome_guard.py`, 2).
+  - **API, against a database** (`test_console_audit_trail.py`, 13; first recorded here as 15, corrected 2026-10-27): both refusals with the same 403; the 403 when recording fails; 5 rows and 1 alert, then refusals 6 to 20 logged only; a second account; outcomes for success, a catalog error, a bare 404 and a crash (unknown on the Audit tab); the Audit tab's states; a failed tier change, hard delete and tenant creation.
+  - **An existing test, extended:** `test_acting_as.py` checks that the acting-as write has its `succeeded` outcome.
+  - **Web:** vitest for the result's words (6), and an e2e for the Result column.
+- **Local results:**
+  - **Core's new and changed tests:** `22 passed`.
+  - **The full core suite:** `1 failed, 1168 passed, 3 errors in 314.74s (0:05:14)`. The four are the live-bucket tests, which fail with Storage blocked (D-207 item 12). 1,172 is D-219's 1,157 plus the 15 new tests.
+  - **The API's new file collects** (42 tests with the MFA and Audit tab files). It needs a database, so it runs in CI and in the staging suites.
+  - **Lint and types:** ruff and mypy pass for core, the API and the worker, as CI runs them.
+  - **Web:** `tsc --noEmit` passes; vitest `68 passed`; eslint passes on the changed files. The whole tree reads 412 errors and 6,669 warnings, all in the local `.next-live/` build output, as in D-217.
+  - **CLAUDE.md:** unchanged, 71,216 characters.
+
+**10. The request row first (founder, 2026-10-27, on PR #84 before merge).** The founder: for the seven same-transaction actions, "commit the request row first in its own short transaction, before the work starts. Success writes its outcome inside the work's transaction as now; failure writes it after the rollback, pointing at the existing request row; a machine stop leaves the request with no outcome, so it reads 'Outcome unknown'." Built as item 3 now reads.
+- **Before it,** a stop midway left no line at all, so a Stripe call or a file removal could happen with nothing on the Audit tab.
+- **The payloads:** what the work finds or does moved from the request row to the `succeeded` outcome's `detail` (item 3). The Audit tab shows the request row's payload, and the same before and after are on the matching lifecycle lines (created, deal terms changed, tier changed, deleted), so the tab shows what it did before.
+- **Readers (D-216 item 6):** `test_admin_access.py` and `test_console_api.py` found the creation row by `target_tenant_id`; they now use `target_id`. `tenant_cleanup.py` removes the creation row by `target_id`. Without that, `test_admin_access.py`'s cleanup would fail on the admin user's foreign key. The other tests reading these seven actions' rows filter by an action name on an existing tenant and count 1, which still holds. The broad-except guard's `_Attempt.failed` entry is unchanged.
+- **New tests:**
+  - **Core** (`test_console_outcomes.py`, now 18):
+    - the request row committed, alone, before the work's transaction opens;
+    - a request row that can't be written stops the work before it starts;
+    - a creation's request named by `target_id` and its outcome by the tenant;
+    - the work's commit failing reads failed, not succeeded;
+    - a stop between the request and the work, both in `_attempt` and in a real tier change (Stripe never called), leaves the request alone and reads "unknown".
+  - **API, against a database** (`test_console_audit_trail.py`, now 15): a created tenant's request row named by `target_id` and its line Done on the tenant's Audit tab; and a stop after the request row of a real tier change, which reads "Outcome unknown" on the tab.
+  - **Two planted bugs were caught:** with no request row, all 18 core tests failed; with a stop treated as a failure, exactly the two stop tests failed.
+- **Local results, every outside service blocked:**
+  - **The changed core files:** `44 passed`.
+  - **The full core suite:** `1 failed, 1173 passed, 3 errors in 313.86s (0:05:13)`. The four are the live-bucket tests, as in item 9. 1,177 is item 9's 1,172 plus 5.
+  - **API:** the changed and reader files collect 93 tests.
+  - **Lint and types:** ruff and mypy pass for core, the API and the worker, as CI runs them.
+
+**Founder approval:** 2026-10-23 (the plan, the answers, changes A to C, the revision with the simple cap); 2026-10-27 (option A, the before-first-pilot gate, building D-178, the five changes from the plan, and item 10).
+
+**Related:** D-151, D-170, D-177, D-178, D-199, D-213 (item 6), D-219, D-222; `apps/api/app/deps.py`, `apps/api/app/routers/admin.py`, `apps/api/app/main.py`, `packages/core/docflow_core/admin_data_access.py`, `packages/core/docflow_core/constants.py`, `packages/core/docflow_core/founder_alerts.py`, `apps/web/src/lib/auditOutcome.ts`, the Audit page; RUNBOOK 4.4, 4.5 and 9.6.

@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.deps import ConsoleRefused
 from app.errors import catalog_detail
 from app.routers import (
     activity,
@@ -195,6 +196,11 @@ async def _malformed_document_id(request: Request, exc: RequestValidationError) 
         return JSONResponse(status_code=404, content={"detail": catalog_detail("REV-006")})
     return await request_validation_exception_handler(request, exc)
 
+
+# A Console request refused at the gate (AUTH-006, AUTH-007) is recorded
+# before its 403 goes out (D-178); the handler lives in the admin router, the
+# only module allowed to write the audit.
+app.add_exception_handler(ConsoleRefused, admin.console_refused_handler)
 
 app.include_router(auth.router)
 app.include_router(activity.router)

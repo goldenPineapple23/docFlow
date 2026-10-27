@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any, Literal, cast
 from uuid import UUID
 
@@ -58,12 +61,20 @@ from docflow_core.db import tenant_session
 from docflow_core.errors import get_error
 from docflow_core.external_services import ExternalServiceError
 from docflow_core.storage import StorageUnavailableError, UnsafeStoragePathError, read_file, save_file
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
+from fastapi.exception_handlers import http_exception_handler
 from pydantic import BaseModel, EmailStr, Field
 
 from app.actor import Actor
 from app.celery_client import celery_client, nudge_dispatcher
-from app.deps import AuthenticatedIdentity, StepUp, require_platform_admin, require_recent_mfa
+from app.deps import (
+    AuthenticatedIdentity,
+    ConsoleRefused,
+    StepUp,
+    require_platform_admin,
+    require_recent_mfa,
+)
 from app.errors import catalog_error
 from app.routers.documents import ingest_upload
 
@@ -370,15 +381,15 @@ def request_card(tenant_id: UUID, identity: AuthenticatedIdentity = Depends(requ
     Billing page, where each click opens a fresh Stripe card page (Checkout
     links expire after 24 hours). The wording follows the deal: the setup fee
     at signing (standard), with month one (founding), or none to charge."""
-    _console_act(identity, tenant_id, "card_request", target_type="tenant", target_id=tenant_id)
-    with tenant_session(tenant_id) as session:
-        try:
-            outbox_id, template = card_billing.request_card(session, tenant_id)
-        except onboarding.OnboardingError as exc:
-            raise _onboarding_error(exc) from exc
-    if outbox_id is None:
-        raise catalog_error("CON-004", status_code=409)
-    return {"email_outbox_id": str(outbox_id), "template": template}
+    with _console_write(identity, tenant_id, "card_request", target_type="tenant", target_id=tenant_id):
+        with tenant_session(tenant_id) as session:
+            try:
+                outbox_id, template = card_billing.request_card(session, tenant_id)
+            except onboarding.OnboardingError as exc:
+                raise _onboarding_error(exc) from exc
+        if outbox_id is None:
+            raise catalog_error("CON-004", status_code=409)
+        return {"email_outbox_id": str(outbox_id), "template": template}
 
 
 # ── Attention panel and outbox (Section 7.9 / 7.15.3) ───────────────────────
@@ -424,12 +435,135 @@ def _import_error(exc: CatalogImportError) -> HTTPException:
 
 
 def _console_act(identity: AuthenticatedIdentity, tenant_id: UUID, action: str, **kw: Any) -> UUID:
+    """The audit row for a Console READ. A write goes through `_console_write`,
+    which also records its outcome (D-178; a test holds every call here to a
+    read action)."""
     admin_id = _admin_id(identity)
     if not admin_data_access.record_console_action(
         platform_admin_user_id=admin_id, action=action, tenant_id=tenant_id, **kw
     ):
         raise HTTPException(status_code=404)
     return admin_id
+
+
+def _outcome_of(exc: BaseException) -> tuple[str | None, dict[str, Any] | None]:
+    """The catalog code a failed Console write ended with, or None and the
+    HTTP status for a bare one (a 404 or 409 with no catalog entry)."""
+    if isinstance(exc, ConsoleError):
+        return exc.code, None
+    if isinstance(exc, HTTPException):
+        detail = exc.detail
+        if isinstance(detail, dict) and detail.get("code"):
+            return str(detail["code"]), None
+        return None, {"status": exc.status_code}
+    return None, None
+
+
+def _record_outcome_quietly(
+    admin_id: UUID, intent_id: UUID, tenant_id: UUID, kw: dict[str, Any], **outcome: Any
+) -> None:
+    # The work is already done (or already failed): a failure to record its
+    # outcome is logged, never turned into a different answer. Turning a real
+    # success into a failure would invite a retry.
+    try:
+        admin_data_access.record_console_outcome(
+            platform_admin_user_id=admin_id,
+            intent_id=intent_id,
+            tenant_id=tenant_id,
+            target_type=kw.get("target_type", "tenant"),
+            target_id=kw.get("target_id"),
+            **outcome,
+        )
+    except Exception as exc:  # noqa: BLE001 -- logged; see above
+        logger.error("console_outcome_not_recorded intent_id=%s error_type=%s", intent_id, type(exc).__name__)
+
+
+def _path_tenant(request: Request) -> UUID | None:
+    for name in ("tenant_id", "acting_tenant_id"):
+        value = request.path_params.get(name)
+        if value is not None:
+            try:
+                return UUID(str(value))
+            except ValueError:
+                return None
+    return None
+
+
+async def console_refused_handler(request: Request, exc: Exception) -> Response:
+    """
+    A Console request refused at the gate with AUTH-006 or AUTH-007 (D-178):
+    record it, then answer with the same 403 the gate always gave. Registered
+    in main.py; it lives here because only this router may write the audit.
+    Past the cap -- CONSOLE_REFUSAL_ALERT_COUNT rows per account per window --
+    the refusal is a log line only (founder, 2026-10-23). If recording fails,
+    the answer is still the 403, and the error type is logged.
+    """
+    assert isinstance(exc, ConsoleRefused)
+    route = request.scope.get("route")
+    path = getattr(route, "path_format", None) or "(unmatched)"
+    account = exc.identity.local_user_id
+    try:
+        if account is None:
+            recorded = False
+        else:
+            recorded = await run_in_threadpool(
+                partial(
+                    admin_data_access.record_console_refusal,
+                    platform_admin_user_id=account,
+                    code=exc.code,
+                    method=request.method,
+                    path_template=path,
+                    mfa_challenge_age_seconds=exc.challenge_age_seconds,
+                    target_tenant_id=_path_tenant(request),
+                )
+            )
+        if not recorded:
+            logger.warning("console_refused_not_recorded code=%s account=%s path=%s", exc.code, account, path)
+    except Exception as record_exc:  # noqa: BLE001 -- the 403 must stand; logged
+        logger.error(
+            "console_refusal_record_failed code=%s account=%s path=%s error_type=%s",
+            exc.code,
+            account,
+            path,
+            type(record_exc).__name__,
+        )
+    return await http_exception_handler(request, exc)
+
+
+@contextmanager
+def _console_write(
+    identity: AuthenticatedIdentity, tenant_id: UUID, action: str, **kw: Any
+) -> Iterator[UUID]:
+    """
+    A Console write that runs in the tenant's own session (D-178): the intent
+    row first, marked `outcome_expected`, then the work, then an `outcome` row
+    pointing back at it -- `succeeded` on a normal exit, `failed` with the
+    catalog code when the work ends with one. An uncaught exception writes no
+    outcome: that is a request that stopped midway, which the Audit tab shows
+    as "Outcome unknown", never as done. Yields the admin's user id.
+    """
+    admin_id = _admin_id(identity)
+    payload = {**(kw.pop("payload", None) or {}), "outcome_expected": True}
+    intent_id = admin_data_access.record_console_action(
+        platform_admin_user_id=admin_id, action=action, tenant_id=tenant_id, payload=payload, **kw
+    )
+    if intent_id is None:
+        raise HTTPException(status_code=404)
+    try:
+        yield admin_id
+    except (HTTPException, ConsoleError) as exc:
+        code, detail = _outcome_of(exc)
+        _record_outcome_quietly(admin_id, intent_id, tenant_id, kw, result="failed", code=code, detail=detail)
+        raise
+    except Exception as exc:
+        logger.error(
+            "console_write_crashed intent_id=%s action=%s error_type=%s",
+            intent_id,
+            action,
+            type(exc).__name__,
+        )
+        raise
+    _record_outcome_quietly(admin_id, intent_id, tenant_id, kw, result="succeeded")
 
 
 # ── Acting-as: the tenant's own review and export routes (D-111) ────────────
@@ -444,7 +578,7 @@ def acting_as_gate(
     request: Request,
     acting_tenant_id: UUID,
     identity: AuthenticatedIdentity = Depends(require_platform_admin),
-) -> None:
+) -> Iterator[None]:
     """
     The Console's way into a tenant's review and export routes (Section
     7.15.1, "Acting-as, not impersonation"). main.py mounts those routers a
@@ -456,6 +590,9 @@ def acting_as_gate(
     written before the work, naming the route template -- never a value from
     a document. Then the route runs in the tenant's own session as the
     founder, with acting_as_tenant_id on everything it writes.
+
+    A write also gets its outcome row (D-178): the route runs at this
+    dependency's `yield`, so its result or its catalog error comes back here.
     """
     route = request.scope.get("route")
     target_type, target_id = "tenant", None
@@ -467,17 +604,23 @@ def acting_as_gate(
                 raise HTTPException(status_code=404) from None
             target_type = kind
             break
-    admin_id = _console_act(
-        identity,
-        acting_tenant_id,
-        "acting_as_read" if request.method == "GET" else "acting_as_write",
-        target_type=target_type,
-        target_id=target_id,
-        payload={"method": request.method, "route": getattr(route, "path_format", None)},
-    )
-    request.state.acting_actor = Actor(
-        tenant_id=acting_tenant_id, user_id=admin_id, role=None, acting_as_tenant_id=acting_tenant_id
-    )
+    audit: dict[str, Any] = {
+        "target_type": target_type,
+        "target_id": target_id,
+        "payload": {"method": request.method, "route": getattr(route, "path_format", None)},
+    }
+    if request.method == "GET":
+        admin_id = _console_act(identity, acting_tenant_id, "acting_as_read", **audit)
+        request.state.acting_actor = Actor(
+            tenant_id=acting_tenant_id, user_id=admin_id, role=None, acting_as_tenant_id=acting_tenant_id
+        )
+        yield
+        return
+    with _console_write(identity, acting_tenant_id, "acting_as_write", **audit) as admin_id:
+        request.state.acting_actor = Actor(
+            tenant_id=acting_tenant_id, user_id=admin_id, role=None, acting_as_tenant_id=acting_tenant_id
+        )
+        yield
 
 
 def _start_import(
@@ -552,23 +695,25 @@ async def upload_import(
     file_type = validation.file_type.name.value
     if file_type not in catalog_import.TABLE_FORMATS:
         raise catalog_error("IMP-001", status_code=422)
-    admin_id = _console_act(identity, tenant_id, f"{kind}_import_upload", target_type="catalog_import")
-    try:
-        storage_path = save_file(tenant_id, filename, content)
-    except StorageUnavailableError as exc:
-        founder_alerts.alert_storage_unavailable(tenant_id, where="console_import_upload")
-        raise catalog_error("DOC-025", status_code=503) from exc
-    import_id = _start_import(
-        tenant_id,
-        admin_id,
-        kind=kind,
-        source="upload",
-        original_filename=filename,
-        storage_path=storage_path,
-        content=content,
-        file_type=file_type,
-    )
-    return {"import_id": import_id}
+    with _console_write(
+        identity, tenant_id, f"{kind}_import_upload", target_type="catalog_import"
+    ) as admin_id:
+        try:
+            storage_path = save_file(tenant_id, filename, content)
+        except StorageUnavailableError as exc:
+            founder_alerts.alert_storage_unavailable(tenant_id, where="console_import_upload")
+            raise catalog_error("DOC-025", status_code=503) from exc
+        import_id = _start_import(
+            tenant_id,
+            admin_id,
+            kind=kind,
+            source="upload",
+            original_filename=filename,
+            storage_path=storage_path,
+            content=content,
+            file_type=file_type,
+        )
+        return {"import_id": import_id}
 
 
 class ImportFromIntakeRequest(BaseModel):
@@ -590,37 +735,37 @@ def import_from_intake(
         raise catalog_error("CON-001", status_code=404)
     if chosen["detected_type"] not in catalog_import.TABLE_FORMATS:
         raise catalog_error("IMP-001", status_code=422)
-    admin_id = _console_act(
+    with _console_write(
         identity,
         tenant_id,
         f"{body.kind}_import_from_intake",
         target_type="onboarding_intake_file",
         target_id=body.intake_file_id,
-    )
-    # After tenant creation the intake's files sit under this tenant's
-    # `onboarding/` prefix, so the read is tenant-checked like any other.
-    try:
-        content = read_file(tenant_id, chosen["storage_path"])
-    except UnsafeStoragePathError as exc:
-        # Nothing is read. The founder sees the general SYS-001, as for any
-        # other Console read that fails (3b build notes); the log line and,
-        # for another tenant's folder, the alert say which (founder, 2026-09-30).
-        founder_alerts.report_refused_storage_path(
-            exc, tenant_id=tenant_id, where="console_import_from_intake", ref_id=body.intake_file_id
+    ) as admin_id:
+        # After tenant creation the intake's files sit under this tenant's
+        # `onboarding/` prefix, so the read is tenant-checked like any other.
+        try:
+            content = read_file(tenant_id, chosen["storage_path"])
+        except UnsafeStoragePathError as exc:
+            # Nothing is read. The founder sees the general SYS-001, as for any
+            # other Console read that fails (3b build notes); the log line and,
+            # for another tenant's folder, the alert say which (founder, 2026-09-30).
+            founder_alerts.report_refused_storage_path(
+                exc, tenant_id=tenant_id, where="console_import_from_intake", ref_id=body.intake_file_id
+            )
+            raise catalog_error("SYS-001", status_code=500) from exc
+        import_id = _start_import(
+            tenant_id,
+            admin_id,
+            kind=body.kind,
+            source="intake_file",
+            original_filename=chosen["original_filename"],
+            storage_path=chosen["storage_path"],
+            content=content,
+            file_type=chosen["detected_type"],
+            intake_file_id=body.intake_file_id,
         )
-        raise catalog_error("SYS-001", status_code=500) from exc
-    import_id = _start_import(
-        tenant_id,
-        admin_id,
-        kind=body.kind,
-        source="intake_file",
-        original_filename=chosen["original_filename"],
-        storage_path=chosen["storage_path"],
-        content=content,
-        file_type=chosen["detected_type"],
-        intake_file_id=body.intake_file_id,
-    )
-    return {"import_id": import_id}
+        return {"import_id": import_id}
 
 
 @router.get("/tenants/{tenant_id}/imports/{import_id}")
@@ -659,17 +804,17 @@ def set_import_mapping(
     body: MappingRequest,
     identity: AuthenticatedIdentity = Depends(require_platform_admin),
 ) -> dict:
-    _console_act(
+    with _console_write(
         identity, tenant_id, "import_mapping_set", target_type="catalog_import", target_id=import_id
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            catalog_import.set_mapping(session, import_id, body.mapping)
-        except LookupError as exc:
-            raise HTTPException(status_code=404) from exc
-        except CatalogImportError as exc:
-            raise _import_error(exc) from exc
-    return {"ok": True}
+    ):
+        with tenant_session(tenant_id) as session:
+            try:
+                catalog_import.set_mapping(session, import_id, body.mapping)
+            except LookupError as exc:
+                raise HTTPException(status_code=404) from exc
+            except CatalogImportError as exc:
+                raise _import_error(exc) from exc
+        return {"ok": True}
 
 
 class RowFixRequest(BaseModel):
@@ -685,58 +830,58 @@ def fix_import_row(
     body: RowFixRequest,
     identity: AuthenticatedIdentity = Depends(require_platform_admin),
 ) -> dict:
-    _console_act(
+    with _console_write(
         identity,
         tenant_id,
         "import_row_fix",
         target_type="catalog_import",
         target_id=import_id,
         payload={"row": row_number, "field": body.field},
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            catalog_import.set_override(session, import_id, row_number, body.field, body.value)
-        except LookupError as exc:
-            raise HTTPException(status_code=404) from exc
-        except CatalogImportError as exc:
-            raise _import_error(exc) from exc
-    return {"ok": True}
+    ):
+        with tenant_session(tenant_id) as session:
+            try:
+                catalog_import.set_override(session, import_id, row_number, body.field, body.value)
+            except LookupError as exc:
+                raise HTTPException(status_code=404) from exc
+            except CatalogImportError as exc:
+                raise _import_error(exc) from exc
+        return {"ok": True}
 
 
 @router.post("/tenants/{tenant_id}/imports/{import_id}/commit")
 def commit_import(
     tenant_id: UUID, import_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
 ) -> dict:
-    admin_id = _console_act(
+    with _console_write(
         identity, tenant_id, "import_commit", target_type="catalog_import", target_id=import_id
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            summary = catalog_import.commit_import(
-                session, tenant_id, import_id, user_id=admin_id, acting_as_tenant_id=tenant_id
-            )
-        except LookupError as exc:
-            raise HTTPException(status_code=404) from exc
-        except CatalogImportError as exc:
-            raise _import_error(exc) from exc
-    return {"summary": summary}
+    ) as admin_id:
+        with tenant_session(tenant_id) as session:
+            try:
+                summary = catalog_import.commit_import(
+                    session, tenant_id, import_id, user_id=admin_id, acting_as_tenant_id=tenant_id
+                )
+            except LookupError as exc:
+                raise HTTPException(status_code=404) from exc
+            except CatalogImportError as exc:
+                raise _import_error(exc) from exc
+        return {"summary": summary}
 
 
 @router.post("/tenants/{tenant_id}/imports/{import_id}/discard")
 def discard_import(
     tenant_id: UUID, import_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
 ) -> dict:
-    _console_act(
+    with _console_write(
         identity, tenant_id, "import_discard", target_type="catalog_import", target_id=import_id
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            catalog_import.discard_import(session, import_id)
-        except LookupError as exc:
-            raise HTTPException(status_code=404) from exc
-        except CatalogImportError as exc:
-            raise _import_error(exc) from exc
-    return {"ok": True}
+    ):
+        with tenant_session(tenant_id) as session:
+            try:
+                catalog_import.discard_import(session, import_id)
+            except LookupError as exc:
+                raise HTTPException(status_code=404) from exc
+            except CatalogImportError as exc:
+                raise _import_error(exc) from exc
+        return {"ok": True}
 
 
 # ── Test batch and go-live (Steps 6-9; D-112, D-113) ────────────────────────
@@ -770,30 +915,30 @@ async def upload_test_batch(
     with each file stored as 'staged' until Step 7. One file failing its
     checks does not stop the others; each gets its own result.
     """
-    admin_id = _console_act(
+    with _console_write(
         identity, tenant_id, "test_batch_upload", target_type="test_batch", payload={"files": len(files)}
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            onboarding.check_test_batch_open(session, tenant_id)
-        except onboarding.OnboardingError as exc:
-            raise _onboarding_error(exc) from exc
-
-    results: list[dict[str, Any]] = []
-    for upload in files:
-        content = await upload.read(_MAX_UPLOAD_BYTES + 1)
-        filename = upload.filename or "upload"
-        try:
-            result = ingest_upload(tenant_id, filename, content, is_test_batch=True)
-            results.append({"filename": filename, **result})
-        except HTTPException as exc:
-            results.append({"filename": filename, "error": exc.detail})
-
-    stored = [r["document_id"] for r in results if "document_id" in r]
-    if stored:
+    ) as admin_id:
         with tenant_session(tenant_id) as session:
-            onboarding.record_test_batch_upload(session, tenant_id, stored, actor_user_id=admin_id)
-    return {"results": results}
+            try:
+                onboarding.check_test_batch_open(session, tenant_id)
+            except onboarding.OnboardingError as exc:
+                raise _onboarding_error(exc) from exc
+
+        results: list[dict[str, Any]] = []
+        for upload in files:
+            content = await upload.read(_MAX_UPLOAD_BYTES + 1)
+            filename = upload.filename or "upload"
+            try:
+                result = ingest_upload(tenant_id, filename, content, is_test_batch=True)
+                results.append({"filename": filename, **result})
+            except HTTPException as exc:
+                results.append({"filename": filename, "error": exc.detail})
+
+        stored = [r["document_id"] for r in results if "document_id" in r]
+        if stored:
+            with tenant_session(tenant_id) as session:
+                onboarding.record_test_batch_upload(session, tenant_id, stored, actor_user_id=admin_id)
+        return {"results": results}
 
 
 @router.post("/tenants/{tenant_id}/test-batch/run")
@@ -803,15 +948,15 @@ def run_test_batch(
     """Step 7: the staged documents go through the normal pipeline at
     interactive priority: `pending` in the interactive lane, sent by the
     dispatcher oldest first (Stage 3d). Nudged after commit."""
-    admin_id = _console_act(identity, tenant_id, "test_batch_run", target_type="test_batch")
-    with tenant_session(tenant_id) as session:
-        try:
-            document_ids = onboarding.start_test_batch_run(session, tenant_id, actor_user_id=admin_id)
-        except onboarding.OnboardingError as exc:
-            raise _onboarding_error(exc) from exc
-    if document_ids:
-        nudge_dispatcher()
-    return {"started": len(document_ids)}
+    with _console_write(identity, tenant_id, "test_batch_run", target_type="test_batch") as admin_id:
+        with tenant_session(tenant_id) as session:
+            try:
+                document_ids = onboarding.start_test_batch_run(session, tenant_id, actor_user_id=admin_id)
+            except onboarding.OnboardingError as exc:
+                raise _onboarding_error(exc) from exc
+        if document_ids:
+            nudge_dispatcher()
+        return {"started": len(document_ids)}
 
 
 @router.post("/tenants/{tenant_id}/test-batch/complete")
@@ -820,13 +965,13 @@ def complete_test_batch(
 ) -> dict:
     """Step 8: "When every test-batch document is approved, ... 'Mark test
     batch complete'", which unlocks go-live."""
-    admin_id = _console_act(identity, tenant_id, "test_batch_complete", target_type="test_batch")
-    with tenant_session(tenant_id) as session:
-        try:
-            onboarding.mark_test_batch_complete(session, tenant_id, actor_user_id=admin_id)
-        except onboarding.OnboardingError as exc:
-            raise _onboarding_error(exc) from exc
-    return {"onboarding_status": "test_batch_complete"}
+    with _console_write(identity, tenant_id, "test_batch_complete", target_type="test_batch") as admin_id:
+        with tenant_session(tenant_id) as session:
+            try:
+                onboarding.mark_test_batch_complete(session, tenant_id, actor_user_id=admin_id)
+            except onboarding.OnboardingError as exc:
+                raise _onboarding_error(exc) from exc
+        return {"onboarding_status": "test_batch_complete"}
 
 
 @router.get("/tenants/{tenant_id}/go-live")
@@ -903,64 +1048,64 @@ def go_live(
     billing_method = (body or GoLiveRequest()).billing_method
     # Destructive: starts billing, so it needs a recent authenticator code (D-177).
     identity = step_up.identity
-    admin_id = _console_act(
+    with _console_write(
         identity, tenant_id, "go_live", target_type="tenant", target_id=tenant_id, payload=step_up.audit()
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            plan = onboarding.plan_go_live(session, tenant_id, billing_method=billing_method)
-        except onboarding.OnboardingError as exc:
-            raise _onboarding_error(exc) from exc
-    founding = plan.founding_price
-    if plan.customer_id is None:
-        raise catalog_error("ONB-008", status_code=502, extra={"reason": "no Stripe customer"})
+    ) as admin_id:
+        with tenant_session(tenant_id) as session:
+            try:
+                plan = onboarding.plan_go_live(session, tenant_id, billing_method=billing_method)
+            except onboarding.OnboardingError as exc:
+                raise _onboarding_error(exc) from exc
+        founding = plan.founding_price
+        if plan.customer_id is None:
+            raise catalog_error("ONB-008", status_code=502, extra={"reason": "no Stripe customer"})
 
-    trial_end = int((datetime.now(UTC) + timedelta(days=TRIAL_PERIOD_DAYS)).timestamp())
-    try:
-        subscription = external_services.start_subscription(
-            tenant_id=tenant_id,
-            customer_id=plan.customer_id,
-            tier_id=plan.tier_id,
-            tier_name=plan.tier_name,
-            monthly_price=plan.monthly_price,
-            promo_monthly_price=plan.promo_monthly_price if founding else None,
-            promo_months=plan.promo_months if founding else None,
-            setup_fee=plan.setup_fee_on_first_invoice,
-            days_until_due=INVOICE_DAYS_UNTIL_DUE,
-            idempotency_scope="golive",
-            trial_end=trial_end,
-            charge_card=plan.billing_method == "card",
-        )
-    except ExternalServiceError as exc:
-        raise catalog_error("ONB-008", status_code=502) from exc
-
-    if not plan.invite_sent:
+        trial_end = int((datetime.now(UTC) + timedelta(days=TRIAL_PERIOD_DAYS)).timestamp())
         try:
-            admin_data_access.send_invite(platform_admin_user_id=admin_id, tenant_id=tenant_id)
-        except ConsoleError as exc:
-            raise _console_error(exc) from exc
-        except ExternalServiceError as exc:
-            raise catalog_error("CON-006", status_code=502) from exc
-
-    with tenant_session(tenant_id) as session:
-        try:
-            onboarding.complete_go_live(
-                session,
-                tenant_id,
-                actor_user_id=admin_id,
-                plan=plan,
-                billing=onboarding.GoLiveBilling(
-                    subscription_id=subscription.subscription_id,
-                    subscription_status=subscription.status,
-                    current_period_end=subscription.current_period_end,
-                    founding_ends_at=subscription.founding_ends_at,
-                    trial_end=trial_end,
-                ),
-                app_url=get_settings().app_base_url,
+            subscription = external_services.start_subscription(
+                tenant_id=tenant_id,
+                customer_id=plan.customer_id,
+                tier_id=plan.tier_id,
+                tier_name=plan.tier_name,
+                monthly_price=plan.monthly_price,
+                promo_monthly_price=plan.promo_monthly_price if founding else None,
+                promo_months=plan.promo_months if founding else None,
+                setup_fee=plan.setup_fee_on_first_invoice,
+                days_until_due=INVOICE_DAYS_UNTIL_DUE,
+                idempotency_scope="golive",
+                trial_end=trial_end,
+                charge_card=plan.billing_method == "card",
             )
-        except onboarding.OnboardingError as exc:
-            raise _onboarding_error(exc) from exc
-    return {"onboarding_status": "live"}
+        except ExternalServiceError as exc:
+            raise catalog_error("ONB-008", status_code=502) from exc
+
+        if not plan.invite_sent:
+            try:
+                admin_data_access.send_invite(platform_admin_user_id=admin_id, tenant_id=tenant_id)
+            except ConsoleError as exc:
+                raise _console_error(exc) from exc
+            except ExternalServiceError as exc:
+                raise catalog_error("CON-006", status_code=502) from exc
+
+        with tenant_session(tenant_id) as session:
+            try:
+                onboarding.complete_go_live(
+                    session,
+                    tenant_id,
+                    actor_user_id=admin_id,
+                    plan=plan,
+                    billing=onboarding.GoLiveBilling(
+                        subscription_id=subscription.subscription_id,
+                        subscription_status=subscription.status,
+                        current_period_end=subscription.current_period_end,
+                        founding_ends_at=subscription.founding_ends_at,
+                        trial_end=trial_end,
+                    ),
+                    app_url=get_settings().app_base_url,
+                )
+            except onboarding.OnboardingError as exc:
+                raise _onboarding_error(exc) from exc
+        return {"onboarding_status": "live"}
 
 
 # ── Lifecycle actions: cancel, reactivate, wind-down, delete (5.6; D-123) ───
@@ -1010,43 +1155,43 @@ def cancel_tenant(
     subscription ends. Every cancel rule is checked first, so Stripe is only
     touched for a cancel that will be recorded; if Stripe doesn't answer,
     nothing changes in DocFlow (CON-006) and the founder tries again."""
-    admin_id = _console_act(
+    with _console_write(
         step_up.identity, tenant_id, "cancel", target_type="tenant", target_id=tenant_id,
         payload={"reason": body.reason, **step_up.audit()},
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            trial = lifecycle.trial_cancel_target(
-                session,
-                tenant_id,
-                reason=body.reason,
-                note=body.note,
-                override_effective_at=body.override_effective_at,
-            )
-        except lifecycle.LifecycleError as exc:
-            raise _lifecycle_error(exc) from exc
-    if trial is not None:
-        try:
-            external_services.end_trial_without_charge(
-                subscription_id=trial.subscription_id, customer_id=trial.customer_id, tenant_id=tenant_id
-            )
-        except ExternalServiceError as exc:
-            logger.error("trial_cancel_stripe_failed tenant_id=%s error=%s", tenant_id, exc)
-            raise catalog_error("CON-006", status_code=502) from exc
-        logger.info("trial_cancel_no_charge tenant_id=%s", tenant_id)
-    with tenant_session(tenant_id) as session:
-        try:
-            result = lifecycle.cancel(
-                session,
-                tenant_id,
-                reason=body.reason,
-                note=body.note,
-                actor_user_id=admin_id,
-                override_effective_at=body.override_effective_at,
-            )
-        except lifecycle.LifecycleError as exc:
-            raise _lifecycle_error(exc) from exc
-    return {**_jsonable(result), "trial_ended_without_charge": trial is not None}
+    ) as admin_id:
+        with tenant_session(tenant_id) as session:
+            try:
+                trial = lifecycle.trial_cancel_target(
+                    session,
+                    tenant_id,
+                    reason=body.reason,
+                    note=body.note,
+                    override_effective_at=body.override_effective_at,
+                )
+            except lifecycle.LifecycleError as exc:
+                raise _lifecycle_error(exc) from exc
+        if trial is not None:
+            try:
+                external_services.end_trial_without_charge(
+                    subscription_id=trial.subscription_id, customer_id=trial.customer_id, tenant_id=tenant_id
+                )
+            except ExternalServiceError as exc:
+                logger.error("trial_cancel_stripe_failed tenant_id=%s error=%s", tenant_id, exc)
+                raise catalog_error("CON-006", status_code=502) from exc
+            logger.info("trial_cancel_no_charge tenant_id=%s", tenant_id)
+        with tenant_session(tenant_id) as session:
+            try:
+                result = lifecycle.cancel(
+                    session,
+                    tenant_id,
+                    reason=body.reason,
+                    note=body.note,
+                    actor_user_id=admin_id,
+                    override_effective_at=body.override_effective_at,
+                )
+            except lifecycle.LifecycleError as exc:
+                raise _lifecycle_error(exc) from exc
+        return {**_jsonable(result), "trial_ended_without_charge": trial is not None}
 
 
 @router.get("/tenants/{tenant_id}/cancel/preview")
@@ -1083,77 +1228,79 @@ def reactivate_tenant(
     fresh one. When the old one is reused after a suspension, the founder is
     alerted with the invoices to collect, void or refund (Stage 3a, option C).
     """
-    admin_id = _console_act(identity, tenant_id, "reactivate", target_type="tenant", target_id=tenant_id)
-    with tenant_session(tenant_id) as session:
+    with _console_write(
+        identity, tenant_id, "reactivate", target_type="tenant", target_id=tenant_id
+    ) as admin_id:
+        with tenant_session(tenant_id) as session:
+            try:
+                plan = lifecycle.plan_reactivate(session, tenant_id)
+            except lifecycle.LifecycleError as exc:
+                raise _lifecycle_error(exc) from exc
+        if plan.customer_id is None:
+            raise catalog_error("CON-006", status_code=502, extra={"reason": "no Stripe customer"})
         try:
-            plan = lifecycle.plan_reactivate(session, tenant_id)
-        except lifecycle.LifecycleError as exc:
-            raise _lifecycle_error(exc) from exc
-    if plan.customer_id is None:
-        raise catalog_error("CON-006", status_code=502, extra={"reason": "no Stripe customer"})
-    try:
-        subscription = external_services.start_subscription(
-            tenant_id=tenant_id,
-            customer_id=plan.customer_id,
-            tier_id=plan.tier_id,
-            tier_name=plan.tier_name,
-            monthly_price=plan.monthly_price,
-            promo_monthly_price=None,
-            promo_months=None,
-            setup_fee=None,
-            days_until_due=INVOICE_DAYS_UNTIL_DUE,
-            idempotency_scope=plan.idempotency_scope,
-            trial_end=None,  # D-125's trial is a go-live perk, not a reactivation one
-            # A card-billed tenant is charged at once; a declined card refuses
-            # the reactivation (D5) instead of leaving an `incomplete`
-            # subscription on an active tenant.
-            charge_card=plan.billing_method == "card",
-            refuse_if_declined=plan.billing_method == "card",
-        )
-    except external_services.CardDeclined as exc:
-        raise catalog_error("BIL-007", status_code=409) from exc
-    except ExternalServiceError as exc:
-        raise catalog_error("CON-006", status_code=502) from exc
-
-    # The old subscription was still live, so Stripe kept invoicing through
-    # the suspension. Read with no transaction open; a failure to read never
-    # blocks the reactivation -- the alert then says the list is missing.
-    review = None
-    reused_after = plan.suspended_at if subscription.reused else None
-    if reused_after is not None:
-        try:
-            review = external_services.invoices_to_review(
-                subscription.subscription_id, int(reused_after.timestamp())
+            subscription = external_services.start_subscription(
+                tenant_id=tenant_id,
+                customer_id=plan.customer_id,
+                tier_id=plan.tier_id,
+                tier_name=plan.tier_name,
+                monthly_price=plan.monthly_price,
+                promo_monthly_price=None,
+                promo_months=None,
+                setup_fee=None,
+                days_until_due=INVOICE_DAYS_UNTIL_DUE,
+                idempotency_scope=plan.idempotency_scope,
+                trial_end=None,  # D-125's trial is a go-live perk, not a reactivation one
+                # A card-billed tenant is charged at once; a declined card refuses
+                # the reactivation (D5) instead of leaving an `incomplete`
+                # subscription on an active tenant.
+                charge_card=plan.billing_method == "card",
+                refuse_if_declined=plan.billing_method == "card",
             )
-        except ExternalServiceError:
-            logger.error("reactivation_invoice_list_failed tenant_id=%s", tenant_id)
+        except external_services.CardDeclined as exc:
+            raise catalog_error("BIL-007", status_code=409) from exc
+        except ExternalServiceError as exc:
+            raise catalog_error("CON-006", status_code=502) from exc
 
-    with tenant_session(tenant_id) as session:
-        try:
-            lifecycle.complete_reactivate(
-                session,
-                tenant_id,
-                actor_user_id=admin_id,
-                plan=plan,
-                billing=lifecycle.ReactivateBilling(
-                    subscription_id=subscription.subscription_id,
-                    subscription_status=subscription.status,
-                    current_period_end=subscription.current_period_end,
-                ),
-                app_url=get_settings().app_base_url,
-            )
-            if reused_after is not None:
-                lifecycle.raise_reactivation_invoice_alert(
+        # The old subscription was still live, so Stripe kept invoicing through
+        # the suspension. Read with no transaction open; a failure to read never
+        # blocks the reactivation -- the alert then says the list is missing.
+        review = None
+        reused_after = plan.suspended_at if subscription.reused else None
+        if reused_after is not None:
+            try:
+                review = external_services.invoices_to_review(
+                    subscription.subscription_id, int(reused_after.timestamp())
+                )
+            except ExternalServiceError:
+                logger.error("reactivation_invoice_list_failed tenant_id=%s", tenant_id)
+
+        with tenant_session(tenant_id) as session:
+            try:
+                lifecycle.complete_reactivate(
                     session,
                     tenant_id,
-                    subscription_id=subscription.subscription_id,
-                    subscription_status=subscription.status,
-                    suspended_at=reused_after,
-                    review=review,
+                    actor_user_id=admin_id,
+                    plan=plan,
+                    billing=lifecycle.ReactivateBilling(
+                        subscription_id=subscription.subscription_id,
+                        subscription_status=subscription.status,
+                        current_period_end=subscription.current_period_end,
+                    ),
+                    app_url=get_settings().app_base_url,
                 )
-        except lifecycle.LifecycleError as exc:
-            raise _lifecycle_error(exc) from exc
-    return {"status": "active"}
+                if reused_after is not None:
+                    lifecycle.raise_reactivation_invoice_alert(
+                        session,
+                        tenant_id,
+                        subscription_id=subscription.subscription_id,
+                        subscription_status=subscription.status,
+                        suspended_at=reused_after,
+                        review=review,
+                    )
+            except lifecycle.LifecycleError as exc:
+                raise _lifecycle_error(exc) from exc
+        return {"status": "active"}
 
 
 @router.get("/lifecycle/wind-down")
@@ -1235,55 +1382,55 @@ def merge_buyers(
 ) -> dict:
     # Destructive: re-points foreign keys for good, so it needs a recent
     # authenticator code (D-177).
-    admin_id = _console_act(
+    with _console_write(
         step_up.identity,
         tenant_id,
         "buyer_merge",
         target_type="buyer_merge_candidate",
         target_id=candidate_id,
         payload={"keep_buyer_id": str(body.keep_buyer_id), **step_up.audit()},
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            result = buyer_merge.merge_candidate(
-                session,
-                tenant_id,
-                candidate_id,
-                keep_buyer_id=body.keep_buyer_id,
-                actor_user_id=admin_id,
-                acting_as_tenant_id=tenant_id,
-            )
-        except LookupError as exc:
-            raise HTTPException(status_code=404) from exc
-        except buyer_merge.MergeError as exc:
-            raise _merge_error(exc) from exc
-    return {
-        "merge_id": str(result.merge_id),
-        "documents_moved": result.documents_moved,
-        "rules_moved": result.rules_moved,
-        "fields_filled": result.fields_filled,
-    }
+    ) as admin_id:
+        with tenant_session(tenant_id) as session:
+            try:
+                result = buyer_merge.merge_candidate(
+                    session,
+                    tenant_id,
+                    candidate_id,
+                    keep_buyer_id=body.keep_buyer_id,
+                    actor_user_id=admin_id,
+                    acting_as_tenant_id=tenant_id,
+                )
+            except LookupError as exc:
+                raise HTTPException(status_code=404) from exc
+            except buyer_merge.MergeError as exc:
+                raise _merge_error(exc) from exc
+        return {
+            "merge_id": str(result.merge_id),
+            "documents_moved": result.documents_moved,
+            "rules_moved": result.rules_moved,
+            "fields_filled": result.fields_filled,
+        }
 
 
 @router.post("/tenants/{tenant_id}/buyer-merges/{candidate_id}/dismiss")
 def dismiss_buyer_merge(
     tenant_id: UUID, candidate_id: UUID, identity: AuthenticatedIdentity = Depends(require_platform_admin)
 ) -> dict:
-    admin_id = _console_act(
+    with _console_write(
         identity,
         tenant_id,
         "buyer_merge_dismiss",
         target_type="buyer_merge_candidate",
         target_id=candidate_id,
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            buyer_merge.dismiss_candidate(session, candidate_id, actor_user_id=admin_id)
-        except LookupError as exc:
-            raise HTTPException(status_code=404) from exc
-        except buyer_merge.MergeError as exc:
-            raise _merge_error(exc) from exc
-    return {"ok": True}
+    ) as admin_id:
+        with tenant_session(tenant_id) as session:
+            try:
+                buyer_merge.dismiss_candidate(session, candidate_id, actor_user_id=admin_id)
+            except LookupError as exc:
+                raise HTTPException(status_code=404) from exc
+            except buyer_merge.MergeError as exc:
+                raise _merge_error(exc) from exc
+        return {"ok": True}
 
 
 @router.get("/tenants/{tenant_id}/rules")
@@ -1299,20 +1446,20 @@ def get_rules(tenant_id: UUID, identity: AuthenticatedIdentity = Depends(require
 
 
 def _rule_change(identity: AuthenticatedIdentity, tenant_id: UUID, rule_id: UUID, action: str) -> dict:
-    _console_act(
+    with _console_write(
         identity, tenant_id, f"learned_rule_{action}", target_type="learned_rule", target_id=rule_id
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            if action == "delete":
-                change = learned_rules.delete_rule(session, rule_id)
-            else:
-                change = learned_rules.set_status(session, rule_id, enabled=action == "enable")
-        except LookupError as exc:
-            raise HTTPException(status_code=404) from exc
-        except learned_rules.RuleError as exc:
-            raise catalog_error(exc.code, status_code=409) from exc
-    return {"change": change}
+    ):
+        with tenant_session(tenant_id) as session:
+            try:
+                if action == "delete":
+                    change = learned_rules.delete_rule(session, rule_id)
+                else:
+                    change = learned_rules.set_status(session, rule_id, enabled=action == "enable")
+            except LookupError as exc:
+                raise HTTPException(status_code=404) from exc
+            except learned_rules.RuleError as exc:
+                raise catalog_error(exc.code, status_code=409) from exc
+        return {"change": change}
 
 
 @router.post("/tenants/{tenant_id}/rules/{rule_id}/disable")
@@ -1371,31 +1518,31 @@ def put_field_schema(
     identity: AuthenticatedIdentity = Depends(require_platform_admin),
 ) -> dict:
     """A new version, never an edit of the one in use (Section 7.13)."""
-    admin_id = _console_act(
+    with _console_write(
         identity,
         tenant_id,
         "field_schema_save",
         target_type="field_schema",
         payload={"fields": body.fields},
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            schema = field_schema.save(
-                session,
-                tenant_id,
-                body.fields,
-                actor_user_id=admin_id,
-                acting_as_tenant_id=tenant_id,
-                note=body.note,
+    ) as admin_id:
+        with tenant_session(tenant_id) as session:
+            try:
+                schema = field_schema.save(
+                    session,
+                    tenant_id,
+                    body.fields,
+                    actor_user_id=admin_id,
+                    acting_as_tenant_id=tenant_id,
+                    note=body.note,
+                )
+            except field_schema.FieldSchemaError as exc:
+                raise catalog_error(exc.code, status_code=422, extra=exc.detail or None) from exc
+            rechecked = (
+                field_schema.recheck_open_documents(session, tenant_id, schema)
+                if body.apply_to_open_documents
+                else 0
             )
-        except field_schema.FieldSchemaError as exc:
-            raise catalog_error(exc.code, status_code=422, extra=exc.detail or None) from exc
-        rechecked = (
-            field_schema.recheck_open_documents(session, tenant_id, schema)
-            if body.apply_to_open_documents
-            else 0
-        )
-    return {"schema": schema.as_dict(), "rechecked_documents": rechecked}
+        return {"schema": schema.as_dict(), "rechecked_documents": rechecked}
 
 
 # ── Tenant audit trail (Section 7.15.3 "Audit" tab; D-143) ──────────────────
@@ -1448,25 +1595,25 @@ def put_example_prompting(
     body: ExamplePromptingRequest,
     identity: AuthenticatedIdentity = Depends(require_platform_admin),
 ) -> dict:
-    admin_id = _console_act(
+    with _console_write(
         identity,
         tenant_id,
         "example_prompting_set",
         target_type="tenant",
         target_id=tenant_id,
         payload={"enabled": body.enabled, "golden_run_confirmed": body.golden_run_confirmed},
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            return example_prompting.set_enabled(
-                session,
-                tenant_id,
-                enabled=body.enabled,
-                golden_run_confirmed=body.golden_run_confirmed,
-                actor_user_id=admin_id,
-            )
-        except example_prompting.ExamplePromptingError as exc:
-            raise catalog_error(exc.code, status_code=422) from exc
+    ) as admin_id:
+        with tenant_session(tenant_id) as session:
+            try:
+                return example_prompting.set_enabled(
+                    session,
+                    tenant_id,
+                    enabled=body.enabled,
+                    golden_run_confirmed=body.golden_run_confirmed,
+                    actor_user_id=admin_id,
+                )
+            except example_prompting.ExamplePromptingError as exc:
+                raise catalog_error(exc.code, status_code=422) from exc
 
 
 # ── Dashboard (Section 7.15.3; slice 5.5, D-121) ────────────────────────────
@@ -1619,23 +1766,23 @@ def release_quarantine(
     body: QuarantineIds,
     identity: AuthenticatedIdentity = Depends(require_platform_admin),
 ) -> dict:
-    admin_id = _console_act(
+    with _console_write(
         identity, tenant_id, "quarantine_release", target_type="tenant", target_id=tenant_id,
         payload={"count": len(body.document_ids)},
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            result = quarantine.release(
-                session, tenant_id, body.document_ids, role=None,
-                actor_user_id=admin_id, acting_as_tenant_id=tenant_id,
-            )
-        except quarantine.QuarantineError as exc:
-            raise _quarantine_error(exc) from exc
-    # Stage 3d: `pending` in the lane the release set; the dispatcher sends
-    # them oldest first, the order they were received. Nudged after commit.
-    if result.released:
-        nudge_dispatcher()
-    return {"released": [str(i) for i in result.released], "skipped": [str(i) for i in result.skipped]}
+    ) as admin_id:
+        with tenant_session(tenant_id) as session:
+            try:
+                result = quarantine.release(
+                    session, tenant_id, body.document_ids, role=None,
+                    actor_user_id=admin_id, acting_as_tenant_id=tenant_id,
+                )
+            except quarantine.QuarantineError as exc:
+                raise _quarantine_error(exc) from exc
+        # Stage 3d: `pending` in the lane the release set; the dispatcher sends
+        # them oldest first, the order they were received. Nudged after commit.
+        if result.released:
+            nudge_dispatcher()
+        return {"released": [str(i) for i in result.released], "skipped": [str(i) for i in result.skipped]}
 
 
 class QuarantineClear(BaseModel):
@@ -1650,32 +1797,34 @@ def clear_quarantine(
     step_up: StepUp = Depends(require_recent_mfa),
 ) -> dict:
     # Destructive: needs a recent authenticator code (D-151).
-    _console_act(
+    with _console_write(
         step_up.identity, tenant_id, "quarantine_clear", target_type="tenant", target_id=tenant_id,
         payload={"count": len(body.document_ids), **step_up.audit()},
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            cleared = quarantine.clear(session, tenant_id, body.document_ids, confirm_name=body.confirm_name)
-        except quarantine.QuarantineError as exc:
-            raise _quarantine_error(exc) from exc
-    return {"cleared": [str(i) for i in cleared]}
+    ):
+        with tenant_session(tenant_id) as session:
+            try:
+                cleared = quarantine.clear(
+                    session, tenant_id, body.document_ids, confirm_name=body.confirm_name
+                )
+            except quarantine.QuarantineError as exc:
+                raise _quarantine_error(exc) from exc
+        return {"cleared": [str(i) for i in cleared]}
 
 
 @router.post("/tenants/{tenant_id}/intake-address/rotate")
 def rotate_intake_address(tenant_id: UUID, step_up: StepUp = Depends(require_recent_mfa)) -> dict:
     # Destructive: the old address stops working after its grace period, so it
     # needs a recent authenticator code (D-151).
-    admin_id = _console_act(
+    with _console_write(
         step_up.identity, tenant_id, "intake_address_rotate", target_type="tenant", target_id=tenant_id,
         payload=step_up.audit(),
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            result = intake_admin.rotate_address(session, tenant_id, actor_user_id=admin_id)
-        except quarantine.QuarantineError as exc:
-            raise _quarantine_error(exc) from exc
-    return {"address": result["address"], "grace_ends_at": result["grace_ends_at"].isoformat()}
+    ) as admin_id:
+        with tenant_session(tenant_id) as session:
+            try:
+                result = intake_admin.rotate_address(session, tenant_id, actor_user_id=admin_id)
+            except quarantine.QuarantineError as exc:
+                raise _quarantine_error(exc) from exc
+        return {"address": result["address"], "grace_ends_at": result["grace_ends_at"].isoformat()}
 
 
 class SenderSettings(BaseModel):
@@ -1689,15 +1838,15 @@ def put_sender_settings(
     body: SenderSettings,
     identity: AuthenticatedIdentity = Depends(require_platform_admin),
 ) -> dict:
-    admin_id = _console_act(
+    with _console_write(
         identity, tenant_id, "sender_settings_update", target_type="tenant", target_id=tenant_id,
         payload={"strict_sender_mode": body.strict_sender_mode, "entries": len(body.sender_allowlist)},
-    )
-    with tenant_session(tenant_id) as session:
-        try:
-            return intake_admin.set_sender_allowlist(
-                session, tenant_id, strict=body.strict_sender_mode,
-                entries=body.sender_allowlist, actor_user_id=admin_id,
-            )
-        except quarantine.QuarantineError as exc:
-            raise _quarantine_error(exc) from exc
+    ) as admin_id:
+        with tenant_session(tenant_id) as session:
+            try:
+                return intake_admin.set_sender_allowlist(
+                    session, tenant_id, strict=body.strict_sender_mode,
+                    entries=body.sender_allowlist, actor_user_id=admin_id,
+                )
+            except quarantine.QuarantineError as exc:
+                raise _quarantine_error(exc) from exc

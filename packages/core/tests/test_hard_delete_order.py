@@ -98,7 +98,10 @@ def test_a_failed_file_removal_leaves_the_database_untouched(world):
         _delete(tenant)
     assert info.value.code == "LIFE-007"
     writes = [e for e in log if e[0] == "sql" and not e[1].startswith("SELECT")]
-    assert writes == []
+    # Nothing but the failure's own record (D-178): the intent and its
+    # `failed` outcome, written after the storage step gave up.
+    assert len(writes) == 2
+    assert all(sql.startswith("INSERT INTO admin_actions") for _, sql in writes)
 
 
 def test_the_final_sweep_removes_an_export_written_during_the_delete(world, monkeypatch):
@@ -122,7 +125,8 @@ def test_the_final_sweep_removes_an_export_written_during_the_delete(world, monk
 
     assert late not in fake.objects
     audits = [e for e in log if e[0] == "sql" and "INSERT INTO admin_actions" in e[1]]
-    assert len(audits) == 2  # tenant_delete, then tenant_delete_final_sweep
+    # tenant_delete and its outcome (D-178), then tenant_delete_final_sweep
+    assert len(audits) == 3
 
 
 def test_a_tenant_not_ready_to_delete_is_refused_before_any_file_is_touched(world):

@@ -257,7 +257,9 @@ def test_creating_a_tenant_from_an_intake_moves_its_files_and_sets_everything_up
         linked = _scalar("SELECT linked_tenant_id FROM onboarding_intakes WHERE id = :i", i=intake_id)
         assert str(linked) == tenant_id
         assert _scalar(
-            "SELECT count(*) FROM admin_actions WHERE action = 'tenant_create' AND target_tenant_id = :t",
+            # Named by target_id: the request row is committed before the
+            # tenant exists (D-220).
+            "SELECT count(*) FROM admin_actions WHERE action = 'tenant_create' AND target_id = :t",
             t=tenant_id,
         ) == 1
 
