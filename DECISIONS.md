@@ -5113,6 +5113,17 @@ The plan was approved on 2026-10-23, with the founder's answers and three change
 **7. Measurements.**
 - **The MFA rate limit:** taken from the source, not measured (founder, 2026-10-27).
 - **The step-up measurement** (a normal sign-in and step-up on the real stack, counting refusals, to confirm the threshold) stays as planned and needs "Grant … D-178 step-up measurement". Sign-in was measured on 2026-09-28 at 0 refusals.
+- **The step-up measurement, done 2026-10-27 under the founder's Grant.**
+  - **The setup:** the local API and web app from `8a9f551` (its code is `954f0ef`'s), against staging, with `CONSOLE_MFA_ENFORCED` true (no "enforcement is off" warning at startup). The tenant was "Acme Test Sweep A" (`73602e07-9ab2-4050-9693-a31909f289e5`), the 2026-09-28 drill's: active, `tenant_created`, never live, no intake address. Memurai answered PONG first.
+  - **What the founder did:** signed in to the Console normally, with the first code at 14:06Z. Then, more than 5.5 minutes later, ran Replace intake address. That was refused with AUTH-007. The founder entered a fresh code at 14:15Z, and the action stopped at QUA-004, as planned.
+  - **The API log:** 165 requests, 13:52Z to 14:18Z: 163 answered 200, one 403 (the first rotate) and one 409 (the second rotate, QUA-004). No 404, and no `console_refused_not_recorded` or `console_refusal_record_failed` line. The access log carries no catalog code; the rows below do.
+  - **The rows written to staging:** 57 `admin_actions` rows from one account: 52 `read`, 2 `quarantine_read` and these three.
+    - `console_refused`, 14:15:30Z: AUTH-007, POST `/admin/tenants/{tenant_id}/intake-address/rotate`, the code 545 s old (the limit is 330 s), on the tenant.
+    - `intake_address_rotate`, 14:15:49Z: the request row, `outcome_expected`, the code 0 s old.
+    - `outcome`, 14:15:49Z: `failed`, QUA-004, pointing at that request row.
+  - **No founder alert** was raised. Before the run, staging had no `console_refused` or `outcome` row.
+  - **The count:** AUTH-006 0, at the sign-in, as on 2026-09-28. AUTH-007 1, for one stale step-up. So a normal sign-in and step-up uses 1 of the 5 the alert allows in 15 minutes. `CONSOLE_REFUSAL_ALERT_COUNT` (5) and `CONSOLE_REFUSAL_WINDOW_MINUTES` (15) stay as approved.
+  - **After it:** the API and the web app were stopped, and ports 8000, 3000 and 8100 are free.
 
 **8. Recorded here, built elsewhere.**
 - **Before the first pilot:**
