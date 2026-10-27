@@ -5280,8 +5280,9 @@ The plan was approved on 2026-10-23, with the founder's answers and three change
   - **SEED NAME:** a name a `scripts/seed_*.py` creates, exactly or by an f-string's fixed start.
   - The mark-readers fail closed: with no records or no seed names found, nothing is swept.
 - **No link it can't back up:** no link from a table without `tenant_id` would delete or blank a row the backup doesn't hold.
-  - On staging's schema (read 2026-10-27) every such link is NO ACTION, apart from the two the test purge already handles (`admin_actions.target_tenant_id`, deleted; `onboarding_intakes.linked_tenant_id`, unlinked).
-  - So a missed link fails the delete and rolls everything back.
+  - On staging's schema (read 2026-10-27) all six such links are NO ACTION.
+  - The purge itself deletes the `admin_actions.target_tenant_id` rows and unlinks `onboarding_intakes.linked_tenant_id`; both are in the backup.
+  - Any other row that still points at the tenant's rows fails the delete, and everything rolls back.
 
 **4. The backup, before anything is removed** (founder's answer 3). It goes to one folder outside the repository. The folder must be new or empty; the default is `~/docflow-sweep-backups/<id>-<UTC time>`. It holds:
 - **`rows.json`:** every row the deletes touch, as Postgres's `to_jsonb` text, so money stays exact;
@@ -5294,7 +5295,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 - **The connection:** `sweep_session` opens one connection as `docflow_admin` through the pooler's session mode (5432, as `suite_lock.py` does), with REPEATABLE READ. It sets `application_name` to `docflow-sweep … pid=… host=… started=…`.
 - **The lock:** the script takes `pg_try_advisory_xact_lock(5_150_292_026)` (`SUITE_LOCK_KEY`) on that transaction, then runs the purge on the same session.
 - **A suite that's running:** the API and worker suites hold the key for their whole run, shared in a parallel run and exclusive otherwise, so the sweep refuses while either runs. Its message names the holder.
-- **A suite that starts during a sweep** refuses with exit 3: "Another test run is using this database: docflow-sweep delete …". It doesn't wait.
+- **A suite that starts during a sweep** refuses with exit 3: "Another test run is using this database: docflow-sweep delete …". It doesn't wait. This comes from reading `suite_lock.py`, not from a test: inside a suite the suite already holds the key, so no test can start one during a sweep.
 - **The order:** the checks; the backup; the deletes; the check that nothing points at the tenant (`rows_left`, plus the creation request row); then the files, after the rows and before the commit.
 - **Releasing the lock:** the commit releases it.
 - **If the connection drops:** before the files go, the rollback leaves everything and releases the lock. After the files go, the rows stay and the files are in the backup. Removing the files after the commit would instead leave files with no row to find them by.
@@ -5320,6 +5321,36 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 - **Each delete is its own Grant,** naming the tenant's id and name. The proof delete is on an unmarked tenant that `list` shows holding at least one Storage object (founder's answer 5).
 - **The staging suites on the PR's head:** under their own Grant.
 - **The deletions themselves** wait for the end-of-build cleanup.
+
+**11. Tests and local results (2026-10-27, every outside service blocked).**
+- **Core, no database** (`test_sweep_script_guard.py`, 24):
+  - loading the script imports nothing from `apps/api`, the purge module included;
+  - staging with both flags passes, through the pooler and the direct host;
+  - each missing or wrong flag is refused, `DOCFLOW_ENV` unset included;
+  - nine databases and four Storage endpoints that aren't staging's are refused;
+  - `main` refuses before the purge loads;
+  - flags in a `.env` file don't count;
+  - Storage must be fully configured.
+- **API, against a database** (`test_sweep_test_tenants.py`, 18):
+  - **Each check refuses on its own,** leaving the tenant whole and writing no backup. Ten cases: the typed name, the age, the prefix, two kinds of live, deleted, pending deletion, named in the records, and two seed names.
+  - **The mark and the folder:** a record names a tenant by its id alone; the backup folder must be outside the repository and empty.
+  - **The transaction and the lock:** the purge needs its REPEATABLE READ transaction; the script's lock refuses while the suite holds the run lock.
+  - **A late file:** a file written after the backup stops the sweep, with every row kept.
+  - **The listing** shows only old "Acme Test" tenants, with rows matching `rows_left`.
+  - **The full sweep:** a swept tenant with a user, a document with lines and a stored file leaves nothing. A tenant beside it is untouched. The backup reads back to what was removed, money exact.
+  - **The boundary test's new check** is in `test_tenant_cleanup.py`, which now holds 5 tests.
+- **A planted bug:** the guard treating an unset `DOCFLOW_ENV` as "staging" failed 3 core tests: the two unset cases and the `.env` file test.
+- **Local results:**
+  - **The guard tests and the fake-names scan:** `25 passed`.
+  - **Core's other readers of `scripts/` and the tests** (`test_broad_except_guard.py`, `test_ci_guards.py`, with the guard and fake-names tests): `71 passed`.
+  - **The full core suite:** `1 failed, 1197 passed, 3 errors in 319.01s (0:05:19)`.
+    - The four are the live-bucket tests, which fail with Storage blocked, as in D-220 item 9.
+    - 1,201 is D-220 item 10's 1,177 plus the 24 new tests.
+  - **The API suite collects** `774/777 tests collected (3 deselected)`, 19 more than `main`'s 755. Its tests run in CI and in the staging suites.
+- **Lint and types, as CI runs them:** `ruff check .` and `mypy app` in `apps/api`, and `ruff check .` and `mypy docflow_core` in `packages/core`, all pass. CI doesn't lint the script; it passes ruff with core's settings.
+- **`list` on staging** (read-only, 18:19:33 to 18:20:11Z), the script's own path end to end:
+  - the guard passed with the real settings, over the pooler's session mode, with Storage listing;
+  - the result: 33 "Acme Test" tenants older than a day, 16 of them unmarked.
 
 **Founder approval:** 2026-10-27 (the plan and answers 1 to 7; the lock in the script, on the purge's own transaction; option (a) for the boundary test; the Storage endpoint check; the guard's tests in core; the records rule).
 

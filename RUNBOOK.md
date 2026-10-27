@@ -2968,11 +2968,17 @@ A stopped test run leaves its tenants behind on `docflow-staging`.
 `scripts/sweep_test_tenants.py` lists the "Acme Test" tenants older than a
 day, and removes one at a time. Run it from the repository root with
 `apps/api/.venv`'s Python. The process environment must carry the two
-flags; the root `.env` gives the database and Storage settings:
+flags; the root `.env` gives the database and Storage settings. In Git
+Bash, set the flags inline, on the command itself:
 
 ```
 DOCFLOW_STAGING_RUN=1 DOCFLOW_ENV=staging apps/api/.venv/Scripts/python.exe scripts/sweep_test_tenants.py list
 ```
+
+Never set them for the whole shell (`export`, or PowerShell's `$env:`):
+`DOCFLOW_STAGING_RUN=1` would stay set, and a test run started later in
+that window would pass the suites' database guard and reach staging (the
+2026-10-19 staging touches, D-211).
 
 1. **`list`** is read-only: a read-only transaction and Storage list calls.
    It needs no Grant, and the report names it among the reads.
