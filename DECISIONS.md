@@ -5179,3 +5179,53 @@ The plan was approved on 2026-10-23, with the founder's answers and three change
 **Founder approval:** 2026-10-23 (the plan, the answers, changes A to C, the revision with the simple cap); 2026-10-27 (option A, the before-first-pilot gate, building D-178, the five changes from the plan, and item 10).
 
 **Related:** D-151, D-170, D-177, D-178, D-199, D-213 (item 6), D-219, D-222; `apps/api/app/deps.py`, `apps/api/app/routers/admin.py`, `apps/api/app/main.py`, `packages/core/docflow_core/admin_data_access.py`, `packages/core/docflow_core/constants.py`, `packages/core/docflow_core/founder_alerts.py`, `apps/web/src/lib/auditOutcome.ts`, the Audit page; RUNBOOK 4.4, 4.5 and 9.6.
+
+## D-223 — dnspython 2.9.0 in the API's lock (GHSA-45c3-73f7-pv4m); when a lock-only PR runs the staging suites (founder, 2026-10-27)
+
+**Context:** the founder's Grant to deploy `main` (`3e021a6`, #84's merge) to `docflow-api-staging`, to confirm one recorded refusal live (D-220's plan), stopped at RUNBOOK 11's third check before anything was deployed:
+```
+::error title=api: known vulnerability in a runtime dependency::dnspython 2.8.0: CVE-2026-114605 (GHSA-45c3-73f7-pv4m), fixed in 2.9.0
+::notice title=api: dependency audit::78 packages audited, 1 with a known vulnerability; blocking: yes
+```
+- **Why the earlier checks were green:** the advisory was published at 2026-10-27 15:37:37Z, after the daily audit of `main` (12:31Z). Main's push run #490 audited after it, but the API's audit blocks only when the API's dependency files changed (D-219), and #84 changed none.
+- **The staging API is unchanged:** release v1 (2026-10-06, image `deployment-01M48YSNPWSEXNDWZ3NEERM5QA`), its one machine `8e7d7eb762d918` stopped.
+
+**1. The advisory.**
+- **Severity:** high, CVSS 7.5 (`CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H`).
+- **What it is:** a crafted DNS wire-format message makes `dns.name.from_wire_parser()` use excessive CPU decompressing a name; an application that parses untrusted DNS messages can be slowed or stopped. Fixed in 2.9.0; no workaround.
+
+**2. DocFlow never reaches it.**
+- dnspython is in the API's lock only for email-validator 2.3.0 (`dnspython>=2.0.0`). No DocFlow code imports `dns` or `email_validator`.
+- **The one path:** pydantic's `EmailStr`, in two Console request bodies (`apps/api/app/routers/admin.py`: an intake's `contact_email` and a new tenant's `owner_email`). pydantic calls `email_validator.validate_email(email, check_deliverability=False)`, and email-validator loads its DNS code only when it checks deliverability. No DNS message is ever parsed.
+- **It blocks anyway:** D-219 has no exceptions.
+
+**3. The change: the API's lock only, dnspython 2.8.0 -> 2.9.0.**
+- **dnspython 2.9.0:** on PyPI since 2026-10-09 (wheel and sdist), not yanked, Python >=3.11, no runtime dependencies.
+- **How the pin moved (RUNBOOK 11.1, written for this):** a throwaway Python 3.13 environment outside the repository; the lock installed with `--no-deps`; `dnspython==2.9.0` installed with `--no-deps`; `pip check`: `No broken requirements found.`; `pip freeze` before and after, 78 packages each, differing only in dnspython. The lock was written from the second freeze, keeping each line whose version didn't move: pip spells `rapidfuzz` as `RapidFuzz`, and writing its line would have added a change that isn't one.
+- **The diff:** exactly `dnspython==2.8.0` -> `dnspython==2.9.0`; the file's BOM and line endings kept.
+- **The audit:** `bash scripts/ci/predeploy_audit.sh api`: `78 packages audited, 0 with a known vulnerability; blocking: yes`, exit 0.
+- **The lock files have no lock tool:** each is a plain list of `name==version` pins with no hashes (API 78, worker 67, parse 17). RUNBOOK 11.1 is the procedure until one exists.
+
+**4. The readers of `apps/api/requirements.lock.txt` (D-216 item 6).**
+- CI's `api` job installs it and audits it (blocking, because it changed).
+- CI's `web-live` job installs it to run the API.
+- `apps/api/Dockerfile` installs it with `--no-deps`.
+- `scripts/ci/predeploy_audit.sh api` audits it.
+- The worker, core and parse jobs don't read it.
+
+**5. No staging suites for this PR (founder).**
+- **The rule:** a lock-only PR runs the staging suites only when the changed package is on a path the suites exercise.
+- **Why not here:** the suites run from the local API environment, which doesn't follow the lock, so they would not test dnspython 2.9.0. CI's `api` and `web-live` jobs install the exact lock. dnspython is never reached.
+- **Why #74 differed:** certifi sits on the TLS path the suites exercise (D-213 item 2).
+
+**6. A new item for the list (founder).** The local API environment holds 107 packages against the lock's 78 pins, certifi among them installed from a file, so the staging suites don't run what ships. Listed in BUILD-STATUS next to the dev tools out of the API's and the worker's images (D-219 item 7).
+
+**7. The API deploy after this merges** (its own Grant, naming the deploy, the machine start and the proxy).
+- **Settings:** none of the API's 45 settings is required (each has a default, and the settings class has no validators), and none was added since `8287bb3`, `main` when v1 was built.
+- **What can stop it at startup:** only `PARSE_SERVICE_TOKEN` being set (it isn't), or a database URL connecting as the wrong login. The three database secrets are the ones v1 started with.
+- **The other missing secrets are features, not crashes:** `SUPABASE_ANON_KEY`, `DOCUMENT_URL_SIGNING_SECRET`, the Stripe keys, e-mail and `SESSION_SECRET` matter only when a feature uses them. Sign-ins are checked with `SUPABASE_URL` alone, and with no `CORS_ALLOWED_ORIGINS` the default allows `localhost:3000`.
+- **The stopped machine:** the deploy updates `8e7d7eb762d918` in place (no second machine, `--ha=false`) as release v2 and, as in D-213 (step 5) and D-214 (item 10), leaves it stopped: `fly machine start`, then `fly proxy 8000` and `GET /healthz`. Rollback: redeploy v1's image.
+
+**Founder approval:** 2026-10-27 (option A, fix first; the regeneration method; RUNBOOK 11.1; no staging suites, and the rule; the list item).
+
+**Related:** D-213, D-216 (item 6), D-219, D-220; `apps/api/requirements.lock.txt`; RUNBOOK 11 and 11.1.

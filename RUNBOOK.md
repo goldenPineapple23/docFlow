@@ -2903,3 +2903,43 @@ decides otherwise.
 
 A production advisory found by the daily audit gets a fix PR the next
 working day (8.5).
+
+### 11.1 Moving one pin in a Python lock file (founder, 2026-10-27; D-223)
+
+The Python lock files (`apps/api/requirements.lock.txt`,
+`apps/worker/requirements.lock.txt`, `apps/parse/requirements.lock.txt`) are
+plain `pip freeze` lists: one `name==version` per line, no hashes. There is
+no lock tool. A pin is never typed in; pip writes it, and the diff proves
+nothing else moved:
+
+1. **A throwaway environment, outside the repository, on a short path**
+   (Windows' path limit breaks lxml's install under a long one), with the
+   Python CI uses (3.13):
+   ```
+   py -3.13 -m venv C:\Users\NK\AppData\Local\Temp\relock
+   ```
+2. **Today's pins, exactly:** `<venv>\Scripts\python.exe -m pip install
+   --no-deps -r apps/<app>/requirements.lock.txt`, then `pip freeze` into a
+   file. `--no-deps` stops pip resolving anything: each pin is installed as
+   written.
+3. **The one move:** `pip install --no-deps <package>==<fixed version>`, then
+   `pip check`, which must print `No broken requirements found.` If the new
+   version needs a newer dependency, `pip check` says so; move that pin the
+   same way and name both in the PR.
+4. **Write the lock from the second `pip freeze`:** keep every lock line
+   whose package and version the freeze reports unchanged, and take the
+   freeze's line only where the version moved. (pip spells some names
+   differently from the lock, `RapidFuzz` for `rapidfuzz`; keeping the
+   unchanged lines keeps the diff to the real move.) A package added or
+   missing is a resolver change, not a pin move: stop. Keep the file's BOM
+   and line endings.
+5. **The proof:** `git diff` shows exactly the moved pin;
+   `bash scripts/ci/predeploy_audit.sh <app>` exits 0; and the readers of
+   the lock (D-216 item 6) are named in the PR.
+6. **Staging suites:** a lock-only PR runs them only when the changed
+   package is on a path the suites exercise (founder, 2026-10-27; D-223).
+   The suites run from the local API environment, which does not follow
+   the lock, so they would not test the new version; CI's `api` and
+   `web-live` jobs install the exact lock.
+
+Delete the throwaway environment afterwards.
