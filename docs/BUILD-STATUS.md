@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-10-27, with the LibreOffice cache PR merged and D-178 built:** Phase 5.5,
+**Status, as of 2026-10-27, with the LibreOffice cache PR merged and D-178 open as PR #84:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
