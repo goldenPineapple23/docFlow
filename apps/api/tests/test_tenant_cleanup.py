@@ -195,9 +195,15 @@ def test_the_purge_order_agrees_with_every_foreign_key_in_the_live_schema():
     assert {(table, column) for table, column, _action in outside} == set(tenant_cleanup._OUTSIDE_LINKS)
 
 
+# The one file outside the tests that may use the purge module: the staging
+# sweep, through purge_swept_tenant only (founder, 2026-10-27; D-224).
+_SWEEP_SCRIPT = "scripts/sweep_test_tenants.py"
+
+
 def test_nothing_outside_the_api_tests_imports_the_purge():
     """Test code only (founder, 2026-10-09): the product's delete is
-    `admin_data_access.delete_tenant`, behind the founder's typed name."""
+    `admin_data_access.delete_tenant`, behind the founder's typed name. The
+    staging sweep is the one named exception, checked below."""
     repo = Path(__file__).resolve().parents[3]
     offenders = []
     product = (
@@ -211,6 +217,18 @@ def test_nothing_outside_the_api_tests_imports_the_purge():
         root = repo / folder
         assert root.is_dir(), f"{folder} has moved; this check no longer covers it"
         for path in root.rglob("*.py"):
-            if "tenant_cleanup" in path.read_text(encoding="utf-8"):
-                offenders.append(str(path.relative_to(repo)))
+            relative = path.relative_to(repo).as_posix()
+            if relative != _SWEEP_SCRIPT and "tenant_cleanup" in path.read_text(encoding="utf-8"):
+                offenders.append(relative)
     assert not offenders, f"product code names the test purge: {offenders}"
+
+
+def test_the_sweep_script_uses_only_the_sweeps_purge():
+    """The exception is exactly one file, and it reaches only the sweep's
+    entry point: never the run's own purge or its registration."""
+    script = Path(__file__).resolve().parents[3] / _SWEEP_SCRIPT
+    assert script.is_file(), f"{_SWEEP_SCRIPT} has moved; the exception above names a file that isn't there"
+    source = script.read_text(encoding="utf-8")
+    assert "purge_swept_tenant" in source
+    for name in ("purge_test_tenant", "register_test_tenant"):
+        assert name not in source, f"{_SWEEP_SCRIPT} names {name}"
