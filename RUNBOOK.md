@@ -1273,14 +1273,24 @@ change:
   unknown**, because acting-as records the request before its input is
   checked. Nothing ran.
 - **The seven same-transaction actions** (create intake, add an intake file,
-  create tenant, deal terms, tier change, invite, hard delete) never read
-  **Outcome unknown**: the request and its outcome are written together. Any
-  error, an unexpected one included, rolls the work back and reads
-  **Failed** (with no code for an unexpected error; its type is in the
-  outcome's detail). If the machine stops midway, or the failure itself
-  cannot be written (logged as `console_failure_not_recorded`), there is **no
-  line at all**, and a step outside the database (a Stripe call, a file
-  removal) may already have happened.
+  create tenant, deal terms, tier change, invite, hard delete): the request
+  is recorded in a transaction of its own before the work starts, and the
+  work runs in one transaction. **Done** commits with the work. Any error,
+  an unexpected one included, rolls the work back and reads **Failed** (with
+  no code for an unexpected error; its type is in the outcome's detail).
+  **Outcome unknown** when the machine stopped after the request was
+  recorded, or the failure itself could not be written (logged as
+  `console_failure_not_recorded`). The database work never half-commits,
+  but a step outside the database (a Stripe call, a file removal) may
+  already have happened. If the request itself cannot be recorded, the
+  work never starts.
+  - A creation's request names the new tenant only by its id, because the
+    tenant doesn't exist yet when the request is recorded. The tenant's
+    Audit tab shows the line all the same. A creation that never finished
+    has no tenant, so its line is on no Audit tab. If it stopped after
+    Stripe answered, the Stripe customer exists with no tenant: a failure
+    deletes it, a stop cannot.
+  - Intake changes belong to no tenant and appear on no Audit tab.
 
 1. Look at the tenant's current state on the page the action belongs to
    (Overview, Lifecycle, Catalog...) before doing anything again.

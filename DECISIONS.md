@@ -5009,6 +5009,10 @@ The Console's two alert lists render who an alert is about through one component
 - **`main`'s cache:** saved 00:15:30Z, 96,389,028 bytes, for `refs/heads/main`, confirmed in GitHub's cache list at 00:22:55Z. Every pull request now restores from it.
 - **The fix is done** (BUILD-STATUS).
 
+**10. The first branch and pull request to read `main`'s cache (D-178's PR #84, `a6d6b23`; founder: "That's the proof that PRs read main's cache, and it confirms main saved").**
+- **Push run #484** (40433422576) and **PR run #485** (40438166466), each green on its first attempt. Parse's notices on both: "hit (libreoffice-debs-Linux-ubuntu24-20261023.334.3-v1)", "50 cached .debs checked against the signed lists, 0 dropped" and "Need to get 0 B/96.7 MB of archives."
+- **Where they read it:** GitHub's cache list, read after both runs had finished (the watcher's last read, 02:30:28Z), held the key for three refs only: `refs/heads/main` (last read 02:24:12Z, 6 s before #485's `apt-get update` finished), and #83's two scopes (last read 22:54Z on 2026-10-26). Neither D-178's branch nor `refs/pull/84/merge` has an entry, and another branch's scope isn't readable from either, so both runs restored `main`'s.
+
 **Founder approval:** 2026-10-26 (the plan, four additions and four decisions; `continue-on-error` and the check, with two conditions; the pre-approval for miss-run timeouts).
 
 **Related:** D-199 (item 10), D-216 (item 8), D-217 (item 3), D-218 (items 4 and 5), D-219 (items 8 and 9); `.github/workflows/ci.yml`, `scripts/ci/check_skips.py`.
@@ -5046,18 +5050,19 @@ The plan was approved on 2026-10-23, with the founder's answers and three change
 - **If writing the outcome fails after the work,** the answer is unchanged and the error is logged. Turning a real success into a failure would invite a retry.
 - **`_console_act` is now for reads only** (`read`, `acting_as_read`, `quarantine_read`). Reads get no outcome row. `test_console_outcome_guard.py` holds every call to its kind, and was shown to catch a write moved back to `_console_act`.
 - **Acting-as writes too.** The gate that mounts the tenant's own review and export routes under `/admin/tenants/{id}/act` became a `yield` dependency, so the route's result comes back to it. In FastAPI 0.141.1, success, an `HTTPException` and a crash each reach the dependency, checked on a scratch app before building.
-  - **A crash writes no outcome here either (founder's question, 2026-10-26).** Acting-as and the Console routes share `_console_write`, so an acting-as crash reads "Outcome unknown", never "Failed". One difference, checked on a scratch app: the gate records the request before FastAPI checks the body, so an acting-as write refused with a 422 reaches the gate as `RequestValidationError` and reads "Outcome unknown" although nothing ran. A Console route's 422 leaves no line (it is checked before the route records anything), as does a body that isn't JSON at all on either path. RUNBOOK 4.5 states what "Outcome unknown" covers for each kind, the seven same-transaction actions included (they never read it).
+  - **A crash writes no outcome here either (founder's question, 2026-10-26).** Acting-as and the Console routes share `_console_write`, so an acting-as crash reads "Outcome unknown", never "Failed". One difference, checked on a scratch app: the gate records the request before FastAPI checks the body, so an acting-as write refused with a 422 reaches the gate as `RequestValidationError` and reads "Outcome unknown" although nothing ran. A Console route's 422 leaves no line (it is checked before the route records anything), as does a body that isn't JSON at all on either path. RUNBOOK 4.5 states what "Outcome unknown" covers for each kind, the seven same-transaction actions included (item 3).
 - **Out of scope:** writes with no tenant (intakes, tier versions, the rollup recompute) aren't on any tenant's Audit tab. The intake pair records outcomes anyway (item 3).
 
 **3. Actions that write their row in the same transaction as the work** (create tenant, deal terms, tier change, invite, intake create and add file, hard delete).
-- **On success:** `_attempt` in `admin_data_access` writes the intent and a `succeeded` outcome in the work's own transaction, so they commit together.
+- **The request row first (founder, 2026-10-27, item 10):** `_attempt` in `admin_data_access` commits the request row, marked `outcome_expected`, in a short transaction of its own before the work starts. If it can't be written, the error stands and the work never runs. A machine that stops after it leaves the request with no outcome, which reads "Outcome unknown".
+- **On success:** the `succeeded` outcome is written in the work's own transaction, so it commits with the work. Its `detail` holds what the work found or did, which the request row, written first, can't: the tier used, files moved and the deal for a creation; before and after for deal terms and a tier change; rows deleted and objects removed for a hard delete.
   - **A change from the plan:** the plan had the route write the outcome after the function returned. Writing it in the transaction leaves no window between the commit and the record.
-- **On failure (founder's change A):** the rollback takes both rows. A new transaction then writes the intent again, under the same id, with a `failed` outcome. The outcome's `detail` holds what had already happened outside the database:
+- **On failure (founder's change A):** the rollback takes the work and its `succeeded` outcome. A new transaction then writes a `failed` outcome pointing at the request row. The outcome's `detail` holds what had already happened outside the database:
   - **Tier change:** `stripe`: `called`, `refused` or `accepted`.
   - **Hard delete:** `stage`: `check`, `storage` or `database`, and `objects_removed`, a count, or `unknown` when Storage itself failed.
   - **Create tenant:** `files_copied`, and the Stripe customer's fate (`created, then deleted` or `created, not deleted`).
   - **A failure with no catalog code:** `error_type`.
-- **A tenant creation that failed has no tenant row to point at:** its record leaves `target_tenant_id` empty and keeps the id in `target_id`.
+- **A tenant creation's request row is committed before the tenant exists,** so it leaves `target_tenant_id` (a foreign key) empty and names the tenant by `target_id`. Its `succeeded` outcome, written with the tenant, names it. `tenant_audit` lists a request row with an empty tenant, `target_type` `tenant` and that `target_id` on the tenant's Audit tab, and the test purge (`tenant_cleanup.py`) removes it. A creation that failed or stopped has no tenant, so its record is on no Audit tab.
 - **If the failure record itself can't be written,** the error is logged (`console_failure_not_recorded`) and the original error still reaches the founder.
 - **A known risk, not fixed here (founder):** the tier change calls Stripe inside the database transaction. A commit that fails after Stripe accepts leaves the two out of step. The record says `stripe: accepted`, so the founder knows to look at Stripe.
 
@@ -5128,9 +5133,9 @@ The plan was approved on 2026-10-23, with the founder's answers and three change
   - **The 25 test lines that read `admin_actions`,** each checked: all filter by an action name, which outcome rows never match, or clean up by admin or by tenant. The leftover counts are kept at `+0` by a fixture that removes the refusal alerts and their emails.
   - **The web:** `lib/admin.ts`, the Audit page, and `e2e/example-prompting.spec.ts`, whose stub rows carry no outcome and still pass.
 - **New tests:**
-  - **Core, no database** (`test_console_outcomes.py`, 13): `_attempt`'s success, catalog failure, crash, failed commit, never-created tenant and unrecordable failure; the tier change's `stripe` detail (refused, accepted then commit failed, succeeded); hard delete at each stage, and success.
+  - **Core, no database** (`test_console_outcomes.py`, 13, 18 after item 10): `_attempt`'s success, catalog failure, crash, failed commit, never-created tenant and unrecordable failure; the tier change's `stripe` detail (refused, accepted then commit failed, succeeded); hard delete at each stage, and success.
   - **The guard** (`test_console_outcome_guard.py`, 2).
-  - **API, against a database** (`test_console_audit_trail.py`, 15): both refusals with the same 403; the 403 when recording fails; 5 rows and 1 alert, then refusals 6 to 20 logged only; a second account; outcomes for success, a catalog error, a bare 404 and a crash (unknown on the Audit tab); the Audit tab's states; a failed tier change, hard delete and tenant creation.
+  - **API, against a database** (`test_console_audit_trail.py`, 13; first recorded here as 15, corrected 2026-10-27): both refusals with the same 403; the 403 when recording fails; 5 rows and 1 alert, then refusals 6 to 20 logged only; a second account; outcomes for success, a catalog error, a bare 404 and a crash (unknown on the Audit tab); the Audit tab's states; a failed tier change, hard delete and tenant creation.
   - **An existing test, extended:** `test_acting_as.py` checks that the acting-as write has its `succeeded` outcome.
   - **Web:** vitest for the result's words (6), and an e2e for the Result column.
 - **Local results:**
@@ -5141,6 +5146,25 @@ The plan was approved on 2026-10-23, with the founder's answers and three change
   - **Web:** `tsc --noEmit` passes; vitest `68 passed`; eslint passes on the changed files. The whole tree reads 412 errors and 6,669 warnings, all in the local `.next-live/` build output, as in D-217.
   - **CLAUDE.md:** unchanged, 71,216 characters.
 
-**Founder approval:** 2026-10-23 (the plan, the answers, changes A to C, the revision with the simple cap); 2026-10-27 (option A, the before-first-pilot gate, and building D-178).
+**10. The request row first (founder, 2026-10-27, on PR #84 before merge).** The founder: for the seven same-transaction actions, "commit the request row first in its own short transaction, before the work starts. Success writes its outcome inside the work's transaction as now; failure writes it after the rollback, pointing at the existing request row; a machine stop leaves the request with no outcome, so it reads 'Outcome unknown'." Built as item 3 now reads.
+- **Before it,** a stop midway left no line at all, so a Stripe call or a file removal could happen with nothing on the Audit tab.
+- **The payloads:** what the work finds or does moved from the request row to the `succeeded` outcome's `detail` (item 3). The Audit tab shows the request row's payload, and the same before and after are on the matching lifecycle lines (created, deal terms changed, tier changed, deleted), so the tab shows what it did before.
+- **Readers (D-216 item 6):** `test_admin_access.py` and `test_console_api.py` found the creation row by `target_tenant_id`; they now use `target_id`. `tenant_cleanup.py` removes the creation row by `target_id`. Without that, `test_admin_access.py`'s cleanup would fail on the admin user's foreign key. The other tests reading these seven actions' rows filter by an action name on an existing tenant and count 1, which still holds. The broad-except guard's `_Attempt.failed` entry is unchanged.
+- **New tests:**
+  - **Core** (`test_console_outcomes.py`, now 18):
+    - the request row committed, alone, before the work's transaction opens;
+    - a request row that can't be written stops the work before it starts;
+    - a creation's request named by `target_id` and its outcome by the tenant;
+    - the work's commit failing reads failed, not succeeded;
+    - a stop between the request and the work, both in `_attempt` and in a real tier change (Stripe never called), leaves the request alone and reads "unknown".
+  - **API, against a database** (`test_console_audit_trail.py`, now 15): a created tenant's request row named by `target_id` and its line Done on the tenant's Audit tab; and a stop after the request row of a real tier change, which reads "Outcome unknown" on the tab.
+  - **Two planted bugs were caught:** with no request row, all 18 core tests failed; with a stop treated as a failure, exactly the two stop tests failed.
+- **Local results, every outside service blocked:**
+  - **The changed core files:** `44 passed`.
+  - **The full core suite:** `1 failed, 1173 passed, 3 errors in 313.86s (0:05:13)`. The four are the live-bucket tests, as in item 9. 1,177 is item 9's 1,172 plus 5.
+  - **API:** the changed and reader files collect 93 tests.
+  - **Lint and types:** ruff and mypy pass for core, the API and the worker, as CI runs them.
+
+**Founder approval:** 2026-10-23 (the plan, the answers, changes A to C, the revision with the simple cap); 2026-10-27 (option A, the before-first-pilot gate, building D-178, the five changes from the plan, and item 10).
 
 **Related:** D-151, D-170, D-177, D-178, D-199, D-213 (item 6), D-219, D-222; `apps/api/app/deps.py`, `apps/api/app/routers/admin.py`, `apps/api/app/main.py`, `packages/core/docflow_core/admin_data_access.py`, `packages/core/docflow_core/constants.py`, `packages/core/docflow_core/founder_alerts.py`, `apps/web/src/lib/auditOutcome.ts`, the Audit page; RUNBOOK 4.4, 4.5 and 9.6.

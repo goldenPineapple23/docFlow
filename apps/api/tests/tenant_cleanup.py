@@ -227,6 +227,12 @@ def _statements(session: Session, tid: str) -> list[str]:
         else f'UPDATE "{table}" SET "{column}" = NULL WHERE "{column}" = {literal}'
         for table, column, action in outside
     ]
+    # A creation's request row is committed before its tenant exists, so it
+    # names the tenant only by target_id (D-220).
+    statements.append(
+        f"DELETE FROM admin_actions WHERE target_tenant_id IS NULL AND target_type = 'tenant' "
+        f"AND target_id = {literal}"
+    )
     statements += [f'DELETE FROM "{table}" WHERE tenant_id = {literal}' for table in order]
     statements.append(f"DELETE FROM tenants WHERE id = {literal}")
     return statements

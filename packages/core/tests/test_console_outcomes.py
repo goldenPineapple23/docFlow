@@ -2,10 +2,12 @@
 D-178 (D-220): a Console write that runs in one transaction with its audit
 row leaves a record whether it succeeds or fails.
 
-On success the intent row and a `succeeded` outcome commit with the work. On
-failure the rollback takes both, so the failure is written again -- the same
-intent id and a `failed` outcome -- in a transaction of its own, with what had
-already happened outside the database (Stripe answered; files removed).
+The request row commits first, in a transaction of its own (founder,
+2026-10-27). On success a `succeeded` outcome commits with the work. On
+failure the rollback takes that, and a `failed` outcome pointing at the
+request row is written in a transaction of its own, with what had already
+happened outside the database (Stripe answered; files removed). A stop in
+between leaves the request with no outcome: "Outcome unknown".
 
 Driven without a database: the platform session is a fake that keeps a
 transaction's rows only if it commits, so a rollback really discards them.
@@ -54,6 +56,7 @@ class _World:
         self.tenant_exists = True
         self.fail_commit_of_session: int | None = None  # 1-based
         self.fail_open_after: int | None = None
+        self.stop_at_session: int | None = None  # 1-based: the process stops as it opens
         self.sessions = 0
 
 
@@ -83,6 +86,8 @@ def world(monkeypatch):
         w.sessions += 1
         if w.fail_open_after is not None and w.sessions > w.fail_open_after:
             raise RuntimeError("database unreachable")
+        if w.stop_at_session == w.sessions:
+            raise _MachineStop
         session = _Session(w)
         yield session  # an exception in the body discards the rows: a rollback
         if w.fail_commit_of_session == w.sessions:
@@ -115,28 +120,49 @@ def _intent_and_outcome(world: _World) -> tuple[dict, dict]:
 # ── The attempt itself ───────────────────────────────────────────────────────
 
 
-def test_success_commits_the_intent_and_its_outcome_with_the_work(world):
+class _MachineStop(BaseException):
+    """The process stopping: nothing after it runs, no handler sees it."""
+
+
+def test_the_request_row_commits_on_its_own_before_the_work_starts(world):
+    with _attempt(request={"tier": "growth"}) as attempt:
+        # Inside the attempt, before the work has opened its transaction.
+        assert world.sessions == 1
+        assert len(world.committed) == 1
+        request = world.committed[0]
+        assert request["id"] == str(attempt.intent_id)
+        assert request["action"] == "tier_change"
+        assert request["payload"] == {"tier": "growth", "outcome_expected": True}
+        with admin_data_access.platform_session() as session:
+            attempt.record(session)
+
+
+def test_success_commits_its_outcome_with_the_work(world):
     with _attempt() as attempt, admin_data_access.platform_session() as session:
-        attempt.record(session, payload={"after": "growth"})
-    intent, outcome = _intent_and_outcome(world)
-    assert intent["action"] == "tier_change"
-    assert intent["id"] == str(attempt.intent_id)
-    assert intent["payload"] == {"after": "growth", "outcome_expected": True}
-    assert outcome["payload"] == {"intent_id": str(attempt.intent_id), "result": "succeeded", "code": None}
-    assert world.sessions == 1  # one transaction: they commit together or not at all
+        attempt.record(session, detail={"after": "growth"})
+    request, outcome = _intent_and_outcome(world)
+    assert request["id"] == str(attempt.intent_id)
+    assert outcome["payload"] == {
+        "intent_id": str(attempt.intent_id),
+        "result": "succeeded",
+        "code": None,
+        "detail": {"after": "growth"},
+    }
+    assert world.sessions == 2  # the request's transaction, then the work's
 
 
-def test_a_catalog_failure_is_recorded_after_the_rollback_with_its_code(world):
+def test_a_catalog_failure_is_recorded_after_the_rollback_against_the_request_row(world):
     with pytest.raises(ConsoleError):
         with _attempt(request={"tier": "growth"}) as attempt, admin_data_access.platform_session() as session:
             attempt.record(session)  # written, then rolled back with the work
             raise ConsoleError("BIL-004")
-    intent, outcome = _intent_and_outcome(world)
-    assert intent["id"] == str(attempt.intent_id)
-    assert intent["payload"] == {"tier": "growth", "outcome_expected": True}
+    request, outcome = _intent_and_outcome(world)  # one request row, never a second
+    assert request["id"] == str(attempt.intent_id)
+    assert request["payload"] == {"tier": "growth", "outcome_expected": True}
     assert outcome["payload"]["result"] == "failed"
     assert outcome["payload"]["code"] == "BIL-004"
     assert "detail" not in outcome["payload"]
+    assert world.sessions == 3  # request, work (rolled back), failure record
 
 
 def test_an_unexpected_error_is_recorded_with_its_type_and_no_code(world):
@@ -149,13 +175,25 @@ def test_an_unexpected_error_is_recorded_with_its_type_and_no_code(world):
     assert outcome["payload"]["detail"] == {"stage": "database", "error_type": "KeyError"}
 
 
-def test_a_failed_commit_is_recorded_too(world):
-    world.fail_commit_of_session = 1
+def test_a_failed_commit_of_the_work_is_recorded_as_failed_not_succeeded(world):
+    world.fail_commit_of_session = 2  # the work's
     with pytest.raises(RuntimeError, match="commit failed"):
         with _attempt() as attempt, admin_data_access.platform_session() as session:
             attempt.record(session)
     _, outcome = _intent_and_outcome(world)
+    assert outcome["payload"]["result"] == "failed"
     assert outcome["payload"]["detail"] == {"error_type": "RuntimeError"}
+
+
+def test_a_request_row_that_cannot_be_written_stops_the_work_before_it_starts(world):
+    world.fail_open_after = 0  # the request's own transaction is refused
+    ran = False
+    with pytest.raises(RuntimeError, match="database unreachable"):
+        with _attempt():
+            ran = True
+    assert ran is False
+    assert world.committed == []
+    assert world.sessions == 1  # no failure record is attempted: nothing ran
 
 
 def test_a_tenant_that_was_never_created_is_named_only_by_target_id(world):
@@ -166,21 +204,46 @@ def test_a_tenant_that_was_never_created_is_named_only_by_target_id(world):
     with pytest.raises(ConsoleError):
         with _attempt(target_tenant_id=tenant_id, target_id=tenant_id):
             raise ConsoleError("CON-003")
-    intent, outcome = _intent_and_outcome(world)
-    for row in (intent, outcome):
+    request, outcome = _intent_and_outcome(world)
+    for row in (request, outcome):
         assert row["target_tenant_id"] is None
         assert row["target_id"] == str(tenant_id)
 
 
+def test_a_creation_request_names_the_tenant_by_target_id_and_its_outcome_names_it(world):
+    """The request row is committed before the tenant exists; the success
+    outcome is written in the transaction that creates it."""
+    tenant_id = uuid4()
+    world.tenant_exists = False
+    with _attempt(target_tenant_id=tenant_id, target_id=tenant_id) as attempt:
+        world.tenant_exists = True  # the work inserts the tenant
+        with admin_data_access.platform_session() as session:
+            attempt.record(session)
+    request, outcome = _intent_and_outcome(world)
+    assert request["target_tenant_id"] is None and request["target_id"] == str(tenant_id)
+    assert outcome["target_tenant_id"] == str(tenant_id)
+
+
 def test_a_failure_to_record_never_replaces_the_error_the_founder_sees(world, caplog):
-    world.fail_open_after = 0  # every session refuses, including the record's
+    world.fail_open_after = 1  # the request is written; every session after it refuses
     with caplog.at_level(logging.ERROR):
         with pytest.raises(ConsoleError) as info:
             with _attempt():
                 raise ConsoleError("BIL-005")
     assert info.value.code == "BIL-005"
-    assert world.committed == []
+    assert [row["action"] for row in world.committed] == ["tier_change"]  # the request, no outcome
     assert "console_failure_not_recorded action=tier_change" in caplog.text
+
+
+def test_a_stop_between_the_request_row_and_the_work_reads_outcome_unknown(world):
+    with pytest.raises(_MachineStop):
+        with _attempt():
+            raise _MachineStop
+    assert len(world.committed) == 1
+    request = world.committed[0]
+    assert request["payload"]["outcome_expected"] is True
+    line = {"payload": request["payload"], "outcome": None, "source": "console", "event": "tier_change"}
+    assert admin_data_access._audit_outcome(line) == {"outcome": None, "outcome_state": "unknown"}
 
 
 # ── Tier change: whether Stripe answered ─────────────────────────────────────
@@ -246,7 +309,7 @@ def test_a_tier_change_whose_commit_fails_after_stripe_accepted_says_so(world, l
         "change_subscription_tier",
         lambda **kw: (SimpleNamespace(status="active", founding_ends_at=None), 0),
     )
-    world.fail_commit_of_session = 1
+    world.fail_commit_of_session = 2  # the work's
     with pytest.raises(RuntimeError, match="commit failed"):
         _change_tier(live_tenant)
     _, outcome = _intent_and_outcome(world)
@@ -261,9 +324,23 @@ def test_a_tier_change_that_succeeds_commits_both_rows(world, live_tenant, monke
     )
     _change_tier(live_tenant)
     intent, outcome = _intent_and_outcome(world)
-    assert intent["payload"]["mfa_challenge_age_seconds"] == 12
-    assert intent["payload"]["outcome_expected"] is True
+    assert intent["payload"] == {"tier": "growth", "mfa_challenge_age_seconds": 12, "outcome_expected": True}
     assert outcome["payload"]["result"] == "succeeded"
+    assert outcome["payload"]["detail"]["after"]["tier"] == "growth"
+    assert outcome["payload"]["detail"]["founding_months_carried"] == 0
+
+
+def test_a_tier_change_stopped_before_its_work_leaves_the_request_and_no_outcome(
+    world, live_tenant, monkeypatch
+):
+    called = []
+    monkeypatch.setattr(external_services, "change_subscription_tier", lambda **kw: called.append(kw))
+    world.stop_at_session = 2  # the request committed; the work never opens
+    with pytest.raises(_MachineStop):
+        _change_tier(live_tenant)
+    assert called == []  # Stripe never called
+    assert [row["action"] for row in world.committed] == ["tier_change"]
+    assert world.committed[0]["payload"]["outcome_expected"] is True
 
 
 # ── Hard delete: the stage it reached ────────────────────────────────────────
@@ -344,3 +421,4 @@ def test_a_hard_delete_that_succeeds_commits_its_outcome_with_the_rows(world, de
     assert actions == ["tenant_delete", "outcome", "tenant_delete_final_sweep"]
     assert world.committed[1]["payload"]["result"] == "succeeded"
     assert world.committed[1]["payload"]["intent_id"] == world.committed[0]["id"]
+    assert world.committed[1]["payload"]["detail"]["objects_removed"] == 1

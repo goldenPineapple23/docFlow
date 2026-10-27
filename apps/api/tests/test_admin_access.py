@@ -123,7 +123,9 @@ def test_platform_admin_can_create_tenant_and_admin_action_is_recorded(client, m
             action_row = session.execute(
                 text(
                     "SELECT platform_admin_user_id FROM admin_actions "
-                    "WHERE action = 'tenant_create' AND target_tenant_id = :tenant_id"
+                    # Named by target_id: the request row is committed before
+                    # the tenant exists (D-220).
+                    "WHERE action = 'tenant_create' AND target_id = :tenant_id"
                 ),
                 {"tenant_id": tenant_id},
             ).mappings().first()

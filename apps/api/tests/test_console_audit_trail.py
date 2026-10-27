@@ -11,7 +11,9 @@ D-178 (D-220), against the real database: the Console's audit trail.
 2. Every Console write leaves an `outcome` row pointing back at its intent:
    succeeded, or failed with its catalog code (or a bare status). A request
    that crashed midway leaves none, and the Audit tab says the outcome is
-   unknown -- never that it was done.
+   unknown -- never that it was done. The seven same-transaction actions
+   commit their request row first, so a stop between it and the work reads
+   the same way.
 
 All data is fictional (CLAUDE.md Section 0 rule 4).
 """
@@ -19,9 +21,10 @@ All data is fictional (CLAUDE.md Section 0 rule 4).
 from __future__ import annotations
 
 import logging
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+from docflow_core import admin_data_access
 from docflow_core.constants import CONSOLE_REFUSAL_ALERT_COUNT
 from docflow_core.db import platform_session
 from fastapi.testclient import TestClient
@@ -327,3 +330,54 @@ def test_a_failed_tenant_creation_names_the_tenant_only_by_target_id(client, str
     assert outcome is not None
     assert outcome["target_tenant_id"] is None
     assert outcome["payload"]["result"] == "failed"
+
+
+def test_a_created_tenants_request_row_names_it_by_target_id_and_its_line_reads_done(client, stripe):
+    """The request row is committed before the tenant exists, so it can't name
+    it in `target_tenant_id` (a foreign key); the outcome, written with the
+    work, can. The tenant's Audit tab still shows the line, as Done."""
+    with _Console() as console:
+        tenant_id = console.create_tenant(client).json()["tenant_id"]
+        intent, outcome = _intent_and_outcome(console, "tenant_create")
+        entries = client.get(f"/admin/tenants/{tenant_id}/audit", headers=console.headers()).json()["entries"]
+    assert intent["target_tenant_id"] is None and str(intent["target_id"]) == tenant_id
+    assert outcome is not None and str(outcome["target_tenant_id"]) == tenant_id
+    assert outcome["payload"]["detail"]["files_moved"] == 0
+    line = next(e for e in entries if e["id"] == str(intent["id"]))
+    assert line["outcome_state"] == "succeeded"
+
+
+class _MachineStop(BaseException):
+    """The process stopping: nothing after it runs, no handler sees it."""
+
+
+def test_a_stop_between_the_request_row_and_the_work_reads_outcome_unknown(client, stripe, monkeypatch):
+    """The founder's change (2026-10-27): the request row commits in its own
+    transaction before the work, so a machine that stops in between leaves a
+    request with no outcome, and the Audit tab says the outcome is unknown."""
+    real_session = admin_data_access.platform_session
+    opened = []
+
+    def stop_after_the_request_row():
+        opened.append(1)
+        if len(opened) == 2:  # the work's transaction: the process stops here
+            raise _MachineStop
+        return real_session()
+
+    with _Console() as console:
+        tenant_id = console.create_tenant(client).json()["tenant_id"]
+        monkeypatch.setattr(admin_data_access, "platform_session", stop_after_the_request_row)
+        with pytest.raises(_MachineStop):
+            admin_data_access.change_tier(
+                platform_admin_user_id=console.user_id, tenant_id=UUID(tenant_id), tier_code="growth"
+            )
+        monkeypatch.setattr(admin_data_access, "platform_session", real_session)
+        intent, outcome = _intent_and_outcome(console, "tier_change")
+        entries = client.get(f"/admin/tenants/{tenant_id}/audit", headers=console.headers()).json()["entries"]
+    assert len(opened) == 2
+    assert str(intent["target_tenant_id"]) == tenant_id
+    assert intent["payload"] == {"tier": "growth", "outcome_expected": True}
+    assert outcome is None
+    line = next(e for e in entries if e["id"] == str(intent["id"]))
+    assert line["outcome"] is None
+    assert line["outcome_state"] == "unknown"

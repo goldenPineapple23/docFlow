@@ -34,8 +34,9 @@ exceptions; pip-audit 2.10.1 audits each app's requirements files; a daily audit
 first run, by hand, green); and a check before every deploy (RUNBOOK 11). **The LibreOffice cache PR
 is merged** (PR #83, `main` is `051000c`; D-222): parse's LibreOffice .debs are cached under a key
 that follows the runner image, each one checked against the signed package lists before apt uses
-it; `main`'s cache is saved and every pull request restores from it. **D-178 is built, not merged**
-(D-220; branch `phase55/stage5-d178-audit-trail`): a Console request refused with AUTH-006 or
+it; `main`'s cache is saved and every pull request restores from it. **D-178 is PR #84, not merged**
+(D-220; first runs green on `a6d6b23`, both restoring `main`'s cache; the request row first for
+the seven same-transaction actions, D-220 item 10, pushed after them): a Console request refused with AUTH-006 or
 AUTH-007 is recorded (5 rows per account per 15 min, the 5th raises a high alert, the rest are
 logged), and every Console write records its outcome, so the Audit tab says "Outcome unknown"
 rather than showing a stopped request as done. Supabase limits MFA code checks per IP only

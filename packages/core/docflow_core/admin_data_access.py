@@ -73,8 +73,7 @@ def _record_admin_action(
 ) -> UUID:
     """Write one `admin_actions` row and return its id. `action_id` is given
     when the id must be known before the row exists: a same-transaction
-    action whose failure is recorded under the same id after a rollback
-    (D-178, `_Attempt`)."""
+    action's request row, which its outcome points at (D-178, `_Attempt`)."""
     action_id = action_id or uuid4()
     # created_at is the database's clock_timestamp(), never the app server's
     # clock: the Audit tab merges these rows with tenant_lifecycle_events,
@@ -145,13 +144,15 @@ def _record_outcome(
 
 class _Attempt:
     """
-    D-178 for an action that writes its `admin_actions` row in the same
-    transaction as its work (create tenant, deal terms, tier change, invite,
-    intake create and add file, hard delete). On success, `record` writes the
-    intent and a `succeeded` outcome in that transaction, so they commit with
-    the work. On failure the rollback takes both, so `_attempt` writes the
-    intent again, under the same id, with a `failed` outcome, in a transaction
-    of its own (founder, 2026-10-23, change A).
+    D-178 for an action whose work runs in one transaction (create tenant,
+    deal terms, tier change, invite, intake create and add file, hard delete).
+    `begin` commits the request row in a short transaction of its own before
+    the work starts (founder, 2026-10-27). On success, `record` writes the
+    `succeeded` outcome in the work's transaction, so it commits with the
+    work. On failure the rollback takes that, so `_attempt` writes a `failed`
+    outcome pointing at the request row, in a transaction of its own. A
+    machine that stops in between leaves the request with no outcome, which
+    the Audit tab reads as "Outcome unknown".
 
     `detail` holds what already happened outside the database when the work
     failed -- Stripe answered, files removed -- because "rolled back" would
@@ -185,43 +186,50 @@ class _Attempt:
             "target_id": self.target_id,
         }
 
-    def record(self, session, payload: dict[str, Any] | None = None) -> None:
-        """The intent and its `succeeded` outcome, in the work's transaction."""
-        _record_admin_action(
-            session,
-            action=self.action,
-            payload={**(payload or {}), "outcome_expected": True},
-            action_id=self.intent_id,
-            **self._target(),
-        )
-        _record_outcome(session, intent_id=self.intent_id, result="succeeded", **self._target())
+    def _existing_target(self, session) -> dict[str, Any]:
+        # A tenant that doesn't exist (yet, for a creation) can't be named:
+        # the column is a foreign key. `target_id` still holds its id.
+        target = self._target()
+        if self.target_tenant_id is not None and session.execute(
+            text("SELECT 1 FROM tenants WHERE id = :id"), {"id": str(self.target_tenant_id)}
+        ).first() is None:
+            target["target_tenant_id"] = None
+        return target
+
+    def begin(self) -> None:
+        """The request row, committed before the work starts. If it can't be
+        written, the error stands and the work never runs."""
+        with platform_session() as session:
+            _record_admin_action(
+                session,
+                action=self.action,
+                payload={**self.request, "outcome_expected": True},
+                action_id=self.intent_id,
+                **self._existing_target(session),
+            )
+
+    def record(self, session, detail: dict[str, Any] | None = None) -> None:
+        """The `succeeded` outcome, in the work's transaction. `detail` holds
+        what the work found or did (before and after, counts)."""
+        _record_outcome(session, intent_id=self.intent_id, result="succeeded", detail=detail, **self._target())
 
     def failed(self, exc: Exception) -> None:
-        """After the rollback: the intent again and a `failed` outcome. Never
-        replaces the error the founder is about to see; a failure here is
-        logged by type only."""
+        """After the rollback: a `failed` outcome pointing at the request row.
+        Never replaces the error the founder is about to see; a failure here
+        is logged by type only."""
         code = exc.code if isinstance(exc, ConsoleError) else None
         detail = dict(self.detail)
         if code is None:
             detail["error_type"] = type(exc).__name__
         try:
             with platform_session() as session:
-                target = self._target()
-                # A tenant that was never created can't be named: the column
-                # is a foreign key. `target_id` still holds its id.
-                if self.target_tenant_id is not None and session.execute(
-                    text("SELECT 1 FROM tenants WHERE id = :id"), {"id": str(self.target_tenant_id)}
-                ).first() is None:
-                    target["target_tenant_id"] = None
-                _record_admin_action(
-                    session,
-                    action=self.action,
-                    payload={**self.request, "outcome_expected": True},
-                    action_id=self.intent_id,
-                    **target,
-                )
                 _record_outcome(
-                    session, intent_id=self.intent_id, result="failed", code=code, detail=detail, **target
+                    session,
+                    intent_id=self.intent_id,
+                    result="failed",
+                    code=code,
+                    detail=detail,
+                    **self._existing_target(session),
                 )
         except Exception as record_exc:  # noqa: BLE001 -- logged; see the docstring
             logger.error(
@@ -234,8 +242,11 @@ class _Attempt:
 
 @contextmanager
 def _attempt(**kwargs: Any) -> Iterator[_Attempt]:
-    """Run a same-transaction action; on any failure, record it (`_Attempt`)."""
+    """Run a same-transaction action: its request row first, then the work;
+    on any failure, record it (`_Attempt`). A BaseException (the process
+    stopping) is not caught: the request is left with no outcome."""
     attempt = _Attempt(**kwargs)
+    attempt.begin()
     try:
         yield attempt
     except Exception as exc:
@@ -767,7 +778,7 @@ def add_intake_file(
                         "detected_type": detected_type,
                     },
                 )
-                attempt.record(session, payload={"file_id": str(file_id), "detected_type": detected_type})
+                attempt.record(session)
         except Exception:
             _cleanup_quietly(partial(delete_staging_file, intake_id, storage_path), "staging_file_cleanup_failed")
             raise
@@ -1037,13 +1048,11 @@ def create_tenant(
                         },
                     },
                 )
+                # The tier actually used: a deal's tier wins over the one asked for.
                 attempt.record(
                     session,
-                    payload={
-                        "name": name,
-                        "owner_email": owner_email,
+                    detail={
                         "tier": tier_code,
-                        "intake_id": str(intake_id) if intake_id else None,
                         "files_moved": moved_files,
                         "deal": resolved.summary() if resolved else None,
                     },
@@ -1181,7 +1190,7 @@ def update_deal_terms(
                     "payload": payload,
                 },
             )
-            attempt.record(session, payload=payload)
+            attempt.record(session, detail=payload)
             return resolved.summary()
 
 
@@ -1330,8 +1339,8 @@ def change_tier(
                     "payload": payload,
                 },
             )
-            # `audit` is the step-up evidence (D-177): recorded, not returned.
-            attempt.record(session, payload={**payload, **(audit or {})})
+            # `audit`, the step-up evidence (D-177), is on the request row.
+            attempt.record(session, detail=payload)
     return {**payload, "subscription_status": result.status}
 
 
@@ -2026,15 +2035,7 @@ def delete_tenant(
                     ),
                 },
             )
-            attempt.record(
-                session,
-                payload={
-                    "reason": reason,
-                    "rows_deleted": counts,
-                    "objects_removed": objects_removed,
-                    **(audit or {}),
-                },
-            )
+            attempt.record(session, detail={"rows_deleted": counts, "objects_removed": objects_removed})
 
     # The final sweep (step 4). The tenant is deleted whatever happens here,
     # so a failure is recorded and logged, never reported as a failed delete.
@@ -2119,7 +2120,10 @@ def tenant_audit(
             UNION ALL
             SELECT a.id, a.created_at, 'console', a.action, a.platform_admin_user_id, a.payload, NULL
             FROM admin_actions a
-            WHERE a.target_tenant_id = :t
+            -- A creation's request row is committed before its tenant exists,
+            -- so it names the tenant only by target_id (D-220).
+            WHERE (a.target_tenant_id = :t
+                   OR (a.target_tenant_id IS NULL AND a.target_type = 'tenant' AND a.target_id = :t))
               AND a.action <> :outcome
               AND (:include_views OR a.action NOT IN {_VIEW_ACTIONS})
         """
