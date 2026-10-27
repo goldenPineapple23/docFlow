@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-10-27, with the LibreOffice cache PR merged and D-178 open as PR #84:** Phase 5.5,
+**Status, as of 2026-10-27, with the LibreOffice cache PR merged and D-178's step-up measured:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -31,32 +31,39 @@ Supabase stack, and step timeouts on `supabase/setup-cli` (5 min, every use) and
 install (15 min). **The audit PR is merged** (PR #82; D-219): a known vulnerability in what an app
 ships blocks only when that app's dependency files changed, a dev-only one warns, and there are no
 exceptions; pip-audit 2.10.1 audits each app's requirements files; a daily audit of `main` (its
-first run, by hand, green); and a check before every deploy (RUNBOOK 11). **The LibreOffice cache PR
-is merged** (PR #83, `main` is `051000c`; D-222): parse's LibreOffice .debs are cached under a key
-that follows the runner image, each one checked against the signed package lists before apt uses
-it; `main`'s cache is saved and every pull request restores from it. **D-178 is PR #84, not merged**
-(D-220; first runs green on `a6d6b23`, both restoring `main`'s cache; the request row first for
-the seven same-transaction actions, D-220 item 10, pushed after them): a Console request refused with AUTH-006 or
-AUTH-007 is recorded (5 rows per account per 15 min, the 5th raises a high alert, the rest are
-logged), and every Console write records its outcome, so the Audit tab says "Outcome unknown"
-rather than showing a stopped request as done. Supabase limits MFA code checks per IP only
+first run, by hand, and its first scheduled run, 2026-10-27, both green); and a check before every
+deploy (RUNBOOK 11). **The LibreOffice cache PR is merged** (PR #83, `main` is `051000c`; D-222):
+parse's LibreOffice .debs are cached under a key that follows the runner image, each one checked
+against the signed package lists before apt uses it; `main`'s cache is saved and every pull request
+restores from it. **D-178 is PR #84** (D-220; its runs green on `a6d6b23` and on `954f0ef`, the
+request row first for the seven same-transaction actions, D-220 item 10): a Console request refused
+with AUTH-006 or AUTH-007 is recorded (5 rows per account per 15 min, the 5th raises a high alert,
+the rest are logged), and every Console write records its outcome, so the Audit tab says "Outcome
+unknown" rather than showing a stopped request as done. Supabase limits MFA code checks per IP only
 (GoTrue v2.197.0, no per-account lockout): per-account protection is a gate before the first pilot.
+**The step-up measurement is done** (2026-10-27, under the founder's Grant; D-220 item 7): a normal
+sign-in and one stale step-up against staging gave 0 AUTH-006 and 1 AUTH-007, recorded with the
+request row and a failed QUA-004 outcome, and no alert; the 5-in-15-minute threshold stays as
+approved (founder). **What remains for PR #84, in order:** the three staging suites on its head,
+under a Grant; then the merge, once they pass with the six counts +0 and that head's pull-request
+run is green. No docs commit follows the suites; the status after the merge goes in the next PR.
 **The CI infrastructure flake count is 9** (D-199 item 10; flakes 5 to 9 are parse's LibreOffice
 install timing out at 15 min on 2026-10-26, D-219 items 8 and 9, D-222 items 8 and 9). **A standing
 rule (D-213 item 6, tightened in D-214): a staging suite, a Fly action or any write to staging
 starts only after a message from the founder that begins with "Grant" and names the step.** **Two
 new rules:** SQL the founder runs on staging is first checked by Claude read-only (D-214 item 15),
 and before a file outside one app is changed, every reader of it is found and its tests are run
-(D-216 item 6). **Next, in order:** D-178 (D-220: its CI runs, then the step-up measurement and the
-three staging suites, each under a Grant), the sweep script, the warnings and the 32-byte test
-secret (with the two thin-margin `test_parse_client.py` tests, D-212 item 8, and the dev tools out
-of the API's and the worker's images, D-219 item 7, before `docflow-prod` exists), M10 without the
-model IDs, the 375 px fix, then counting rows before extraction, and the docs PR last. Then E1 and
-E2a, then demo readiness (D-209). The long catalog commit's test through a public address needs its
-own grant. The 50,000-row cap and IMP-003's wording: one PR, before pilots, only if a pilot prospect
-has more than 50,000 SKUs. The welding demo comes after the fastener rehearsal and never blocks it
-(D-208). **Staging:** the database has 0039. `docflow-parse-staging` runs PR B's image (Pillow
-13.0.0). `docflow-worker-staging` runs `e95b095`'s image (D-212) with no machines; certifi
+(D-216 item 6). **Next, in order:** D-178 (above), the sweep script, the warnings and the 32-byte
+test secret (with the two thin-margin `test_parse_client.py` tests, D-212 item 8, and the dev tools
+out of the API's and the worker's images, D-219 item 7, before `docflow-prod` exists), M10 without
+the model IDs, the 375 px fix, then counting rows before extraction, and the docs PR last (it also
+takes `apps/web/AGENTS.md`, whose first heading `next dev` rewrote from `#` to `##` when it started
+on 2026-10-27: either commit that heading or stop `next dev` from rewriting the file; founder). Then E1
+and E2a, then demo readiness (D-209). The long catalog commit's test through a public address needs
+its own grant. The 50,000-row cap and IMP-003's wording: one PR, before pilots, only if a pilot
+prospect has more than 50,000 SKUs. The welding demo comes after the fastener rehearsal and never
+blocks it (D-208). **Staging:** the database has 0039. `docflow-parse-staging` runs PR B's image
+(Pillow 13.0.0). `docflow-worker-staging` runs `e95b095`'s image (D-212) with no machines; certifi
 2026.10.19 and M7's code reach it at its next deploy. **That staging worker deploy is owed under
 D-209 (staging is redeployed after a merge, then the demo smoke test) before anything relies on
 staging's worker, and it needs a Grant.** The API and parse machines are stopped, with auto-stop
