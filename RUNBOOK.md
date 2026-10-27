@@ -1224,6 +1224,53 @@ dashboard exactly as written above; the account then had no authenticator,
 signed in with its password alone, enrolled a replacement and passed a real
 challenge with it. The account was then revoked and deleted.
 
+### 4.4 Refused Console requests, and the alert (D-178, D-220)
+
+With enforcement on, a Console request refused with **AUTH-006** (no
+authenticator code on this sign-in) or **AUTH-007** (the code is more than
+5 min 30 s old, for one of the seven destructive actions) is recorded in
+`admin_actions` as `console_refused`, with the code, the route, and the
+code's age. Only an active platform admin's sign-in can be refused this way;
+anyone else gets the 404 first. So a refusal is you, or someone with your
+password.
+
+- **The alert:** the `CONSOLE_REFUSAL_ALERT_COUNT`th (5th) refusal for one
+  account in `CONSOLE_REFUSAL_WINDOW_MINUTES` (15) raises
+  `console_refusals_repeated`, high severity. One stays open per account
+  until you acknowledge it.
+- **Past the cap** nothing more is written for that account until the window
+  rolls; each refusal is a log line, `console_refused_not_recorded`, with the
+  code, the account id and the route.
+- **When it fires:** if it was you (a stale tab, a code typed late), nothing
+  to do. If it wasn't, change your password at once and look at the account's
+  sessions in Supabase (**Authentication** → **Users** → your user).
+- **What it can't see:** a wrong authenticator code (AUTH-008) never reaches
+  DocFlow. It goes from the browser to Supabase, which limits code checks per
+  IP address only (15 a minute plus a burst of 30, by default) and writes no
+  audit entry for a wrong code. Per-account protection against guessing is a
+  gate before the first pilot (D-220 item 6).
+
+### 4.5 "Outcome unknown" on the Audit tab (D-178, D-220)
+
+Every Console change records its outcome next to the request: **Done**, or
+**Failed** with its catalog code. **"Outcome unknown: no outcome was recorded.
+Check the tenant's current state before retrying."** means the request
+stopped midway: the API crashed, or the machine stopped, after the request
+was recorded and before its result was. The change may or may not have
+happened.
+
+1. Look at the tenant's current state on the page the action belongs to
+   (Overview, Lifecycle, Catalog...) before doing anything again.
+2. For a tier change, check the subscription in Stripe too: Stripe is called
+   inside the database transaction, so a failed commit after Stripe accepted
+   leaves the two out of step (the failure record says `stripe: accepted`).
+3. For a hard delete, a failure says how far it got: `check` (nothing
+   changed), `storage` (some files may be gone) or `database` (the files are
+   gone, the rows remain). Running the delete again finishes it.
+
+Lines from before D-178 say **"Outcome not recorded (before D-178)"**: those
+actions were recorded before outcomes were kept.
+
 ---
 
 ## 5. The worker: time limits, the prefork pool, and jobs that never finish (Stage 3a, D-179)
@@ -2134,6 +2181,7 @@ The Console's health strip shows the same heartbeat, red past
 | `HEARTBEAT_PING_MIN` | 5 | At most one heartbeat ping this often (3e) |
 | `HEARTBEAT_PING_TIMEOUT_SECONDS` | 5 | A ping's own time limit; a failed ping never fails a pass |
 | `DISPATCH_UNCLAIMED_ALERT_MIN` | 20 | Dispatched and unclaimed this long sends `/fail` (Q2; founder Q9: 20, above every non-document task's hard limit and below `STUCK_PROCESSING_TIMEOUT_MIN` (30), both pinned by a test) |
+| `CONSOLE_REFUSAL_ALERT_COUNT` / `CONSOLE_REFUSAL_WINDOW_MINUTES` | 5 / 15 | Refused Console requests (AUTH-006, AUTH-007) recorded per account per rolling window; the row that reaches the count raises `console_refusals_repeated` (high), and refusals past it are logged only (D-220) |
 | `ALERT_STILL_HAPPENING_DAYS` | 7 | An acknowledged alert stays under "Acknowledged, still happening" until this many days pass with no new document hit by its state (D-203) |
 
 ### 9.7 The first worker deploy on staging: the procedure (founder, 2026-10-05; D-193)

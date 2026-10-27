@@ -109,6 +109,12 @@ MFA_STEP_UP_MAX_AGE_SECONDS = 300
 # challenge up to MFA_STEP_UP_MAX_AGE_SECONDS + this old can pass (5 min 30 s),
 # and one stamped up to this far in our future is accepted.
 MFA_CLOCK_TOLERANCE_SECONDS = 30
+# Refused Console requests (D-178, D-220): AUTH-006 and AUTH-007 are each
+# recorded as an admin_actions row, at most this many per account per rolling
+# window by the database's clock; past that, a log line only. The row that
+# reaches the count raises one high-severity founder alert.
+CONSOLE_REFUSAL_ALERT_COUNT = 5
+CONSOLE_REFUSAL_WINDOW_MINUTES = 15
 # The "needs review" digest (slice 5.8c, D-131): at most one email per tenant
 # per this many minutes, sent this long after the first new order that starts
 # it. A 500-document backfill is one or two emails, not 500.

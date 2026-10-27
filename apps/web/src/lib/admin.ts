@@ -1,4 +1,5 @@
 import { apiFetch } from "./api";
+import type { AuditOutcome, OutcomeState } from "./auditOutcome";
 import { ReviewApiError, UNEXPECTED, request, type CatalogError } from "./review";
 
 /**
@@ -617,6 +618,7 @@ export const saveFieldSchema = (
 // ── Tenant audit trail (Section 7.15.3 "Audit" tab; D-143) ────────────────
 
 export type AuditEntry = {
+  id: string;
   at: string;
   source: "lifecycle" | "console";
   event: string;
@@ -624,6 +626,9 @@ export type AuditEntry = {
   actor_is_docflow: boolean;
   payload: Record<string, unknown>;
   constants: Record<string, unknown>;
+  // D-178: a Console action's outcome, attached by the API.
+  outcome?: AuditOutcome;
+  outcome_state?: OutcomeState;
 };
 
 export const getTenantAudit = (

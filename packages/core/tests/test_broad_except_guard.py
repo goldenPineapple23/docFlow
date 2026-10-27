@@ -88,6 +88,14 @@ LISTED: dict[tuple[str, str, int], tuple[str, str]] = {
         BEST_EFFORT,
         "the health strip degrades, the page doesn't",
     ),
+    (f"{_API}/routers/admin.py", "_record_outcome_quietly", 1): (
+        BEST_EFFORT,
+        "the work is done or failed already: a lost outcome is logged, never a new answer (D-220)",
+    ),
+    (f"{_API}/routers/admin.py", "console_refused_handler", 1): (
+        BEST_EFFORT,
+        "the refusal's 403 stands whatever recording it does (D-220)",
+    ),
     # ── the parse service ────────────────────────────────────────────────────
     # PR 1b-i narrowed the parsing blocks that blamed the file for anything
     # (DOC-005, DOC-017, IMP-004): each catches only what its library raises
@@ -153,6 +161,10 @@ LISTED: dict[tuple[str, str, int], tuple[str, str]] = {
     (f"{_CORE}/admin_data_access.py", "_cleanup_quietly", 1): (
         BEST_EFFORT,
         "clean-up after a failure that is re-raised",
+    ),
+    (f"{_CORE}/admin_data_access.py", "_Attempt.failed", 1): (
+        BEST_EFFORT,
+        "the failure's record; the action's own error is what goes out (D-220)",
     ),
     (f"{_CORE}/admin_data_access.py", "create_tenant", 2): (
         BEST_EFFORT,

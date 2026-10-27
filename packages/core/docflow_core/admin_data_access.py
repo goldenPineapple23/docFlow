@@ -27,7 +27,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import timedelta
 from decimal import Decimal
 from functools import partial
@@ -38,7 +39,11 @@ from sqlalchemy import RowMapping, text
 from sqlalchemy.orm import Session
 
 from docflow_core import deal_terms, founder_alerts, system_actors
-from docflow_core.constants import ALERT_STILL_HAPPENING_DAYS
+from docflow_core.constants import (
+    ALERT_STILL_HAPPENING_DAYS,
+    CONSOLE_REFUSAL_ALERT_COUNT,
+    CONSOLE_REFUSAL_WINDOW_MINUTES,
+)
 from docflow_core.db import platform_session, rowcount
 
 logger = logging.getLogger(__name__)
@@ -64,7 +69,13 @@ def _record_admin_action(
     target_type: str | None = None,
     target_id: UUID | None = None,
     payload: dict[str, Any] | None = None,
-) -> None:
+    action_id: UUID | None = None,
+) -> UUID:
+    """Write one `admin_actions` row and return its id. `action_id` is given
+    when the id must be known before the row exists: a same-transaction
+    action whose failure is recorded under the same id after a rollback
+    (D-178, `_Attempt`)."""
+    action_id = action_id or uuid4()
     # created_at is the database's clock_timestamp(), never the app server's
     # clock: the Audit tab merges these rows with tenant_lifecycle_events,
     # which the database stamps, and two clocks in one timeline listed events
@@ -81,7 +92,7 @@ def _record_admin_action(
             """
         ),
         {
-            "id": str(uuid4()),
+            "id": str(action_id),
             "platform_admin_user_id": str(platform_admin_user_id),
             "action": action,
             "target_tenant_id": str(target_tenant_id) if target_tenant_id else None,
@@ -90,6 +101,146 @@ def _record_admin_action(
             "payload": payload,
         },
     )
+    return action_id
+
+
+# ── Outcomes (D-178, D-220) ──────────────────────────────────────────────────
+#
+# Every Console write leaves two rows: the intent, written before the work and
+# marked `outcome_expected`, and an `outcome` row pointing back at it --
+# succeeded, or failed with its catalog code. An intent with no outcome is a
+# request that stopped midway, and the Audit tab says so rather than showing
+# it as done. Reads get no outcome row: they have no outcome that could
+# mislead. The table stays append-only by convention: an outcome is a new row,
+# never an update of the intent.
+
+OUTCOME_ACTION = "outcome"
+
+
+def _record_outcome(
+    session,
+    *,
+    platform_admin_user_id: UUID,
+    intent_id: UUID,
+    target_tenant_id: UUID | None,
+    target_type: str | None,
+    target_id: UUID | None,
+    result: str,
+    code: str | None = None,
+    detail: dict[str, Any] | None = None,
+) -> UUID:
+    payload: dict[str, Any] = {"intent_id": str(intent_id), "result": result, "code": code}
+    if detail:
+        payload["detail"] = detail
+    return _record_admin_action(
+        session,
+        platform_admin_user_id=platform_admin_user_id,
+        action=OUTCOME_ACTION,
+        target_tenant_id=target_tenant_id,
+        target_type=target_type,
+        target_id=target_id,
+        payload=payload,
+    )
+
+
+class _Attempt:
+    """
+    D-178 for an action that writes its `admin_actions` row in the same
+    transaction as its work (create tenant, deal terms, tier change, invite,
+    intake create and add file, hard delete). On success, `record` writes the
+    intent and a `succeeded` outcome in that transaction, so they commit with
+    the work. On failure the rollback takes both, so `_attempt` writes the
+    intent again, under the same id, with a `failed` outcome, in a transaction
+    of its own (founder, 2026-10-23, change A).
+
+    `detail` holds what already happened outside the database when the work
+    failed -- Stripe answered, files removed -- because "rolled back" would
+    otherwise read as "nothing changed", and for those steps it isn't true.
+    """
+
+    def __init__(
+        self,
+        *,
+        platform_admin_user_id: UUID,
+        action: str,
+        target_tenant_id: UUID | None,
+        target_type: str,
+        target_id: UUID | None,
+        request: dict[str, Any] | None = None,
+    ) -> None:
+        self.intent_id = uuid4()
+        self.platform_admin_user_id = platform_admin_user_id
+        self.action = action
+        self.target_tenant_id = target_tenant_id
+        self.target_type = target_type
+        self.target_id = target_id
+        self.request = request or {}
+        self.detail: dict[str, Any] = {}
+
+    def _target(self) -> dict[str, Any]:
+        return {
+            "platform_admin_user_id": self.platform_admin_user_id,
+            "target_tenant_id": self.target_tenant_id,
+            "target_type": self.target_type,
+            "target_id": self.target_id,
+        }
+
+    def record(self, session, payload: dict[str, Any] | None = None) -> None:
+        """The intent and its `succeeded` outcome, in the work's transaction."""
+        _record_admin_action(
+            session,
+            action=self.action,
+            payload={**(payload or {}), "outcome_expected": True},
+            action_id=self.intent_id,
+            **self._target(),
+        )
+        _record_outcome(session, intent_id=self.intent_id, result="succeeded", **self._target())
+
+    def failed(self, exc: Exception) -> None:
+        """After the rollback: the intent again and a `failed` outcome. Never
+        replaces the error the founder is about to see; a failure here is
+        logged by type only."""
+        code = exc.code if isinstance(exc, ConsoleError) else None
+        detail = dict(self.detail)
+        if code is None:
+            detail["error_type"] = type(exc).__name__
+        try:
+            with platform_session() as session:
+                target = self._target()
+                # A tenant that was never created can't be named: the column
+                # is a foreign key. `target_id` still holds its id.
+                if self.target_tenant_id is not None and session.execute(
+                    text("SELECT 1 FROM tenants WHERE id = :id"), {"id": str(self.target_tenant_id)}
+                ).first() is None:
+                    target["target_tenant_id"] = None
+                _record_admin_action(
+                    session,
+                    action=self.action,
+                    payload={**self.request, "outcome_expected": True},
+                    action_id=self.intent_id,
+                    **target,
+                )
+                _record_outcome(
+                    session, intent_id=self.intent_id, result="failed", code=code, detail=detail, **target
+                )
+        except Exception as record_exc:  # noqa: BLE001 -- logged; see the docstring
+            logger.error(
+                "console_failure_not_recorded action=%s intent_id=%s error_type=%s",
+                self.action,
+                self.intent_id,
+                type(record_exc).__name__,
+            )
+
+
+@contextmanager
+def _attempt(**kwargs: Any) -> Iterator[_Attempt]:
+    """Run a same-transaction action; on any failure, record it (`_Attempt`)."""
+    attempt = _Attempt(**kwargs)
+    try:
+        yield attempt
+    except Exception as exc:
+        attempt.failed(exc)
+        raise
 
 
 def get_tenant(*, platform_admin_user_id: UUID, tenant_id: UUID) -> dict[str, Any] | None:
@@ -526,7 +677,16 @@ def create_intake(
     notes: str | None,
 ) -> UUID:
     intake_id = uuid4()
-    with platform_session() as session:
+    with (
+        _attempt(
+            platform_admin_user_id=platform_admin_user_id,
+            action="intake_create",
+            target_tenant_id=None,
+            target_type="onboarding_intake",
+            target_id=intake_id,
+        ) as attempt,
+        platform_session() as session,
+    ):
         session.execute(
             text(
                 """
@@ -544,13 +704,7 @@ def create_intake(
                 "created_by": str(platform_admin_user_id),
             },
         )
-        _record_admin_action(
-            session,
-            platform_admin_user_id=platform_admin_user_id,
-            action="intake_create",
-            target_type="onboarding_intake",
-            target_id=intake_id,
-        )
+        attempt.record(session)
     return intake_id
 
 
@@ -571,51 +725,52 @@ def add_intake_file(
     from docflow_core.storage import delete_staging_file, save_staging_file
 
     file_id = uuid4()
-    storage_path = save_staging_file(intake_id, original_filename, content)
-    try:
-        with platform_session() as session:
-            intake = session.execute(
-                text(
-                    "SELECT linked_tenant_id FROM onboarding_intakes "
-                    "WHERE id = :id AND deleted_at IS NULL"
-                ),
-                {"id": str(intake_id)},
-            ).mappings().first()
-            if intake is None:
-                raise ConsoleError("CON-001")
-            if intake["linked_tenant_id"] is not None:
-                raise ConsoleError("CON-002")
-            session.execute(
-                text(
-                    """
-                    INSERT INTO onboarding_intake_files
-                        (id, intake_id, original_filename, storage_path, sha256, byte_size,
-                         detected_type)
-                    VALUES (:id, :intake_id, :original_filename, :storage_path, :sha256,
-                            :byte_size, :detected_type)
-                    """
-                ),
-                {
-                    "id": str(file_id),
-                    "intake_id": str(intake_id),
-                    "original_filename": original_filename,
-                    "storage_path": storage_path,
-                    "sha256": hashlib.sha256(content).hexdigest(),
-                    "byte_size": len(content),
-                    "detected_type": detected_type,
-                },
-            )
-            _record_admin_action(
-                session,
-                platform_admin_user_id=platform_admin_user_id,
-                action="intake_file_add",
-                target_type="onboarding_intake",
-                target_id=intake_id,
-                payload={"file_id": str(file_id), "detected_type": detected_type},
-            )
-    except Exception:
-        _cleanup_quietly(partial(delete_staging_file, intake_id, storage_path), "staging_file_cleanup_failed")
-        raise
+    with _attempt(
+        platform_admin_user_id=platform_admin_user_id,
+        action="intake_file_add",
+        target_tenant_id=None,
+        target_type="onboarding_intake",
+        target_id=intake_id,
+        request={"file_id": str(file_id), "detected_type": detected_type},
+    ) as attempt:
+        storage_path = save_staging_file(intake_id, original_filename, content)
+        try:
+            with platform_session() as session:
+                intake = session.execute(
+                    text(
+                        "SELECT linked_tenant_id FROM onboarding_intakes "
+                        "WHERE id = :id AND deleted_at IS NULL"
+                    ),
+                    {"id": str(intake_id)},
+                ).mappings().first()
+                if intake is None:
+                    raise ConsoleError("CON-001")
+                if intake["linked_tenant_id"] is not None:
+                    raise ConsoleError("CON-002")
+                session.execute(
+                    text(
+                        """
+                        INSERT INTO onboarding_intake_files
+                            (id, intake_id, original_filename, storage_path, sha256, byte_size,
+                             detected_type)
+                        VALUES (:id, :intake_id, :original_filename, :storage_path, :sha256,
+                                :byte_size, :detected_type)
+                        """
+                    ),
+                    {
+                        "id": str(file_id),
+                        "intake_id": str(intake_id),
+                        "original_filename": original_filename,
+                        "storage_path": storage_path,
+                        "sha256": hashlib.sha256(content).hexdigest(),
+                        "byte_size": len(content),
+                        "detected_type": detected_type,
+                    },
+                )
+                attempt.record(session, payload={"file_id": str(file_id), "detected_type": detected_type})
+        except Exception:
+            _cleanup_quietly(partial(delete_staging_file, intake_id, storage_path), "staging_file_cleanup_failed")
+            raise
     return file_id
 
 
@@ -731,186 +886,197 @@ def create_tenant(
     originals: list[str] = []
     stripe_customer_id: str | None = None
 
-    try:
-        with platform_session() as session:
-            resolved = None
-            if deal is not None:
-                try:
-                    resolved = deal_terms.resolve(session, deal)
-                except deal_terms.DealTermsError as exc:
-                    raise ConsoleError(exc.code, exc.detail) from exc
-                tier_code = resolved.tier_code
-                tier: dict[str, Any] | RowMapping | None = {"id": resolved.tier_id}
-            else:
-                tier = session.execute(
-                    text("SELECT id FROM tiers WHERE code = :code AND is_current"),
-                    {"code": tier_code},
-                ).mappings().first()
-            if tier is None:
-                raise ConsoleError("CON-003")
+    with _attempt(
+        platform_admin_user_id=platform_admin_user_id,
+        action="tenant_create",
+        target_tenant_id=tenant_id,
+        target_type="tenant",
+        target_id=tenant_id,
+        request={
+            "name": name,
+            "owner_email": owner_email,
+            "tier": tier_code,
+            "intake_id": str(intake_id) if intake_id else None,
+        },
+    ) as attempt:
+        try:
+            with platform_session() as session:
+                resolved = None
+                if deal is not None:
+                    try:
+                        resolved = deal_terms.resolve(session, deal)
+                    except deal_terms.DealTermsError as exc:
+                        raise ConsoleError(exc.code, exc.detail) from exc
+                    tier_code = resolved.tier_code
+                    tier: dict[str, Any] | RowMapping | None = {"id": resolved.tier_id}
+                else:
+                    tier = session.execute(
+                        text("SELECT id FROM tiers WHERE code = :code AND is_current"),
+                        {"code": tier_code},
+                    ).mappings().first()
+                if tier is None:
+                    raise ConsoleError("CON-003")
 
-            session.execute(
-                text(
-                    """
-                    INSERT INTO tenants
-                        (id, name, primary_currency, timezone, status, onboarding_status,
-                         tier_id, onboarding_intake_id, created_at, updated_at, status_changed_at)
-                    VALUES
-                        (:id, :name, :primary_currency, :timezone, 'active', 'tenant_created',
-                         :tier_id, :intake_id, now(), now(), now())
-                    """
-                ),
-                {
-                    "id": str(tenant_id),
-                    "name": name,
-                    "primary_currency": primary_currency,
-                    "timezone": timezone_name,
-                    "tier_id": str(tier["id"]),
-                    "intake_id": str(intake_id) if intake_id else None,
-                },
-            )
-            if resolved is not None:
                 session.execute(
                     text(
                         """
-                        UPDATE tenants SET
-                            setup_fee_preset_id = :setup_fee_preset_id,
-                            setup_fee_amount = :setup_fee_amount,
-                            setup_fee_billing = :setup_fee_billing,
-                            setup_fee_note = :setup_fee_note,
-                            founding_price = :founding_price
-                        WHERE id = :id
+                        INSERT INTO tenants
+                            (id, name, primary_currency, timezone, status, onboarding_status,
+                             tier_id, onboarding_intake_id, created_at, updated_at, status_changed_at)
+                        VALUES
+                            (:id, :name, :primary_currency, :timezone, 'active', 'tenant_created',
+                             :tier_id, :intake_id, now(), now(), now())
                         """
                     ),
-                    {**resolved.columns(), "id": str(tenant_id)},
+                    {
+                        "id": str(tenant_id),
+                        "name": name,
+                        "primary_currency": primary_currency,
+                        "timezone": timezone_name,
+                        "tier_id": str(tier["id"]),
+                        "intake_id": str(intake_id) if intake_id else None,
+                    },
                 )
-            session.execute(
-                text(
-                    """
-                    INSERT INTO users (id, tenant_id, email, role, is_active, created_at, updated_at)
-                    VALUES (:id, :tenant_id, :email, 'owner', true, now(), now())
-                    """
-                ),
-                {"id": str(owner_user_id), "tenant_id": str(tenant_id), "email": owner_email},
-            )
-            # invite_sent_at stays NULL until "Send invite" (Step 3). The
-            # address exists now but is not live: intake_address_active stays
-            # false until go-live (Step 9).
-            session.execute(
-                text(
-                    """
-                    INSERT INTO intake_addresses (id, tenant_id, token, address, status, created_at)
-                    VALUES (:id, :tenant_id, :token, :address, 'active', now())
-                    """
-                ),
-                {
-                    "id": str(uuid4()),
-                    "tenant_id": str(tenant_id),
-                    "token": intake_token,
-                    "address": f"orders+{intake_token}@{settings.intake_email_domain}",
-                },
-            )
-
-            moved_files = 0
-            if intake_id is not None:
-                intake = session.execute(
-                    text(
-                        "SELECT linked_tenant_id FROM onboarding_intakes "
-                        "WHERE id = :id AND deleted_at IS NULL FOR UPDATE"
-                    ),
-                    {"id": str(intake_id)},
-                ).mappings().first()
-                if intake is None:
-                    raise ConsoleError("CON-001")
-                if intake["linked_tenant_id"] is not None:
-                    raise ConsoleError("CON-002")
-                files = session.execute(
-                    text(
-                        "SELECT id, storage_path FROM onboarding_intake_files "
-                        "WHERE intake_id = :id AND deleted_at IS NULL"
-                    ),
-                    {"id": str(intake_id)},
-                ).mappings().all()
-                for f in files:
-                    new_path = copy_into_tenant(
-                        intake_id, f["storage_path"], tenant_id, area="onboarding"
-                    )
-                    copied.append(new_path)
-                    originals.append(f["storage_path"])
+                if resolved is not None:
                     session.execute(
-                        text("UPDATE onboarding_intake_files SET storage_path = :p WHERE id = :id"),
-                        {"p": new_path, "id": str(f["id"])},
+                        text(
+                            """
+                            UPDATE tenants SET
+                                setup_fee_preset_id = :setup_fee_preset_id,
+                                setup_fee_amount = :setup_fee_amount,
+                                setup_fee_billing = :setup_fee_billing,
+                                setup_fee_note = :setup_fee_note,
+                                founding_price = :founding_price
+                            WHERE id = :id
+                            """
+                        ),
+                        {**resolved.columns(), "id": str(tenant_id)},
                     )
-                moved_files = len(files)
                 session.execute(
                     text(
-                        "UPDATE onboarding_intakes SET linked_tenant_id = :tid, linked_at = now() "
-                        "WHERE id = :id"
+                        """
+                        INSERT INTO users (id, tenant_id, email, role, is_active, created_at, updated_at)
+                        VALUES (:id, :tenant_id, :email, 'owner', true, now(), now())
+                        """
                     ),
-                    {"tid": str(tenant_id), "id": str(intake_id)},
+                    {"id": str(owner_user_id), "tenant_id": str(tenant_id), "email": owner_email},
+                )
+                # invite_sent_at stays NULL until "Send invite" (Step 3). The
+                # address exists now but is not live: intake_address_active stays
+                # false until go-live (Step 9).
+                session.execute(
+                    text(
+                        """
+                        INSERT INTO intake_addresses (id, tenant_id, token, address, status, created_at)
+                        VALUES (:id, :tenant_id, :token, :address, 'active', now())
+                        """
+                    ),
+                    {
+                        "id": str(uuid4()),
+                        "tenant_id": str(tenant_id),
+                        "token": intake_token,
+                        "address": f"orders+{intake_token}@{settings.intake_email_domain}",
+                    },
                 )
 
-            session.execute(
-                text(
-                    """
-                    INSERT INTO tenant_lifecycle_events
-                        (id, tenant_id, event_type, actor_user_id, payload, created_at)
-                    VALUES (:id, :tenant_id, 'created', :actor, :payload, now())
-                    """
-                ),
-                {
-                    "id": str(uuid4()),
-                    "tenant_id": str(tenant_id),
-                    "actor": str(platform_admin_user_id),
-                    "payload": {
+                moved_files = 0
+                if intake_id is not None:
+                    intake = session.execute(
+                        text(
+                            "SELECT linked_tenant_id FROM onboarding_intakes "
+                            "WHERE id = :id AND deleted_at IS NULL FOR UPDATE"
+                        ),
+                        {"id": str(intake_id)},
+                    ).mappings().first()
+                    if intake is None:
+                        raise ConsoleError("CON-001")
+                    if intake["linked_tenant_id"] is not None:
+                        raise ConsoleError("CON-002")
+                    files = session.execute(
+                        text(
+                            "SELECT id, storage_path FROM onboarding_intake_files "
+                            "WHERE intake_id = :id AND deleted_at IS NULL"
+                        ),
+                        {"id": str(intake_id)},
+                    ).mappings().all()
+                    for f in files:
+                        new_path = copy_into_tenant(
+                            intake_id, f["storage_path"], tenant_id, area="onboarding"
+                        )
+                        copied.append(new_path)
+                        originals.append(f["storage_path"])
+                        session.execute(
+                            text("UPDATE onboarding_intake_files SET storage_path = :p WHERE id = :id"),
+                            {"p": new_path, "id": str(f["id"])},
+                        )
+                    moved_files = len(files)
+                    session.execute(
+                        text(
+                            "UPDATE onboarding_intakes SET linked_tenant_id = :tid, linked_at = now() "
+                            "WHERE id = :id"
+                        ),
+                        {"tid": str(tenant_id), "id": str(intake_id)},
+                    )
+
+                session.execute(
+                    text(
+                        """
+                        INSERT INTO tenant_lifecycle_events
+                            (id, tenant_id, event_type, actor_user_id, payload, created_at)
+                        VALUES (:id, :tenant_id, 'created', :actor, :payload, now())
+                        """
+                    ),
+                    {
+                        "id": str(uuid4()),
+                        "tenant_id": str(tenant_id),
+                        "actor": str(platform_admin_user_id),
+                        "payload": {
+                            "tier": tier_code,
+                            "intake_id": str(intake_id) if intake_id else None,
+                            "deal": resolved.summary() if resolved else None,
+                        },
+                    },
+                )
+                attempt.record(
+                    session,
+                    payload={
+                        "name": name,
+                        "owner_email": owner_email,
                         "tier": tier_code,
                         "intake_id": str(intake_id) if intake_id else None,
+                        "files_moved": moved_files,
                         "deal": resolved.summary() if resolved else None,
                     },
-                },
-            )
-            _record_admin_action(
-                session,
-                platform_admin_user_id=platform_admin_user_id,
-                action="tenant_create",
-                target_tenant_id=tenant_id,
-                target_type="tenant",
-                target_id=tenant_id,
-                payload={
-                    "name": name,
-                    "owner_email": owner_email,
-                    "tier": tier_code,
-                    "intake_id": str(intake_id) if intake_id else None,
-                    "files_moved": moved_files,
-                    "deal": resolved.summary() if resolved else None,
-                },
-            )
-
-            # Last, so a failure in anything above never leaves a Stripe
-            # customer behind. If the commit itself fails, it is deleted below.
-            if create_stripe_customer:
-                from docflow_core.external_services import create_stripe_customer as _create
-
-                stripe_customer_id = _create(tenant_id=tenant_id, name=name, email=owner_email)
-                session.execute(
-                    text("UPDATE tenants SET stripe_customer_id = :c WHERE id = :id"),
-                    {"c": stripe_customer_id, "id": str(tenant_id)},
                 )
-    except Exception:
-        # The copies are removed so the failed creation leaves nothing behind.
-        # Best effort: a copy that can't be removed now is under a tenant id
-        # that was never committed, and the copy script's orphan report finds
-        # it -- the original error, not this one, is what the founder sees.
-        for path in copied:
-            _cleanup_quietly(partial(delete_tenant_file, tenant_id, path), "tenant_copy_cleanup_failed")
-        if stripe_customer_id:
-            try:
-                from docflow_core.external_services import delete_stripe_customer
 
-                delete_stripe_customer(stripe_customer_id)
-            except Exception:  # noqa: BLE001 -- logged; the tenant never existed
-                logger.error("stripe_customer_cleanup_failed tenant_id=%s", tenant_id)
-        raise
+                # Last, so a failure in anything above never leaves a Stripe
+                # customer behind. If the commit itself fails, it is deleted below.
+                if create_stripe_customer:
+                    from docflow_core.external_services import create_stripe_customer as _create
+
+                    stripe_customer_id = _create(tenant_id=tenant_id, name=name, email=owner_email)
+                    session.execute(
+                        text("UPDATE tenants SET stripe_customer_id = :c WHERE id = :id"),
+                        {"c": stripe_customer_id, "id": str(tenant_id)},
+                    )
+        except Exception:
+            # The copies are removed so the failed creation leaves nothing behind.
+            # Best effort: a copy that can't be removed now is under a tenant id
+            # that was never committed, and the copy script's orphan report finds
+            # it -- the original error, not this one, is what the founder sees.
+            for path in copied:
+                _cleanup_quietly(partial(delete_tenant_file, tenant_id, path), "tenant_copy_cleanup_failed")
+            attempt.detail["files_copied"] = len(copied)
+            if stripe_customer_id:
+                try:
+                    from docflow_core.external_services import delete_stripe_customer
+
+                    delete_stripe_customer(stripe_customer_id)
+                    attempt.detail["stripe_customer"] = "created, then deleted"
+                except Exception:  # noqa: BLE001 -- logged; the tenant never existed
+                    logger.error("stripe_customer_cleanup_failed tenant_id=%s", tenant_id)
+                    attempt.detail["stripe_customer"] = "created, not deleted"
+            raise
 
     # Committed: the staging originals can go. Best effort: the tenant exists
     # now, so a failure here must not look like a failed creation. An
@@ -939,85 +1105,84 @@ def update_deal_terms(
     the record can't drift from what Stripe collected. The rest of the deal
     stays editable until go-live.
     """
-    with platform_session() as session:
-        row = session.execute(
-            text(
-                "SELECT onboarding_status, tier_id, setup_fee_preset_id, setup_fee_amount, "
-                "setup_fee_billing, founding_price, setup_fee_paid_at FROM tenants WHERE id = :id FOR UPDATE"
-            ),
-            {"id": str(tenant_id)},
-        ).mappings().first()
-        if row is None:
-            raise ConsoleError("CON-001")
-        if row["onboarding_status"] == "live":
-            raise ConsoleError("ONB-011")
-        try:
-            resolved = deal_terms.resolve(
-                session,
-                deal,
-                current_tier_id=row["tier_id"],
-                current_preset_id=row["setup_fee_preset_id"],
+    with _attempt(
+        platform_admin_user_id=platform_admin_user_id,
+        action="deal_terms_update",
+        target_tenant_id=tenant_id,
+        target_type="tenant",
+        target_id=tenant_id,
+    ) as attempt:
+        with platform_session() as session:
+            row = session.execute(
+                text(
+                    "SELECT onboarding_status, tier_id, setup_fee_preset_id, setup_fee_amount, "
+                    "setup_fee_billing, founding_price, setup_fee_paid_at FROM tenants WHERE id = :id FOR UPDATE"
+                ),
+                {"id": str(tenant_id)},
+            ).mappings().first()
+            if row is None:
+                raise ConsoleError("CON-001")
+            if row["onboarding_status"] == "live":
+                raise ConsoleError("ONB-011")
+            try:
+                resolved = deal_terms.resolve(
+                    session,
+                    deal,
+                    current_tier_id=row["tier_id"],
+                    current_preset_id=row["setup_fee_preset_id"],
+                )
+            except deal_terms.DealTermsError as exc:
+                raise ConsoleError(exc.code, exc.detail) from exc
+            if row["setup_fee_paid_at"] is not None:
+                after = resolved.columns()
+                fee_changes = (
+                    str(after["setup_fee_preset_id"]) != str(row["setup_fee_preset_id"])
+                    or Decimal(str(after["setup_fee_amount"])) != Decimal(row["setup_fee_amount"])
+                    or after["setup_fee_billing"] != row["setup_fee_billing"]
+                )
+                if fee_changes:
+                    raise ConsoleError("ONB-017")
+            before = {
+                "tier_id": str(row["tier_id"]) if row["tier_id"] else None,
+                "setup_fee_preset_id": str(row["setup_fee_preset_id"]) if row["setup_fee_preset_id"] else None,
+                "setup_fee_amount": str(row["setup_fee_amount"]) if row["setup_fee_amount"] is not None else None,
+                "setup_fee_billing": row["setup_fee_billing"],
+                "founding_price": row["founding_price"],
+            }
+            session.execute(
+                text(
+                    """
+                    UPDATE tenants SET
+                        tier_id = :tier_id,
+                        setup_fee_preset_id = :setup_fee_preset_id,
+                        setup_fee_amount = :setup_fee_amount,
+                        setup_fee_billing = :setup_fee_billing,
+                        setup_fee_note = :setup_fee_note,
+                        founding_price = :founding_price,
+                        updated_at = now()
+                    WHERE id = :id
+                    """
+                ),
+                {**resolved.columns(), "id": str(tenant_id)},
             )
-        except deal_terms.DealTermsError as exc:
-            raise ConsoleError(exc.code, exc.detail) from exc
-        if row["setup_fee_paid_at"] is not None:
-            after = resolved.columns()
-            fee_changes = (
-                str(after["setup_fee_preset_id"]) != str(row["setup_fee_preset_id"])
-                or Decimal(str(after["setup_fee_amount"])) != Decimal(row["setup_fee_amount"])
-                or after["setup_fee_billing"] != row["setup_fee_billing"]
+            payload = {"before": before, "after": resolved.summary()}
+            session.execute(
+                text(
+                    """
+                    INSERT INTO tenant_lifecycle_events
+                        (id, tenant_id, event_type, actor_user_id, payload, created_at)
+                    VALUES (:id, :tenant_id, 'deal_terms_changed', :actor, :payload, now())
+                    """
+                ),
+                {
+                    "id": str(uuid4()),
+                    "tenant_id": str(tenant_id),
+                    "actor": str(platform_admin_user_id),
+                    "payload": payload,
+                },
             )
-            if fee_changes:
-                raise ConsoleError("ONB-017")
-        before = {
-            "tier_id": str(row["tier_id"]) if row["tier_id"] else None,
-            "setup_fee_preset_id": str(row["setup_fee_preset_id"]) if row["setup_fee_preset_id"] else None,
-            "setup_fee_amount": str(row["setup_fee_amount"]) if row["setup_fee_amount"] is not None else None,
-            "setup_fee_billing": row["setup_fee_billing"],
-            "founding_price": row["founding_price"],
-        }
-        session.execute(
-            text(
-                """
-                UPDATE tenants SET
-                    tier_id = :tier_id,
-                    setup_fee_preset_id = :setup_fee_preset_id,
-                    setup_fee_amount = :setup_fee_amount,
-                    setup_fee_billing = :setup_fee_billing,
-                    setup_fee_note = :setup_fee_note,
-                    founding_price = :founding_price,
-                    updated_at = now()
-                WHERE id = :id
-                """
-            ),
-            {**resolved.columns(), "id": str(tenant_id)},
-        )
-        payload = {"before": before, "after": resolved.summary()}
-        session.execute(
-            text(
-                """
-                INSERT INTO tenant_lifecycle_events
-                    (id, tenant_id, event_type, actor_user_id, payload, created_at)
-                VALUES (:id, :tenant_id, 'deal_terms_changed', :actor, :payload, now())
-                """
-            ),
-            {
-                "id": str(uuid4()),
-                "tenant_id": str(tenant_id),
-                "actor": str(platform_admin_user_id),
-                "payload": payload,
-            },
-        )
-        _record_admin_action(
-            session,
-            platform_admin_user_id=platform_admin_user_id,
-            action="deal_terms_update",
-            target_tenant_id=tenant_id,
-            target_type="tenant",
-            target_id=tenant_id,
-            payload=payload,
-        )
-        return resolved.summary()
+            attempt.record(session, payload=payload)
+            return resolved.summary()
 
 
 # ── Plan change for a live tenant (Section 7.16.1; slice 5.9, D-138) ─────────
@@ -1050,118 +1215,123 @@ def change_tier(
 
     from docflow_core import external_services
 
-    with platform_session() as session:
-        row = session.execute(
-            text(
-                """
-                SELECT t.name, t.status, t.onboarding_status, t.tier_id, t.stripe_subscription_id,
-                       t.founding_price, tr.code AS tier_code, tr.name AS tier_name,
-                       tr.version AS tier_version, tr.monthly_price, tr.document_allowance
-                FROM tenants t LEFT JOIN tiers tr ON tr.id = t.tier_id
-                WHERE t.id = :id FOR UPDATE OF t
-                """
-            ),
-            {"id": str(tenant_id)},
-        ).mappings().first()
-        if row is None:
-            raise ConsoleError("CON-001")
-        if row["onboarding_status"] != "live" or not row["stripe_subscription_id"]:
-            raise ConsoleError("BIL-001")
-        if row["status"] != "active":
-            raise ConsoleError("BIL-002", {"status": row["status"]})
-        target = session.execute(
-            text(
-                "SELECT id, code, name, version, monthly_price, promo_monthly_price, document_allowance "
-                "FROM tiers WHERE code = :c AND is_current"
-            ),
-            {"c": tier_code},
-        ).mappings().first()
-        if target is None:
-            raise ConsoleError("BIL-003")
-        if str(target["id"]) == str(row["tier_id"]):
-            raise ConsoleError("BIL-004")
-
-        try:
-            result, founding_months = external_services.change_subscription_tier(
-                tenant_id=tenant_id,
-                subscription_id=row["stripe_subscription_id"],
-                tier_id=UUID(str(target["id"])),
-                tier_name=target["name"],
-                monthly_price=Decimal(target["monthly_price"]),
-                promo_monthly_price=(
-                    Decimal(target["promo_monthly_price"]) if target["promo_monthly_price"] is not None else None
+    with _attempt(
+        platform_admin_user_id=platform_admin_user_id,
+        action="tier_change",
+        target_tenant_id=tenant_id,
+        target_type="tenant",
+        target_id=tenant_id,
+        request={"tier": tier_code, **(audit or {})},
+    ) as attempt:
+        with platform_session() as session:
+            row = session.execute(
+                text(
+                    """
+                    SELECT t.name, t.status, t.onboarding_status, t.tier_id, t.stripe_subscription_id,
+                           t.founding_price, tr.code AS tier_code, tr.name AS tier_name,
+                           tr.version AS tier_version, tr.monthly_price, tr.document_allowance
+                    FROM tenants t LEFT JOIN tiers tr ON tr.id = t.tier_id
+                    WHERE t.id = :id FOR UPDATE OF t
+                    """
                 ),
-                founding=bool(row["founding_price"]),
-                now=int(time()),
-            )
-        except external_services.ExternalServiceError as exc:
-            # Stripe's own reason goes to the founder's log so a refusal can be
-            # diagnosed; it never reaches a person on screen (BIL-005 does).
-            logger.error(
-                "tier_change_failed tenant_id=%s service=%s reason=%s", tenant_id, exc.service, exc.reason
-            )
-            raise ConsoleError("BIL-005") from None
+                {"id": str(tenant_id)},
+            ).mappings().first()
+            if row is None:
+                raise ConsoleError("CON-001")
+            if row["onboarding_status"] != "live" or not row["stripe_subscription_id"]:
+                raise ConsoleError("BIL-001")
+            if row["status"] != "active":
+                raise ConsoleError("BIL-002", {"status": row["status"]})
+            target = session.execute(
+                text(
+                    "SELECT id, code, name, version, monthly_price, promo_monthly_price, document_allowance "
+                    "FROM tiers WHERE code = :c AND is_current"
+                ),
+                {"c": tier_code},
+            ).mappings().first()
+            if target is None:
+                raise ConsoleError("BIL-003")
+            if str(target["id"]) == str(row["tier_id"]):
+                raise ConsoleError("BIL-004")
 
-        session.execute(
-            text(
-                """
-                UPDATE tenants SET tier_id = :tier, stripe_subscription_status = :status,
-                    -- D-139: the new coupon's end, from Stripe's answer, or
-                    -- none when no founding months carried over.
-                    founding_price_ends_at = CASE WHEN :months > 0 THEN coalesce(
-                        to_timestamp(CAST(:founding_end AS double precision)),
-                        now() + make_interval(months => CAST(:months AS integer))
-                    ) END,
-                    updated_at = now()
-                WHERE id = :id
-                """
-            ),
-            {
-                "tier": str(target["id"]),
-                "status": result.status,
-                "id": str(tenant_id),
-                "months": founding_months,
-                "founding_end": result.founding_ends_at,
-            },
-        )
-        before = {
-            "tier": row["tier_code"],
-            "version": row["tier_version"],
-            "monthly_price": None if row["monthly_price"] is None else str(row["monthly_price"]),
-            "document_allowance": row["document_allowance"],
-        }
-        after = {
-            "tier": target["code"],
-            "version": target["version"],
-            "monthly_price": str(target["monthly_price"]),
-            "document_allowance": target["document_allowance"],
-        }
-        payload = {"before": before, "after": after, "founding_months_carried": founding_months}
-        session.execute(
-            text(
-                """
-                INSERT INTO tenant_lifecycle_events
-                    (id, tenant_id, event_type, actor_user_id, payload, created_at)
-                VALUES (:id, :tenant_id, 'tier_changed', :actor, :payload, clock_timestamp())
-                """
-            ),
-            {
-                "id": str(uuid4()),
-                "tenant_id": str(tenant_id),
-                "actor": str(platform_admin_user_id),
-                "payload": payload,
-            },
-        )
-        _record_admin_action(
-            session,
-            platform_admin_user_id=platform_admin_user_id,
-            action="tier_change",
-            target_tenant_id=tenant_id,
-            target_type="tenant",
-            target_id=tenant_id,
+            # If the commit fails after this, Stripe has changed and DocFlow
+            # hasn't (a known risk, D-220): the failure record says Stripe answered.
+            attempt.detail["stripe"] = "called"
+            try:
+                result, founding_months = external_services.change_subscription_tier(
+                    tenant_id=tenant_id,
+                    subscription_id=row["stripe_subscription_id"],
+                    tier_id=UUID(str(target["id"])),
+                    tier_name=target["name"],
+                    monthly_price=Decimal(target["monthly_price"]),
+                    promo_monthly_price=(
+                        Decimal(target["promo_monthly_price"]) if target["promo_monthly_price"] is not None else None
+                    ),
+                    founding=bool(row["founding_price"]),
+                    now=int(time()),
+                )
+            except external_services.ExternalServiceError as exc:
+                # Stripe's own reason goes to the founder's log so a refusal can be
+                # diagnosed; it never reaches a person on screen (BIL-005 does).
+                logger.error(
+                    "tier_change_failed tenant_id=%s service=%s reason=%s", tenant_id, exc.service, exc.reason
+                )
+                attempt.detail["stripe"] = "refused"
+                raise ConsoleError("BIL-005") from None
+            attempt.detail["stripe"] = "accepted"
+
+            session.execute(
+                text(
+                    """
+                    UPDATE tenants SET tier_id = :tier, stripe_subscription_status = :status,
+                        -- D-139: the new coupon's end, from Stripe's answer, or
+                        -- none when no founding months carried over.
+                        founding_price_ends_at = CASE WHEN :months > 0 THEN coalesce(
+                            to_timestamp(CAST(:founding_end AS double precision)),
+                            now() + make_interval(months => CAST(:months AS integer))
+                        ) END,
+                        updated_at = now()
+                    WHERE id = :id
+                    """
+                ),
+                {
+                    "tier": str(target["id"]),
+                    "status": result.status,
+                    "id": str(tenant_id),
+                    "months": founding_months,
+                    "founding_end": result.founding_ends_at,
+                },
+            )
+            before = {
+                "tier": row["tier_code"],
+                "version": row["tier_version"],
+                "monthly_price": None if row["monthly_price"] is None else str(row["monthly_price"]),
+                "document_allowance": row["document_allowance"],
+            }
+            after = {
+                "tier": target["code"],
+                "version": target["version"],
+                "monthly_price": str(target["monthly_price"]),
+                "document_allowance": target["document_allowance"],
+            }
+            payload = {"before": before, "after": after, "founding_months_carried": founding_months}
+            session.execute(
+                text(
+                    """
+                    INSERT INTO tenant_lifecycle_events
+                        (id, tenant_id, event_type, actor_user_id, payload, created_at)
+                    VALUES (:id, :tenant_id, 'tier_changed', :actor, :payload, clock_timestamp())
+                    """
+                ),
+                {
+                    "id": str(uuid4()),
+                    "tenant_id": str(tenant_id),
+                    "actor": str(platform_admin_user_id),
+                    "payload": payload,
+                },
+            )
             # `audit` is the step-up evidence (D-177): recorded, not returned.
-            payload={**payload, **(audit or {})},
-        )
+            attempt.record(session, payload={**payload, **(audit or {})})
     return {**payload, "subscription_status": result.status}
 
 
@@ -1180,63 +1350,64 @@ def send_invite(*, platform_admin_user_id: UUID, tenant_id: UUID) -> dict[str, A
     """
     from docflow_core import email_outbox, invites
 
-    with platform_session() as session:
-        row = session.execute(
-            text(
-                """
-                SELECT t.name AS tenant_name, u.id AS user_id, u.email, u.auth_user_id
-                FROM tenants t
-                JOIN users u ON u.tenant_id = t.id AND u.role = 'owner' AND u.deleted_at IS NULL
-                WHERE t.id = :id
-                ORDER BY u.created_at
-                LIMIT 1
-                """
-            ),
-            {"id": str(tenant_id)},
-        ).mappings().first()
-        if row is None:
-            raise ConsoleError("CON-004")
+    with _attempt(
+        platform_admin_user_id=platform_admin_user_id,
+        action="invite_send",
+        target_tenant_id=tenant_id,
+        target_type="user",
+        target_id=None,
+    ) as attempt:
+        with platform_session() as session:
+            row = session.execute(
+                text(
+                    """
+                    SELECT t.name AS tenant_name, u.id AS user_id, u.email, u.auth_user_id
+                    FROM tenants t
+                    JOIN users u ON u.tenant_id = t.id AND u.role = 'owner' AND u.deleted_at IS NULL
+                    WHERE t.id = :id
+                    ORDER BY u.created_at
+                    LIMIT 1
+                    """
+                ),
+                {"id": str(tenant_id)},
+            ).mappings().first()
+            if row is None:
+                raise ConsoleError("CON-004")
+            attempt.target_id = row["user_id"]
 
-        # The same path the Team page's invites take (D-132).
-        try:
-            outbox_id = invites.issue(
-                session,
-                tenant_id=tenant_id,
-                user_id=row["user_id"],
-                email=row["email"],
-                existing_auth_user_id=row["auth_user_id"],
-                template="invite",
-                params={"tenant_name": row["tenant_name"]},
+            # The same path the Team page's invites take (D-132).
+            try:
+                outbox_id = invites.issue(
+                    session,
+                    tenant_id=tenant_id,
+                    user_id=row["user_id"],
+                    email=row["email"],
+                    existing_auth_user_id=row["auth_user_id"],
+                    template="invite",
+                    params={"tenant_name": row["tenant_name"]},
+                )
+            except invites.InviteLinkedElsewhere:
+                raise ConsoleError("CON-005") from None
+            session.execute(
+                text("UPDATE tenants SET invite_sent_at = now(), updated_at = now() WHERE id = :id"),
+                {"id": str(tenant_id)},
             )
-        except invites.InviteLinkedElsewhere:
-            raise ConsoleError("CON-005") from None
-        session.execute(
-            text("UPDATE tenants SET invite_sent_at = now(), updated_at = now() WHERE id = :id"),
-            {"id": str(tenant_id)},
-        )
-        session.execute(
-            text(
-                """
-                INSERT INTO tenant_lifecycle_events
-                    (id, tenant_id, event_type, actor_user_id, payload, created_at)
-                VALUES (:id, :tenant_id, 'invite_sent', :actor, :payload, now())
-                """
-            ),
-            {
-                "id": str(uuid4()),
-                "tenant_id": str(tenant_id),
-                "actor": str(platform_admin_user_id),
-                "payload": {"user_id": str(row["user_id"]), "email_outbox_id": str(outbox_id)},
-            },
-        )
-        _record_admin_action(
-            session,
-            platform_admin_user_id=platform_admin_user_id,
-            action="invite_send",
-            target_tenant_id=tenant_id,
-            target_type="user",
-            target_id=row["user_id"],
-        )
+            session.execute(
+                text(
+                    """
+                    INSERT INTO tenant_lifecycle_events
+                        (id, tenant_id, event_type, actor_user_id, payload, created_at)
+                    VALUES (:id, :tenant_id, 'invite_sent', :actor, :payload, now())
+                    """
+                ),
+                {
+                    "id": str(uuid4()),
+                    "tenant_id": str(tenant_id),
+                    "actor": str(platform_admin_user_id),
+                    "payload": {"user_id": str(row["user_id"]), "email_outbox_id": str(outbox_id)},
+                },
+            )
+            attempt.record(session)
     return {"email_outbox_id": outbox_id, "held": not email_outbox.provider_configured()}
 
 
@@ -1425,12 +1596,13 @@ def record_console_action(
     target_type: str,
     target_id: UUID | None = None,
     payload: dict[str, Any] | None = None,
-) -> bool:
+) -> UUID | None:
     """
     The `admin_actions` row for a Console action that then runs through the
     tenant's own code path with `acting_as_tenant_id` (Section 7.15.1:
     "Acting-as, not impersonation"). Written BEFORE the work, like every
-    other Console call. Returns False if the tenant doesn't exist, so the
+    other Console call. Returns the row's id, which a write's outcome row
+    points back at (D-178), or None if the tenant doesn't exist, so the
     route can 404 without doing anything.
     """
     with platform_session() as session:
@@ -1438,8 +1610,8 @@ def record_console_action(
             text("SELECT 1 FROM tenants WHERE id = :id"), {"id": str(tenant_id)}
         ).first()
         if exists is None:
-            return False
-        _record_admin_action(
+            return None
+        return _record_admin_action(
             session,
             platform_admin_user_id=platform_admin_user_id,
             action=action,
@@ -1448,6 +1620,112 @@ def record_console_action(
             target_id=target_id,
             payload=payload,
         )
+
+
+def record_console_outcome(
+    *,
+    platform_admin_user_id: UUID,
+    intent_id: UUID,
+    tenant_id: UUID,
+    target_type: str,
+    target_id: UUID | None,
+    result: str,
+    code: str | None = None,
+    detail: dict[str, Any] | None = None,
+) -> None:
+    """The outcome of a Console write whose intent `record_console_action`
+    wrote (D-178): `succeeded`, or `failed` with its catalog code."""
+    with platform_session() as session:
+        _record_outcome(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            intent_id=intent_id,
+            target_tenant_id=tenant_id,
+            target_type=target_type,
+            target_id=target_id,
+            result=result,
+            code=code,
+            detail=detail,
+        )
+
+
+CONSOLE_REFUSED_ACTION = "console_refused"
+
+
+def record_console_refusal(
+    *,
+    platform_admin_user_id: UUID,
+    code: str,
+    method: str,
+    path_template: str,
+    mfa_challenge_age_seconds: int | None,
+    target_tenant_id: UUID | None,
+) -> bool:
+    """
+    A Console request refused at the gate with AUTH-006 (no authenticator on
+    this sign-in) or AUTH-007 (the code is too old for a destructive action)
+    -- D-178. Only an active platform admin's sign-in gets this far: anyone
+    else has had a 404. So a refusal here is the founder, or someone holding
+    the founder's password.
+
+    At most CONSOLE_REFUSAL_ALERT_COUNT rows per account per rolling
+    CONSOLE_REFUSAL_WINDOW_MINUTES, by the database's clock. The row that
+    reaches the count raises one high-severity `console_refusals_repeated`
+    alert (one open at a time per account). Returns False when the cap was
+    already reached and nothing was written; the caller logs that refusal
+    instead (founder, 2026-10-23: no counter past the cap).
+    """
+    with platform_session() as session:
+        # One account's refusals are counted one at a time, so two at once
+        # can't both see room under the cap.
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+            {"k": f"{CONSOLE_REFUSED_ACTION}:{platform_admin_user_id}"},
+        )
+        recent = session.execute(
+            text(
+                """
+                SELECT count(*) FROM admin_actions
+                WHERE platform_admin_user_id = :u AND action = :a
+                  AND created_at > clock_timestamp() - make_interval(mins => :w)
+                """
+            ),
+            {"u": str(platform_admin_user_id), "a": CONSOLE_REFUSED_ACTION, "w": CONSOLE_REFUSAL_WINDOW_MINUTES},
+        ).scalar_one()
+        if recent >= CONSOLE_REFUSAL_ALERT_COUNT:
+            return False
+        if target_tenant_id is not None and session.execute(
+            text("SELECT 1 FROM tenants WHERE id = :id"), {"id": str(target_tenant_id)}
+        ).first() is None:
+            # The column is a foreign key; a path naming no tenant names none.
+            target_tenant_id = None
+        _record_admin_action(
+            session,
+            platform_admin_user_id=platform_admin_user_id,
+            action=CONSOLE_REFUSED_ACTION,
+            target_tenant_id=target_tenant_id,
+            target_type="console",
+            payload={
+                "code": code,
+                "method": method,
+                "path_template": path_template,
+                "mfa_challenge_age_seconds": mfa_challenge_age_seconds,
+            },
+        )
+        if recent + 1 == CONSOLE_REFUSAL_ALERT_COUNT:
+            founder_alerts.raise_alert(
+                session,
+                alert_type="console_refusals_repeated",
+                severity="high",
+                tenant_id=None,
+                payload={
+                    "platform_admin_user_id": str(platform_admin_user_id),
+                    "refusals": CONSOLE_REFUSAL_ALERT_COUNT,
+                    "window_minutes": CONSOLE_REFUSAL_WINDOW_MINUTES,
+                    "last_code": code,
+                },
+                dedupe_key=f"console_refusals_repeated:{platform_admin_user_id}",
+            )
     return True
 
 
@@ -1660,92 +1938,103 @@ def delete_tenant(
     If step 3 fails after the files are gone, running the delete again
     finishes it.
     """
-    if len(confirm_name.strip()) == 0 or len(reason.strip()) < 10:
-        raise ConsoleError("LIFE-005")
-    from docflow_core.storage import StorageError, delete_tenant_storage
+    # A failure is recorded with the stage it reached: `check` (nothing
+    # changed), `storage` (some files may be gone) or `database` (the files
+    # are gone, the rows remain; running the delete again finishes it).
+    with _attempt(
+        platform_admin_user_id=platform_admin_user_id,
+        action="tenant_delete",
+        target_tenant_id=tenant_id,
+        target_type="tenant",
+        target_id=tenant_id,
+        request={"reason": reason, **(audit or {})},
+    ) as attempt:
+        attempt.detail["stage"] = "check"
+        if len(confirm_name.strip()) == 0 or len(reason.strip()) < 10:
+            raise ConsoleError("LIFE-005")
+        from docflow_core.storage import StorageError, delete_tenant_storage
 
-    with platform_session() as session:
-        _check_deletable(session, tenant_id, confirm_name, lock=False)
-    try:
-        objects_removed = delete_tenant_storage(tenant_id)
-    except StorageError as exc:
-        logger.error("tenant_delete_storage_failed tenant_id=%s error_type=%s", tenant_id, type(exc).__name__)
-        raise ConsoleError("LIFE-007") from exc
+        with platform_session() as session:
+            _check_deletable(session, tenant_id, confirm_name, lock=False)
+        attempt.detail["stage"] = "storage"
+        try:
+            objects_removed = delete_tenant_storage(tenant_id)
+        except StorageError as exc:
+            logger.error("tenant_delete_storage_failed tenant_id=%s error_type=%s", tenant_id, type(exc).__name__)
+            # Some objects may be gone; how many isn't known.
+            attempt.detail["objects_removed"] = "unknown"
+            raise ConsoleError("LIFE-007") from exc
+        attempt.detail.update(stage="database", objects_removed=objects_removed)
 
-    with platform_session() as session:
-        _check_deletable(session, tenant_id, confirm_name, lock=True)
+        with platform_session() as session:
+            _check_deletable(session, tenant_id, confirm_name, lock=True)
 
-        # The lifecycle log outlives the tenant, but the tenant's own people do
-        # not: an event one of them caused (a Team-page invite, D-132) keeps
-        # its row and now names the one shared "deleted account" actor -- never
-        # blank, and nothing that leads back to the person (D-165). Done in
-        # this transaction, before their users rows go, so there is never a
-        # moment with a blank or dangling actor. The founder's own events keep
-        # theirs.
-        session.execute(
-            text(
-                "UPDATE tenant_lifecycle_events SET actor_user_id = :deleted "
-                "WHERE tenant_id = :id AND actor_user_id IN (SELECT id FROM users WHERE tenant_id = :id)"
-            ),
-            {"id": str(tenant_id), "deleted": str(system_actors.DELETED_ACCOUNT)},
-        )
-        counts: dict[str, int] = {}
-        for table in _PURGE_TABLES:
-            result = session.execute(
-                text(f"DELETE FROM {table} WHERE tenant_id = :id"), {"id": str(tenant_id)}
-            )
-            counts[table] = rowcount(result)
-        session.execute(
-            text("UPDATE onboarding_intakes SET linked_tenant_id = NULL WHERE linked_tenant_id = :id"),
-            {"id": str(tenant_id)},
-        )
-        session.execute(
-            text(
-                """
-                UPDATE tenants SET
-                    status = 'deleted',
-                    status_changed_at = now(),
-                    deleted_at = now(),
-                    deleted_by = :by,
-                    deletion_reason = :reason,
-                    updated_at = now()
-                WHERE id = :id
-                """
-            ),
-            {"id": str(tenant_id), "by": str(platform_admin_user_id), "reason": reason},
-        )
-        session.execute(
-            text(
-                """
-                INSERT INTO tenant_lifecycle_events
-                    (id, tenant_id, event_type, actor_user_id, payload, created_at)
-                VALUES (:id, :tenant_id, 'deleted', :actor, CAST(:payload AS jsonb), now())
-                """
-            ),
-            {
-                "id": str(uuid4()),
-                "tenant_id": str(tenant_id),
-                "actor": str(platform_admin_user_id),
-                "payload": json.dumps(
-                    {"reason": reason, "rows_deleted": counts, "objects_removed": objects_removed},
-                    default=str,
+            # The lifecycle log outlives the tenant, but the tenant's own people do
+            # not: an event one of them caused (a Team-page invite, D-132) keeps
+            # its row and now names the one shared "deleted account" actor -- never
+            # blank, and nothing that leads back to the person (D-165). Done in
+            # this transaction, before their users rows go, so there is never a
+            # moment with a blank or dangling actor. The founder's own events keep
+            # theirs.
+            session.execute(
+                text(
+                    "UPDATE tenant_lifecycle_events SET actor_user_id = :deleted "
+                    "WHERE tenant_id = :id AND actor_user_id IN (SELECT id FROM users WHERE tenant_id = :id)"
                 ),
-            },
-        )
-        _record_admin_action(
-            session,
-            platform_admin_user_id=platform_admin_user_id,
-            action="tenant_delete",
-            target_tenant_id=tenant_id,
-            target_type="tenant",
-            target_id=tenant_id,
-            payload={
-                "reason": reason,
-                "rows_deleted": counts,
-                "objects_removed": objects_removed,
-                **(audit or {}),
-            },
-        )
+                {"id": str(tenant_id), "deleted": str(system_actors.DELETED_ACCOUNT)},
+            )
+            counts: dict[str, int] = {}
+            for table in _PURGE_TABLES:
+                result = session.execute(
+                    text(f"DELETE FROM {table} WHERE tenant_id = :id"), {"id": str(tenant_id)}
+                )
+                counts[table] = rowcount(result)
+            session.execute(
+                text("UPDATE onboarding_intakes SET linked_tenant_id = NULL WHERE linked_tenant_id = :id"),
+                {"id": str(tenant_id)},
+            )
+            session.execute(
+                text(
+                    """
+                    UPDATE tenants SET
+                        status = 'deleted',
+                        status_changed_at = now(),
+                        deleted_at = now(),
+                        deleted_by = :by,
+                        deletion_reason = :reason,
+                        updated_at = now()
+                    WHERE id = :id
+                    """
+                ),
+                {"id": str(tenant_id), "by": str(platform_admin_user_id), "reason": reason},
+            )
+            session.execute(
+                text(
+                    """
+                    INSERT INTO tenant_lifecycle_events
+                        (id, tenant_id, event_type, actor_user_id, payload, created_at)
+                    VALUES (:id, :tenant_id, 'deleted', :actor, CAST(:payload AS jsonb), now())
+                    """
+                ),
+                {
+                    "id": str(uuid4()),
+                    "tenant_id": str(tenant_id),
+                    "actor": str(platform_admin_user_id),
+                    "payload": json.dumps(
+                        {"reason": reason, "rows_deleted": counts, "objects_removed": objects_removed},
+                        default=str,
+                    ),
+                },
+            )
+            attempt.record(
+                session,
+                payload={
+                    "reason": reason,
+                    "rows_deleted": counts,
+                    "objects_removed": objects_removed,
+                    **(audit or {}),
+                },
+            )
 
     # The final sweep (step 4). The tenant is deleted whatever happens here,
     # so a failure is recorded and logged, never reported as a failed delete.
@@ -1831,19 +2120,31 @@ def tenant_audit(
             SELECT a.id, a.created_at, 'console', a.action, a.platform_admin_user_id, a.payload, NULL
             FROM admin_actions a
             WHERE a.target_tenant_id = :t
+              AND a.action <> :outcome
               AND (:include_views OR a.action NOT IN {_VIEW_ACTIONS})
         """
-        params = {"t": str(tenant_id), "include_views": include_views}
+        params = {"t": str(tenant_id), "include_views": include_views, "outcome": OUTCOME_ACTION}
         total = session.execute(text(f"SELECT count(*) FROM ({trail}) x"), params).scalar_one()
         rows = (
             session.execute(
                 text(
                     f"""
                     SELECT x.*, u.email AS actor_email,
-                           (p.user_id IS NOT NULL) AS actor_is_docflow
+                           (p.user_id IS NOT NULL) AS actor_is_docflow,
+                           o.payload AS outcome, o.created_at AS outcome_at
                     FROM ({trail}) x
                     LEFT JOIN users u ON u.id = x.actor_id
                     LEFT JOIN platform_admins p ON p.user_id = x.actor_id
+                    -- The outcome row that points back at a Console intent
+                    -- (D-178). Outcome rows aren't lines of their own.
+                    LEFT JOIN LATERAL (
+                        SELECT o.payload, o.created_at FROM admin_actions o
+                        WHERE x.source = 'console' AND o.action = :outcome
+                          AND o.target_tenant_id = :t
+                          AND o.payload->>'intent_id' = x.id::text
+                        ORDER BY o.created_at
+                        LIMIT 1
+                    ) o ON true
                     -- Then by id: rows with the same timestamp keep one order,
                     -- so a page never shuffles between two reads (D-164).
                     ORDER BY x.at DESC, x.id DESC
@@ -1867,7 +2168,34 @@ def tenant_audit(
                 "actor_is_docflow": bool(row["actor_is_docflow"]),
                 "payload": row["payload"] or {},
                 "constants": row["constants"] or {},
+                **_audit_outcome(row),
             }
             for row in rows
         ],
     }
+
+
+def _audit_outcome(row: Any) -> dict[str, Any]:
+    """
+    How a Console line reads on the Audit tab (D-178, D-220): its outcome, if
+    one was recorded; or, for a write marked `outcome_expected` with none,
+    that its outcome is unknown -- never that it was done. Writes from before
+    D-178 carry no mark and read as such; lifecycle events and reads have no
+    outcome to show.
+    """
+    payload = row["payload"] or {}
+    outcome = row["outcome"]
+    if outcome is not None:
+        return {
+            "outcome": {
+                "result": outcome.get("result"),
+                "code": outcome.get("code"),
+                "at": row["outcome_at"].isoformat(),
+            },
+            "outcome_state": outcome.get("result"),
+        }
+    if row["source"] != "console" or row["event"] in _VIEW_ACTIONS or row["event"] == CONSOLE_REFUSED_ACTION:
+        return {"outcome": None, "outcome_state": None}
+    if payload.get("outcome_expected"):
+        return {"outcome": None, "outcome_state": "unknown"}
+    return {"outcome": None, "outcome_state": "not_recorded"}

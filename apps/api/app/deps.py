@@ -345,10 +345,28 @@ def require_platform_admin(authorization: str | None = Header(default=None)) -> 
     # Only a real platform admin gets this far, so answering with a catalog
     # code instead of a 404 reveals nothing to anyone else (7.15.1).
     if get_settings().console_mfa_enforced and identity.aal != "aal2":
-        from app.errors import catalog_error
-
-        raise catalog_error("AUTH-006", status_code=403)
+        raise ConsoleRefused("AUTH-006", identity)
     return identity
+
+
+class ConsoleRefused(HTTPException):
+    """
+    AUTH-006 or AUTH-007 at the Console's gate, carrying who was refused
+    (D-178). The response is exactly the catalog 403 it always was; an
+    exception handler registered in main.py (its function lives in the admin
+    router, the only module allowed to write the audit) records the refusal
+    first. Recording never changes the answer.
+    """
+
+    def __init__(
+        self, code: str, identity: AuthenticatedIdentity, challenge_age_seconds: int | None = None
+    ) -> None:
+        from app.errors import catalog_detail
+
+        super().__init__(status_code=403, detail=catalog_detail(code))
+        self.code = code
+        self.identity = identity
+        self.challenge_age_seconds = challenge_age_seconds
 
 
 @dataclass(frozen=True)
@@ -386,9 +404,7 @@ def require_recent_mfa(identity: AuthenticatedIdentity = Depends(require_platfor
         and -MFA_CLOCK_TOLERANCE_SECONDS <= age <= MFA_STEP_UP_MAX_AGE_SECONDS + MFA_CLOCK_TOLERANCE_SECONDS
     )
     if not fresh:
-        from app.errors import catalog_error
-
-        raise catalog_error("AUTH-007", status_code=403)
+        raise ConsoleRefused("AUTH-007", identity, challenge_age_seconds=age)
     return StepUp(identity=identity, challenge_age_seconds=age)
 
 
