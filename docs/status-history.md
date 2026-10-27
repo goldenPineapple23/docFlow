@@ -4,6 +4,66 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-27 (#85 merged at ea6a988; the API deployed, v2; the sweep script opened, D-224)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-27, with D-178 merged and the dnspython fix open:** Phase 5.5,
+**Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
+(review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
+CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
+matched and the three staging suites passed (D-214 item 14). `backup_0039` stays until the founder
+drops it. **Next.js 16.4.1 is merged** (PR #78; D-216): three new advisories fixed. **zod 4.6.6 is
+merged** (PR #79; D-217) and **undici 7.30.1 is merged** (PR #80; D-221): new dev-only advisories,
+each fixed in the lock file. **D-215 (CLAUDE.md capped at 28k tokens) is merged** (PR #77). **The CI
+PR is merged** (PR #81; D-218): the port-54322 before/after steps in the four jobs that start the
+Supabase stack, and step timeouts on `supabase/setup-cli` (5 min, every use) and parse's LibreOffice
+install (15 min). **The audit PR is merged** (PR #82; D-219): a known vulnerability in what an app
+ships blocks only when that app's dependency files changed, a dev-only one warns, and there are no
+exceptions; pip-audit 2.10.1 audits each app's requirements files; a daily audit of `main` (its
+first run, by hand, and its first scheduled run, 2026-10-27, both green); and a check before every
+deploy (RUNBOOK 11). **The LibreOffice cache PR is merged** (PR #83; D-222): parse's LibreOffice
+.debs are cached under a key that follows the runner image, each one checked against the signed
+package lists before apt uses it; `main`'s cache is saved and every pull request restores from it
+(on 2026-10-27 a new runner image restored the older image's entry and saved one under its own key,
+as designed). **D-178 is merged** (PR #84, `main` is `3e021a6`; D-220; main's push run #490 green):
+a Console request refused with AUTH-006 or AUTH-007 is recorded (5 rows per account per 15 min, the
+5th raises a high alert, the rest are logged), and every Console write records its outcome, so the
+Audit tab says "Outcome unknown" rather than showing a stopped request as done. The step-up
+measurement on staging gave 0 AUTH-006 and 1 AUTH-007, so the 5-in-15-minute threshold stays (D-220
+item 7), and the three staging suites passed on its head with the six counts +0. Supabase limits MFA
+code checks per IP only (GoTrue v2.197.0, no per-account lockout): per-account protection is a gate
+before the first pilot. **The dnspython fix is open** (D-223): GHSA-45c3-73f7-pv4m (CVE-2026-114605,
+high, published 2026-10-27) in dnspython 2.8.0 stopped the API's deploy at RUNBOOK 11's check. The
+API's lock moves to 2.9.0 and nothing else moves; DocFlow's code never reaches dnspython (pydantic's
+`EmailStr` validates without deliverability checks). It runs no staging suites: a lock-only PR runs
+them only when the changed package is on a path the suites exercise (founder, D-223).
+**The CI infrastructure flake count is 9** (D-199 item 10; flakes 5 to 9 are parse's LibreOffice
+install timing out at 15 min on 2026-10-26, D-219 items 8 and 9, D-222 items 8 and 9). **A standing
+rule (D-213 item 6, tightened in D-214): a staging suite, a Fly action or any write to staging
+starts only after a message from the founder that begins with "Grant" and names the step.** **Two
+new rules:** SQL the founder runs on staging is first checked by Claude read-only (D-214 item 15),
+and before a file outside one app is changed, every reader of it is found and its tests are run
+(D-216 item 6). **Next, in order:** the dnspython fix (above); then the API deploy to
+`docflow-api-staging`, confirming one recorded refusal live (D-220's plan; its own Grant); then the
+sweep script (its plan approved 2026-10-27), the warnings and the 32-byte test secret (with the two
+thin-margin `test_parse_client.py` tests, D-212 item 8, and the dev tools out of the API's and the
+worker's images, D-219 item 7, before `docflow-prod` exists, and the local API environment brought
+in line with its lock: it holds 107 packages against the lock's 78 pins, certifi installed from a
+file among them, so the staging suites don't run what ships; founder, 2026-10-27, D-223), M10
+without the model IDs, the 375 px fix, then counting rows before extraction, and the docs PR last
+(it also takes `apps/web/AGENTS.md`, whose first heading `next dev` rewrote from `#` to `##` when it
+started on 2026-10-27: either commit that heading or stop `next dev` from rewriting the file;
+founder). Then E1 and E2a, then demo readiness (D-209). The long catalog commit's test through a
+public address needs its own grant. The 50,000-row cap and IMP-003's wording: one PR, before pilots,
+only if a pilot prospect has more than 50,000 SKUs. The welding demo comes after the fastener
+rehearsal and never blocks it (D-208). **Staging:** the database has 0039. `docflow-api-staging`
+runs v1, 2026-10-06's image. `docflow-parse-staging` runs PR B's image (Pillow 13.0.0).
+`docflow-worker-staging` runs `e95b095`'s image (D-212) with no machines; certifi 2026.10.19 and
+M7's code reach it at its next deploy. **That staging worker deploy is owed under D-209 (staging is
+redeployed after a merge, then the demo smoke test) before anything relies on staging's worker, and
+it needs a Grant.** The API and parse machines are stopped, with auto-stop on, and the
+Healthchecks.io check is paused.
+
 ## Replaced on 2026-10-27 (#84 merged at 3e021a6; the dnspython fix opened, D-223)
 
 <!-- the paragraph as it stood, starting on the next line -->

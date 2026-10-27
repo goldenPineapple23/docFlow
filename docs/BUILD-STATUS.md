@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-10-27, with D-178 merged and the dnspython fix open:** Phase 5.5,
+**Status, as of 2026-10-27, with the dnspython fix merged, the API deployed and the sweep script open:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -36,44 +36,51 @@ deploy (RUNBOOK 11). **The LibreOffice cache PR is merged** (PR #83; D-222): par
 .debs are cached under a key that follows the runner image, each one checked against the signed
 package lists before apt uses it; `main`'s cache is saved and every pull request restores from it
 (on 2026-10-27 a new runner image restored the older image's entry and saved one under its own key,
-as designed). **D-178 is merged** (PR #84, `main` is `3e021a6`; D-220; main's push run #490 green):
-a Console request refused with AUTH-006 or AUTH-007 is recorded (5 rows per account per 15 min, the
+as designed). **D-178 is merged** (PR #84, at `3e021a6`; D-220; main's push run #490 green): a
+Console request refused with AUTH-006 or AUTH-007 is recorded (5 rows per account per 15 min, the
 5th raises a high alert, the rest are logged), and every Console write records its outcome, so the
 Audit tab says "Outcome unknown" rather than showing a stopped request as done. The step-up
 measurement on staging gave 0 AUTH-006 and 1 AUTH-007, so the 5-in-15-minute threshold stays (D-220
 item 7), and the three staging suites passed on its head with the six counts +0. Supabase limits MFA
 code checks per IP only (GoTrue v2.197.0, no per-account lockout): per-account protection is a gate
-before the first pilot. **The dnspython fix is open** (D-223): GHSA-45c3-73f7-pv4m (CVE-2026-114605,
-high, published 2026-10-27) in dnspython 2.8.0 stopped the API's deploy at RUNBOOK 11's check. The
-API's lock moves to 2.9.0 and nothing else moves; DocFlow's code never reaches dnspython (pydantic's
-`EmailStr` validates without deliverability checks). It runs no staging suites: a lock-only PR runs
-them only when the changed package is on a path the suites exercise (founder, D-223).
+before the first pilot. **The dnspython fix is merged** (PR #85, `main` is `ea6a988`; D-223; main's
+push run #493 green): GHSA-45c3-73f7-pv4m in dnspython 2.8.0 had stopped the API's deploy at RUNBOOK
+11's check; the API's lock moved to 2.9.0 and nothing else moved. A lock-only PR runs the staging
+suites only when the changed package is on a path the suites exercise (founder, D-223). **The API is
+deployed to `docflow-api-staging`** (release v2, `ea6a988`'s image
+`deployment-01M5Z5Z0ER07M6JHKGSBKAA8XA`; rollback is v1's image
+`deployment-01M48YSNPWSEXNDWZ3NEERM5QA`), and one refusal was recorded live through it: row
+`036931c2-37e0-4b10-9b2c-0132c3563242`, AUTH-007, the code 460 s old (D-220 item 11). `fly proxy`
+traffic doesn't keep the API machine up: a staging step through the proxy starts the machine and
+expects it to stop after a few idle minutes (founder; RUNBOOK 11.2; fly.toml unchanged).
 **The CI infrastructure flake count is 9** (D-199 item 10; flakes 5 to 9 are parse's LibreOffice
 install timing out at 15 min on 2026-10-26, D-219 items 8 and 9, D-222 items 8 and 9). **A standing
 rule (D-213 item 6, tightened in D-214): a staging suite, a Fly action or any write to staging
-starts only after a message from the founder that begins with "Grant" and names the step.** **Two
-new rules:** SQL the founder runs on staging is first checked by Claude read-only (D-214 item 15),
-and before a file outside one app is changed, every reader of it is found and its tests are run
-(D-216 item 6). **Next, in order:** the dnspython fix (above); then the API deploy to
-`docflow-api-staging`, confirming one recorded refusal live (D-220's plan; its own Grant); then the
-sweep script (its plan approved 2026-10-27), the warnings and the 32-byte test secret (with the two
-thin-margin `test_parse_client.py` tests, D-212 item 8, and the dev tools out of the API's and the
-worker's images, D-219 item 7, before `docflow-prod` exists, and the local API environment brought
-in line with its lock: it holds 107 packages against the lock's 78 pins, certifi installed from a
-file among them, so the staging suites don't run what ships; founder, 2026-10-27, D-223), M10
-without the model IDs, the 375 px fix, then counting rows before extraction, and the docs PR last
-(it also takes `apps/web/AGENTS.md`, whose first heading `next dev` rewrote from `#` to `##` when it
-started on 2026-10-27: either commit that heading or stop `next dev` from rewriting the file;
-founder). Then E1 and E2a, then demo readiness (D-209). The long catalog commit's test through a
-public address needs its own grant. The 50,000-row cap and IMP-003's wording: one PR, before pilots,
-only if a pilot prospect has more than 50,000 SKUs. The welding demo comes after the fastener
-rehearsal and never blocks it (D-208). **Staging:** the database has 0039. `docflow-api-staging`
-runs v1, 2026-10-06's image. `docflow-parse-staging` runs PR B's image (Pillow 13.0.0).
-`docflow-worker-staging` runs `e95b095`'s image (D-212) with no machines; certifi 2026.10.19 and
-M7's code reach it at its next deploy. **That staging worker deploy is owed under D-209 (staging is
-redeployed after a merge, then the demo smoke test) before anything relies on staging's worker, and
-it needs a Grant.** The API and parse machines are stopped, with auto-stop on, and the
-Healthchecks.io check is paused.
+starts only after a message from the founder that begins with "Grant" and names the step.** Any
+change to a granted command, a flag such as `--app` included, is told to the founder before it runs
+(founder, 2026-10-27). **Two new rules:** SQL the founder runs on staging is first checked by Claude
+read-only (D-214 item 15), and before a file outside one app is changed, every reader of it is found
+and its tests are run (D-216 item 6). **Next, in order:** the sweep script (open, D-224); then the
+warnings and the 32-byte test secret (with the two thin-margin `test_parse_client.py` tests, D-212
+item 8, and the dev tools out of the API's and the worker's images, D-219 item 7, before
+`docflow-prod` exists, and the local API environment brought in line with its lock: it holds 107
+packages against the lock's 78 pins, certifi installed from a file among them, so the staging suites
+don't run what ships; founder, 2026-10-27, D-223), M10 without the model IDs, the 375 px fix, then
+counting rows before extraction, and the docs PR last (it also takes `apps/web/AGENTS.md`, whose
+first heading `next dev` rewrote from `#` to `##` when it started on 2026-10-27: either commit that
+heading or stop `next dev` from rewriting the file; founder). Then E1 and E2a, then demo readiness
+(D-209). **To investigate later, not now (founder, 2026-10-27):** CI's "Install Playwright browser"
+step (web-live) took 9 to 11 minutes on PR runs #489 and #492 but under 30 seconds on main's push
+run #490, likely a cache miss on PR runs, costing about 10 minutes per PR. The long catalog commit's
+test through a public address needs its own grant. The 50,000-row cap and IMP-003's wording: one PR,
+before pilots, only if a pilot prospect has more than 50,000 SKUs. The welding demo comes after the
+fastener rehearsal and never blocks it (D-208). **Staging:** the database has 0039.
+`docflow-api-staging` runs v2, `ea6a988`'s image. `docflow-parse-staging` runs PR B's image (Pillow
+13.0.0). `docflow-worker-staging` runs `e95b095`'s image (D-212) with no machines; certifi
+2026.10.19 and M7's code reach it at its next deploy. **That staging worker deploy is owed under
+D-209 (staging is redeployed after a merge, then the demo smoke test) before anything relies on
+staging's worker, and it needs a Grant.** The API and parse machines are stopped, with auto-stop on,
+and the Healthchecks.io check is paused.
 
 **That paragraph is the current state only** (founder, 2026-10-05; D-191). When it changes, the
 paragraph it replaces moves, word for word, to the top of `docs/status-history.md`, which is not

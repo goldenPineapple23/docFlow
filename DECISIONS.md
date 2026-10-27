@@ -5176,6 +5176,24 @@ The plan was approved on 2026-10-23, with the founder's answers and three change
   - **API:** the changed and reader files collect 93 tests.
   - **Lint and types:** ruff and mypy pass for core, the API and the worker, as CI runs them.
 
+**11. One refusal recorded live on the deployed API (founder's Grant, 2026-10-27).**
+- **The deploy:**
+  - `main` at `ea6a988` (#85's merge; its push run #493 green) went to `docflow-api-staging` with `apps/api/fly.toml`'s command, 17:19:09 to 17:20:24Z.
+  - RUNBOOK 11's three checks passed first: that commit's CI, the daily audit (#2, 12:31Z) and `predeploy_audit.sh api` (exit 0, 0 vulnerabilities).
+  - It is **release v2**, image `deployment-01M5Z5Z0ER07M6JHKGSBKAA8XA`. **Rollback:** v1's image `deployment-01M48YSNPWSEXNDWZ3NEERM5QA`.
+  - The deploy left machine `8e7d7eb762d918` stopped, as D-223 item 7 expected. Once it was started, `GET /healthz` through `fly proxy 8000` answered 200 with `"status":"ok"`. The dispatcher's heartbeat was stale, since the worker wasn't running.
+- **Enforcement was on:** the secret `CONSOLE_MFA_ENFORCED` is set, and the startup log has no `console_mfa_enforcement_off` warning. Under uvicorn's log setup, a `docflow.api` warning does reach that log (checked locally).
+- **What the founder did:** used the local web app, talking to the deployed API through the proxy.
+  - Signed in with a code at 17:36Z.
+  - More than 330 s later, ran Replace address on "Acme Test Sweep A" (item 7's tenant).
+  - Cancelled the step-up dialog instead of entering a code.
+- **The row:** `036931c2-37e0-4b10-9b2c-0132c3563242`, 17:44:36.677Z, `console_refused`: AUTH-007, POST `/admin/tenants/{tenant_id}/intake-address/rotate`, the code 460 s old, on the tenant. The API's log has the 403, and no `console_refused_not_recorded` or `console_refusal_record_failed` line.
+- **Everything else written from 17:20Z:** 18 `read` and 4 `quarantine_read` rows, from the same account. There was no founder alert, and no rotate request or outcome row, because the dialog was cancelled. Staging now holds 2 `console_refused` rows.
+- **Auto-stop:**
+  - Fly stopped the machine at 17:26:43Z, 17:42:35Z and 17:52:05Z, 6 to 8 minutes after each of its three starts. `fly proxy` traffic doesn't keep the machine up (founder).
+  - The second and third starts had the founder's OK. `fly.toml` is unchanged (founder); RUNBOOK 11.2 records it.
+- **A rule restated (founder):** any change to a granted command, including an added flag, is told to the founder before it runs. The first start ran with `--app docflow-api-staging` added, and that was said only afterwards.
+
 **Founder approval:** 2026-10-23 (the plan, the answers, changes A to C, the revision with the simple cap); 2026-10-27 (option A, the before-first-pilot gate, building D-178, the five changes from the plan, and item 10).
 
 **Related:** D-151, D-170, D-177, D-178, D-199, D-213 (item 6), D-219, D-222; `apps/api/app/deps.py`, `apps/api/app/routers/admin.py`, `apps/api/app/main.py`, `packages/core/docflow_core/admin_data_access.py`, `packages/core/docflow_core/constants.py`, `packages/core/docflow_core/founder_alerts.py`, `apps/web/src/lib/auditOutcome.ts`, the Audit page; RUNBOOK 4.4, 4.5 and 9.6.

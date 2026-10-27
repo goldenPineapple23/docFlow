@@ -2943,3 +2943,21 @@ nothing else moved:
    `web-live` jobs install the exact lock.
 
 Delete the throwaway environment afterwards.
+
+### 11.2 A staging step through `fly proxy` (founder, 2026-10-27; D-220 item 11)
+
+`fly proxy` traffic doesn't keep the machine up. `docflow-api-staging`
+has auto-stop on (`auto_stop_machines = "stop"`, `min_machines_running =
+0`) and no address, so nothing wakes a stopped machine. A deploy leaves it
+stopped too.
+
+1. **Start the machine first:** `fly machine start <id> --app <app>`.
+   Then open `fly proxy 8000 --app <app>`, and `GET /healthz` through it.
+2. **Expect it to stop after a few idle minutes.** On 2026-10-27 it
+   stopped 6 to 8 minutes after each of three starts.
+3. **A step that waits** (a step-up code older than 330 s, for example):
+   right before the request, check the machine with `fly machine list`
+   (read-only), and start it again if it has stopped. A start is a Fly
+   action, so it needs the founder's Grant (D-213 item 6).
+
+`fly.toml` stays as it is (founder).
