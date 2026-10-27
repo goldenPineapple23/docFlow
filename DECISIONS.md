@@ -5352,6 +5352,30 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
   - the guard passed with the real settings, over the pooler's session mode, with Storage listing;
   - the result: 33 "Acme Test" tenants older than a day, 16 of them unmarked.
 
+**12. The proof delete on staging (founder's Grant, 2026-10-27).** Recorded by id only (item 9).
+- **The run:** tenant `21d1215f-2cca-4dbc-a732-b46ab67a7029`, swept from the PR's head `b359cdf`, 18:54:10 to 18:54:20Z, exit 0.
+  - The flags were set inline in Git Bash, as RUNBOOK 12 says.
+  - Before it, no suite held a run-lock key and no test run was going on the founder's machine.
+  - It was unmarked, active and never live. Of the unmarked tenants it was chosen for the wider coverage: documents and Storage objects.
+- **Removed:** 13 rows and 2 Storage objects.
+  - **The rows:** `buyers` 1, `document_headers` 2, `documents` 2, `intake_addresses` 1, `tenant_daily_metrics` 5, `tenants` 1, `users` 1.
+  - **The objects:** two 38-byte files under `uploads/`.
+- **The backup:** `C:\Users\NK\docflow-sweep-backups\21d1215f-2cca-4dbc-a732-b46ab67a7029-20261027T185413Z`, each file's SHA-256 matching when hashed again separately:
+  - `rows.json`: `b65fe82cf2936635de7dfd37370ff3891dd901d846ac8521dffa2f94a5d05cca`
+  - `storage/…/uploads/7363981dc04c4d458c4e147085944bec.txt`: `763144c8a9c35f93349ec718a9ab31065910b5416bba8099c03b1b973a843693`
+  - `storage/…/uploads/fbc412cf88c14041bf2f8bf5fed61f9c.txt`: `73fb7fae43dafbe9c20af00140bb1cd746a3ed3c2e28c687aeb7a95c8ca1f44b`
+  - `manifest.json`: `ab3695ca5599859093ec665f7cd418a2824f2b1a4c908eecb16a2bd9ec5286e4`
+- **The final check, read separately afterwards (read-only):**
+  - no row in any of the 35 columns ending in `tenant_id`;
+  - no `tenants` row and no creation request row;
+  - an empty Storage prefix.
+- **The Auth account left behind:** one, its address in the output and the manifest.
+- **`list` after the delete** (read-only, 18:54:58 to 18:55:37Z): 32 tenants, 15 unmarked. The swept tenant is gone, and the other 32 are identical to the earlier list, line for line.
+- **The six counts,** 18:53:46Z before and 18:55:38Z after:
+  - tenants 35 → 34, the swept tenant;
+  - founder alerts 4, e-mails 30, scheduled jobs 35, platform-admin rows 12 and users with no tenant 15, all unchanged. The removed user had a tenant, so it was never in the last count.
+- **Nothing else was written:** both `list` runs were read-only, and the sweep writes no audit row of its own.
+
 **Founder approval:** 2026-10-27 (the plan and answers 1 to 7; the lock in the script, on the purge's own transaction; option (a) for the boundary test; the Storage endpoint check; the guard's tests in core; the records rule).
 
 **Related:** Section 0 rule 5, Section 7.10; D-180, D-197, D-211, D-213 (item 6), D-220 (item 8); `scripts/sweep_test_tenants.py`, `apps/api/tests/tenant_cleanup.py`, `apps/api/tests/suite_lock.py`; RUNBOOK 1.4 and 12.
