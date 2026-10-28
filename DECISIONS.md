@@ -4310,6 +4310,7 @@ Everything else fails as before: a deadlock (40P01), a serialization failure (40
 **8. Added to the warnings and 32-byte test-secret PR (PR 7) (founder):** two `test_parse_client.py` tests, `test_busy_is_retried_then_never_got_in` and `test_busy_then_free_parses`. Each gives the client 3 s to retry, and a 1 s "busy" answer must come back first, so the first request must finish within 2.0 s.
 - Estimated from their durations: about 60% margin serially and 20% and 26% in the parallel run, assuming the test's two requests take equal time.
 - **Before PR 7:** measure their first-request time locally, every outside service blocked, in a quiet run and a run with the CPU busy, and report it against the 2.0 s window. Then propose either removing the dependence on wall time or widening the window. No change before the founder approves.
+- **A later item (founder, 2026-10-28; no code change in PR 7):** production's parse client builds a new TLS context on every request (`parse_client._post` calls `httpx.post`, which makes a new client each time); on the founder's PC that context took 0.21 s with certifi's CA bundle against 0.02 s with the system store.
 
 **Related:** D-196 (step 11, STOP 3), D-197 (item 3), D-199, D-202, D-210 (item 9), D-211; RUNBOOK 1.4, 9.8; `apps/worker/app/run_workers.py`, `apps/worker/app/celery_app.py`.
 
@@ -5235,6 +5236,7 @@ The plan was approved on 2026-10-23, with the founder's answers and three change
 - **The rule:** a lock-only PR runs the staging suites only when the changed package is on a path the suites exercise.
 - **Why not here:** the suites run from the local API environment, which doesn't follow the lock, so they would not test dnspython 2.9.0. CI's `api` and `web-live` jobs install the exact lock. dnspython is never reached.
 - **Why #74 differed:** certifi sits on the TLS path the suites exercise (D-213 item 2).
+- **A PR that changes only tests (founder, 2026-10-28):** it runs the staging suites only if the staging environment can change those tests' results in a way CI can't show.
 
 **6. A new item for the list (founder).** The local API environment holds 107 packages against the lock's 78 pins, certifi among them installed from a file, so the staging suites don't run what ships. Listed in BUILD-STATUS next to the dev tools out of the API's and the worker's images (D-219 item 7).
 
