@@ -33,7 +33,7 @@ from sqlalchemy import text
 from tests.conftest import requires_review_schema
 from tests.test_validation import _TestValidationTenant
 
-JWT_SECRET = "test-only-secret-for-ci"
+JWT_SECRET = "test-only-secret-for-ci-at-least-32-bytes"
 SIGNING_SECRET = "test-only-signing-secret-not-a-real-one"
 
 CLEAN_HEADER = {"po_number": "BCH-2291", "order_total": Decimal("570.00")}

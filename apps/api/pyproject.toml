@@ -5,6 +5,8 @@ markers = [
     "console_mfa_notice: a test about the 'Console MFA enforcement is off' founder alert (D-177); it resets and cleans up the notice itself.",
 ]
 addopts = "-m \"not live_api\""
+# A test HMAC key under 32 bytes fails the test, so the short keys can't come back (D-163, D-199).
+filterwarnings = ["error::jwt.warnings.InsecureKeyLengthWarning"]
 
 [tool.ruff]
 line-length = 110

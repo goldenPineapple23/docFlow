@@ -36,7 +36,7 @@ from sqlalchemy import text
 from tests.conftest import requires_console_schema
 from tests.tenant_cleanup import purge_test_tenant, register_test_tenant
 
-JWT_SECRET = "test-only-secret-for-ci"
+JWT_SECRET = "test-only-secret-for-ci-at-least-32-bytes"
 CATALOG_CSV = b"sku,description,unit_of_measure\nTEST-1001,Test Beans 5lb,CS\nTEST-1002,Test Cups,BOX\n"
 
 
