@@ -25,7 +25,7 @@ def test_admin_route_404_without_any_auth_header(client):
 
 
 def test_admin_route_404_with_malformed_bearer_token(client, monkeypatch):
-    monkeypatch.setenv("SUPABASE_JWT_SECRET", "test-only-secret-for-ci")
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", "test-only-secret-for-ci-at-least-32-bytes")
     get_settings.cache_clear()
     try:
         response = client.get("/admin/tenants", headers={"Authorization": "Bearer not-a-real-jwt"})
@@ -42,7 +42,7 @@ def test_admin_route_404_with_validly_signed_but_unknown_user_token(client, monk
     platform_admins row) must still 404, not 401/403/500. Needs a real DB
     connection because resolving "does this user exist" is itself a lookup.
     """
-    secret = "test-only-secret-for-ci"
+    secret = "test-only-secret-for-ci-at-least-32-bytes"
     monkeypatch.setenv("SUPABASE_JWT_SECRET", secret)
     get_settings.cache_clear()
     try:
@@ -70,7 +70,7 @@ def test_platform_admin_can_create_tenant_and_admin_action_is_recorded(client, m
     cleans up everything it inserts -- this test must be safe to re-run
     against docflow-staging without accumulating rows.
     """
-    secret = "test-only-secret-for-ci"
+    secret = "test-only-secret-for-ci-at-least-32-bytes"
     monkeypatch.setenv("SUPABASE_JWT_SECRET", secret)
     get_settings.cache_clear()
     # Tenant creation makes the Stripe customer (Section 7.15.2 Step 2); a

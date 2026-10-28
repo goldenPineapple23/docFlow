@@ -25,7 +25,7 @@ from docflow_core.config import get_settings
 
 from app import deps
 
-HS_SECRET = "test-only-legacy-shared-secret"
+HS_SECRET = "test-only-legacy-shared-secret-at-least-32-bytes"
 CLAIMS = {"sub": "11111111-1111-1111-1111-111111111111", "email": "x@example.test", "aud": "authenticated"}
 
 
@@ -96,7 +96,7 @@ def test_a_token_signed_with_the_wrong_es256_key_is_refused(monkeypatch, es256_k
 def test_a_token_signed_with_the_wrong_shared_secret_is_refused(monkeypatch, es256_keys):
     _, public_key = es256_keys
     _stub_jwks(monkeypatch, public_key)
-    token = jwt.encode(CLAIMS, "not-the-secret", algorithm="HS256")
+    token = jwt.encode(CLAIMS, "not-the-secret-though-also-at-least-32-bytes", algorithm="HS256")
 
     assert deps._decode_bearer_token(f"Bearer {token}") is None
 

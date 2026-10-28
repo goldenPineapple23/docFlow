@@ -4,6 +4,73 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-10-27 (#86 merged at d053cca; the warnings PR opened)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-10-27, with the dnspython fix merged, the API deployed and the sweep script open:** Phase 5.5,
+**Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
+(review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
+CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
+matched and the three staging suites passed (D-214 item 14). `backup_0039` stays until the founder
+drops it. **Next.js 16.4.1 is merged** (PR #78; D-216): three new advisories fixed. **zod 4.6.6 is
+merged** (PR #79; D-217) and **undici 7.30.1 is merged** (PR #80; D-221): new dev-only advisories,
+each fixed in the lock file. **D-215 (CLAUDE.md capped at 28k tokens) is merged** (PR #77). **The CI
+PR is merged** (PR #81; D-218): the port-54322 before/after steps in the four jobs that start the
+Supabase stack, and step timeouts on `supabase/setup-cli` (5 min, every use) and parse's LibreOffice
+install (15 min). **The audit PR is merged** (PR #82; D-219): a known vulnerability in what an app
+ships blocks only when that app's dependency files changed, a dev-only one warns, and there are no
+exceptions; pip-audit 2.10.1 audits each app's requirements files; a daily audit of `main` (its
+first run, by hand, and its first scheduled run, 2026-10-27, both green); and a check before every
+deploy (RUNBOOK 11). **The LibreOffice cache PR is merged** (PR #83; D-222): parse's LibreOffice
+.debs are cached under a key that follows the runner image, each one checked against the signed
+package lists before apt uses it; `main`'s cache is saved and every pull request restores from it
+(on 2026-10-27 a new runner image restored the older image's entry and saved one under its own key,
+as designed). **D-178 is merged** (PR #84, at `3e021a6`; D-220; main's push run #490 green): a
+Console request refused with AUTH-006 or AUTH-007 is recorded (5 rows per account per 15 min, the
+5th raises a high alert, the rest are logged), and every Console write records its outcome, so the
+Audit tab says "Outcome unknown" rather than showing a stopped request as done. The step-up
+measurement on staging gave 0 AUTH-006 and 1 AUTH-007, so the 5-in-15-minute threshold stays (D-220
+item 7), and the three staging suites passed on its head with the six counts +0. Supabase limits MFA
+code checks per IP only (GoTrue v2.197.0, no per-account lockout): per-account protection is a gate
+before the first pilot. **The dnspython fix is merged** (PR #85, `main` is `ea6a988`; D-223; main's
+push run #493 green): GHSA-45c3-73f7-pv4m in dnspython 2.8.0 had stopped the API's deploy at RUNBOOK
+11's check; the API's lock moved to 2.9.0 and nothing else moved. A lock-only PR runs the staging
+suites only when the changed package is on a path the suites exercise (founder, D-223). **The API is
+deployed to `docflow-api-staging`** (release v2, `ea6a988`'s image
+`deployment-01M5Z5Z0ER07M6JHKGSBKAA8XA`; rollback is v1's image
+`deployment-01M48YSNPWSEXNDWZ3NEERM5QA`), and one refusal was recorded live through it: row
+`036931c2-37e0-4b10-9b2c-0132c3563242`, AUTH-007, the code 460 s old (D-220 item 11). `fly proxy`
+traffic doesn't keep the API machine up: a staging step through the proxy starts the machine and
+expects it to stop after a few idle minutes (founder; RUNBOOK 11.2; fly.toml unchanged).
+**The CI infrastructure flake count is 9** (D-199 item 10; flakes 5 to 9 are parse's LibreOffice
+install timing out at 15 min on 2026-10-26, D-219 items 8 and 9, D-222 items 8 and 9). **A standing
+rule (D-213 item 6, tightened in D-214): a staging suite, a Fly action or any write to staging
+starts only after a message from the founder that begins with "Grant" and names the step.** Any
+change to a granted command, a flag such as `--app` included, is told to the founder before it runs
+(founder, 2026-10-27). **Two new rules:** SQL the founder runs on staging is first checked by Claude
+read-only (D-214 item 15), and before a file outside one app is changed, every reader of it is found
+and its tests are run (D-216 item 6). **Next, in order:** the sweep script (open, D-224); then the
+warnings and the 32-byte test secret (with the two thin-margin `test_parse_client.py` tests, D-212
+item 8, and the dev tools out of the API's and the worker's images, D-219 item 7, before
+`docflow-prod` exists, and the local API environment brought in line with its lock: it holds 107
+packages against the lock's 78 pins, certifi installed from a file among them, so the staging suites
+don't run what ships; founder, 2026-10-27, D-223), M10 without the model IDs, the 375 px fix, then
+counting rows before extraction, and the docs PR last (it also takes `apps/web/AGENTS.md`, whose
+first heading `next dev` rewrote from `#` to `##` when it started on 2026-10-27: either commit that
+heading or stop `next dev` from rewriting the file; founder). Then E1 and E2a, then demo readiness
+(D-209). **To investigate later, not now (founder, 2026-10-27):** CI's "Install Playwright browser"
+step (web-live) took 9 to 11 minutes on PR runs #489 and #492 but under 30 seconds on main's push
+run #490, likely a cache miss on PR runs, costing about 10 minutes per PR. The long catalog commit's
+test through a public address needs its own grant. The 50,000-row cap and IMP-003's wording: one PR,
+before pilots, only if a pilot prospect has more than 50,000 SKUs. The welding demo comes after the
+fastener rehearsal and never blocks it (D-208). **Staging:** the database has 0039.
+`docflow-api-staging` runs v2, `ea6a988`'s image. `docflow-parse-staging` runs PR B's image (Pillow
+13.0.0). `docflow-worker-staging` runs `e95b095`'s image (D-212) with no machines; certifi
+2026.10.19 and M7's code reach it at its next deploy. **That staging worker deploy is owed under
+D-209 (staging is redeployed after a merge, then the demo smoke test) before anything relies on
+staging's worker, and it needs a Grant.** The API and parse machines are stopped, with auto-stop on,
+and the Healthchecks.io check is paused.
+
 ## Replaced on 2026-10-27 (#85 merged at ea6a988; the API deployed, v2; the sweep script opened, D-224)
 
 <!-- the paragraph as it stood, starting on the next line -->

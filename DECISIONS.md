@@ -4310,6 +4310,7 @@ Everything else fails as before: a deadlock (40P01), a serialization failure (40
 **8. Added to the warnings and 32-byte test-secret PR (PR 7) (founder):** two `test_parse_client.py` tests, `test_busy_is_retried_then_never_got_in` and `test_busy_then_free_parses`. Each gives the client 3 s to retry, and a 1 s "busy" answer must come back first, so the first request must finish within 2.0 s.
 - Estimated from their durations: about 60% margin serially and 20% and 26% in the parallel run, assuming the test's two requests take equal time.
 - **Before PR 7:** measure their first-request time locally, every outside service blocked, in a quiet run and a run with the CPU busy, and report it against the 2.0 s window. Then propose either removing the dependence on wall time or widening the window. No change before the founder approves.
+- **A later item (founder, 2026-10-28; no code change in PR 7):** production's parse client builds a new TLS context on every request (`parse_client._post` calls `httpx.post`, which makes a new client each time); on the founder's PC that context took 0.21 s with certifi's CA bundle against 0.02 s with the system store.
 
 **Related:** D-196 (step 11, STOP 3), D-197 (item 3), D-199, D-202, D-210 (item 9), D-211; RUNBOOK 1.4, 9.8; `apps/worker/app/run_workers.py`, `apps/worker/app/celery_app.py`.
 
@@ -5235,6 +5236,7 @@ The plan was approved on 2026-10-23, with the founder's answers and three change
 - **The rule:** a lock-only PR runs the staging suites only when the changed package is on a path the suites exercise.
 - **Why not here:** the suites run from the local API environment, which doesn't follow the lock, so they would not test dnspython 2.9.0. CI's `api` and `web-live` jobs install the exact lock. dnspython is never reached.
 - **Why #74 differed:** certifi sits on the TLS path the suites exercise (D-213 item 2).
+- **A PR that changes only tests (founder, 2026-10-28):** it runs the staging suites only if the staging environment can change those tests' results in a way CI can't show.
 
 **6. A new item for the list (founder).** The local API environment holds 107 packages against the lock's 78 pins, certifi among them installed from a file, so the staging suites don't run what ships. Listed in BUILD-STATUS next to the dev tools out of the API's and the worker's images (D-219 item 7).
 
@@ -5376,6 +5378,25 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
   - founder alerts 4, e-mails 30, scheduled jobs 35, platform-admin rows 12 and users with no tenant 15, all unchanged. The removed user had a tenant, so it was never in the last count.
 - **Nothing else was written:** both `list` runs were read-only, and the sweep writes no audit row of its own.
 
-**Founder approval:** 2026-10-27 (the plan and answers 1 to 7; the lock in the script, on the purge's own transaction; option (a) for the boundary test; the Storage endpoint check; the guard's tests in core; the records rule).
+**13. The staging suites on the PR's head, `f44a9d7` (founder's Grants, 2026-10-27), and a staging-suite timing failure.**
+- **How they ran:** in parallel through `scripts/run_suites_parallel.py`, 19:06:49 to 19:58:03Z, exit 1. Only the staging database, Storage and loopback were reachable, `DOCFLOW_STAGING_RUN=1` was set, and the dev parse service was on 8100 for the API suite. The logins were each app's own (the runner's connection peak, 26 at 19:14:06Z, names `docflow_api`, `docflow_worker`, `docflow_admin` and `docflow_stripe`).
+  - core, `f44a9d7`: `1200 passed, 1 skipped in 169.05s (0:02:49)`
+  - worker, `f44a9d7`: `260 passed, 8 skipped in 2505.05s (0:41:45)`
+  - API, `f44a9d7`: `1 failed, 772 passed, 1 skipped, 3 deselected, 723 warnings in 3060.99s (0:51:00)`
+  - **The six counts, before -> after:** tenants 34 -> 34, founder alerts 4 -> 4, e-mails 30 -> 30, scheduled jobs 35 -> 35, platform-admin rows 12 -> 12, users with no tenant 15 -> 15. All `+0`. The database grew 81,920 bytes.
+  - **Afterwards:** the dev parse service was stopped, and 8100 was free at 19:58:44Z.
+- **The failure:** `test_lifecycle_api.py::test_for_cause_is_immediate`.
+  - **What it read:** `cancellation_effective_at` was 19:34:09.20Z, the database's `now()`, which is the transaction's start. The test's own clock, read after the response, was 19:34:24.69Z. That is 15.49 s, against the test's 5 s limit. The test took 19.54 s.
+  - **Not clock skew:** the database's clock was +0.15 s from the PC's (measured 19:59Z). The time went on the request, under the parallel run's load.
+  - **Not the PR:** the PR touches no app, core or lifecycle code, and CI passed the test on `b359cdf` and `f44a9d7`.
+  - **Not a CI flake (founder):** it is recorded as a staging-suite timing failure, and the CI flake count stays 9 (D-199 item 10).
+- **The API suite again, alone** (its own Grant), 20:05:40 to 20:59:54Z, with the same environment and arguments, its run lock exclusive:
+  - API, `f44a9d7`: `773 passed, 1 skipped, 3 deselected, 723 warnings in 3242.90s (0:54:02)`
+  - The six counts were all `+0` (tenants 34), and 8100 was free at 21:00:31Z.
+- **A candidate fix, not built:** the test measures against this PC's clock after the response, so its tolerance is tight under load. Reading the clock before the request and after it, and requiring the effective date to fall between the two, would remove that.
 
-**Related:** Section 0 rule 5, Section 7.10; D-180, D-197, D-211, D-213 (item 6), D-220 (item 8); `scripts/sweep_test_tenants.py`, `apps/api/tests/tenant_cleanup.py`, `apps/api/tests/suite_lock.py`; RUNBOOK 1.4 and 12.
+**14. The prefix match is case-sensitive (founder, 2026-10-27).** `list` filters with `name LIKE 'Acme Test%'`, and `purge_swept_tenant` refuses a name that doesn't start with "Acme Test". So tenant `2cc16e35-f80e-4e5a-8bde-93577f2c88d3`, "acme test prospect 3", is never listed and never swept. Its name is already in the records (D-165's incident while applying it), so writing it here changes no tenant's marks, and no test creates it.
+
+**Founder approval:** 2026-10-27 (the plan and answers 1 to 7; the lock in the script, on the purge's own transaction; option (a) for the boundary test; the Storage endpoint check; the guard's tests in core; the records rule). Items 13 and 14 were recorded after the merge, at the founder's request.
+
+**Related:** Section 0 rule 5, Section 7.10; D-165, D-180, D-197, D-199 (item 10), D-211, D-213 (item 6), D-220 (item 8); `scripts/sweep_test_tenants.py`, `apps/api/tests/tenant_cleanup.py`, `apps/api/tests/suite_lock.py`; RUNBOOK 1.4 and 12.

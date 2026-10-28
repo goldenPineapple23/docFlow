@@ -22,7 +22,7 @@ from sqlalchemy import text
 from tests.conftest import requires_database, requires_documents_schema
 from tests.tenant_cleanup import purge_test_tenant, register_test_tenant
 
-JWT_SECRET = "test-only-secret-for-ci"
+JWT_SECRET = "test-only-secret-for-ci-at-least-32-bytes"
 
 
 class _FakeCeleryClient:

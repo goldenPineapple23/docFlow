@@ -80,6 +80,41 @@ def service(monkeypatch):
     get_settings.cache_clear()
 
 
+class _FakeClock:
+    """parse_client's clock for the two busy-retry tests: time moves only when
+    the client sleeps, so how long a request takes on a busy machine can't
+    decide whether it retries (D-212 item 8)."""
+
+    # _post reads the clock at most twice between sleeps (to set the deadline,
+    # then to check it). A loop that reads it more without sleeping would never
+    # see fake time move, so it fails the test instead of hanging. 10 is well
+    # above 2, and still trips within a few turns of such a loop.
+    MAX_READS_WITHOUT_SLEEP = 10
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps: list[float] = []
+        self._reads = 0
+
+    def monotonic(self) -> float:
+        self._reads += 1
+        if self._reads > self.MAX_READS_WITHOUT_SLEEP:
+            pytest.fail(f"parse_client read the clock {self._reads} times without sleeping")
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+        self._reads = 0
+
+
+@pytest.fixture
+def fake_clock(monkeypatch):
+    clock = _FakeClock()
+    monkeypatch.setattr(parse_client, "time", clock)
+    return clock
+
+
 OK_ANSWER = {
     "outcome": "ok",
     "file_type": "docx",
@@ -127,18 +162,41 @@ def test_nothing_listening_is_never_got_in(monkeypatch):
         get_settings.cache_clear()
 
 
-def test_busy_is_retried_then_never_got_in(service):
-    stub = service(_json(503, {"error": "busy"}, {"Retry-After": "1"}))
+def test_busy_is_retried_then_never_got_in(service, fake_clock):
+    seen_at: list[float] = []
+    busy = _json(503, {"error": "busy"}, {"Retry-After": "1"})
+    service(lambda handler: (seen_at.append(fake_clock.now), busy(handler)))
     with pytest.raises(parse_client.ParseUnavailable) as excinfo:
         parse_client.parse_document(b"x", "po.pdf")
     assert excinfo.value.reason == "http_503"
-    assert len(stub.requests) >= 2  # retried within the patience
+    # Within the 3 s patience: Retry-After's 1 s, then doubled to 2 s; the
+    # next wait, 4 s, would pass the deadline.
+    assert seen_at == [0.0, 1.0, 3.0]
+    assert fake_clock.sleeps == [1.0, 2.0]
 
 
-def test_busy_then_free_parses(service):
+def test_busy_then_free_parses(service, fake_clock):
+    seen_at: list[float] = []
     answers = [_json(503, {"error": "busy"}, {"Retry-After": "1"}), _json(200, OK_ANSWER)]
-    service(lambda handler: answers.pop(0)(handler))
+    service(lambda handler: (seen_at.append(fake_clock.now), answers.pop(0)(handler)))
     assert parse_client.parse_document(b"x", "po.docx").outcome == "ok"
+    assert seen_at == [0.0, 1.0]
+    assert fake_clock.sleeps == [1.0]
+
+
+def test_a_slow_busy_answer_uses_up_the_patience(service, fake_clock):
+    busy = _json(503, {"error": "busy"}, {"Retry-After": "1"})
+
+    def slow_busy(handler):
+        fake_clock.now += 2.5  # the request itself took 2.5 s of the 3 s patience
+        busy(handler)
+
+    stub = service(slow_busy)
+    with pytest.raises(parse_client.ParseUnavailable) as excinfo:
+        parse_client.parse_document(b"x", "po.pdf")
+    assert excinfo.value.reason == "http_503"
+    # 2.5 s gone plus the 1 s wait would pass the deadline: no retry.
+    assert len(stub.requests) == 1 and fake_clock.sleeps == []
 
 
 def test_a_token_mismatch_is_never_got_in_and_not_retried(service):
