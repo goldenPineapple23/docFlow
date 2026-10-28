@@ -269,8 +269,9 @@ Memurai answering, as below):
 apps/api/.venv/Scripts/python scripts/run_suites_parallel.py <a folder outside the repository>
 ```
 
-It starts the three suites at once (`pytest -q -rs --durations=25`, one log
-each in that folder) with `DOCFLOW_TEST_PARALLEL_RUN=1`, so their run locks
+It starts the three suites at once, each in its own environment (11.3; core
+in `packages/core/.venv` since D-225), with `pytest -q -rs --durations=25`
+and one log each in that folder, and with `DOCFLOW_TEST_PARALLEL_RUN=1`, so their run locks
 take the shared key in shared mode and nothing else can start meanwhile. It
 reads the six leftover counts before it starts them and after the last one
 ends, and fails on anything but `+0`; each suite's own leftover line then
@@ -2938,9 +2939,11 @@ nothing else moved:
    the lock (D-216 item 6) are named in the PR.
 6. **Staging suites:** a lock-only PR runs them only when the changed
    package is on a path the suites exercise (founder, 2026-10-27; D-223).
-   The suites run from the local API environment, which does not follow
-   the lock, so they would not test the new version; CI's `api` and
-   `web-live` jobs install the exact lock.
+   The suites run from the local environments, which are built from the
+   locks and the dev files (11.3), so they test the new version only after
+   the environment that runs them is rebuilt as 11.3 says; CI's `api` and
+   `web-live` jobs install the exact lock. (Until 2026-10-28 they ran from
+   a local API environment that didn't follow the lock; D-223, D-225.)
 
 Delete the throwaway environment afterwards.
 
@@ -2961,6 +2964,54 @@ stopped too.
    action, so it needs the founder's Grant (D-213 item 6).
 
 `fly.toml` stays as it is (founder).
+
+### 11.3 The local Python environments (founder, 2026-10-28; D-225)
+
+Each suite runs locally in a virtual environment built the way its CI job
+builds it, on the Python CI uses: the newest 3.13 with a Windows installer
+(3.13.17 when this was written; 3.13 is now security-only, and its later
+releases are source-only). The images run Debian's own 3.13 (D-225 item 11).
+
+| Environment | Built in | From (CI's lines) |
+|---|---|---|
+| `apps/api/.venv` | `apps/api` | `requirements.lock.txt`, `requirements-dev.txt`; core with `--no-deps -e ../../packages/core` |
+| `apps/worker/.venv` | `apps/worker` | `requirements.lock.txt`, `requirements-dev.txt`; core the same way |
+| `packages/core/.venv` | `packages/core` | the worker's lock and dev file (core's CI job installs those); core with `--no-deps -e .` |
+
+The staging-suite runner (`scripts/run_suites_parallel.py`, 1.4) runs core
+in `packages/core/.venv`. The API's environment still runs the scripts that
+name it (the sweep, the Storage copy, the live end-to-end seed).
+
+**Building one** (the API's shown; the worker's is the same in
+`apps/worker`; core's uses the worker's two files and `-e .`):
+```
+py -3.13 -m venv .venv
+.venv\Scripts\python -m pip install --upgrade pip
+.venv\Scripts\python -m pip install -r requirements.lock.txt -r requirements-dev.txt
+.venv\Scripts\python -m pip install --no-deps -e ../../packages/core
+.venv\Scripts\python -m pip install pip-audit==2.10.1
+```
+pip-audit is installed as CI installs it, and RUNBOOK 11's
+`predeploy_audit.sh` needs it on PATH.
+
+**The check:** `pip check` prints `No broken requirements found.`, and
+`pip freeze` compared pin by pin with the files it was built from shows
+every pin at its version, nothing missing, and nothing extra except
+pip-audit 2.10.1 and its dependencies.
+
+**Rebuild it when** its lock or dev file changes, or CI's Python moves:
+1. Record `python -V` and `pip freeze` outside the repository.
+2. Move the old environment outside the repository, into the folder of
+   step 1 under the name `.venv-before-<date>`; never leave it in the tree
+   under another name. The tests that read the repo's own source files
+   (core's `test_broad_except_guard.py` and `test_heartbeat.py`, the API's
+   `test_console_shared_paths.py`) skip only folders named exactly `.venv`.
+   A renamed environment left in place made them read its site-packages:
+   locally, core had 3 errors and 3 failures and the API 1 failure, while CI,
+   which has no such folder, passes them (2026-10-28; D-225).
+3. Build and check as above, then run the suites with every outside
+   service blocked, and lint as CI does.
+4. Delete the old environment only on the founder's word.
 
 ## 12. The staging sweep: old test tenants (founder, 2026-10-27; D-224)
 

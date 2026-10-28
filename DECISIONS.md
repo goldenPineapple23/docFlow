@@ -5400,3 +5400,129 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** 2026-10-27 (the plan and answers 1 to 7; the lock in the script, on the purge's own transaction; option (a) for the boundary test; the Storage endpoint check; the guard's tests in core; the records rule). Items 13 and 14 were recorded after the merge, at the founder's request.
 
 **Related:** Section 0 rule 5, Section 7.10; D-165, D-180, D-197, D-199 (item 10), D-211, D-213 (item 6), D-220 (item 8); `scripts/sweep_test_tenants.py`, `apps/api/tests/tenant_cleanup.py`, `apps/api/tests/suite_lock.py`; RUNBOOK 1.4 and 12.
+
+## D-225 — The dev tools out of the API's and the worker's images, openpyxl and lxml out of the API's, and the local environments rebuilt on CI's Python (founder, 2026-10-28)
+
+**Context:** D-219 item 7: the API's and the worker's locks held their test and lint tools, and their Dockerfiles install the whole lock (`pip install --no-cache-dir --no-deps -r requirements.lock.txt`), so those tools shipped in the images. They move into `requirements-dev.txt` files, as parse's did, before `docflow-prod` exists. D-223 item 6 adds the local API environment, which held 107 packages against the lock's 78 pins, so the staging suites didn't run what ships. The plan was approved on 2026-10-28 with the founder's answers below; the branch is `phase55/stage5-dev-tools-split`, from `main` at `8d31b07` (#87's merge).
+
+**1. What moved, and how it was chosen.**
+- **The method:** the packages only the tools need, computed from the installed packages' own metadata, with the markers evaluated for Linux, the images' platform. A package moved only when nothing in the lock needs it.
+- **The API: 78 -> 63 pins.** Its new dev file holds 15:
+  - the tools: pytest 9.1.1, pytest-cov 7.1.0, coverage 7.16.1, mypy 2.3.1, ruff 0.16.7;
+  - their dependencies: ast_serialize 0.11.2, iniconfig 2.3.0, librt 0.15.0, mypy_extensions 1.1.0, pathspec 1.1.1, pluggy 1.6.0, Pygments 2.21.0;
+  - openpyxl 3.1.5, et_xmlfile 2.0.0 and lxml 6.1.3 (item 2).
+- **The worker: 67 -> 55 pins.** Its new dev file holds 12: pytest 9.1.1, hypothesis 6.168.1, mypy 2.3.1, ruff 0.16.8, and ast_serialize, iniconfig, librt, mypy_extensions, pathspec, pluggy, Pygments and sortedcontainers 2.4.0.
+- **hypothesis (founder's answer 1):** only `apps/worker/tests/test_numeric_fidelity_db.py` imports it.
+- **All the tools' dependencies, not only the tools (answer 2):** a dependency left in the lock would still ship.
+- **The files:** each lock keeps its BOM and line endings, and loses only the lines named here. `requirements.txt` in each app names the dev file in a comment instead of the tools.
+
+**2. openpyxl, et_xmlfile and lxml out of the API's lock (founder, option (ii): "I was wrong to keep them").**
+- **Nothing in `apps/api/app` imports them, and nothing may:** the API's `tests/test_parsing_boundary.py` forbids `openpyxl` in `FORBIDDEN_MODULES`, forbids core's `previews`, `parsing`, `conversion`, `exports` and `catalog_parsing` (`FORBIDDEN_CORE_MODULES`), and its XML guard catches `lxml` and `load_workbook`.
+- **Two API tests use them:** `test_catalog_import_api.py` writes a small .xlsx with openpyxl, and `test_exports_api.py` runs the worker's export code, which writes through lxml when it is installed. They come from the API's dev file, at the worker's lock's pins.
+- **The one import a module walk can't see:** `docflow_core/exports.py` imports openpyxl inside two functions (lines 263, 264 and 329). The API is forbidden to import `exports`.
+- **No check on the API's lock for openpyxl (founder):** "the import ban covers what matters."
+
+**3. The boundary tests and the dev files.**
+- **The API's boundary test reads no requirements file.** It parses the imports in `apps/api/app`. Option (ii) doesn't change it: it already forbade what moved.
+- **The worker's** `test_no_parsing_library_is_in_the_worker_or_api_requirements` is the only check of a requirements file. It loops over both apps and now reads `requirements-dev.txt` as well: a parser installed for the tests could hide one imported where it must not be.
+- **Its names** (`REQUIREMENT_NAMES`: pdfplumber, pdfminer.six, pypdfium2, python-docx, pillow, pillow-heif, olefile, xlrd, xlwt, defusedxml) don't include openpyxl or lxml, so the API's dev file passes it.
+
+**4. CI.**
+- **Installs:** the `api` and `worker` jobs run `pip install -r requirements.lock.txt -r requirements-dev.txt`, as `parse` already did. Core's job installs the worker's lock and dev file.
+- **Audits:** the `core`, `api` and `worker` audit steps, and the daily audit's `api` and `worker` steps, audit the dev file too and pass it to `pip_audit.py` as `dev=pip-audit-dev.json`, which only warns (D-219). The lock still blocks.
+- **Unchanged, and still enough:**
+  - `web-live` installs the API's lock alone. It runs the API and `scripts/seed_live_e2e.py`, which imports httpx, SQLAlchemy and core's `config`, `db` and `validation`, nothing that moved.
+  - `catalog-sizing` installs the worker's lock alone. Its `scripts/bench` imports none of the moved tools.
+  - `check_skips.py`'s step names.
+- **`scripts/ci/pip_audit.py`:** its docstring only. `test_pip_audit.py`'s `JOBS` gives the three dev files, and the daily audit now has 3 dev audits, not 1.
+- **The image check** is the last step of the `api` and `worker` jobs (item 6).
+
+**5. The image check (founder's addition A), on Python 3.13.17.**
+- **What it does:** a new venv outside the repository, built with exactly the Dockerfile's two install lines (`pip install --no-cache-dir --no-deps -r requirements.lock.txt`, then core from a copy with `--no-deps`); then `pip check`, `pip freeze`, an import of the entry module, and an import of every module of `app` and `docflow_core` (`pkgutil.walk_packages`), listing any dev tool that got loaded. Outside services were blocked.
+- **The API:** `pip check`: `No broken requirements found.`; the freeze, 64 lines (the 63 pins and docflow-core), has no openpyxl, et_xmlfile, lxml or dev tool; `import app.main` succeeds; `modules imported: 76; failed: 0; dev tools loaded: []`.
+- **The worker:** `No broken requirements found.`; the freeze, 56 lines, has openpyxl, et_xmlfile and lxml; `import app.run_workers` succeeds; `modules imported: 69; failed: 0; dev tools loaded: []`.
+- **A negative control:** with rapidfuzz removed from the API's venv, `pip check` exited 1 (`docflow-core 0.1.0 requires rapidfuzz, which is not installed.`), and 8 modules failed with `ModuleNotFoundError: No module named 'rapidfuzz'`, `app.main` among them.
+- **Its limits:** it runs on Windows, not on the images' Debian; and it imports modules, so it can't see an import inside a function (item 2's `exports.py` is the only such import of a moved package).
+
+**6. The image check in CI: built (founder, 2026-10-28: "Approved as proposed", with a second negative control).**
+- **Where:** the last step of the `api` and `worker` jobs, after the dependency audit, with `if: (success() || failure()) && steps.deps.outcome == 'success'`. A test failure doesn't hide it, it never runs on the runner's system Python, and `check_skips.py` needs no new step name.
+- **What:** `scripts/ci/image_check.py <app>`.
+  - It reads the Dockerfile's `COPY` lines, its venv line and its two pip lines. A pip line, venv line or `COPY` it doesn't know stops it with exit 2 before anything is built, so it can't drift from the Dockerfile.
+  - It lays the copies out under `$RUNNER_TEMP` as in the image and runs the pip lines unchanged, with only `/opt/<app>` mapped.
+  - Then `pip check`, `pip freeze`, and a failure if any dev-file name is installed.
+  - Then, from the image's `WORKDIR`, the `CMD`'s entry module and every module of `app` and `docflow_core`. It fails on any import error, or on a dev tool loaded.
+- **Cost, estimated:** about 30 to 50 s in api and 25 to 40 s in worker.
+  - **Run #501's step times** (the public API, run `40739503112`): the lock install took 15 s in api and 10 s in worker, from pip's cache; core took 3 s and 1 s.
+  - **The Dockerfile's `--no-cache-dir`** downloads every wheel again: 5 to 15 s more.
+  - **The imports:** 5 to 6 s locally.
+  - **Locally, on Windows with no cache:** 80 to 90 s per app, the upper bound.
+  - The jobs run in parallel and api is already the longest (237 s in #501), so a run grows by about the api step.
+  - **The real figure** comes from the first PR run's step times. It goes into the next status move, not a commit of its own (founder).
+- **Tests:**
+  - **`packages/core/tests/test_image_check.py`, 14 tests:**
+    - the plan read from both real Dockerfiles is exactly their four copies, their venv, their two pip lines, `WORKDIR` and entry module;
+    - six lines it doesn't know are refused: a third pip line, a bare `pip install`, a `venv/bin/python` line, a venv with `--system-site-packages`, a `COPY --chown` and a `COPY` outside `/opt/<app>`;
+    - a `CMD` with no entry module is refused;
+    - an unknown Dockerfile stops the run with exit 2 before anything is built;
+    - the path mapping, and pip's spellings of names;
+    - no package is in both an app's lock and its dev file.
+  - **`test_ci_guards.py`, 2 tests:** both jobs run the check, after the audit, as their last step, with that `if`.
+- **Local runs** (on Python 3.13.17, the app's services pointed at `.invalid` names, PyPI reachable for pip). The five ran at once, so their times (136 to 148 s) say nothing about CI's. The logs are in the evidence folder's `image-check\`.
+  - **The API:** `pip check` clean, `modules imported: 78; failed: 0; dev tools loaded: []`, exit 0.
+  - **The worker:** `pip check` clean, `modules imported: 71; failed: 0; dev tools loaded: []`, exit 0.
+  - The 78 and 71 are item 5's 76 and 69 plus the two top packages, `app` and `docflow_core`, which this walk also counts.
+- **Negative controls,** each on a scratch copy of the files the API's Dockerfile reads, with one change to its lock, run with `--repo`:
+  - **rapidfuzz removed** (the missing-package side): exit 1. `pip check`: `docflow-core 0.1.0 requires rapidfuzz, which is not installed.` 8 imports failed with `ModuleNotFoundError: No module named 'rapidfuzz'`: `app.main`, `app.routers.admin`, `app.routers.review`, `docflow_core.buyer_merge`, `buyers`, `catalog_import`, `example_prompting` and `matching`.
+  - **pytest==9.1.1 added (founder's control):** exit 1, on the dev-package rule (`packages from requirements-dev.txt are installed: pytest`). `pip check` failed as well, since pytest's own dependencies weren't there.
+  - **pytest added with iniconfig, pluggy and Pygments,** so that `pip check` is clean and the dev-package rule fails on its own: exit 1, `packages from requirements-dev.txt are installed: iniconfig, pluggy, pygments, pytest`.
+    - It also failed the dev-tool rule: the imports loaded `pygments`. httpx's package tries to import its optional command-line tool (`httpx/_main.py`, `import pygments.lexers`) whenever pygments is installed.
+    - In the real image pygments isn't installed, and it isn't loaded.
+
+**7. Python 3.13.17 locally, matching CI (founder: "match CI, not the images").**
+- **Why:** CI's jobs ran 3.13.17 (run #501's API log); this PC had 3.13.1.
+- **The newest 3.13 with a Windows installer:** 3.13.17. 3.13 is security-only, and python.org says of 3.13.18: "binary installers are no longer provided".
+- **The installer:** `https://www.python.org/ftp/python/3.13.17/python-3.13.17-amd64.exe`, SHA-256 `5da012101ba2e17113a9a1cd901e9ce1441086f2b7ecb5de06ec94163899a190`, matching python.org's. Authenticode: Valid, signed by the Python Software Foundation and timestamped by Microsoft's time-stamping authority.
+- **The install:** an upgrade of the all-users install at `C:\Python313`, run by the founder in an elevated PowerShell with `/passive` and `/log`; exit 0. Afterwards `py -3.13 -V` reads `Python 3.13.17`, and `py -0p` lists `-V:3.13 * C:\Python313\python.exe`.
+- **Kept outside the repository:** `C:\Users\NK\DocFlow-evidence\2026-10-28-venv-rebuild\` holds the installer, its logs, and the records of item 8.
+
+**8. The local environments (founder's answers 4 and 5).**
+- **Before:** each old venv's `python -V` (3.13.1) and `pip freeze` (the API's 106 lines, the worker's 98) were recorded in the evidence folder.
+- **Rebuilt** with CI's install lines for that job, plus `pip install --upgrade pip` and `pip-audit==2.10.1` (as CI installs it; RUNBOOK 11's `predeploy_audit.sh` needs it), on 3.13.17 with pip 26.2.2:
+  - `apps/api/.venv`: 78 of 78 pins exact, 22 more packages, all pip-audit 2.10.1 and its dependencies;
+  - `apps/worker/.venv`: 67 of 67 exact, 21 more, the same;
+  - `packages/core/.venv`, new (option (a)): the worker's lock and dev file, as core's CI job builds it; 67 of 67 exact, 21 more, the same.
+  - Each passes `pip check`.
+- **The runner:** `scripts/run_suites_parallel.py` runs core in `packages/core/.venv`, not the API's. Its first staging run is at the next deploy's suite run, and that Grant names the change.
+- **The old venvs:** first renamed in place to `.venv-before-2026-10-28` (the founder's "rename it with the date"). Three source-scanning tests then read their site-packages (item 11's third later item): locally, core had 3 errors and 3 failures and the API 1 failure. The suites' own evidence: `UnicodeDecodeError: 'utf-8' codec can't decode byte 0x93` and `SyntaxError: invalid hexadecimal literal` on `MAXREGSECT = 0xFFFFFFFAL`, Python 2 code in a site-packages file. With the founder's approval they were moved, under the same names, to the evidence folder's `api\` and `worker\` folders (16,660 and 16,086 files, counted before and after). Nothing was deleted, and they are kept until the founder says. RUNBOOK 11.3 says to move an old environment outside the repository.
+
+**9. Readers and local results (D-216 item 6), every outside service blocked, on `8d31b07` plus the change.**
+- **Readers of the changed files:**
+  - the locks and dev files: CI's `core`, `api` and `worker` jobs and audits, the daily audit, both Dockerfiles, `predeploy_audit.sh`, `web-live` and `catalog-sizing` (the API's lock), and the worker's `test_parsing_boundary.py`;
+  - `ci.yml` and `dependency-audit.yml`: `test_ci_guards.py`, `test_pip_audit.py`, `check_skips.py`;
+  - the API's and the worker's Dockerfiles, unchanged, are now read by `scripts/ci/image_check.py`, whose tests are `test_image_check.py`;
+  - `scripts/run_suites_parallel.py`: `test_run_suites_parallel.py`, which checks only the suite names;
+  - `BUILD-STATUS.md`, `status-history.md`, `RUNBOOK.md` and `DECISIONS.md`: `test_fake_names.py`; `test_healthz_dispatcher.py` reads RUNBOOK 9.4, unchanged; `tenant_cleanup._record_lines` reads every tracked Markdown file (CI, with a database).
+- **Lint and types, as CI runs them, in the new venvs:** `ruff check .` "All checks passed!" and mypy "Success" in api (20 files), worker (13) and core (58).
+- **The suites, after the old venvs left the tree:**
+  - **Core,** in `packages/core/.venv`: `1 failed, 1198 passed, 3 errors in 394.60s (0:06:34)`. The four are the live-bucket tests, which fail with Storage blocked (D-207 item 12). 1,202 is D-224's 1,201 plus #87's new test in `test_parse_client.py`.
+  - **Core again, with the image check's tests** (item 6): `1 failed, 1214 passed, 3 errors in 296.61s (0:04:56)`. The same four live-bucket tests; 1,218 is 1,202 plus the 16 new tests (14 in `test_image_check.py`, 2 in `test_ci_guards.py`).
+  - **The API:** `24 failed, 127 passed, 622 skipped, 3 deselected, 1 warning, 1 error in 627.94s (0:10:27)`. The 25 are the tests that need a database, which is `db.invalid` here. They have the same IDs as the earlier run's, less the one item 8 explains.
+- **The worker suite:** `130 passed, 138 skipped in 90.21s (0:01:30)`. 268 tests, as on staging (`260 passed, 8 skipped` on `f44a9d7`). The 138: the same 8 as on staging, reason for reason, and 130 that need the database (blank here).
+
+**10. No staging suites for this PR (D-223 item 5).** The images aren't deployed by it. CI installs exactly the lock and the dev file. The staging suites run from the local venvs, now built the same way, so they would add nothing CI doesn't show. The next deploys (worker, then API) each run under their own Grant, and their suite runs are the runner's first with core in `packages/core/.venv`.
+
+**11. Later items, outside this PR.**
+- **Before `docflow-prod`: the locks were frozen on Windows.** The API's and the worker's locks hold colorama 0.4.6, which pytest requires only on Windows (`sys_platform == "win32"`) and nothing in either lock needs on Linux. The API's lacks uvloop, which `uvicorn[standard]` installs everywhere but Windows. The images install with `--no-deps`, so the lock is what they get. Freezing on Linux, in the image's own base, would give the images' exact set.
+- **Before `docflow-prod`: CI doesn't test the shipped interpreter.** The images run Debian's `python3.13 3.13.5-2+deb13u5` (the base `debian:trixie-slim` has no Python; apt installs it from the pinned snapshot `20261001T000000Z`), while CI runs the newest 3.13 (3.13.17 now).
+- **Before `docflow-prod`, once its cost is measured: the image check inside the real images (founder, 2026-10-28).** Build the API's and the worker's images with `docker build` in CI and run item 6's module walk inside each. It is the only check that tests what actually ships: Debian's 3.13.5, the image's own pip and the real image. Recording it costs nothing. Building it is a decision for before `docflow-prod`, after its cost is measured.
+- **The same check for parse (founder, 2026-10-28; not built).**
+  - **The same split:** `apps/parse/Dockerfile` installs `requirements.lock.txt` alone, with `--no-cache-dir --no-deps`, and parse's dev tools are in a separate `requirements-dev.txt`.
+  - **Two differences** keep item 6's script from reading it as it is:
+    - its venv is `python3 -m venv --system-site-packages`, for Debian's `python3-seccomp`, which a runner's venv doesn't have;
+    - core and parse install in one pip line.
+  - **Its build already imports** `parse_service.server`, `seccomp` and `docflow_core.file_types`. It doesn't check the rest of its modules or the dev rule.
+- **The source-scanning tests skip only folders named exactly `.venv`.** Core's `test_broad_except_guard.py` (`SKIPPED_DIRECTORIES`), `test_heartbeat.py` and `test_fake_names.py`, and the API's `test_console_shared_paths.py` walk all of `apps/` or `packages/`. Any other environment folder in the tree breaks them locally while CI passes (item 8; `test_fake_names.py` reads with `errors="ignore"` and passed). The other walkers start inside product folders such as `apps/api/app`. Scanning only the files git tracks (`git ls-files`, as `tenant_cleanup.py` already does for its Markdown marks) would match what CI sees.
+
+**Founder approval:** 2026-10-28 (the plan; answers 1 to 5; additions A and B; Python matching CI; option (ii); no openpyxl check on the API's files; the old venvs moved outside the repository; the image check built as proposed, with the pytest control; the later items, the Docker-build check and parse's among them).
+
+**Related:** D-191, D-216 (item 6), D-219 (item 7), D-223 (items 5 and 6); `apps/api/requirements-dev.txt`, `apps/worker/requirements-dev.txt`; RUNBOOK 11.1 and 11.3.
