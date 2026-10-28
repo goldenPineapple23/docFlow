@@ -281,3 +281,22 @@ def test_another_suites_staging_only_line_asks_nothing_of_this_job(tmp_path, cap
 def test_ci_must_run_the_committed_worker_start_test():
     committed = "tests.test_worker_starts_db::test_a_committed_start_appears_in_the_count_healthz_reads"
     assert _check_skips().read_approvals(APPROVALS, "worker-staging") == {committed}
+
+
+def _one_job(workflow: str, job: str) -> str:
+    """One job's block, up to the next job's key (whatever its name)."""
+    start = workflow.index(f"\n  {job}:\n")
+    following = re.search(r"\n  [a-z][a-z0-9_-]*:\n", workflow[start + 1 :])
+    return workflow[start : start + 1 + following.start()] if following else workflow[start:]
+
+
+@pytest.mark.parametrize("job", ["api", "worker"])
+def test_the_image_check_runs_last_in_the_api_and_worker_jobs_whatever_the_tests_did(job):
+    """D-225 item 6: what the image installs, on its own, after the tests and
+    the audit, and not skipped because one of them failed."""
+    block = _one_job(WORKFLOW.read_text(encoding="utf-8"), job)
+    step = f'scripts/ci/image_check.py" {job}'
+    assert step in block, f"CI job {job!r} no longer runs the image check"
+    assert block.index(step) > block.index("scripts/ci/pip_audit.py"), "the image check runs after the audit"
+    assert "\n      - " not in block[block.index(step) :], "the image check is the job's last step"
+    assert "if: (success() || failure()) && steps.deps.outcome == 'success'" in block

@@ -6,8 +6,8 @@ name: Dependency audit (daily)
 #           a dev-only one warns (scripts/ci/npm_audit.py).
 #   python: pip-audit 2.10.1 on the API's, the worker's and parse's locks
 #           (core ships inside the API and worker images, pinned by the
-#           worker's lock); any known vulnerability fails. Parse's dev tools
-#           only warn (scripts/ci/pip_audit.py).
+#           worker's lock); any known vulnerability fails. The three apps'
+#           dev tools (requirements-dev.txt) only warn (scripts/ci/pip_audit.py).
 # In ci.yml the same audits block only when that app's dependency files
 # changed, so this run is what catches an advisory published against a file
 # nobody touched.
@@ -64,13 +64,15 @@ jobs:
         working-directory: apps/api
         run: |
           pip-audit -r requirements.lock.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-runtime.json || true
-          python "${{ github.workspace }}/scripts/ci/pip_audit.py" api --blocking yes runtime=pip-audit-runtime.json
+          pip-audit -r requirements-dev.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-dev.json || true
+          python "${{ github.workspace }}/scripts/ci/pip_audit.py" api --blocking yes runtime=pip-audit-runtime.json dev=pip-audit-dev.json
       - name: worker (and core)
         if: success() || failure()
         working-directory: apps/worker
         run: |
           pip-audit -r requirements.lock.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-runtime.json || true
-          python "${{ github.workspace }}/scripts/ci/pip_audit.py" worker --blocking yes runtime=pip-audit-runtime.json
+          pip-audit -r requirements-dev.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-dev.json || true
+          python "${{ github.workspace }}/scripts/ci/pip_audit.py" worker --blocking yes runtime=pip-audit-runtime.json dev=pip-audit-dev.json
       - name: parse
         if: success() || failure()
         working-directory: apps/parse

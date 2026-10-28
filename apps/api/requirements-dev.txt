@@ -1,0 +1,24 @@
+# Tests and linters for the API; never in the image (the Dockerfile installs
+# requirements.lock.txt alone). Every pin here, the tools' own dependencies
+# included, is one nothing in the lock needs (D-225).
+pytest==9.1.1
+pytest-cov==7.1.0
+coverage==7.16.1
+mypy==2.3.1
+ruff==0.16.7
+# The tools' dependencies.
+ast_serialize==0.11.2
+iniconfig==2.3.0
+librt==0.15.0
+mypy_extensions==1.1.0
+pathspec==1.1.1
+pluggy==1.6.0
+Pygments==2.21.0
+# Tests only, never the web process (tests/test_parsing_boundary.py forbids
+# openpyxl in app/). test_catalog_import_api.py writes a small .xlsx with
+# openpyxl; test_exports_api.py runs the worker's export code, which writes
+# through lxml when it is installed, as the worker's image does. Same pins as
+# the worker's lock.
+openpyxl==3.1.5
+et_xmlfile==2.0.0
+lxml==6.1.3
