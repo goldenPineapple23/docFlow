@@ -7,19 +7,17 @@ Usage:
       --progress-spinner off -f json -o <report.json> || true
   python scripts/ci/pip_audit.py <app> --blocking yes|no runtime=<report.json> [dev=<report.json>]
 
-runtime: the requirements an app ships. That is the whole lock for the API
-and the worker (their images install all of it, dev tools included, until
-those move to requirements-dev.txt files; BUILD-STATUS item 7), parse's lock,
-and for core the worker's lock, which is what core's job installs. A known
-vulnerability there:
+runtime: the requirements an app ships: its lock, which its image installs
+whole (for core, the worker's lock, which is what core's job installs). A
+known vulnerability there:
   --blocking yes: an ::error, and the step fails;
   --blocking no:  a ::warning, and the step passes.
 CI decides with scripts/ci/deps_changed.sh: blocking only when that app's
 requirements files changed. The daily audit and the check before a deploy
 always block.
 
-dev: parse's requirements-dev.txt, which is never in an image. A known
-vulnerability there is always a ::warning.
+dev: the app's requirements-dev.txt (for core, the worker's), which is never
+in an image (D-225). A known vulnerability there is always a ::warning.
 
 For Python, "blocks" means any known vulnerability of any severity, with no
 exceptions mechanism (founder, 2026-10-23): pip-audit reports no severity.

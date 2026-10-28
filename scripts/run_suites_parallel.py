@@ -40,9 +40,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
-# (suite, folder it runs in, its virtual environment)
+# (suite, folder it runs in, its virtual environment). Core's is built as
+# CI's core job builds it: the worker's lock and dev file (D-225).
 SUITES = (
-    ("core", "packages/core", "apps/api/.venv"),
+    ("core", "packages/core", "packages/core/.venv"),
     ("worker", "apps/worker", "apps/worker/.venv"),
     ("api", "apps/api", "apps/api/.venv"),
 )

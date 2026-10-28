@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-10-27, with the sweep script merged and the warnings PR open:** Phase 5.5,
+**Status, as of 2026-10-28, with the warnings PR merged and the dev-tools PR open:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -53,13 +53,20 @@ deployed to `docflow-api-staging`** (release v2, `ea6a988`'s image
 `036931c2-37e0-4b10-9b2c-0132c3563242`, AUTH-007, the code 460 s old (D-220 item 11). `fly proxy`
 traffic doesn't keep the API machine up: a staging step through the proxy starts the machine and
 expects it to stop after a few idle minutes (founder; RUNBOOK 11.2; fly.toml unchanged). **The
-sweep script is merged** (PR #86, `main` is `d053cca`; D-224; main's push run #498 green):
+sweep script is merged** (PR #86, at `d053cca`; D-224; main's push run #498 green):
 `scripts/sweep_test_tenants.py` lists old "Acme Test" tenants read-only and deletes one at a time
 under a Grant, after a backup (RUNBOOK 12); the proof delete on staging removed one tenant, by id
 only (D-224 item 12). The three staging suites passed on its head, the API's on a re-run alone: in
 the parallel run `test_for_cause_is_immediate` took 15.49 s against its 5 s limit, a staging-suite
 timing failure, not a CI flake (D-224 item 13). The sweep's prefix match is case-sensitive, so a
-tenant named in lower case is never listed or swept (D-224 item 14). **The CI infrastructure flake
+tenant named in lower case is never listed or swept (D-224 item 14). **The warnings PR is merged**
+(PR #87, `main` is `8d31b07`; main's push run #501 green, the API's tests `774 passed, 3 deselected,
+1 warning in 64.38s (0:01:04)`, the one warning starlette's DeprecationWarning from
+`testclient.py:53`, the `anyio.abc.BlockingPortal` alias): the API's test signing keys are at least
+32 bytes and `InsecureKeyLengthWarning` fails a test; the two busy-retry `test_parse_client.py`
+tests run on a fake clock, and a new test checks that a slow busy answer uses up the patience
+(D-212 item 8). A PR that changes only tests runs the staging suites only if the staging
+environment can change those tests' results in a way CI can't show (D-223 item 5). **The CI infrastructure flake
 count is 9** (D-199 item 10; flakes 5 to 9 are parse's LibreOffice install timing out at 15 min on
 2026-10-26, D-219 items 8 and 9, D-222 items 8 and 9). **A standing rule (D-213 item 6, tightened
 in D-214): a staging suite, a Fly action or any write to staging starts only after a message from
@@ -67,13 +74,9 @@ the founder that begins with "Grant" and names the step.** Any change to a grant
 such as `--app` included, is told to the founder before it runs (founder, 2026-10-27). **Two new
 rules:** SQL the founder runs on staging is first checked by Claude read-only (D-214 item 15), and
 before a file outside one app is changed, every reader of it is found and its tests are run (D-216
-item 6). **Next, in order:** the warnings and the 32-byte test secret (open), with the two
-thin-margin `test_parse_client.py` tests (D-212 item 8, measured first, on the current local
-environment) and `InsecureKeyLengthWarning` made an error in the API's tests; then one PR with the
-dev tools out of the API's and the worker's images (D-219 item 7, before `docflow-prod` exists) and,
-after them, the local API environment built once from the lock and the new dev files (it holds 107
-packages against the lock's 78 pins, certifi installed from a file among them, so the staging suites
-don't run what ships; founder, 2026-10-27, D-223); then the staging worker deploy (D-209) and the
+item 6). **Next, in order:** the dev-tools PR (open; D-225): the dev tools out of the API's and the worker's
+images (D-219 item 7), openpyxl and lxml out of the API's, and the local API, worker and core
+environments rebuilt on Python 3.13.17 from the locks and the new dev files; then the staging worker deploy (D-209) and the
 API's redeploy, after that PR, so each app deploys once (founder); then M10 without the model IDs,
 the 375 px fix, then counting rows before extraction, and the docs PR last (it also takes
 `apps/web/AGENTS.md`, whose first heading `next dev` rewrote from `#` to `##` when it started on
@@ -85,7 +88,7 @@ On main's push run #498 (`d053cca`) it took 16 seconds. The long catalog commit'
 public address needs its own grant. The 50,000-row cap and IMP-003's wording: one PR, before pilots,
 only if a pilot prospect has more than 50,000 SKUs. The welding demo comes after the fastener
 rehearsal and never blocks it (D-208). **Staging:** the database has 0039. `docflow-api-staging`
-runs v2, `ea6a988`'s image; no app code changed between `ea6a988` and `d053cca`.
+runs v2, `ea6a988`'s image; no app code changed between `ea6a988` and `8d31b07`.
 `docflow-parse-staging` runs PR B's image (Pillow 13.0.0). `docflow-worker-staging` runs `e95b095`'s
 image (D-212) with no machines; certifi 2026.10.19 and M7's code reach it at its next deploy. **That
 staging worker deploy is owed under D-209 (staging is redeployed after a merge, then the demo smoke

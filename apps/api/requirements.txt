@@ -5,23 +5,15 @@ uvicorn[standard]>=0.30
 python-multipart>=0.0.9
 email-validator>=2.1
 
-# Tests only: test_catalog_import_api.py writes a small .xlsx with it. The
-# API never opens a file a stranger sent (CLAUDE.md Section 7.11); since
-# Stage 3c only the parse service (apps/parse) does, and the parsing
-# libraries are in its image alone (apps/api/tests/test_parsing_boundary.py,
-# apps/worker/tests/test_parsing_boundary.py).
-openpyxl>=3.1
-# Tests only, with openpyxl: core's export tests run in this environment in
-# CI, and openpyxl writes different .xlsx bytes without lxml.
-lxml>=6.1
+# No openpyxl or lxml: nothing in app/ imports them, and the web process may
+# not (tests/test_parsing_boundary.py). The tests that use them get them
+# from requirements-dev.txt (D-225).
 
 # Phase 1: enqueue-only Celery client (app/celery_client.py) -- the API
 # never defines or runs task bodies, it only sends tasks by name onto the
 # same broker apps/worker listens on.
 celery[redis]>=5.4
 
-pytest>=8.2
 httpx>=0.27
-pytest-cov>=5.0
-ruff>=0.5
-mypy>=1.10
+
+# Tests and linters: requirements-dev.txt, never in the image (D-225).

@@ -95,7 +95,9 @@ def test_the_moved_modules_are_gone_from_worker_and_core():
 def test_no_parsing_library_is_in_the_worker_or_api_requirements():
     offenders = []
     for app in ("worker", "api"):
-        for name in ("requirements.txt", "requirements.lock.txt"):
+        # The dev file too: a parser installed for the tests could hide one
+        # imported where it must not be (D-225).
+        for name in ("requirements.txt", "requirements.lock.txt", "requirements-dev.txt"):
             for line in (REPO / "apps" / app / name).read_text(encoding="utf-8").splitlines():
                 if REQUIREMENT_NAMES.match(line.strip()):
                     offenders.append(f"apps/{app}/{name}: {line.strip()}")

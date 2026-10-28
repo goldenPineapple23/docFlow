@@ -196,13 +196,17 @@ JOBS = {
     # job: (runtime requirements, dev requirements, files whose change blocks)
     "core": (
         "../../apps/worker/requirements.lock.txt",
-        None,
+        "../../apps/worker/requirements-dev.txt",
         "packages/core/pyproject.toml apps/worker/requirements.lock.txt",
     ),
-    "api": ("requirements.lock.txt", None, "apps/api/requirements.txt apps/api/requirements.lock.txt"),
+    "api": (
+        "requirements.lock.txt",
+        "requirements-dev.txt",
+        "apps/api/requirements.txt apps/api/requirements.lock.txt",
+    ),
     "worker": (
         "requirements.lock.txt",
-        None,
+        "requirements-dev.txt",
         "apps/worker/requirements.txt apps/worker/requirements.lock.txt",
     ),
     "parse": (
@@ -268,4 +272,4 @@ def test_the_daily_python_audit_always_blocks_and_every_app_reports():
     runtime = f"pip-audit -r requirements.lock.txt {AUDIT_FLAGS} pip-audit-runtime.json || true\n"
     dev = f"pip-audit -r requirements-dev.txt {AUDIT_FLAGS} pip-audit-dev.json || true\n"
     assert python.count(runtime) == 3
-    assert python.count(dev) == 1
+    assert python.count(dev) == 3

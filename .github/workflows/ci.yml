@@ -293,9 +293,10 @@ jobs:
           cache-dependency-path: apps/worker/requirements.lock.txt
       - run: python -m pip install --upgrade pip
       # Pinned, not ranges (H7): the worker's lockfile holds every core
-      # dependency, the `files` extras and the lint/type/test tools.
+      # dependency and the `files` extras; its dev file, the lint/type/test
+      # tools (D-225).
       - id: deps
-        run: pip install -r ../../apps/worker/requirements.lock.txt
+        run: pip install -r ../../apps/worker/requirements.lock.txt -r ../../apps/worker/requirements-dev.txt
       - id: core
         run: pip install --no-deps -e .
       - run: pip install pip-audit==2.10.1
@@ -377,7 +378,8 @@ jobs:
       - name: Dependency audit (blocks when this app's requirements changed; D-219)
         run: |
           pip-audit -r ../../apps/worker/requirements.lock.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-runtime.json || true
-          python "${{ github.workspace }}/scripts/ci/pip_audit.py" core --blocking "${{ steps.deps_changed.outputs.blocking }}" runtime=pip-audit-runtime.json
+          pip-audit -r ../../apps/worker/requirements-dev.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-dev.json || true
+          python "${{ github.workspace }}/scripts/ci/pip_audit.py" core --blocking "${{ steps.deps_changed.outputs.blocking }}" runtime=pip-audit-runtime.json dev=pip-audit-dev.json
       # D-215: CLAUDE.md is capped at 28k tokens, checked as characters.
       # Runs even when an earlier step failed, so it never hides their result.
       - name: CLAUDE.md size (cap ~28k tokens; founder rule in CLAUDE.md, D-215)
@@ -428,7 +430,7 @@ jobs:
           cache-dependency-path: apps/api/requirements.lock.txt
       - run: python -m pip install --upgrade pip
       - id: deps
-        run: pip install -r requirements.lock.txt
+        run: pip install -r requirements.lock.txt -r requirements-dev.txt
       - id: core
         run: pip install --no-deps -e ../../packages/core
       - run: pip install pip-audit==2.10.1
@@ -488,7 +490,16 @@ jobs:
       - name: Dependency audit (blocks when this app's requirements changed; D-219)
         run: |
           pip-audit -r requirements.lock.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-runtime.json || true
-          python "${{ github.workspace }}/scripts/ci/pip_audit.py" api --blocking "${{ steps.deps_changed.outputs.blocking }}" runtime=pip-audit-runtime.json
+          pip-audit -r requirements-dev.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-dev.json || true
+          python "${{ github.workspace }}/scripts/ci/pip_audit.py" api --blocking "${{ steps.deps_changed.outputs.blocking }}" runtime=pip-audit-runtime.json dev=pip-audit-dev.json
+      # D-225: what the image installs, on its own: a fresh venv built with the
+      # Dockerfile's pip lines alone (no dev file), then pip check and an import
+      # of every module of app and docflow_core. It needs only the checkout and
+      # Python, so it runs whatever the tests did.
+      - name: Image check (the Dockerfile's install lines alone; pip check; every module imports)
+        id: image_check
+        if: (success() || failure()) && steps.deps.outcome == 'success'
+        run: python "${{ github.workspace }}/scripts/ci/image_check.py" api
 
   worker:
     name: worker (lint, typecheck, test, audit)
@@ -538,7 +549,7 @@ jobs:
           cache-dependency-path: apps/worker/requirements.lock.txt
       - run: python -m pip install --upgrade pip
       - id: deps
-        run: pip install -r requirements.lock.txt
+        run: pip install -r requirements.lock.txt -r requirements-dev.txt
       - id: core
         run: pip install --no-deps -e ../../packages/core
       - run: pip install pip-audit==2.10.1
@@ -598,7 +609,13 @@ jobs:
       - name: Dependency audit (blocks when this app's requirements changed; D-219)
         run: |
           pip-audit -r requirements.lock.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-runtime.json || true
-          python "${{ github.workspace }}/scripts/ci/pip_audit.py" worker --blocking "${{ steps.deps_changed.outputs.blocking }}" runtime=pip-audit-runtime.json
+          pip-audit -r requirements-dev.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-dev.json || true
+          python "${{ github.workspace }}/scripts/ci/pip_audit.py" worker --blocking "${{ steps.deps_changed.outputs.blocking }}" runtime=pip-audit-runtime.json dev=pip-audit-dev.json
+      # D-225: as in the api job.
+      - name: Image check (the Dockerfile's install lines alone; pip check; every module imports)
+        id: image_check
+        if: (success() || failure()) && steps.deps.outcome == 'success'
+        run: python "${{ github.workspace }}/scripts/ci/image_check.py" worker
 
   parse:
     # Stage 3c: the parse service. CI is the only place before Fly where the

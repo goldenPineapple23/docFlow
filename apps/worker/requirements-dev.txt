@@ -1,0 +1,19 @@
+# Tests and linters for the worker, and for core's CI job, which installs
+# the worker's files; never in the image (the Dockerfile installs
+# requirements.lock.txt alone). Every pin here, the tools' own dependencies
+# included, is one nothing in the lock needs (D-225).
+pytest==9.1.1
+# Property-based tests (Phase 5.5 Stage 1, C1): random decimals through the
+# whole path from model output to every export format.
+hypothesis==6.168.1
+mypy==2.3.1
+ruff==0.16.8
+# The tools' dependencies.
+ast_serialize==0.11.2
+iniconfig==2.3.0
+librt==0.15.0
+mypy_extensions==1.1.0
+pathspec==1.1.1
+pluggy==1.6.0
+Pygments==2.21.0
+sortedcontainers==2.4.0
