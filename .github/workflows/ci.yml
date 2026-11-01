@@ -492,6 +492,28 @@ jobs:
           pip-audit -r requirements.lock.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-runtime.json || true
           pip-audit -r requirements-dev.txt --no-deps --disable-pip --strict --progress-spinner off -f json -o pip-audit-dev.json || true
           python "${{ github.workspace }}/scripts/ci/pip_audit.py" api --blocking "${{ steps.deps_changed.outputs.blocking }}" runtime=pip-audit-runtime.json dev=pip-audit-dev.json
+      # D-227: the real image, started the way Fly starts it. Fly's edge dials
+      # a machine on IPv4, so the published port below (IPv4 into the container)
+      # is the nearest thing CI has to the edge's path. It isn't the edge: only
+      # a request through a public address proves that.
+      - name: Build the API's image
+        id: api_image
+        if: success() || failure()
+        timeout-minutes: 15
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          tags: docflow-api:ci
+          load: true
+          build-args: ${{ inputs.debian_snapshot && format('DEBIAN_SNAPSHOT={0}', inputs.debian_snapshot) || '' }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+      - name: The API's image answers on IPv4 and IPv6 (D-227)
+        id: api_listen
+        if: (success() || failure()) && steps.api_image.outcome == 'success'
+        timeout-minutes: 5
+        run: bash "${{ github.workspace }}/scripts/ci/api_image_listen.sh" docflow-api:ci
       # D-225: what the image installs, on its own: a fresh venv built with the
       # Dockerfile's pip lines alone (no dev file), then pip check and an import
       # of every module of app and docflow_core. It needs only the checkout and

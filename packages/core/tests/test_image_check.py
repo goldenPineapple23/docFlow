@@ -26,7 +26,7 @@ def _dockerfile(app: str) -> str:
     return (REPO / "apps" / app / "Dockerfile").read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize(("app", "entry"), [("api", "app.main"), ("worker", "app.run_workers")])
+@pytest.mark.parametrize(("app", "entry"), [("api", "app.serve"), ("worker", "app.run_workers")])
 def test_the_plan_is_the_dockerfiles_own_install(app, entry):
     root = f"/opt/{app}"
     plan = _image_check().read_plan(app, _dockerfile(app))

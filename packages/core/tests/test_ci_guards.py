@@ -300,3 +300,16 @@ def test_the_image_check_runs_last_in_the_api_and_worker_jobs_whatever_the_tests
     assert block.index(step) > block.index("scripts/ci/pip_audit.py"), "the image check runs after the audit"
     assert "\n      - " not in block[block.index(step) :], "the image check is the job's last step"
     assert "if: (success() || failure()) && steps.deps.outcome == 'success'" in block
+
+
+def test_the_api_job_starts_the_real_image_and_reads_both_address_families():
+    """D-227: the fault that kept Fly's edge out lived in the image's start
+    command, which no test ran. A build with a time limit, then the check."""
+    block = _one_job(WORKFLOW.read_text(encoding="utf-8"), "api")
+    step = 'scripts/ci/api_image_listen.sh" docflow-api:ci'
+    build = block.index("name: Build the API's image")
+    assert step in block, "the api job no longer reads the image's two address families"
+    assert build < block.index(step) < block.index('scripts/ci/image_check.py" api')
+    assert "timeout-minutes: 15" in block[build : block.index(step)]
+    assert "cache-from: type=gha,scope=api" in block
+    assert "cache-to: type=gha,mode=max,scope=api" in block

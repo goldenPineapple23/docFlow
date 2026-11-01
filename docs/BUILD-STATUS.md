@@ -18,7 +18,8 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-10-28, with the warnings PR merged and the dev-tools PR open:** Phase 5.5,
+**Status, as of 2026-11-01, with the dev-tools PR merged, the staging worker deployed and the API's
+bind fix in its PR:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -74,26 +75,42 @@ the founder that begins with "Grant" and names the step.** Any change to a grant
 such as `--app` included, is told to the founder before it runs (founder, 2026-10-27). **Two new
 rules:** SQL the founder runs on staging is first checked by Claude read-only (D-214 item 15), and
 before a file outside one app is changed, every reader of it is found and its tests are run (D-216
-item 6). **Next, in order:** the dev-tools PR (open; D-225): the dev tools out of the API's and the worker's
-images (D-219 item 7), openpyxl and lxml out of the API's, and the local API, worker and core
-environments rebuilt on Python 3.13.17 from the locks and the new dev files; then the staging worker deploy (D-209) and the
-API's redeploy, after that PR, so each app deploys once (founder); then M10 without the model IDs,
-the 375 px fix, then counting rows before extraction, and the docs PR last (it also takes
-`apps/web/AGENTS.md`, whose first heading `next dev` rewrote from `#` to `##` when it started on
-2026-10-27: either commit that heading or stop `next dev` from rewriting the file; founder). Then E1
-and E2a, then demo readiness (D-209). **To investigate later, not now (founder, 2026-10-27):** CI's
-"Install Playwright browser" step (web-live) took 9 to 11 minutes on PR runs #489 and #492 but under
-30 seconds on main's push run #490, likely a cache miss on PR runs, costing about 10 minutes per PR.
-On main's push run #498 (`d053cca`) it took 16 seconds. The long catalog commit's test through a
-public address needs its own grant. The 50,000-row cap and IMP-003's wording: one PR, before pilots,
-only if a pilot prospect has more than 50,000 SKUs. The welding demo comes after the fastener
-rehearsal and never blocks it (D-208). **Staging:** the database has 0039. `docflow-api-staging`
-runs v2, `ea6a988`'s image; no app code changed between `ea6a988` and `8d31b07`.
-`docflow-parse-staging` runs PR B's image (Pillow 13.0.0). `docflow-worker-staging` runs `e95b095`'s
-image (D-212) with no machines; certifi 2026.10.19 and M7's code reach it at its next deploy. **That
-staging worker deploy is owed under D-209 (staging is redeployed after a merge, then the demo smoke
-test) before anything relies on staging's worker, and it needs a Grant.** The API and parse
-machines are stopped, with auto-stop on, and the Healthchecks.io check is paused.
+item 6). **The dev-tools PR is merged** (PR #88, `main` is `4cadcaa`; D-225; main's push run
+#504 green, its image check 15 s on api and 12 s on worker; PR run #503's API tests read `774 passed,
+3 deselected, 1 warning in 89.97s (0:01:29)`, the same starlette warning, and its image check took
+23 s and 17 s): the dev tools are out of the API's and the worker's images, openpyxl and lxml are out
+of the API's, and the local environments are rebuilt on Python 3.13.17. **The founder's decisions of
+2026-10-28 and 2026-10-29 are D-226**, which changes D-199's order. **Rule (a) has dropped:** the
+Memurai restart task runs at sign-in since 2026-10-29, so a suite needs only PONG and an uptime under
+9 days (RUNBOOK 1.4). **The worker is deployed to staging** (2026-11-01; D-227 item 2): `4cadcaa`, release
+v12, `deployment-01M6C0E3KRZKC7DSMAKJA002PZ`. **The Blocker 3 test stopped at its first request
+(2026-11-01; D-227 item 3):** Fly's edge can't reach the API, because `uvicorn --host ::` listens on
+IPv6 alone, so `/healthz` through a public address read 503. No catalog went through it, so the cut
+is still unmeasured. **Next, in order (D-226 item 5, changed by D-227):** the API's bind fix (open;
+D-227), then the staging API's redeploy, under a Grant, without the suites, then the Blocker 3 test
+again. Then M10, with D-195 change 1 straight after it and M10's model-ID part folded into change 1.
+If Blocker 3 is confirmed, its fix, with the duplicate SKU index in the same migration. The 375 px
+fix, then counting rows before extraction. E1, then E2a. The staging API's redeploy, and the worker's
+again if those changed it, with the staging suites and D-209's smoke test, owed since the worker's
+deploy of 2026-11-01 (there is no demo tenant yet, and it needs a model call). The docs PR, which ends
+Stage 5 (it also takes `apps/web/AGENTS.md`, whose first heading `next dev` rewrote from `#` to `##`
+when it started on 2026-10-27: either commit that heading or stop `next dev` from rewriting the file;
+founder). The production environment. Demo content: both demo tenants, seeded history, a reset
+procedure, the synthetic POs, the accuracy bar set before anything is measured, and the D-195
+comparison. Two rehearsals from every machine stopped, fastener first, then welding, the smoke test,
+tag demo-1. Then the independent review, then pilots. **To investigate later, not now (founder,
+2026-10-27):** CI's "Install Playwright browser" step (web-live) took 9 to 11 minutes on PR runs #489
+and #492 but under 30 seconds on main's push run #490, likely a cache miss on PR runs, costing about
+10 minutes per PR. On main's push run #498 (`d053cca`) it took 16 seconds. The 50,000-row cap and
+IMP-003's wording: one PR, before pilots, only if a pilot prospect has more than 50,000 SKUs.
+**Staging:** the database has 0039. `docflow-api-staging` runs v2, `ea6a988`'s image, and has no
+address. `docflow-parse-staging` runs PR B's image (`b1af531`; Pillow 13.0.0); Fly moved its machine
+to another host on 2026-10-29, and its canary passed there on 2026-11-01. `docflow-worker-staging`
+runs v12, and its worker and beat machines are running for the founder's walkthrough, then scaled to
+0. The first sweep raised four `tenant_ready_to_delete` alerts, which are open, so the leftover
+line's start is now tenants 34, founder alerts 8, e-mails 34, scheduled jobs 35, admin rows 12, users
+with no tenant 15. The API and parse machines are stopped, with auto-stop on. The Healthchecks.io
+check is live while the worker runs, and paused when it stops.
 
 **That paragraph is the current state only** (founder, 2026-10-05; D-191). When it changes, the
 paragraph it replaces moves, word for word, to the top of `docs/status-history.md`, which is not
@@ -280,7 +297,7 @@ the engine works well in a demo. **The order:** the leftover-count PR;
 Stage 4; Stage 5 (the worker-start fix and the cleanup that does not depend
 on a model); demo readiness, with D-195's model work; the Phase 6
 pilot-blocker subset (under Phase 6, below); then pilots with two or three
-customers. Of all this, only the leftover-count PR is built.
+customers. Of all this, only the leftover-count PR is built. Changed by D-226 item 5.
 
 **Stage 4, the load.** It replaces the approved design's 50,000-item tenant
 under test, its 250,000 rows on staging and its 2.5 million row CI job:
@@ -1822,6 +1839,13 @@ here is built.
 ---
 
 ## Known open items (across phases)
+
+- **Step h, the production environment (founder, 2026-11-01; D-226 item 10):**
+  - `/docs`, `/redoc` and `/openapi.json` turned off or put behind login. FastAPI's defaults serve
+    them with no sign-in, and `/openapi.json` names the `/admin/*` routes, against 7.15.1. Accepted
+    on staging for the Blocker 3 test's window only.
+  - Behind Fly's edge, `request.client.host` is the proxy's address, so the intake's source-IP note
+    (`email_intake.py`, log-only) can't see the real sender.
 
 - IIF export not yet validated against real QuickBooks Desktop (Phase 4).
 - **A known limit: a 40-line order on a 250,000-item catalog (founder, 2026-10-12; D-201).**

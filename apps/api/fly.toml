@@ -13,6 +13,9 @@
 # reachable from more places. So `fly ips list` is empty, and nothing wakes a
 # stopped machine: start it first (`fly machine start <id>`), then `fly proxy`.
 #
+# It listens on IPv4 and IPv6 (app/serve.py; D-227): `fly proxy` comes in on
+# IPv6, and Fly's edge on IPv4 if a Grant ever adds a public address.
+#
 # Secrets (set by the founder): DATABASE_URL (docflow_api), ADMIN_DATABASE_URL
 # (docflow_admin), STRIPE_DATABASE_URL (docflow_stripe) -- Stage 3e, RUNBOOK
 # 10; never WORKER_DATABASE_URL or HEARTBEAT_URL -- REDIS_URL, SUPABASE_*,

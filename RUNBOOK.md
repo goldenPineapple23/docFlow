@@ -473,6 +473,7 @@ How a run is reported:
   2026-10-08 15:50:51Z), and with it down the suite reads `3 failed`.
   Check the service before the run and after it; starting it needs
   administrator rights (`Start-Service Memurai`).
+  Before a suite: PONG on 6379 and Memurai's `uptime_in_seconds` under 777,600 (9 days).
   If the count is *lower* than the number written here, find out what
   stopped running before calling the run green.
   The 3 deselected are the `live_api` tests, which only run at checkpoints
@@ -2962,6 +2963,10 @@ stopped too.
    right before the request, check the machine with `fly machine list`
    (read-only), and start it again if it has stopped. A start is a Fly
    action, so it needs the founder's Grant (D-213 item 6).
+4. **A public address, when a Grant adds one:** the API listens on IPv4 and
+   IPv6 (`apps/api/app/serve.py`; D-227), so Fly's edge reaches it, and a
+   request through the edge wakes a stopped machine. Until D-227's redeploy,
+   staging's API listens on IPv6 alone and the edge answers 503.
 
 `fly.toml` stays as it is (founder).
 
