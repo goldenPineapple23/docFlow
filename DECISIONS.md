@@ -5526,3 +5526,91 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** 2026-10-28 (the plan; answers 1 to 5; additions A and B; Python matching CI; option (ii); no openpyxl check on the API's files; the old venvs moved outside the repository; the image check built as proposed, with the pytest control; the later items, the Docker-build check and parse's among them).
 
 **Related:** D-191, D-216 (item 6), D-219 (item 7), D-223 (items 5 and 6); `apps/api/requirements-dev.txt`, `apps/worker/requirements-dev.txt`; RUNBOOK 11.1 and 11.3.
+
+---
+
+## D-226 — The founder's decisions of 2026-10-28 and 2026-10-29: verticals, demos from production, the new order; rule (a) dropped; the edge finding (founder, 2026-10-28 to 2026-11-01)
+
+**Context:** decisions taken after #88's merge, recorded together on the founder's instruction ("to record as one new D-number in the next PR's records commit"). Items 1 to 6 are the founder's text. Item 5 changes D-199's order.
+
+1. Focus verticals: welding supply and fastener/hardware distributors in the USA, not limited to them.
+2. Demos run from the production environment, not staging. docflow-prod is built before demo readiness and holds only synthetic demo tenants until the before-first-pilot items in D-220 item 8 are done; those still gate any real customer data. Staging stays private (D-194) and in its current Supabase Free organization. docflow-prod goes in a new Supabase organization on Pro. D-209's outreach-period rules now apply to production: demo releases tagged demo-1, demo-2 and recorded in BUILD-STATUS; the smoke test, including one inbound e-mail, after every production deploy; no production deploys in the 24 hours before a booked demo; machines started early on demo day.
+3. D-208 changes: the D-195 comparison runs on fastener and welding POs. Both demo tenants are built together. The fastener rehearsal still runs first, then welding's.
+4. Your item 6 changes my custom SMTP decision. DocFlow never asks Supabase Auth to send mail, so custom SMTP for Supabase Auth is not needed and leaves the plan. The outbox sender (delivering queued rows through Postmark) stays on the before-first-pilot list. Demos send no outbound mail; if a prospect asks, held mail is shown on the Console's Outbox page. When the sender is built, outbound app e-mail is sent from a subdomain of our domain.
+5. The order, which changes D-199:
+   - a. The staging worker deploy (D-209), then the Blocker 3 test.
+   - b. M10, then D-195 change 1 straight after it, with M10's model-ID part folded into change 1.
+   - c. If Blocker 3 is confirmed, its fix, with the duplicate SKU index in the same migration.
+   - d. The 375 px fix, then counting rows before extraction.
+   - e. E1, then E2a.
+   - f. The staging API redeploy, and the worker again if b to e changed it.
+   - g. The docs PR, which ends Stage 5.
+   - h. The production environment.
+   - i. Demo content: both demo tenants with seeded history, a reset procedure, the synthetic POs, the accuracy bar set before anything is measured, the D-195 comparison.
+   - j. Two rehearsals from every machine stopped, fastener first, then welding; the smoke test; tag demo-1.
+   - Then the independent review, then pilots.
+6. From your item 7: the 2026-11-16 deadline is dropped, because claude-haiku-4-5-20251001 has no retirement notice and retirement needs at least 60 days' notice. D-195's comparison adds claude-sonnet-5-5 as an arm, with claude-sonnet-5 as the baseline. The full list of arms is proposed when the comparison is designed, from a fresh read of the models and deprecations pages.
+
+**Context for items 4 and 6 (Claude's read-only report, 2026-10-29):** the deprecations page lists `claude-haiku-4-5-20251001` Active, N/A, "Not sooner than October 15, 2026", and promises "at least 60 days' notice"; `claude-sonnet-5` Active, "Not sooner than June 30, 2027", listed under "Legacy models (still available)"; `claude-sonnet-5-5` $2/$10 per MTok. DocFlow's code has no Supabase Auth mail call (invites and recovery go through `generate_link`, D-105), and no outbox sender exists (D-103 addendum).
+
+7. **Rule (a) has dropped (founder, 2026-11-01).** On 2026-10-29 the founder replaced the Memurai restart task's daily 04:00 trigger with an At log on trigger for the founder's account. The confirming line, `2026-10-29 12:42:20 restarted, status Running`, follows Windows' sign-in event (Winlogon 7001) of 12:42:19; the lines of 10-30 and 10-31 follow sign-ins the same way, and on 2026-11-01 Memurai's uptime of 89,692 s put its start two seconds after the last line. The live task's trigger can't be read without administrator rights, so the evidence is the log and the events. A suite now needs only PONG and an uptime under 9 days.
+8. **RUNBOOK 1.4 gains, word for word:** "Before a suite: PONG on 6379 and Memurai's `uptime_in_seconds` under 777,600 (9 days)." Rule (a) was written in no file of the repository, so nothing else changes, CLAUDE.md included.
+9. **The finding (founder, 2026-11-01).** Fly's edge can't reach the API because it listens on IPv6 only, found 2026-11-01 at 17:08Z. The address was public 90 seconds. The evidence is `api-edge-503-log.txt` in the founder's evidence folder for the day, `DocFlow-evidence/2026-11-01-blocker3/`. It moves the API's redeploy ahead of step f. D-227 has the rest.
+10. **For step h (founder, 2026-11-01):**
+    - `/docs`, `/redoc` and `/openapi.json` turned off or put behind login. On staging they were accepted for the test window only.
+    - Behind Fly's edge, `request.client.host` is the proxy's address, so the intake's source-IP note can't see the real sender.
+11. **D-209's smoke test is owed at step f (founder, 2026-11-01).** It didn't run after the worker's deploy of 2026-11-01: there is no demo tenant yet, and it needs a model call.
+
+**Founder approval:** 2026-10-28 and 2026-10-29 (items 1 to 6); 2026-11-01 (items 7 to 11).
+
+**Related:** D-195, D-199, D-208, D-209, D-220, D-227.
+
+---
+
+## D-227 — The API listens on IPv4 and IPv6, so Fly's edge can reach it (founder, 2026-11-01)
+
+**Context:** step a of D-226's order. The Blocker 3 test needs a public address, which the API had never had. The first request through one read 503, because of how the API has started since Stage 3c.
+
+**1. The fault.**
+- `apps/api/Dockerfile` started `uvicorn app.main:app --host :: --port 8000`. When uvicorn makes the socket, asyncio sets `IPV6_V6ONLY` on it, so the API listened on IPv6 alone. The API's lock has no uvloop (D-225 item 11), so asyncio's loop is the one that ran.
+- Fly's edge dials a machine on IPv4. The proxy's log read `instance refused connection. is your app listening on 0.0.0.0:8000?`, then `could not find a good candidate within 40 attempts at load balancing`.
+- `fly proxy` comes in on the private IPv6 address, which is why no staging step showed this.
+- The parse service was never affected: `server.py` sets `IPV6_V6ONLY` to 0, and Fly's proxy reaches it over Flycast.
+- Production at step h would have hit the same wall.
+
+**2. The staging worker deploy, Grant 1 (D-209; D-226 step a).**
+- `4cadcaa` from a clean tree, 16:52:35Z to 16:53:59Z, exit 0, the command in `apps/worker/fly.toml`. RUNBOOK 11's three checks passed: run #504, daily audit #7 on `4cadcaa`, `predeploy_audit.sh worker` (55 packages, 0 vulnerabilities).
+- Release v12, `deployment-01M6C0E3KRZKC7DSMAKJA002PZ`, `sha256:be3910712d85997eed4cc412ff6347e04df2f380be9e5e69ff563624fba2a7e5`, 99 MB. Worker 1024 MB, beat 256 MB. Rollback is v11's image `deployment-01M5FN3YGFXMT9J8F14838VTPX`, which predates the certifi fix, so redeploying it needs the founder's waiver of RUNBOOK 11.
+- Release v7's stale `running` status had no effect.
+- Login check at 16:53:57Z, both workers ready at 16:54:03Z. First lifecycle sweep at 16:58:47Z, `ready_alerted=4`: one `tenant_ready_to_delete` alert for each of the four tenants past their deletion date, named before the deploy and matched by `dedupe_key`. Their four e-mails are held. One grace intake address retired.
+- The six counts before: 34, 4, 30, 35, 12, 15. After the sweep: 34, 8, 34, 35, 12, 15. No extraction run and no document since the deploy.
+
+**3. The test, Grant 2, stopped at its gate.**
+- The catalog was generated as D-202's: the first 20,000 items of `catalog_gen.catalog(20261011, 1, 250000)`, in a layout that reproduces D-202's 50,000-row sha256. 1,371,543 bytes, sha256 `1c12914b48e7956d05b3ffc2b47ef3b83298122a045bdfb5164e02ceb56986ac`. Outside the repository, with the generator's call beside it.
+- A shared IPv4 at no charge, allocated 17:07:23Z. Parse's canary passed 5 of 5, cgroup v1, on the host Fly moved it to on 2026-10-29.
+- `/healthz` through the edge read `503 45.445170`, which the Grant's rule stopped on. Nothing was uploaded, and the web app never started.
+- The address was released at 17:08:53Z and `fly ips list` read empty. The six counts stayed 34, 8, 34, 35, 12, 15.
+- **What did work:** auto-start through the edge. The proxy woke the stopped machine at 17:07:42Z, the machine started in 0.95 s, and `Application startup complete` came at 17:07:47Z.
+- **So Blocker 3's cut is still unmeasured.**
+
+**4. The fix: one socket for both families, as the parse service binds.** `apps/api/app/serve.py` makes an IPv6 socket with `IPV6_V6ONLY` off, binds `::`, and hands it to uvicorn; a socket handed over keeps its setting. The Dockerfile's `CMD` is `python -m app.serve`.
+- `app.main` is imported at the top, so the Q12 refusal still comes before the port opens, and image_check's module walk reaches the API's whole tree from the entry module.
+- A failed startup exits 3, uvicorn's own code. `Server.run` only returns, and a clean exit wouldn't trigger Fly's on-failure restart.
+- **Rejected:** `--host 0.0.0.0`, which is IPv4 alone and would likely break `fly proxy`; two uvicorn processes; gunicorn, a new dependency for one socket option.
+- A caller on IPv4 shows as `::ffff:a.b.c.d` in `request.client.host`. Its only reader is `email_intake.py`, and that is log-only.
+
+**5. What proves it.**
+- **`apps/api/tests/test_serve_dual_stack.py`, real processes, on the PC and in CI:** the launcher answers on 127.0.0.1 and ::1; the control `uvicorn --host ::` is refused on IPv4, so the test can fail; the Q12 refusal holds through the launcher; a failed startup exits 3; the Dockerfile's `CMD` is the launcher.
+- **In the `api` job (founder, approved 2026-11-01):** the API's real image is built, and `scripts/ci/api_image_listen.sh` starts it and reads `/healthz` on a published port, which is IPv4 into the container, and on ::1 from inside. The same image with the old command must be refused on IPv4. The build has `timeout-minutes: 15` and its own cache. The steps sit before the image check, which stays last (D-225 item 6). The founder is told before merging if they add more than 5 minutes to the job; the time on the PR run and the push run goes in the next status move.
+- **It does part of D-225 item 11's later Docker-build check,** for one app, for this one fault. That item stays open.
+- **The limit:** there's no Docker on the development machine, and no CI step passes through Fly's proxy. Only a request through a public address proves the edge, which is the `/healthz` gate of the re-run.
+
+**6. Readers (D-216 item 6).** Changed: `packages/core/tests/test_image_check.py` (the API's entry module is now `app.serve`; `scripts/ci/image_check.py` already reads `python -m`), `packages/core/tests/test_ci_guards.py` (a new guard), the header of `apps/api/fly.toml`, RUNBOOK 11.2. Read and unchanged: `.github/workflows/debian-snapshot.yml`, which reads the Dockerfile's snapshot line; `ci.yml`'s web-live job and `test_parse_token_boundary.py`, which start uvicorn themselves on 127.0.0.1.
+
+**7. No staging suites (founder, 2026-11-01).** D-223 item 5 names lock-only and tests-only PRs, and this is neither. The launcher touches no database or Storage path, and the suites don't run through it, so staging can't change these tests' results in a way CI can't show. The API's redeploy also runs without the suites, since it changes no database, Storage or worker path. They stay with step f's redeploy.
+
+**8. Then.** The API's redeploy, under its own Grant: this PR's merge on `main`, RUNBOOK 11's three checks, the command in `apps/api/fly.toml`. It also ships D-225's image split, since v2 is `ea6a988`'s image. Rollback is v2's image `deployment-01M5Z5Z0ER07M6JHKGSBKAA8XA`, which needs its own audit. After it, the Blocker 3 test runs again from Grant 2's `/healthz` gate, 20,000 items and then 50,000 into a second empty tenant. The walkthrough doesn't wait for this: it runs through `fly proxy`.
+
+**Founder approval:** 2026-11-01 (the fix, the CI step with its cache and time limit, no staging suites).
+
+**Related:** D-194, D-196, D-202, D-209, D-223, D-225, D-226; `apps/api/app/serve.py`, `apps/api/tests/test_serve_dual_stack.py`, `scripts/ci/api_image_listen.sh`.
