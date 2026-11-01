@@ -19,8 +19,6 @@ import sys
 import time
 from pathlib import Path
 
-from app import serve
-
 _API_DIR = Path(__file__).resolve().parents[1]
 _START_SECONDS = 60
 _HANG_SECONDS = 300
@@ -135,9 +133,10 @@ def test_on_fly_the_launcher_exits_before_opening_its_port_when_it_holds_the_tok
 
 
 def test_a_wrong_login_at_startup_exits_3_through_real_uvicorn():
-    # Fly restarts on failure only, so a failed startup must not read as a clean
-    # stop. Nothing is timed: there is no port to watch (port 0), the process
-    # ends by itself, and the limit only stops a hang.
+    # A failed startup must not read as a clean stop. uvicorn 0.53.0 exits 3
+    # itself and the launcher adds no check, so this guards a uvicorn change.
+    # Nothing is timed: there is no port to watch (port 0), the process ends by
+    # itself, and the limit only stops a hang.
     result = subprocess.run(
         [sys.executable, "-c", _WRONG_LOGIN],
         cwd=_API_DIR,
@@ -148,21 +147,6 @@ def test_a_wrong_login_at_startup_exits_3_through_real_uvicorn():
     stderr = result.stderr.decode(errors="replace")
     assert result.returncode == 3, stderr[-2000:]
     assert "DocFlow API refused to start: forced by the test" in stderr
-
-
-def test_a_clean_stop_exits_zero(monkeypatch):
-    # After a clean stop Server.run returns with started true. No SystemExit is
-    # the pass here.
-    class FakeServer:
-        def __init__(self, config):
-            self.started = True
-
-        def run(self, sockets):
-            for sock in sockets:
-                sock.close()
-
-    monkeypatch.setattr(serve.uvicorn, "Server", FakeServer)
-    serve.main(["0"])
 
 
 def test_the_image_starts_the_launcher():

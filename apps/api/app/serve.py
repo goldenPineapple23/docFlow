@@ -22,9 +22,6 @@ import uvicorn
 from app.main import app
 
 PORT = 8000
-# uvicorn's own exit code when the app's startup fails. Fly's on-failure restart
-# needs it: a plain return here would read as a clean stop.
-STARTUP_FAILURE = 3
 
 
 def listening_socket(port: int) -> socket.socket:
@@ -38,9 +35,11 @@ def listening_socket(port: int) -> socket.socket:
 def main(argv: list[str]) -> None:
     port = int(argv[0]) if argv else PORT
     server = uvicorn.Server(uvicorn.Config(app))
+    # A failed startup needs no check here: uvicorn 0.53.0's Server.startup exits
+    # 3 itself, `if self.lifespan.should_exit: sys.exit(STARTUP_FAILURE)`
+    # (uvicorn/server.py:117-118). The test that guards a uvicorn change is
+    # test_a_wrong_login_at_startup_exits_3_through_real_uvicorn.
     server.run(sockets=[listening_socket(port)])
-    if not server.started:
-        sys.exit(STARTUP_FAILURE)
 
 
 if __name__ == "__main__":
