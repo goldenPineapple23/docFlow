@@ -3,9 +3,9 @@ The API answers on IPv4 and on IPv6 from one socket (app/serve.py; D-227).
 
 Fly's edge dials a machine on IPv4 and `fly proxy` on its private IPv6 address.
 On 2026-11-01 the first request through a public address read 503, because
-`uvicorn --host ::` listens on IPv6 alone. These start real processes, so the
-fault can't hide behind a fake; ::1 stands for the private address and
-127.0.0.1 for the edge's.
+`uvicorn --host ::` listens on IPv6 alone. The listening tests start real
+processes, so the fault can't hide behind a fake; ::1 stands for the private
+address and 127.0.0.1 for the edge's.
 """
 
 from __future__ import annotations
@@ -19,12 +19,25 @@ import sys
 import time
 from pathlib import Path
 
-import pytest
-
 from app import serve
 
 _API_DIR = Path(__file__).resolve().parents[1]
 _START_SECONDS = 60
+_HANG_SECONDS = 300
+_LOGIN_URLS = ("DATABASE_URL", "API_DATABASE_URL", "ADMIN_DATABASE_URL", "STRIPE_DATABASE_URL")
+_NO_DATABASE = "postgresql://nobody:nothing@db.invalid:5432/none"
+# db.verify_logins is the one startup call that would reach a database. Forcing
+# it here leaves the real check, the real lifespan and real uvicorn to do the
+# rest, so the result can't depend on whether a database is up.
+_WRONG_LOGIN = """
+from app import main, serve
+
+def wrong_login(logins):
+    raise main.db.WrongLoginError("forced by the test")
+
+main.db.verify_logins = wrong_login
+serve.main(["0"])
+"""
 
 
 def _free_port() -> int:
@@ -40,13 +53,17 @@ def _accepts(host: str, port: int) -> bool:
         return probe.connect_ex((host, port)) == 0
 
 
-def _start(command: list[str], extra_env: dict[str, str] | None = None) -> subprocess.Popen:
+def _env(extra_env: dict[str, str] | None = None) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if k not in ("PARSE_SERVICE_TOKEN", "FLY_APP_NAME")}
     env.update(extra_env or {})
+    return env
+
+
+def _start(command: list[str], extra_env: dict[str, str] | None = None) -> subprocess.Popen:
     return subprocess.Popen(
         [sys.executable, "-m", *command],
         cwd=_API_DIR,
-        env=env,
+        env=_env(extra_env),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
     )
@@ -112,30 +129,40 @@ def test_on_fly_the_launcher_exits_before_opening_its_port_when_it_holds_the_tok
     if proc.poll() is None:
         proc.kill()
     _, stderr = proc.communicate(timeout=10)
-    assert proc.returncode not in (None, 0), stderr.decode(errors="replace")[-2000:]
+    assert proc.returncode == 1, stderr.decode(errors="replace")[-2000:]
     assert not opened
     assert "DocFlow API refused to start: PARSE_SERVICE_TOKEN is set" in stderr.decode(errors="replace")
 
 
-@pytest.mark.parametrize(("started", "exits"), [(False, True), (True, False)])
-def test_a_failed_startup_exits_non_zero_and_a_clean_stop_does_not(monkeypatch, started, exits):
-    # Fly restarts on failure only, and uvicorn's Server.run simply returns
-    # when the app's startup fails.
+def test_a_wrong_login_at_startup_exits_3_through_real_uvicorn():
+    # Fly restarts on failure only, so a failed startup must not read as a clean
+    # stop. Nothing is timed: there is no port to watch (port 0), the process
+    # ends by itself, and the limit only stops a hang.
+    result = subprocess.run(
+        [sys.executable, "-c", _WRONG_LOGIN],
+        cwd=_API_DIR,
+        env=_env(dict.fromkeys(_LOGIN_URLS, _NO_DATABASE)),
+        capture_output=True,
+        timeout=_HANG_SECONDS,
+    )
+    stderr = result.stderr.decode(errors="replace")
+    assert result.returncode == 3, stderr[-2000:]
+    assert "DocFlow API refused to start: forced by the test" in stderr
+
+
+def test_a_clean_stop_exits_zero(monkeypatch):
+    # After a clean stop Server.run returns with started true. No SystemExit is
+    # the pass here.
     class FakeServer:
         def __init__(self, config):
-            self.started = started
+            self.started = True
 
         def run(self, sockets):
             for sock in sockets:
                 sock.close()
 
     monkeypatch.setattr(serve.uvicorn, "Server", FakeServer)
-    if exits:
-        with pytest.raises(SystemExit) as stopped:
-            serve.main([str(_free_port())])
-        assert stopped.value.code == serve.STARTUP_FAILURE
-    else:
-        serve.main([str(_free_port())])
+    serve.main(["0"])
 
 
 def test_the_image_starts_the_launcher():

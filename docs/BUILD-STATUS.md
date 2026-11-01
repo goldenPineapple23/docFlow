@@ -297,7 +297,7 @@ the engine works well in a demo. **The order:** the leftover-count PR;
 Stage 4; Stage 5 (the worker-start fix and the cleanup that does not depend
 on a model); demo readiness, with D-195's model work; the Phase 6
 pilot-blocker subset (under Phase 6, below); then pilots with two or three
-customers. Of all this, only the leftover-count PR is built.
+customers. Of all this, only the leftover-count PR is built. Changed by D-226 item 5.
 
 **Stage 4, the load.** It replaces the approved design's 50,000-item tenant
 under test, its 250,000 rows on staging and its 2.5 million row CI job:
@@ -1840,7 +1840,7 @@ here is built.
 
 ## Known open items (across phases)
 
-- **Step h, the production environment (founder, 2026-11-01; D-226 items 9 and 10):**
+- **Step h, the production environment (founder, 2026-11-01; D-226 item 10):**
   - `/docs`, `/redoc` and `/openapi.json` turned off or put behind login. FastAPI's defaults serve
     them with no sign-in, and `/openapi.json` names the `/admin/*` routes, against 7.15.1. Accepted
     on staging for the Blocker 3 test's window only.
