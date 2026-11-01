@@ -41,4 +41,6 @@ WORKDIR /opt/api
 ENV PATH=/opt/api/venv/bin:/usr/bin:/bin
 USER docflow
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "::", "--port", "8000"]
+# One socket for IPv4 and IPv6 (app/serve.py; D-227). `uvicorn --host ::` listens
+# on IPv6 alone, and Fly's edge can't reach that.
+CMD ["python", "-m", "app.serve"]
