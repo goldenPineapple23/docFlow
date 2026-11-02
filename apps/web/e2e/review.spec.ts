@@ -304,6 +304,94 @@ test("an original that can't be read says so in the catalog's words, with no lin
   await expect(page.getByTestId("header-input-po_number")).toHaveValue("BCH-2291");
 });
 
+const DOC_031 = {
+  code: "DOC-031",
+  title: "This PDF can't be shown here",
+  message:
+    "DocFlow read this PDF, but it can't show the pages in this panel. Everything DocFlow read from it is shown beside this.",
+  action: "Download the original if you need to check a value against it.",
+};
+
+test("a PDF is offered as a download, on a fresh link, and never reaches the frame or a new tab", async ({ page }) => {
+  const state = { detail: detail() };
+  await stubApi(page, state);
+  let minted = 0;
+  await page.route("**/review/documents/*/original", (route) => {
+    minted += 1;
+    const token = `t${minted}`;
+    return route.fulfill({
+      json: {
+        url: `/review/documents/x/original/content?token=${token}`,
+        download_url: `/review/documents/x/original/content?token=${token}&download=1`,
+        expires_at: 0,
+        previewable: false,
+        format: "a PDF",
+        filename: "po.pdf",
+        preview_kind: null,
+        unavailable: null,
+        not_shown: DOC_031,
+      },
+    });
+  });
+  const asked: string[] = [];
+  await page.route("**/review/documents/*/original/content*", (route) => {
+    asked.push(new URL(route.request().url()).search);
+    return route.fulfill({
+      body: "%PDF-1.4",
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-disposition": 'attachment; filename="po.pdf"',
+      },
+    });
+  });
+  await page.goto(`/review/${DOCUMENT_ID}`);
+
+  const panel = page.getByTestId("viewer-not-previewable");
+  await expect(panel).toContainText("This PDF can't be shown here");
+  await expect(panel).toContainText("DOC-031");
+  await expect(panel).not.toContainText("a browser can't display");
+  await expect(page.getByTestId("document-viewer")).toHaveCount(0);
+
+  const opened: string[] = [];
+  page.context().on("page", (other) => opened.push(other.url()));
+  const mintedOnLoad = minted;
+  const downloading = page.waitForEvent("download");
+  await page.getByTestId("download-original").click();
+  const download = await downloading;
+
+  expect(download.suggestedFilename()).toBe("po.pdf");
+  expect(minted).toBe(mintedOnLoad + 1);
+  expect(asked).toEqual([`?token=t${minted}&download=1`]);
+  expect(opened).toEqual([]);
+  await expect(page.getByTestId("header-input-po_number")).toHaveValue("BCH-2291");
+});
+
+test("a viewer that can't get a link shows the catalog's words and code", async ({ page }) => {
+  const state = { detail: detail() };
+  await stubApi(page, state);
+  await page.route("**/review/documents/*/original", (route) =>
+    route.fulfill({
+      status: 503,
+      json: {
+        detail: {
+          code: "SYS-002",
+          title: "Files can't be opened right now",
+          message:
+            "DocFlow can't create the secure link it needs to open a file, because a setting is missing on our side. Your orders and the values DocFlow read are not affected.",
+          action: "DocFlow has logged this. If it keeps happening, contact DocFlow support.",
+        },
+      },
+    }),
+  );
+  await page.goto(`/review/${DOCUMENT_ID}`);
+
+  const panel = page.getByTestId("viewer-unavailable");
+  await expect(panel).toContainText("Files can't be opened right now");
+  await expect(panel).toContainText("contact DocFlow support");
+  await expect(panel).toContainText("SYS-002");
+  await expect(page.getByTestId("header-input-po_number")).toHaveValue("BCH-2291");
+});
+
 test("a read-only reviewer cannot edit or approve", async ({ page }) => {
   const state = { detail: detail({ can_edit: false }) };
   await stubApi(page, state);

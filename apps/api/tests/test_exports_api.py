@@ -26,6 +26,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from docflow_core import exports
+from docflow_core.config import get_settings
 from docflow_core.db import platform_session, tenant_session
 from docflow_core.export_jobs import run_export
 from docflow_core.review import (
@@ -95,6 +96,22 @@ def _export(client, tenant: _ReviewTenant, document: UUID, fmt: str) -> dict:
 
 def _download(client, status: dict):
     return client.get(status["download"]["url"])
+
+
+@requires_exports_schema
+def test_with_no_signing_secret_a_ready_export_answers_sys_002_not_a_500(client, monkeypatch):
+    """The link is minted when a ready export is read, so that's where it
+    fails (D-228). The file and its row are untouched."""
+    with _ReviewTenant("Acme Test Distributor -- export no secret") as tenant:
+        document = _approved_document(tenant)
+        status = _export(client, tenant, document, "csv")
+        monkeypatch.setenv("DOCUMENT_URL_SIGNING_SECRET", "")
+        get_settings.cache_clear()
+
+        refused = client.get(f"/review/exports/{status['export']['id']}", headers=tenant.headers())
+
+        assert refused.status_code == 503
+        assert refused.json()["detail"]["code"] == "SYS-002"
 
 
 # ── The Phase 4 exit criteria, through the real stack ───────────────────────

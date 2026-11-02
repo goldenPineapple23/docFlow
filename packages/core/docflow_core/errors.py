@@ -437,6 +437,19 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="high",
         audience="tenant",
     ),
+    # Sandboxed frames don't display PDFs (measured in Chrome, D-228), so a
+    # PDF is offered as a download whenever there are no page images for it.
+    "DOC-031": ErrorCatalogEntry(
+        code="DOC-031",
+        title="This PDF can't be shown here",
+        message=(
+            "DocFlow read this PDF, but it can't show the pages in this panel. Everything "
+            "DocFlow read from it is shown beside this."
+        ),
+        action="Download the original if you need to check a value against it.",
+        severity="info",
+        audience="tenant",
+    ),
     "INT-001": ErrorCatalogEntry(
         code="INT-001",
         title="No attachment to process",
@@ -945,6 +958,20 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
             "changed, and the failure has been logged."
         ),
         action="Try again in a minute. If it happens again, DocFlow already has the details.",
+        severity="high",
+        audience="both",
+    ),
+    # A file link can't be signed: DOCUMENT_URL_SIGNING_SECRET isn't set.
+    # Nothing here clears by itself and no alert is raised (D-228), so the
+    # wording promises neither. "Logged" is true: the API's handler logs it.
+    "SYS-002": ErrorCatalogEntry(
+        code="SYS-002",
+        title="Files can't be opened right now",
+        message=(
+            "DocFlow can't create the secure link it needs to open a file, because a setting "
+            "is missing on our side. Your orders and the values DocFlow read are not affected."
+        ),
+        action="DocFlow has logged this. If it keeps happening, contact DocFlow support.",
         severity="high",
         audience="both",
     ),

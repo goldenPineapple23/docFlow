@@ -76,6 +76,7 @@ Stripe handles billing. We're only using **test mode** for now — no real charg
 1. In the project root, copy `.env.example` to a new file named `.env`:
    - On Windows (PowerShell): `Copy-Item .env.example .env`
 2. Open `.env` and paste in the values you collected above next to the matching variable name. `.env.example` has a comment above each line explaining what it is and where it came from.
+3. `DOCUMENT_URL_SIGNING_SECRET` isn't collected from any service. Generate it with the command in `.env.example`, for this `.env` only: without it no original document opens and no export downloads.
 3. **Never commit `.env`** — it's already in `.gitignore`, and it should stay that way. If you ever see it show up in `git status` as a file to be committed, stop and tell me before proceeding.
 
 ## 5. Apply the database migration and make yourself a platform admin

@@ -6,6 +6,7 @@ import {
   createExport,
   getExport,
   listExports,
+  triggerDownload,
   type CatalogError,
   type ExportFormat,
   type ExportRecord,
@@ -43,17 +44,6 @@ type Notice =
   | { kind: "error"; catalog: CatalogError }
   | { kind: "info"; text: string }
   | null;
-
-function triggerDownload(url: string) {
-  // The API answers with Content-Disposition: attachment, so following the
-  // link saves the file and leaves this page where it is.
-  const link = document.createElement("a");
-  link.href = url;
-  link.rel = "noopener";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));

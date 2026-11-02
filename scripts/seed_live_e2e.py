@@ -37,6 +37,7 @@ from uuid import UUID, uuid4
 import httpx
 from docflow_core.config import get_settings
 from docflow_core.db import platform_session, tenant_session
+from docflow_core.storage import delete_tenant_storage, save_file
 from docflow_core.validation import validate_document
 from sqlalchemy import text
 
@@ -372,6 +373,34 @@ def _seed_rows(
         ],
     )
 
+    # One whose original is really in Storage and really a PDF, for the spec
+    # that the browser saves it (D-228). Nothing reads past its first bytes.
+    pdf_id, _ = _create_document(
+        tenant_id,
+        po_number=f"LIVE-{run}-4",
+        order_total=Decimal("570.00"),
+        lines=[
+            {
+                "line_number": 1,
+                "sku": "CF-1001",
+                "description": "Colombian Whole Bean 5lb",
+                "quantity": Decimal("12.00"),
+                "unit_price": Decimal("47.50"),
+                "line_total": Decimal("570.00"),
+                "confidence": Decimal("0.97"),
+            }
+        ],
+    )
+    pdf_path = save_file(tenant_id, "live-e2e-order.pdf", b"%PDF-1.4\n% Fake order for testing\n%%EOF\n")
+    with platform_session() as session:
+        session.execute(
+            text(
+                "UPDATE documents SET storage_path = :path, original_filename = 'live-e2e-order.pdf' "
+                "WHERE id = :id"
+            ),
+            {"path": pdf_path, "id": str(pdf_id)},
+        )
+
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
         json.dumps(
@@ -384,6 +413,7 @@ def _seed_rows(
                 "clean_document_id": str(clean_id),
                 "flagged_document_id": str(flagged_id),
                 "ack_document_id": str(ack_id),
+                "pdf_document_id": str(pdf_id),
             },
             indent=2,
         ),
@@ -413,6 +443,7 @@ def _remove(tenant_id: UUID, auth_user_id: str | None) -> None:
     """Every row and sign-in the run created. Safe to call twice, and safe
     to call on a tenant that was only half built."""
     tid = str(tenant_id)
+    delete_tenant_storage(tenant_id)
 
     # Dependency order, the same one the Python fixtures unwind in.
     with platform_session() as session:
