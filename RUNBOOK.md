@@ -2239,7 +2239,7 @@ to the founder before it is set.
 |---|---|
 | parse | `PARSE_SERVICE_TOKEN`, nothing else |
 | worker | `PARSE_SERVICE_TOKEN` (the same value), `DATABASE_URL` (`docflow_worker`'s: the `.env` line `WORKER_DATABASE_URL`), `REDIS_URL`, `ANTHROPIC_API_KEY`, the four `STORAGE_S3_*`, `HEARTBEAT_URL`, `FOUNDER_ALERT_EMAIL` |
-| API | `DATABASE_URL` (`docflow_api`'s: the `.env` line `API_DATABASE_URL`), `ADMIN_DATABASE_URL`, `STRIPE_DATABASE_URL`, `REDIS_URL`, `SUPABASE_URL`, `CONSOLE_MFA_ENFORCED`, the four `STORAGE_S3_*` |
+| API | `DATABASE_URL` (`docflow_api`'s: the `.env` line `API_DATABASE_URL`), `ADMIN_DATABASE_URL`, `STRIPE_DATABASE_URL`, `REDIS_URL`, `SUPABASE_URL`, `CONSOLE_MFA_ENFORCED`, the four `STORAGE_S3_*`, `DOCUMENT_URL_SIGNING_SECRET` |
 
 Left off, and why:
 - **`SUPABASE_JWT_SECRET`** (founder: off unless the API fails without it).
@@ -2250,9 +2250,9 @@ Left off, and why:
   (D-103: its own stage, before the first pilot). Unset, every e-mail is
   written `held` and read in the Console's Outbox. Set, the rows would be
   written `queued` and nothing would send them.
-- **The Stripe keys, the Postmark webhook pair, `SUPABASE_SERVICE_ROLE_KEY`,
-  `DOCUMENT_URL_SIGNING_SECRET`.** So Fly staging has no inbound e-mail, no
-  Stripe, no invites and no document viewer. No gate needs them.
+- **The Stripe keys, the Postmark webhook pair, `SUPABASE_SERVICE_ROLE_KEY`.**
+  So Fly staging has no inbound e-mail, no Stripe and no invites. No gate
+  needs them.
 
 **Rules for the whole deploy** (founder, 2026-10-05).
 - **The real model reads every document**, the 500 + 1 included. A deployed
@@ -2524,6 +2524,40 @@ stack against the same database, and no migration is part of this deploy.
 If the parse service and the worker disagree on the token, documents wait
 and `parse_service_unavailable` is raised (8.4); set the same value on both
 again.
+
+**Adding one generated secret to one app (founder, 2026-11-02; D-228).** For
+a secret added after the first deploy. `DOCUMENT_URL_SIGNING_SECRET` goes on
+the API only, with a newly generated value for each environment, so a link
+signed in one never works in another (founder, 2026-10-01). It is never
+`.env`'s value, and production never reuses staging's. The founder generates
+and sets it. Claude never sees or types the value, and it is never printed,
+pasted or saved to a file.
+
+1. **Founder,** in a new PowerShell window:
+   ```powershell
+   Set-PSReadLineOption -HistorySaveStyle SaveNothing
+   $fly = "$env:USERPROFILE\.fly\bin\fly.exe"
+   if (-not (Test-Path $fly)) { Write-Error "fly.exe not found at $fly"; return }
+   python -c "import secrets,subprocess,sys; sys.exit(subprocess.run([sys.argv[1],'secrets','set','--app',sys.argv[2],'--stage',sys.argv[3]+'='+secrets.token_urlsafe(48)]).returncode)" $fly docflow-api-staging DOCUMENT_URL_SIGNING_SECRET
+   ```
+   Python makes the value and hands it straight to `fly`, so it never appears
+   on screen or in the shell. `--stage` stores it without starting anything.
+   Do not use a PowerShell pipe: on 2026-11-02 one put a byte-order mark in
+   front of the name. Close the window afterwards.
+2. **Claude:** `fly secrets list` on all three apps, names only. Report that
+   the name is spelled exactly and is on the API alone.
+
+   **STOP.** The founder confirms the list. No deploy runs before this.
+3. **Claude, under a Grant:** the API deploy that brings the feature. A staged
+   secret reaches no machine until a deploy.
+4. **Claude:** confirm the startup log has no `document_signing_secret_unset`
+   line, and that the review screen opens an original.
+
+**Replacing the value:** run the steps again. Links in flight stop working
+within 300 s, and nobody is signed out.
+
+The exact `secrets set` call has run only against a stand-in for `fly`, not
+against Fly.
 
 ### 9.8 What an idle worker costs on Redis (founder, 2026-10-08; D-196)
 
