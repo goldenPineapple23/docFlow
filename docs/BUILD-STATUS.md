@@ -107,7 +107,13 @@ answers SYS-002. Its staging suites passed on `1309a0b`, the worker's on a re-ru
 in its clean-up, a staging-suite failure, not a CI flake (D-229 items 1 to 3). **Suites run with no
 VPN connection on this PC** (founder, 2026-11-03; D-229 item 4): on 2026-11-02, with NordVPN
 connected, the worker and API suites took about 1.8 times their 2026-10-27 times; the cause is not
-proved and won't be investigated. **Next, in order (D-228 item 7):** A2, then A3 to A6, with A5
+proved and won't be investigated. **A2 is built** (`phase55/stage5-viewer-a2`; D-228): the parse
+service draws page images on a new `POST /v1/pages`: every page of a PDF or TIFF, and a sender's
+single image, a PDF at 200 dpi, each page the smaller of PNG and JPEG, a gray page stored as gray,
+in answers of at most 32 MiB of base64 that say where the next starts. Nothing stores or shows them
+yet (A3, A4). A 25 MB upload holds at most about 30 poor-scan pages (23.7 MB), which fit in one
+answer; D-228 item 2's 44-page figure assumed more could arrive. The batching still serves long PDFs
+whose pages are small on disk but large as images. **Next, in order (D-228 item 7):** A3 to A6, with A5
 absorbing the 375 px fix. M10, with D-195 change 1 straight after it and M10's model-ID part folded
 into change 1. B1's demo half, the inbound-mail item (D-230). Blocker 3's background commit with the duplicate SKU index (0041). Counting rows before
 extraction. E1, then E2a. The staging API's redeploy, and the worker's again if those changed it,

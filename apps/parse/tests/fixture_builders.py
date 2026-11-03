@@ -272,11 +272,12 @@ def build_ole_with_stream(stream_name: str, data: bytes = b"fake legacy office c
 # ── PDF ────────────────────────────────────────────────────────────────────
 
 
-def build_pdf(page_texts: list[str]) -> bytes:
+def build_pdf(page_texts: list[str], media_box: tuple[int, int] = (612, 792)) -> bytes:
     """
     A minimal, uncompressed, multi-page PDF. Hand-assembled so the page count
     is exactly what the test asks for (a 500-page PDF is one of Section
     7.11's required rejection fixtures) with no dependency on a PDF writer.
+    `media_box` is the page size in points (US Letter by default).
     """
     objects: list[bytes] = []
 
@@ -296,9 +297,9 @@ def build_pdf(page_texts: list[str]) -> bytes:
     for content_id in content_ids:
         page_ids.append(
             add(
-                b"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 612 792] "
+                b"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %d %d] "
                 b"/Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>"
-                % (pages_id, font_id, content_id)
+                % (pages_id, media_box[0], media_box[1], font_id, content_id)
             )
         )
     kids = b" ".join(b"%d 0 R" % page_id for page_id in page_ids)

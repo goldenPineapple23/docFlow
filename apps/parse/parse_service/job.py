@@ -9,7 +9,8 @@ With isolation on, before it reads a byte of its input (founder's item 1):
 If any step fails it exits with status 70 without reading the file: the
 supervisor answers that as the service failing to isolate.
 
-Then: one header line of JSON on stdin ({"filename": ..., "args": ...}),
+Then: one header line of JSON on stdin ({"filename": ..., "args": ...}, and
+for page images "first_page"),
 the file's bytes until EOF, and one JSON answer on stdout. The filename is
 built by the supervisor from the extension alone; the sender's own name
 never reaches this process.
@@ -89,16 +90,17 @@ def main(argv: list[str]) -> int:
             return 0
         content = sys.stdin.buffer.read()
         filename = str(header.get("filename") or "upload")
-        if kind not in ("document", "table"):
+        if kind not in ("document", "table", "pages"):
             print(f"unknown job kind {kind!r}", file=sys.stderr)
             return 2
-        _answer(_parse(kind, content, filename))
+        extra = {"first_page": int(header.get("first_page") or 0)} if kind == "pages" else {}
+        _answer(_parse(kind, content, filename, **extra))
     except MemoryError:
         return EXIT_MEMORY
     return 0
 
 
-def _parse(kind: str, content: bytes, filename: str) -> dict:
+def _parse(kind: str, content: bytes, filename: str, *, first_page: int = 0) -> dict:
     """
     The parser's answer, or `error` (D-203, PR 1b-i): each parsing block
     catches only what its library raises on a malformed file, so an
@@ -114,6 +116,10 @@ def _parse(kind: str, content: bytes, filename: str) -> dict:
             from parse_service.parsing import documents
 
             return documents.parse(content, filename)
+        if kind == "pages":
+            from parse_service.parsing import pages
+
+            return pages.render(content, filename, first_page)
         from parse_service.parsing import tables
 
         return tables.parse(content, filename)
