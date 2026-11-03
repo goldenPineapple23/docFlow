@@ -3389,7 +3389,7 @@ Neither change starts before the founder's "go".
 - **2026-10-09, the Supabase stack again:** push run 38000939499 on `8cb7d95`, first attempt. The worker job failed at the step "Start the local Supabase stack (applies supabase/migrations/)", 42 seconds in. Its annotation, as printed: `worker: no test report: pytest never ran: the step "Start the local Supabase stack" failed first, so nothing was tested. That step's own log has the cause.` The other five jobs were green, the same step passed in that run's api and core jobs, and the commit changed one line of DECISIONS.md. The founder re-ran the failed job; the second attempt was green (`198 tests, 0 failed, 0 skipped, 0 unapproved`, 22:57:29 to 23:01:27).
 - **No cause is established for any of the three:** the job logs cannot be read here. No workaround was proposed or made. The step that starts the Supabase stack has now failed twice, on 2026-09-30 and on 2026-10-09. The two runs of 2026-10-11 in item 1 were green at the first attempt.
 - **The rule (founder, 2026-10-11): at the third flake, stop and read the log. The count starts from the two of 2026-10-09:** the image build on `a284b3d` is the first and the Supabase-stack start on `8cb7d95` is the second, so the next one is the third. The run of 2026-09-30 is recorded here and is not counted.
-- **The count since (added 2026-10-26): 10.** Flake 10 is `main`'s push run #510 (41662522636) on `91d4962`, #90's merge commit, 2026-11-03: the api job at "Start the local Supabase stack", Inbucket's host port 54324 already in use (D-229 item 7). Flake 9 is `main`'s push run #483 (40417642377) on `051000c`, #83's merge commit, 2026-10-26: the same install timing out on the miss path before `main` had a cache (D-222 item 9). Flakes 5 to 7 are parse's LibreOffice install (step 8) hitting its 15-min timeout on 2026-10-26, each its own flake (founder): push run #474 (40403054192) and pull-request run #475 (40403390752) on `a27599a`, and pull-request run #477 (40404128910) on `0230769`; a slow mirror (D-219 items 8 and 9). Flake 8 is the same timeout on the cache PR's first commit, now step 10, in pull-request run #480 (40412247609) on `9135240`, on the miss path, before any cache existed (founder's pre-approval; D-222 item 8). Flake 3 is push run 39684668090 on 2026-10-21, web-live at "Start the local Supabase stack", port 54322 already in use (D-214 item 13). Flake 4 is pull-request run #469 (40378719035) on 2026-10-26, web-live at step 3 "Run supabase/setup-cli@v2.1.2", hung 1 h 10 min 49 s, cancelled and re-run, cause unknown (D-221 item 4). From the CI PR (D-218), a step timeout on `supabase/setup-cli` or on parse's LibreOffice install counts as an infrastructure flake.
+- **The count since (added 2026-10-26): 11.** Flake 11 is the branch push run #511 (41682955096) on `1a04530`, A2's head, 2026-11-03: the api job at "Start the local Supabase stack", Inbucket's host port 54324 already in use again (D-231 item 1). Flake 10 is `main`'s push run #510 (41662522636) on `91d4962`, #90's merge commit, 2026-11-03: the api job at "Start the local Supabase stack", Inbucket's host port 54324 already in use (D-229 item 7). Flake 9 is `main`'s push run #483 (40417642377) on `051000c`, #83's merge commit, 2026-10-26: the same install timing out on the miss path before `main` had a cache (D-222 item 9). Flakes 5 to 7 are parse's LibreOffice install (step 8) hitting its 15-min timeout on 2026-10-26, each its own flake (founder): push run #474 (40403054192) and pull-request run #475 (40403390752) on `a27599a`, and pull-request run #477 (40404128910) on `0230769`; a slow mirror (D-219 items 8 and 9). Flake 8 is the same timeout on the cache PR's first commit, now step 10, in pull-request run #480 (40412247609) on `9135240`, on the miss path, before any cache existed (founder's pre-approval; D-222 item 8). Flake 3 is push run 39684668090 on 2026-10-21, web-live at "Start the local Supabase stack", port 54322 already in use (D-214 item 13). Flake 4 is pull-request run #469 (40378719035) on 2026-10-26, web-live at step 3 "Run supabase/setup-cli@v2.1.2", hung 1 h 10 min 49 s, cancelled and re-run, cause unknown (D-221 item 4). From the CI PR (D-218), a step timeout on `supabase/setup-cli` or on parse's LibreOffice install counts as an infrastructure flake.
 
 **Not changed:** any gate, pass mark, limit or constant; any product code (the PR is test code and documents). Nothing of Stage 4, Stage 5, demo readiness or the Phase 6 subset is built.
 
@@ -5746,3 +5746,80 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** 2026-11-03.
 
 **Related:** Sections 3, 7.1, 7.2, 7.8, 7.10, 7.13, 7.16.1, 7.16.3; D-195, D-226, D-228; `packages/core/docflow_core/email_intake.py`, `extraction.py`, `duplicates.py`, `constants.py`.
+
+---
+
+## D-231 — Flake 11, the runner image, the stack's ports kept out of automatic assignment, and the image build's condition (founder, 2026-11-03)
+
+**Context:** Main's push run #510 on `91d4962` failed at "Start the local Supabase stack" because Inbucket's host port 54324 was already in use (flake 10, D-229 item 7). The next push run, #511, failed at the same step on the same port. D-229 item 7 planned a CI PR to reserve the stack's ports from automatic assignment, together with the image-build fix. This is that PR, with the founder's rulings on its plan, and a printout that names whatever holds a port the next time.
+
+1. **Flake 11 (founder's ruling).**
+   - **The run:** the branch push run #511 (41682955096) on `1a04530`, A2's head, 2026-11-03. The api job (126081117874) failed at "Start the local Supabase stack (applies supabase/migrations/)", 17:18:48 to 17:19:49Z, before any test ran. The other five jobs were green: GitHub's REST API, `GET /repos/goldenPineapple23/docFlow/actions/runs/41682955096/attempts/1/jobs`, read by Claude at about 19:45Z on 2026-11-03, gave attempt 1's worker, core, web, parse service and web-live jobs `success` and the api job `failure`.
+   - **The cause, from the step's log (read by the founder):** all 39 migrations applied. Then, at "Starting containers...", `supabase_inbucket_docflow-ci` failed to bind host port 0.0.0.0:54324 ("address already in use"). This is the same failure as #510.
+   - **The same class as flake 3:** push run 39684668090 on 2026-10-21, web-live at "Start the local Supabase stack", port 54322 already in use (D-214 item 13; D-199 item 10).
+   - **What was holding the port wasn't found.** The after-failure step showed nothing on 54322, and the only container was the job's `redis:7` service on 6379. That step looked at 54322 only.
+   - **Two knock-on red steps:** "No unapproved skipped tests" (`pytest never ran`), and "Build the API's image" with `Cache export is not supported for the docker driver`, the same as #510 (BUILD-STATUS's known open items).
+   - **Re-run:** the founder re-ran the failed job, and it was green. PR #91 was merged.
+   - **The count is now 11 (D-199 item 10).** Flake 10 stays recorded in D-229 item 7.
+2. **The runner image (the founder's reading of the "Set up job" logs).**
+   - #509's api job passed on the ubuntu-24.04 image 20261025.353.1.
+   - #511's api job failed on 20261025.353.1 (attempt 1, 126081117874) and passed on it (attempt 2).
+   - A #510 api job ran on 20261101.360.1. Which attempt it was isn't confirmed; probably the passing attempt 2.
+   - No change in the repository between #509 and #510: `git diff 1309a0b 91d4962` is empty.
+   - **The failure isn't tied to one image.** Flake 11 failed on the same image #509 passed on, so the 2026-11-01 image doesn't explain the failures. Either something binds 54324 only some of the time, or the port was handed out as an automatic port, which the reservation addresses. From this PR on, each stack-start step prints the image.
+3. **The founder's rulings on the plan.**
+   1. The after-failure printout keeps its second `ss` line: every socket on the ports, in any state.
+   2. The before step prints the 54320 to 54327 range too.
+   3. The reservation step has the id `reserve_ports`, and `scripts/ci/check_skips.py` names it when it fails.
+   4. `catalog-sizing.yml`'s `sizing` job gets the reservation too.
+   5. The before step prints `$ImageOS` and `$ImageVersion`.
+   6. The before and after printout steps are renamed for the 54320 to 54327 range. The script keeps its file name, `show_port_54322.sh`. None of those steps has an id, so none is in `check_skips.py`'s `STEP_NAMES`.
+   7. BUILD-STATUS's known-open-items bullet for the reservation is replaced by the residual item in item 6.
+   8. The image-build fix goes in this PR: the api job's buildx step gets `id: buildx`, and "Build the API's image" runs on `(success() || failure()) && steps.buildx.outcome == 'success'`. Its known-open-items bullet is dropped.
+   9. `packages/core/tests/test_ci_guards.py` checks that the build step's `if:` requires `steps.buildx.outcome == 'success'`.
+   10. `check_skips.py`'s `STEP_NAMES` names `buildx`.
+4. **The change.**
+   - **The reservation.** The first step of each job that starts the stack runs `sudo sysctl -w net.ipv4.ip_local_reserved_ports=54320-54327` and prints the setting back. Those jobs are `ci.yml`'s `web-live`, `core`, `api` and `worker`, and `catalog-sizing.yml`'s `sizing`.
+     - The step runs before checkout, with `working-directory: ${{ github.workspace }}`, because three of those jobs default to an app folder that doesn't exist yet.
+     - It has no `continue-on-error`, so if it fails, the job stops there.
+   - **The printout.** `scripts/ci/show_port_54322.sh` now prints every listener on 54320 to 54327 with its owning process (`sudo ss -ltunp`), then every socket on them in any state (`sudo ss -tuanp`). It does this before the stack starts and again after a failed start, and the before step also names the runner image.
+     - `sudo` is needed because `ss -p` names only the runner user's own processes, and Docker's port proxy runs as root.
+     - The script still never fails its step.
+     - The eight steps that call it, a before and an after in each of the four `ci.yml` jobs, are named "Show what is listening on ports 54320 to 54327 before the stack starts, and the runner image" and "... after the stack failed to start, and every container".
+   - **The image build.** "Build the API's image" ran on `if: success() || failure()`. When an earlier step failed, `docker/setup-buildx-action` was skipped, and the build failed too, with `Cache export is not supported for the docker driver`. That happened on #510 and #511, and the second red step pointed away from the real cause.
+     - **Where the condition came from:** `b04af98` (2026-11-01, D-227) added the step with it.
+     - **Why it was used isn't recorded.** Neither that commit's message nor D-227 says. The reason is inferred from D-225 item 6, which says of the image check that "A test failure doesn't hide it", and from `ci.yml`'s comment on that step, "it runs whatever the tests did". The inferred intent is that a test failure shouldn't stop the image from being built.
+     - **The fix keeps that intent.** The api job's buildx step gets `id: buildx`, and the build runs on `(success() || failure()) && steps.buildx.outcome == 'success'`. buildx runs before the tests, so a test failure still builds the image. An earlier failure, such as the stack start, skips buildx, and then the build is skipped instead of failing.
+     - **The two steps after it** were read before the change. "The API's image answers on IPv4 and IPv6" runs only on `steps.api_image.outcome == 'success'`, so it is skipped with the build. The image check reads only `steps.deps.outcome`, so it is unchanged. Neither goes red when the build is skipped.
+     - **The guard:** a new test in `test_ci_guards.py` checks that buildx (`id: buildx`) is set up before the tests, that the build's `if:` requires `steps.buildx.outcome == 'success'`, and that `STEP_NAMES` holds `buildx`. Before the commit, it was run by hand against `HEAD`'s `ci.yml` and against the new id with the old `if:`, and it fails on both.
+     - **`STEP_NAMES`:** `"buildx": "Run docker/setup-buildx-action@v4"`, so a missing test report after a failed buildx names that step.
+5. **What the reservation does, from the kernel's own documentation and source.**
+   - **The docs page** (docs.kernel.org/networking/ip-sysctl.html, version 7.4.0-rc1, read 2026-11-03), on `ip_local_reserved_ports`: "These ports will not be used by automatic port assignments (e.g. when calling connect() or bind() with port number 0). Explicit port allocation behavior is unchanged." On `ip_local_port_range`: "The default values are 32768 and 60999 respectively." So the whole stack block is in the automatic range by default.
+   - **IPv6:** the docs page doesn't say. Its "/proc/sys/net/ipv6/* Variables" section says only "tcp_* settings under ipv4/ also apply to IPv6 [XXX?]", and it never names `ip_local_reserved_ports`. The source settles it. At torvalds/linux commit `05441d697f7f9a927264f4058cbbc6a03dfcac9d` (master, read 2026-11-03):
+     - `include/net/ip.h:370-375`: `inet_is_local_reserved_port` reads `net->ipv4.sysctl_local_reserved_ports`, with no address-family test.
+     - `net/ipv6/tcp_ipv6.c:2303`: IPv6 TCP uses `.get_port = inet_csk_get_port`. That function's port-0 path (`net/ipv4/inet_connection_sock.c:517-518`) calls `inet_csk_find_open_port`, which skips reserved ports (`:360`).
+     - `net/ipv6/inet6_hashtables.c:405`: an IPv6 connect's port choice goes through `__inet_hash_connect`, which skips reserved ports (`net/ipv4/inet_hashtables.c:1128`).
+     - `net/ipv6/udp.c:98-107` and `:1921`: IPv6 UDP uses `udp_lib_get_port`, which skips reserved ports (`net/ipv4/udp.c:275`).
+
+     So the reservation applies to IPv6 as well as IPv4, for TCP and UDP.
+   - **Scope: per network namespace.** The reservation applies in the runner's host namespace, where Docker binds the published 54324. Containers on their own networks don't inherit it. At the same commit:
+     - `net/ipv4/sysctl_net_ipv4.c:837-838`: `ip_local_reserved_ports` is in `ipv4_net_table`, the per-namespace table, with `.data = &init_net.ipv4.sysctl_local_reserved_ports`.
+     - `:1661-1676`: a new namespace's copy of the table points at that namespace's own variables.
+     - `:1707`: `ipv4_sysctl_init_net` gives each new namespace its own zeroed bitmap, `kzalloc(65536 / 8, GFP_KERNEL)`.
+     - `include/net/netns/ipv4.h:273`: the bitmap is a field of `struct netns_ipv4`.
+6. **What neither change covers.**
+   - **The reservation:**
+     - It can't release a socket that took one of these ports before step 1, during job setup or when the `redis:7` service container started.
+     - It doesn't refuse an explicit bind.
+     - It doesn't cover a bind failure inside Docker itself.
+   - **A program on the image that binds 54324 itself:** the reservation doesn't stop it. The printout names it, with its process, if it is still bound when a stack-start step runs. **The residual item (founder, in BUILD-STATUS's known open items):** "If the port printout names a program binding 54320 to 54327 itself, move the mail catcher's port or turn it off in CI (not proposed until a program is named; D-231)."
+7. **The gate.**
+   - CI green on the PR run, and no staging suites: nothing staging can show changes.
+   - The PR run proves the reservation in the four `ci.yml` jobs, and the before step's range printout on every run. `catalog-sizing.yml` runs on this PR too, on its small mix, because its own file changed. The after-failure lines run only after a failed start.
+   - **The founder reads the api job's before-step printout on the PR run**, the runner image line and both `ss` column headers, to prove the range filter works. On a green run nothing holds 54320 to 54327, so the column headers prove only that `ss` accepted the filter, not that it catches a holder.
+   - **The founder also reads the api job's reserve step** printing `net.ipv4.ip_local_reserved_ports = 54320-54327`.
+   - **On a green run the image build runs as before.** Its skip shows only after an earlier step fails.
+
+**Founder approval:** the founder, 2026-11-03.
+
+**Related:** D-199, D-214, D-218, D-225, D-227, D-229; `.github/workflows/ci.yml`, `.github/workflows/catalog-sizing.yml`, `scripts/ci/show_port_54322.sh`, `scripts/ci/check_skips.py`, `packages/core/tests/test_ci_guards.py`.

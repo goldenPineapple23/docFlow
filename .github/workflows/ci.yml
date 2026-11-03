@@ -110,6 +110,15 @@ jobs:
     name: web-live (the review screen against the real API)
     runs-on: ubuntu-24.04
     steps:
+      - name: Keep the stack's ports 54320 to 54327 out of automatic assignment (D-229 item 7; D-231)
+        id: reserve_ports
+        # Before checkout: a socket that takes one of these as its automatic
+        # port before this step still holds it. An explicit bind is never
+        # refused (flakes 10 and 11; D-231).
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo sysctl -w net.ipv4.ip_local_reserved_ports=54320-54327
+          sysctl net.ipv4.ip_local_reserved_ports
       - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v2.1.2
         # Normally under 10 s; hung 70 min on 2026-10-26 (run #469), cause
@@ -117,13 +126,13 @@ jobs:
         timeout-minutes: 5
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
-      - name: Show what is listening on port 54322 before the stack starts (read-only; D-199 flake 3)
+      - name: Show what is listening on ports 54320 to 54327 before the stack starts, and the runner image (read-only; D-199 flake 3; D-231)
         continue-on-error: true
         run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" before
       - name: Start the local Supabase stack (applies supabase/migrations/)
         id: supabase
         run: supabase start
-      - name: Show what is listening on port 54322 after the stack failed to start, and every container (read-only; D-199 flake 3)
+      - name: Show what is listening on ports 54320 to 54327 after the stack failed to start, and every container (read-only; D-199 flake 3; D-231)
         if: failure() && steps.supabase.outcome == 'failure'
         continue-on-error: true
         run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" after
@@ -261,6 +270,15 @@ jobs:
       run:
         working-directory: packages/core
     steps:
+      - name: Keep the stack's ports 54320 to 54327 out of automatic assignment (D-229 item 7; D-231)
+        id: reserve_ports
+        # Before checkout: a socket that takes one of these as its automatic
+        # port before this step still holds it. An explicit bind is never
+        # refused (flakes 10 and 11; D-231).
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo sysctl -w net.ipv4.ip_local_reserved_ports=54320-54327
+          sysctl net.ipv4.ip_local_reserved_ports
       - uses: actions/checkout@v7
         # Two commits: the dependency audit compares a pull request's merge
         # commit with its first parent (scripts/ci/deps_changed.sh; D-219).
@@ -272,14 +290,14 @@ jobs:
         timeout-minutes: 5
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
-      - name: Show what is listening on port 54322 before the stack starts (read-only; D-199 flake 3)
+      - name: Show what is listening on ports 54320 to 54327 before the stack starts, and the runner image (read-only; D-199 flake 3; D-231)
         continue-on-error: true
         run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" before
       - name: Start the local Supabase stack (applies supabase/migrations/)
         id: supabase
         working-directory: ${{ github.workspace }}
         run: supabase start
-      - name: Show what is listening on port 54322 after the stack failed to start, and every container (read-only; D-199 flake 3)
+      - name: Show what is listening on ports 54320 to 54327 after the stack failed to start, and every container (read-only; D-199 flake 3; D-231)
         if: failure() && steps.supabase.outcome == 'failure'
         continue-on-error: true
         run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" after
@@ -398,6 +416,15 @@ jobs:
       run:
         working-directory: apps/api
     steps:
+      - name: Keep the stack's ports 54320 to 54327 out of automatic assignment (D-229 item 7; D-231)
+        id: reserve_ports
+        # Before checkout: a socket that takes one of these as its automatic
+        # port before this step still holds it. An explicit bind is never
+        # refused (flakes 10 and 11; D-231).
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo sysctl -w net.ipv4.ip_local_reserved_ports=54320-54327
+          sysctl net.ipv4.ip_local_reserved_ports
       - uses: actions/checkout@v7
         # Two commits: the dependency audit compares a pull request's merge
         # commit with its first parent (scripts/ci/deps_changed.sh; D-219).
@@ -409,14 +436,14 @@ jobs:
         timeout-minutes: 5
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
-      - name: Show what is listening on port 54322 before the stack starts (read-only; D-199 flake 3)
+      - name: Show what is listening on ports 54320 to 54327 before the stack starts, and the runner image (read-only; D-199 flake 3; D-231)
         continue-on-error: true
         run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" before
       - name: Start the local Supabase stack (applies supabase/migrations/)
         id: supabase
         working-directory: ${{ github.workspace }}
         run: supabase start
-      - name: Show what is listening on port 54322 after the stack failed to start, and every container (read-only; D-199 flake 3)
+      - name: Show what is listening on ports 54320 to 54327 after the stack failed to start, and every container (read-only; D-199 flake 3; D-231)
         if: failure() && steps.supabase.outcome == 'failure'
         continue-on-error: true
         run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" after
@@ -441,6 +468,7 @@ jobs:
       # (catalog_import.run_parse), which reads through the real parse service
       # image, as in the worker job.
       - uses: docker/setup-buildx-action@v4
+        id: buildx
       - name: Build the parse service image
         id: parse_image
         uses: docker/build-push-action@v7
@@ -498,7 +526,7 @@ jobs:
       # a request through a public address proves that.
       - name: Build the API's image
         id: api_image
-        if: success() || failure()
+        if: (success() || failure()) && steps.buildx.outcome == 'success'
         timeout-minutes: 15
         uses: docker/build-push-action@v7
         with:
@@ -539,6 +567,15 @@ jobs:
     env:
       DATABASE_URL: postgresql://docflow_worker:ci-local-only@127.0.0.1:54322/postgres
     steps:
+      - name: Keep the stack's ports 54320 to 54327 out of automatic assignment (D-229 item 7; D-231)
+        id: reserve_ports
+        # Before checkout: a socket that takes one of these as its automatic
+        # port before this step still holds it. An explicit bind is never
+        # refused (flakes 10 and 11; D-231).
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo sysctl -w net.ipv4.ip_local_reserved_ports=54320-54327
+          sysctl net.ipv4.ip_local_reserved_ports
       - uses: actions/checkout@v7
         # Two commits: the dependency audit compares a pull request's merge
         # commit with its first parent (scripts/ci/deps_changed.sh; D-219).
@@ -550,14 +587,14 @@ jobs:
         timeout-minutes: 5
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
-      - name: Show what is listening on port 54322 before the stack starts (read-only; D-199 flake 3)
+      - name: Show what is listening on ports 54320 to 54327 before the stack starts, and the runner image (read-only; D-199 flake 3; D-231)
         continue-on-error: true
         run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" before
       - name: Start the local Supabase stack (applies supabase/migrations/)
         id: supabase
         working-directory: ${{ github.workspace }}
         run: supabase start
-      - name: Show what is listening on port 54322 after the stack failed to start, and every container (read-only; D-199 flake 3)
+      - name: Show what is listening on ports 54320 to 54327 after the stack failed to start, and every container (read-only; D-199 flake 3; D-231)
         if: failure() && steps.supabase.outcome == 'failure'
         continue-on-error: true
         run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" after

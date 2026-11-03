@@ -313,3 +313,15 @@ def test_the_api_job_starts_the_real_image_and_reads_both_address_families():
     assert "timeout-minutes: 15" in block[build : block.index(step)]
     assert "cache-from: type=gha,scope=api" in block
     assert "cache-to: type=gha,mode=max,scope=api" in block
+
+
+def test_the_api_image_is_built_only_when_buildx_was_set_up_and_the_skip_check_can_name_it():
+    """D-231: the build ran on success() || failure(), so a failed stack start
+    skipped buildx and the build went red too, pointing away from the cause
+    (push runs #510 and #511). It still runs whatever the tests did."""
+    block = _one_job(WORKFLOW.read_text(encoding="utf-8"), "api")
+    setup = block.index("- uses: docker/setup-buildx-action@v4\n        id: buildx\n")
+    build = block.index("name: Build the API's image")
+    assert setup < block.index("id: test\n") < build
+    assert "if: (success() || failure()) && steps.buildx.outcome == 'success'" in block[build : build + 200]
+    assert "buildx" in _check_skips().STEP_NAMES

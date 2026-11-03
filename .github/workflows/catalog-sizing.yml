@@ -59,6 +59,14 @@ jobs:
     # mix has not been timed; a run cut short still prints how far it got.
     timeout-minutes: 350
     steps:
+      - name: Keep the stack's ports 54320 to 54327 out of automatic assignment (D-229 item 7; D-231)
+        # Before checkout: a socket that takes one of these as its automatic
+        # port before this step still holds it. An explicit bind is never
+        # refused (flakes 10 and 11; D-231).
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo sysctl -w net.ipv4.ip_local_reserved_ports=54320-54327
+          sysctl net.ipv4.ip_local_reserved_ports
       - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v2.1.2
         # Normally under 10 s; hung 70 min on 2026-10-26 (run #469), cause

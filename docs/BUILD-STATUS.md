@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-03, with A1 merged and the worker suite's re-run passed:** Phase 5.5,
+**Status, as of 2026-11-03, with A2 merged:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -67,9 +67,15 @@ tenant named in lower case is never listed or swept (D-224 item 14). **The warni
 tests run on a fake clock, and a new test checks that a slow busy answer uses up the patience
 (D-212 item 8). A PR that changes only tests runs the staging suites only if the staging
 environment can change those tests' results in a way CI can't show (D-223 item 5). **The CI infrastructure flake
-count is 10** (D-199 item 10; flakes 5 to 9 are parse's LibreOffice install timing out at 15 min on
+count is 11** (D-199 item 10; flakes 5 to 9 are parse's LibreOffice install timing out at 15 min on
 2026-10-26, D-219 items 8 and 9, D-222 items 8 and 9; flake 10 is main's push run #510 on `91d4962`,
-where Inbucket's host port 54324 was already in use at the api job's stack start, D-229 item 7). **A standing rule (D-213 item 6, tightened
+where Inbucket's host port 54324 was already in use at the api job's stack start, D-229 item 7; flake 11 is
+A2's branch push run #511 on `1a04530`, the same port at the same step, holder not identified, D-231
+item 1). **The port-reservation CI PR is built** (`ci/supabase-port-reservation`; D-231): each job
+that starts the Supabase stack first keeps 54320 to 54327 out of automatic port assignment, and the
+steps around the stack's start print every socket on those ports with its process, and the runner
+image; "Build the API's image" now runs only when buildx was set up, so a failed stack start no longer
+turns it red too. **A standing rule (D-213 item 6, tightened
 in D-214): a staging suite, a Fly action or any write to staging starts only after a message from
 the founder that begins with "Grant" and names the step.** Any change to a granted command, a flag
 such as `--app` included, is told to the founder before it runs (founder, 2026-10-27). **Two new
@@ -107,7 +113,9 @@ answers SYS-002. Its staging suites passed on `1309a0b`, the worker's on a re-ru
 in its clean-up, a staging-suite failure, not a CI flake (D-229 items 1 to 3). **Suites run with no
 VPN connection on this PC** (founder, 2026-11-03; D-229 item 4): on 2026-11-02, with NordVPN
 connected, the worker and API suites took about 1.8 times their 2026-10-27 times; the cause is not
-proved and won't be investigated. **A2 is built** (`phase55/stage5-viewer-a2`; D-228): the parse
+proved and won't be investigated. **A2 is merged** (PR #91, `main` is `56fe7d2`; main's push run #513 green; PR run #512's parse HTTP
+step `478 passed`, parse unit `635 passed, 17 warnings`, parse audit no known vulnerabilities, API
+`798 passed, 3 deselected, 1 warning in 90.37s (0:01:30)`, every left-behind count +0; D-228): the parse
 service draws page images on a new `POST /v1/pages`: every page of a PDF or TIFF, and a sender's
 single image, a PDF at 200 dpi, each page the smaller of PNG and JPEG, a gray page stored as gray,
 in answers of at most 32 MiB of base64 that say where the next starts. Nothing stores or shows them
@@ -1875,17 +1883,8 @@ here is built.
 
 ## Known open items (across phases)
 
-- **For a later CI PR, not the docs PR (founder, 2026-11-03; D-229 item 7):** the api job's "Build
-  the API's image" step runs on `success() || failure()`, so when an earlier step fails and
-  `docker/setup-buildx-action` is skipped, it fails too, with `Cache export is not supported for the
-  docker driver` (main's push run #510). That second red step points away from the real cause.
-
-- **For a later CI PR, together with the image-build fix (founder, 2026-11-03; D-229 item 7):** as
-  the first step of each job that starts the Supabase stack, reserve its local ports from automatic
-  assignment with `sudo sysctl -w net.ipv4.ip_local_reserved_ports=54320-54327`, and print the
-  setting back. Flakes 3 (port 54322) and 10 (port 54324) were both a stack port already held on the
-  runner, and Linux's default ephemeral range is 32768 to 60999
-  (docs.kernel.org/networking/ip-sysctl.html). Turning the mail catcher off in CI is not taken.
+- If the port printout names a program binding 54320 to 54327 itself, move the mail catcher's port
+  or turn it off in CI (not proposed until a program is named; D-231).
 
 - **Step h, the production environment (founder, 2026-11-01; D-226 item 10):**
   - `/docs`, `/redoc` and `/openapi.json` turned off or put behind login. FastAPI's defaults serve
