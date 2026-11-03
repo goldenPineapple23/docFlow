@@ -7,6 +7,7 @@
 # docflow_core is installed separately with --no-deps: the service imports
 # only its standard-library modules (file_types).
 pdfplumber>=0.11
+pypdfium2>=5.13       # page images (viewer A2, D-228); pdfplumber already pulls it in
 python-docx>=1.1
 openpyxl>=3.1
 Pillow>=10.4

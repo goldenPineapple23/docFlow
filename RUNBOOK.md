@@ -474,6 +474,8 @@ How a run is reported:
   Check the service before the run and after it; starting it needs
   administrator rights (`Start-Service Memurai`).
   Before a suite: PONG on 6379 and Memurai's `uptime_in_seconds` under 777,600 (9 days).
+  Before a suite and again after it: no VPN connection is active on this PC. All three are read without changing anything: every VPN adapter reads Disconnected (`Get-NetAdapter -IncludeHidden`), no Windows VPN profile is connected (`Get-VpnConnection`, user and all-user), and no default route goes through a VPN adapter (`Get-NetRoute`). Any NordVPN processes and services still running are listed for the record. A suite doesn't start while a connection is active, and one found active afterwards is reported with the run (founder, 2026-11-03; D-229 item 5).
+  Before a suite: the AC sleep timeout is read without changing it (`powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE`), and a suite doesn't start if it is under 120 minutes (0, never, passes). The API suite took 1:31:06 on 2026-11-02 (founder, 2026-11-03; D-229 item 5).
   If the count is *lower* than the number written here, find out what
   stopped running before calling the run green.
   The 3 deselected are the `live_api` tests, which only run at checkpoints

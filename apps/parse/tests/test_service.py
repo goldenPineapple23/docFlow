@@ -55,11 +55,11 @@ def service(monkeypatch_module=None):
     proc.wait(timeout=10)
 
 
-def _post(url: str, kind: str, body: bytes, extension: str, token: str | None):
+def _post(url: str, kind: str, body: bytes, extension: str, token: str | None, headers: dict | None = None):
     saved = conftest.SERVICE_URL, conftest.SERVICE_TOKEN
     conftest.SERVICE_URL = url
     try:
-        return conftest.post(kind, body, extension, token=token or "")
+        return conftest.post(kind, body, extension, token=token or "", extra_headers=headers)
     finally:
         conftest.SERVICE_URL, conftest.SERVICE_TOKEN = saved
 
@@ -93,6 +93,23 @@ def test_an_extension_that_is_not_an_extension_is_refused(service):
     for bad in ("", "txt", "../../etc/passwd", ".TOOLONGEXT"):
         status, body = _post(url, "document", b"PO", bad, token)
         assert (status, body) == (400, {"error": "bad_extension"}), bad
+
+
+def test_page_images_answer_through_the_service_from_the_page_asked_for(service):
+    url, token = service
+    content = (FIXTURES / "positive/po.tif").read_bytes()
+    status, body = _post(url, "pages", content, ".tif", token, {"X-First-Page": "1"})
+    assert status == 200 and body["outcome"] == "ok", body
+    assert [page["index"] for page in body["pages"]] == [1]
+    status, body = _post(url, "pages", content, ".tif", token)
+    assert status == 200 and [page["index"] for page in body["pages"]] == [0, 1]
+
+
+def test_a_first_page_that_is_not_a_page_number_is_refused(service):
+    url, token = service
+    for bad in ("x", "-1", "1.5", "100", "0100"):
+        status, body = _post(url, "pages", b"PO", ".txt", token, {"X-First-Page": bad})
+        assert (status, body) == (400, {"error": "bad_first_page"}), bad
 
 
 def test_an_unknown_path_is_a_404(service):

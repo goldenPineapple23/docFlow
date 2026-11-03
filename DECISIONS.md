@@ -3389,7 +3389,7 @@ Neither change starts before the founder's "go".
 - **2026-10-09, the Supabase stack again:** push run 38000939499 on `8cb7d95`, first attempt. The worker job failed at the step "Start the local Supabase stack (applies supabase/migrations/)", 42 seconds in. Its annotation, as printed: `worker: no test report: pytest never ran: the step "Start the local Supabase stack" failed first, so nothing was tested. That step's own log has the cause.` The other five jobs were green, the same step passed in that run's api and core jobs, and the commit changed one line of DECISIONS.md. The founder re-ran the failed job; the second attempt was green (`198 tests, 0 failed, 0 skipped, 0 unapproved`, 22:57:29 to 23:01:27).
 - **No cause is established for any of the three:** the job logs cannot be read here. No workaround was proposed or made. The step that starts the Supabase stack has now failed twice, on 2026-09-30 and on 2026-10-09. The two runs of 2026-10-11 in item 1 were green at the first attempt.
 - **The rule (founder, 2026-10-11): at the third flake, stop and read the log. The count starts from the two of 2026-10-09:** the image build on `a284b3d` is the first and the Supabase-stack start on `8cb7d95` is the second, so the next one is the third. The run of 2026-09-30 is recorded here and is not counted.
-- **The count since (added 2026-10-26): 9.** Flake 9 is `main`'s push run #483 (40417642377) on `051000c`, #83's merge commit, 2026-10-26: the same install timing out on the miss path before `main` had a cache (D-222 item 9). Flakes 5 to 7 are parse's LibreOffice install (step 8) hitting its 15-min timeout on 2026-10-26, each its own flake (founder): push run #474 (40403054192) and pull-request run #475 (40403390752) on `a27599a`, and pull-request run #477 (40404128910) on `0230769`; a slow mirror (D-219 items 8 and 9). Flake 8 is the same timeout on the cache PR's first commit, now step 10, in pull-request run #480 (40412247609) on `9135240`, on the miss path, before any cache existed (founder's pre-approval; D-222 item 8). Flake 3 is push run 39684668090 on 2026-10-21, web-live at "Start the local Supabase stack", port 54322 already in use (D-214 item 13). Flake 4 is pull-request run #469 (40378719035) on 2026-10-26, web-live at step 3 "Run supabase/setup-cli@v2.1.2", hung 1 h 10 min 49 s, cancelled and re-run, cause unknown (D-221 item 4). From the CI PR (D-218), a step timeout on `supabase/setup-cli` or on parse's LibreOffice install counts as an infrastructure flake.
+- **The count since (added 2026-10-26): 10.** Flake 10 is `main`'s push run #510 (41662522636) on `91d4962`, #90's merge commit, 2026-11-03: the api job at "Start the local Supabase stack", Inbucket's host port 54324 already in use (D-229 item 7). Flake 9 is `main`'s push run #483 (40417642377) on `051000c`, #83's merge commit, 2026-10-26: the same install timing out on the miss path before `main` had a cache (D-222 item 9). Flakes 5 to 7 are parse's LibreOffice install (step 8) hitting its 15-min timeout on 2026-10-26, each its own flake (founder): push run #474 (40403054192) and pull-request run #475 (40403390752) on `a27599a`, and pull-request run #477 (40404128910) on `0230769`; a slow mirror (D-219 items 8 and 9). Flake 8 is the same timeout on the cache PR's first commit, now step 10, in pull-request run #480 (40412247609) on `9135240`, on the miss path, before any cache existed (founder's pre-approval; D-222 item 8). Flake 3 is push run 39684668090 on 2026-10-21, web-live at "Start the local Supabase stack", port 54322 already in use (D-214 item 13). Flake 4 is pull-request run #469 (40378719035) on 2026-10-26, web-live at step 3 "Run supabase/setup-cli@v2.1.2", hung 1 h 10 min 49 s, cancelled and re-run, cause unknown (D-221 item 4). From the CI PR (D-218), a step timeout on `supabase/setup-cli` or on parse's LibreOffice install counts as an infrastructure flake.
 
 **Not changed:** any gate, pass mark, limit or constant; any product code (the PR is test code and documents). Nothing of Stage 4, Stage 5, demo readiness or the Phase 6 subset is built.
 
@@ -5645,3 +5645,104 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** 2026-11-02.
 
 **Related:** D-085, D-089, D-091, D-092, D-195, D-226.
+
+---
+
+## D-229 — A1 merged; its staging suites, the worker's re-run alone, and suites with no VPN connection (founder, 2026-11-02 and 2026-11-03)
+
+**Context:** A1 (D-228 item 12) was built on `phase55/stage5-viewer-a1` at `1309a0b` and merged as PR #90. Its staging suites ran on 2026-11-02 under the founder's Grant. The worker suite failed one test in its clean-up, so it ran again alone on 2026-11-03 under a second Grant, and the PR merged only after it passed (founder). The evidence is in the founder's folders `DocFlow-evidence/2026-11-02-viewer-a1/suites/` and `DocFlow-evidence/2026-11-03-worker-rerun/`.
+
+1. **The staging suites on `1309a0b` (2026-11-02).** They ran in parallel through `scripts/run_suites_parallel.py`, 21:13:12 to 22:44:32Z, and the runner exited 1. Only the staging database, Storage and loopback were reachable, `DOCFLOW_STAGING_RUN=1` was set, and the dev parse service was on 8100 for the API suite.
+   - core: `1219 passed, 1 skipped in 168.33s (0:02:48)`
+   - worker: `1 failed, 259 passed, 8 skipped in 4457.52s (1:14:17)`
+   - API: `797 passed, 1 skipped, 3 deselected, 1 warning in 5466.21s (1:31:06)`
+   - **The six counts, before -> after:** tenants 34 -> 34, founder alerts 8 -> 8, e-mails 34 -> 34, scheduled jobs 35 -> 35, platform-admin rows 12 -> 12, users with no tenant 15 -> 15. All `+0`. The database grew 196,608 bytes, and the connection peak was 27, at 21:25:05Z. The same four `tenant_ready_to_delete` alerts were open before and after.
+2. **The worker failure, a staging-suite failure.** `tests/test_numeric_fidelity_db.py::test_C1_property_random_decimals_survive_model_db_edit_approve_and_every_export` failed in the test tenant's clean-up. Storage answered 503 to `DeleteObjects` (`tests/db_helpers.py:242`, `_purge`; `StorageUnavailableError ... 503`). Hypothesis reported `FlakyFailure`, and its replay passed. The tenant's prefix, `tenants/e665b8f0-3f76-4f42-bdbb-a14692294342/`, read 0 objects afterwards. No A1 file is in the traceback, and the founder ruled it not an A1 defect. **Not a CI flake (founder):** it is recorded as a staging-suite failure under D-224 item 13's ruling, and it isn't counted in D-199 item 10's flake count.
+3. **The worker re-run alone on `1309a0b` (2026-11-03; the founder's Grant, NordVPN off).** It ran 14:14:43 to 14:51:08Z and exited 0, from `apps/worker/.venv` with `pytest -q -rs --durations=25`, in item 1's environment. The dev parse service was started by hand on 8100 at 14:14:10Z and stopped afterwards, and 8100 was free at 14:51:58Z. The worker suite started its own and did not call it.
+   - worker: `260 passed, 8 skipped in 2171.77s (0:36:11)`. The suite's own check read `worker_starts in the last 60 minutes: before 0, after 0; starts kept by tests: 0; committed on CI's own database: 0`.
+   - `test_C1_property_random_decimals_survive_model_db_edit_approve_and_every_export` passed, in 265.83 s, against 447.50 s on 2026-11-02.
+   - **The six counts:** 34/8/34/35/12/15 before and after, all `+0`. The same four alerts were open.
+   - **Before and after,** read-only: HEAD `1309a0b`, a clean tree, Memurai PONG with an uptime of 2,748 s, AC sleep 60 minutes, and no VPN connection active. The NordVPN app had quit, and three NordVPN services were still running: `nordsec-threatprotection-service`, `NordUpdaterService` and `nordvpn-service`.
+   - **Evidence:** `DocFlow-evidence/2026-11-03-worker-rerun/` (`before.txt`, `run.txt`, `worker.log`, `after.txt`, `parse-dev.txt`).
+4. **The slowdown, cause not proved.** On 2026-11-02 the worker and API suites took about 1.8 times their 2026-10-27 times: 4457.52 s against 2505.05 s, and 5466.21 s against 3060.99 s. NordVPN was connected on this PC at the time, and its tunnel carried the database connection. On 2026-11-03 the worker suite took 2171.77 s, alone, with no VPN connection. That doesn't prove the cause, for two reasons: the 11-03 run was alone, not through the runner, and Threat Protection's state was unknown (the app had quit, but its service was running). **Decision (founder):** suites run with no VPN connection on this PC, and the cause won't be investigated further.
+5. **Two suite rules (founder, 2026-11-03), in RUNBOOK 1.4, with a one-line pointer in CLAUDE.md's "Running the suites":**
+   - (a) Before a suite and again after it, no VPN connection is active on this PC, and a suite doesn't start while one is.
+   - (b) A suite doesn't start if the AC sleep timeout is under 120 minutes, because the API suite took 1:31:06 on 2026-11-02.
+6. **For the docs PR (D-228 item 7's order).**
+   - CLAUDE.md doesn't name the three staging apps: `docflow-api-staging`, `docflow-worker-staging` and `docflow-parse-staging`. Their names are in each app's `fly.toml`.
+   - RUNBOOK 1.4's dev parse service, started by hand: check which suites actually use it, and correct the runbook. The worker suite starts its own (`apps/worker/tests/conftest.py`, the `parse_service` fixture, on a free port unless `PARSE_SERVICE_URL` is set).
+7. **A1 is merged, and main's push run hit the tenth CI infrastructure flake.**
+   - **The merge:** PR #90, merge commit `91d49623e7547196cadda8efed770f7a030ca005` (parents `56e00f3` and `1309a0b`), 2026-11-03 15:18:28Z. The founder confirmed PR run #509 was still green on `1309a0b` first.
+   - **Main's push run #510 (41662522636), attempt 1:** the api job failed at "Start the local Supabase stack (applies supabase/migrations/)", after 60 s (15:18:46 to 15:19:46Z), before any test ran. The other five jobs were green: core 180 s, worker 358 s, parse 353 s, web 149 s, web-live 183 s. Main's tree is `1309a0b`'s, which passed on #508 and #509.
+   - **The cause, from the step's log (read by the founder):** all 39 migrations applied, then at "Starting containers..." `supabase_inbucket_docflow-ci` failed to bind host port 0.0.0.0:54324 ("address already in use"), and the CLI stopped the containers.
+   - **The founder counted it as flake 10 (D-199 item 10).** The count is now 10.
+   - **Re-run (founder's "Re-run failed jobs"):** the api job's attempt 2, 15:39:59 to 15:45:46Z, was green. Its Test step, as the founder read it: `798 passed, 3 deselected, 1 warning in 96.52s (0:01:36)`, and the left-behind line was all `+0` (users with no tenant 3 -> 3). The run's conclusion is now success.
+   - **A second red step on attempt 1, for a later CI PR (founder):** "Build the API's image" runs on `success() || failure()`, so with `docker/setup-buildx-action` skipped it failed too, with `buildx failed with: failed to build: Cache export is not supported for the docker driver`. It points away from the real cause. Recorded in BUILD-STATUS's known open items.
+   - **For a later CI PR, together with the image-build fix (founder):** as the first step of each job that starts the Supabase stack, reserve its local ports from automatic assignment with `sudo sysctl -w net.ipv4.ip_local_reserved_ports=54320-54327`, and print the setting back. Flakes 3 (port 54322) and 10 (port 54324) were both a stack port already held on the runner, and Linux's default ephemeral range is 32768 to 60999 (docs.kernel.org/networking/ip-sysctl.html). Turning the mail catcher off in CI is not taken. Recorded in BUILD-STATUS's known open items.
+8. **The 2026-10-28 environments can be deleted now.** The old venvs are in `DocFlow-evidence/2026-10-28-venv-rebuild/` (its `api/` and `worker/` folders; D-225 item 8). All three suites have now passed on the new environments: core and API on 2026-11-02, the worker on 2026-11-03. They are not deleted; the founder decides when.
+
+**Founder approval:** 2026-11-03.
+
+**Related:** D-199, D-224, D-225, D-226, D-228; `scripts/run_suites_parallel.py`, `apps/worker/tests/db_helpers.py`, `apps/worker/tests/conftest.py`, `.github/workflows/ci.yml`.
+
+---
+
+## D-230 — B1 sized: its order, its two halves, the labelling rules, changes and cancellations in the review queue, and body retention (founder, 2026-11-03)
+
+**Context:** B1, the inbound-mail item (D-228 item 5: label only, no automation), was sized read-only on 2026-11-03. The body is never read today (`email_intake.parse_postmark_payload`), so `raw_emails` keeps headers but no body, short of Section 7.2's "store the raw email", and an e-mail with no attachment is refused as INT-001 (Section 7.16.3). Postmark's inbound pages show `ContentID` on attachments only in examples. They don't say that an image the HTML body references by `cid:` arrives in `Attachments`, so the inline-image rule is proved on a real message before it is relied on. These are the founder's rulings on that sizing.
+
+1. **Order: both halves come after M10 and D-195 change 1**, so the labelling call's model ID and price come from change 1's config module from its first commit. This settles the place D-228 item 7 left open: A2 to A6, M10, D-195 change 1, B1's demo half, then Blocker 3's background commit and the rest of D-228 item 7's order. B1's pilots half is a before-first-pilot item.
+2. **Two halves.**
+   - **Before the demo:** the body stored and shown beside each document from its e-mail, HTML-only bodies included; a PO printed in the body; the body labelling call as their filter; and item 4's rule for bodies.
+   - **Before the first pilot:** labels on attachments, inline images, skipping, item 4's rule for attachments, item 5 at version (b), and item 7.
+   - The demo half stays at 7 days, with no further split (founder).
+3. **One cheap call per item:** one for each body and one for each attachment, not one per e-mail. An attachment's label call is folded into the routing read when that read runs anyway.
+4. **Fail toward review.**
+   - The threshold is a named constant, `MAIL_LABEL_REVIEW_THRESHOLD`, 0.80 to start, defined once in `docflow_core.constants` and listed in RUNBOOK with the other constants. It is applied to a confidence the model reports about itself, which isn't calibrated, so the value is checked against the demo content's labels once that content exists.
+   - A body becomes a document when the call says it contains order lines, when the call's confidence in that answer is below the threshold, or when it reports `injection_suspected`.
+   - An attachment is skipped only when it is labelled "not an order" at or above the threshold and the call didn't report `injection_suspected`. Every other attachment is extracted.
+   - A labelling call that fails or returns output that doesn't validate counts as below the threshold.
+   - **CI:**
+     - The decision is one pure function in core. Table tests run each label at the threshold minus 0.01, at it, and plus 0.01.
+     - A property test over every label, confidence, `injection_suspected` and `contains_order_lines` combination asserts that nothing below the threshold, and nothing with `injection_suspected`, is ever skipped or left out of review.
+     - Recorded responses on each side of the threshold run through the worker task against the database.
+     - A test checks that the constant is defined once and that no literal stands in for it.
+5. **Changes and cancellations must not end up only in the ignored-mail list**, where a body-only "cancel line 3" would again reach nobody. Nothing changes a document automatically. Three versions were sized:
+   - (a) a separate "Changes and cancellations" list, apart from ignored mail, showing each e-mail's body and label, with its count on the dashboard (1.5 days);
+   - (b) each such e-mail as its own item in the review queue. A reviewer opens it, sees the body, and either dismisses it or marks it acted on, recorded with the user and the time (2.5 days);
+   - (c) version (b), plus a link to an existing document found by a plain lookup: PO numbers in the subject and body are matched, through `normalize_po_number` and migration 0006's index, against this tenant's documents only, with no model call (3.5 days).
+
+   **Ruling (founder):**
+   - **Version (b), in the pilots half.**
+   - **Not (a):** (a) followed by (b) would cost 4 days, against (b)'s 2.5.
+   - **(c)** is decided before the first pilot.
+   - **In the demo half,** a change or cancellation body without order lines goes to the ignored-mail list with its label.
+   - **A change or cancellation with order lines** becomes a document (part 2), and also takes item 5's path once item 5 exists.
+   - **A quote-request or status-question label below the threshold** takes item 5's path once item 5 exists. Until then it goes to the ignored-mail list with its label.
+   - **Item 5's items** aren't counted against the allowance or in the KPIs.
+6. **Quote requests and status questions are not documents.** They go to the ignored-mail list with their label, and a person can send one to extraction.
+7. **Skipped items don't count against the allowance until a person sends one to extraction.** Section 7.16.1's metering wording changes with the pilots half, as a marked change like 7.12's (D-228); the draft text is in item 13.
+8. **Body retention:** the same as `raw_emails` today. A body is kept for the tenant's lifetime, soft-deleted with its e-mail, and removed at the tenant's hard delete. No TTL constant now. Before the first pilot, decide body retention together with the privacy policy (BUILD-STATUS).
+9. **`contains_order_lines` on the body labelling call:** approved, with the confidence that item 4 reads.
+10. **No model prices are recorded here.** They are re-read from Anthropic's pages when D-195's comparison is designed.
+11. **Whatever B1 defers past the demo is done before the first pilot.** Each deferred item, by name:
+    - labels on attachments;
+    - item 4's rule for attachments;
+    - inline-image detection, proved on a real Postmark capture;
+    - the skipped status and its list;
+    - "send to extraction";
+    - Section 7.16.1's metering change (item 13);
+    - changes and cancellations as review-queue items (item 5, version (b)), and the decision on version (c);
+    - item 8's retention decision, taken together with the privacy policy.
+12. **Sizes** (working days, including tests and records, excluding the wait for Grants; estimated 2026-11-03):
+    - the demo half: 7;
+    - the pilots half: 7, which is 4.5 plus item 5 at version (b), 2.5;
+    - version (c), if it is chosen: 1 day more.
+
+    On 2026-11-02, before it grew, B1 was sized at 2 to 3 days.
+13. **Section 7.16.1, the draft for the pilots half (not written until then):**
+    > - Metering: count `documents` rows per tenant per calendar month (tenant timezone) where `is_test_batch = false` and status is not `failed`, `quarantined` or `skipped`. A skipped item (an attachment labelled "not an order", or an inline image) is counted from the moment a person sends it to extraction, in the month it is sent. Duplicates linked to an existing document (7.8) are not counted twice. The count is visible to the tenant on their dashboard and to the founder on the tenant list ("312 / 300").
+
+**Founder approval:** 2026-11-03.
+
+**Related:** Sections 3, 7.1, 7.2, 7.8, 7.10, 7.13, 7.16.1, 7.16.3; D-195, D-226, D-228; `packages/core/docflow_core/email_intake.py`, `extraction.py`, `duplicates.py`, `constants.py`.

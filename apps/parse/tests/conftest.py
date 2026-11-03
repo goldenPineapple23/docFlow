@@ -29,9 +29,15 @@ def via_http() -> bool:
 
 
 def post(
-    kind: str, content: bytes, extension: str, *, token: str | None = None, timeout: float = 300
+    kind: str,
+    content: bytes,
+    extension: str,
+    *,
+    token: str | None = None,
+    timeout: float = 300,
+    extra_headers: dict[str, str] | None = None,
 ) -> tuple[int, dict]:
-    headers = {"Content-Type": "application/octet-stream", "X-File-Extension": extension}
+    headers = {"Content-Type": "application/octet-stream", "X-File-Extension": extension, **(extra_headers or {})}
     token = SERVICE_TOKEN if token is None else token
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -45,18 +51,27 @@ def post(
 
 def answer(kind: str, path: Path) -> dict:
     """The parser's answer for one fixture file, by whichever route is set."""
-    content = path.read_bytes()
+    return answer_for(kind, path.read_bytes(), path.name)
+
+
+def answer_for(kind: str, content: bytes, filename: str, *, first_page: int = 0) -> dict:
+    """The same, for bytes built at test time. `first_page` is for pages only."""
     if via_http():
-        status, body = post(kind, content, path.suffix.lower())
-        assert status == 200, f"{path.name}: HTTP {status} {body}"
+        extra = {"X-First-Page": str(first_page)} if kind == "pages" else None
+        status, body = post(kind, content, Path(filename).suffix.lower(), extra_headers=extra)
+        assert status == 200, f"{filename}: HTTP {status} {body}"
         return body
     if kind == "document":
         from parse_service.parsing import documents
 
-        return documents.parse(content, path.name)
+        return documents.parse(content, filename)
+    if kind == "pages":
+        from parse_service.parsing import pages
+
+        return pages.render(content, filename, first_page)
     from parse_service.parsing import tables
 
-    return tables.parse(content, path.name)
+    return tables.parse(content, filename)
 
 
 def decoded(part: dict) -> bytes:

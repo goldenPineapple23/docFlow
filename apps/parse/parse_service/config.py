@@ -42,6 +42,17 @@ SHM_TMPFS_BYTES = 64 * MIB
 # The job's answer, read by the supervisor. A 25 MB scanned PDF returned
 # base64 is about 34 MB.
 ANSWER_CAP_BYTES = 48 * MIB
+# Page images (viewer A2, D-228): one answer carries pages until the next one
+# would pass this many base64 characters, so it stays well inside the cap
+# above; the worker asks again from `next_page`. At about 815 KB a poor-scan
+# page, that is about 30 pages an answer.
+PAGES_ANSWER_BUDGET_BYTES = 32 * MIB
+# One page's encoded image, PNG or JPEG. A page above it is answered as not
+# rendered, never quietly lowered in quality.
+PAGE_MAX_BYTES = 8 * MIB
+# A pages answer stops taking new pages after this long, inside the job's
+# wall clock above; the rest come in the next answer.
+PAGES_TIME_BUDGET_SECONDS = 120
 # How often the supervisor reads the job's cgroups.
 WATCH_INTERVAL_SECONDS = 0.1
 

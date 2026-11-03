@@ -5,12 +5,15 @@ answer up to a cap, and replies.
 
     POST /v1/document   bytes in -> {"outcome": ...}   (a purchase order)
     POST /v1/table      bytes in -> {"outcome": ...}   (a catalog file)
+    POST /v1/pages      bytes in -> {"outcome": ...}   (a document's page images)
     GET  /health        200 only after the canary passed
 
 Every POST must carry `Authorization: Bearer <PARSE_SERVICE_TOKEN>`; a
 missing or wrong token is a 401 before the body is read (founder's change
 4, test N4). `X-File-Extension` (e.g. ".docx") is the only thing the job
-learns about the sender's filename.
+learns about the sender's filename. `/v1/pages` also takes `X-First-Page`,
+the 0-based page its answer starts at (absent means 0); the answer's
+`next_page` is the one to ask for next (viewer A2, D-228).
 
 Answers, as JSON with HTTP 200:
 - {"outcome": "ok", ...} or {"outcome": "rejected", "code": ...} -- the job's;
@@ -39,7 +42,7 @@ import socket
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from docflow_core.file_types import MAX_FILE_SIZE_BYTES
+from docflow_core.file_types import MAX_DOCUMENT_PAGES, MAX_FILE_SIZE_BYTES
 
 from parse_service import config, fault_origin, stderr_summary
 from parse_service.launcher import run_job
@@ -47,7 +50,8 @@ from parse_service.launcher import run_job
 logger = logging.getLogger("parse_service")
 
 _EXTENSION = re.compile(r"^\.[a-z0-9]{1,8}$")
-_KINDS = {"/v1/document": "document", "/v1/table": "table"}
+_FIRST_PAGE = re.compile(r"^\d{1,3}$")
+_KINDS = {"/v1/document": "document", "/v1/table": "table", "/v1/pages": "pages"}
 
 
 class Service:
@@ -118,6 +122,14 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             self._reply(400, {"error": "bad_extension"})
             return
+        header: dict = {"filename": f"upload{extension}"}
+        if kind == "pages":
+            first_page = self.headers.get("X-First-Page") or "0"
+            if not _FIRST_PAGE.match(first_page) or int(first_page) >= MAX_DOCUMENT_PAGES:
+                self.close_connection = True
+                self._reply(400, {"error": "bad_first_page"})
+                return
+            header["first_page"] = int(first_page)
         try:
             slot = self.service.slots.get_nowait()
         except queue.Empty:
@@ -128,7 +140,7 @@ class Handler(BaseHTTPRequestHandler):
             body = self.rfile.read(length)
             result = run_job(
                 kind,
-                {"filename": f"upload{extension}"},
+                header,
                 body,
                 slot=slot,
                 settings=self.service.settings,
