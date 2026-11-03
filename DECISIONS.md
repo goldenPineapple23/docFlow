@@ -5684,3 +5684,65 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** 2026-11-03.
 
 **Related:** D-199, D-224, D-225, D-226, D-228; `scripts/run_suites_parallel.py`, `apps/worker/tests/db_helpers.py`, `apps/worker/tests/conftest.py`, `.github/workflows/ci.yml`.
+
+---
+
+## D-230 — B1 sized: its order, its two halves, the labelling rules, changes and cancellations in the review queue, and body retention (founder, 2026-11-03)
+
+**Context:** B1, the inbound-mail item (D-228 item 5: label only, no automation), was sized read-only on 2026-11-03. The body is never read today (`email_intake.parse_postmark_payload`), so `raw_emails` keeps headers but no body, short of Section 7.2's "store the raw email", and an e-mail with no attachment is refused as INT-001 (Section 7.16.3). Postmark's inbound pages show `ContentID` on attachments only in examples. They don't say that an image the HTML body references by `cid:` arrives in `Attachments`, so the inline-image rule is proved on a real message before it is relied on. These are the founder's rulings on that sizing.
+
+1. **Order: both halves come after M10 and D-195 change 1**, so the labelling call's model ID and price come from change 1's config module from its first commit. This settles the place D-228 item 7 left open: A2 to A6, M10, D-195 change 1, B1's demo half, then Blocker 3's background commit and the rest of D-228 item 7's order. B1's pilots half is a before-first-pilot item.
+2. **Two halves.**
+   - **Before the demo:** the body stored and shown beside each document from its e-mail, HTML-only bodies included; a PO printed in the body; the body labelling call as their filter; and item 4's rule for bodies.
+   - **Before the first pilot:** labels on attachments, inline images, skipping, item 4's rule for attachments, item 5 at version (b), and item 7.
+   - The demo half stays at 7 days, with no further split (founder).
+3. **One cheap call per item:** one for each body and one for each attachment, not one per e-mail. An attachment's label call is folded into the routing read when that read runs anyway.
+4. **Fail toward review.**
+   - The threshold is a named constant, `MAIL_LABEL_REVIEW_THRESHOLD`, 0.80 to start, defined once in `docflow_core.constants` and listed in RUNBOOK with the other constants. It is applied to a confidence the model reports about itself, which isn't calibrated, so the value is checked against the demo content's labels once that content exists.
+   - A body becomes a document when the call says it contains order lines, when the call's confidence in that answer is below the threshold, or when it reports `injection_suspected`.
+   - An attachment is skipped only when it is labelled "not an order" at or above the threshold and the call didn't report `injection_suspected`. Every other attachment is extracted.
+   - A labelling call that fails or returns output that doesn't validate counts as below the threshold.
+   - **CI:**
+     - The decision is one pure function in core. Table tests run each label at the threshold minus 0.01, at it, and plus 0.01.
+     - A property test over every label, confidence, `injection_suspected` and `contains_order_lines` combination asserts that nothing below the threshold, and nothing with `injection_suspected`, is ever skipped or left out of review.
+     - Recorded responses on each side of the threshold run through the worker task against the database.
+     - A test checks that the constant is defined once and that no literal stands in for it.
+5. **Changes and cancellations must not end up only in the ignored-mail list**, where a body-only "cancel line 3" would again reach nobody. Nothing changes a document automatically. Three versions were sized:
+   - (a) a separate "Changes and cancellations" list, apart from ignored mail, showing each e-mail's body and label, with its count on the dashboard (1.5 days);
+   - (b) each such e-mail as its own item in the review queue. A reviewer opens it, sees the body, and either dismisses it or marks it acted on, recorded with the user and the time (2.5 days);
+   - (c) version (b), plus a link to an existing document found by a plain lookup: PO numbers in the subject and body are matched, through `normalize_po_number` and migration 0006's index, against this tenant's documents only, with no model call (3.5 days).
+
+   **Ruling (founder):**
+   - **Version (b), in the pilots half.**
+   - **Not (a):** (a) followed by (b) would cost 4 days, against (b)'s 2.5.
+   - **(c)** is decided before the first pilot.
+   - **In the demo half,** a change or cancellation body without order lines goes to the ignored-mail list with its label.
+   - **A change or cancellation with order lines** becomes a document (part 2), and also takes item 5's path once item 5 exists.
+   - **A quote-request or status-question label below the threshold** takes item 5's path once item 5 exists. Until then it goes to the ignored-mail list with its label.
+   - **Item 5's items** aren't counted against the allowance or in the KPIs.
+6. **Quote requests and status questions are not documents.** They go to the ignored-mail list with their label, and a person can send one to extraction.
+7. **Skipped items don't count against the allowance until a person sends one to extraction.** Section 7.16.1's metering wording changes with the pilots half, as a marked change like 7.12's (D-228); the draft text is in item 13.
+8. **Body retention:** the same as `raw_emails` today. A body is kept for the tenant's lifetime, soft-deleted with its e-mail, and removed at the tenant's hard delete. No TTL constant now. Before the first pilot, decide body retention together with the privacy policy (BUILD-STATUS).
+9. **`contains_order_lines` on the body labelling call:** approved, with the confidence that item 4 reads.
+10. **No model prices are recorded here.** They are re-read from Anthropic's pages when D-195's comparison is designed.
+11. **Whatever B1 defers past the demo is done before the first pilot.** Each deferred item, by name:
+    - labels on attachments;
+    - item 4's rule for attachments;
+    - inline-image detection, proved on a real Postmark capture;
+    - the skipped status and its list;
+    - "send to extraction";
+    - Section 7.16.1's metering change (item 13);
+    - changes and cancellations as review-queue items (item 5, version (b)), and the decision on version (c);
+    - item 8's retention decision, taken together with the privacy policy.
+12. **Sizes** (working days, including tests and records, excluding the wait for Grants; estimated 2026-11-03):
+    - the demo half: 7;
+    - the pilots half: 7, which is 4.5 plus item 5 at version (b), 2.5;
+    - version (c), if it is chosen: 1 day more.
+
+    On 2026-11-02, before it grew, B1 was sized at 2 to 3 days.
+13. **Section 7.16.1, the draft for the pilots half (not written until then):**
+    > - Metering: count `documents` rows per tenant per calendar month (tenant timezone) where `is_test_batch = false` and status is not `failed`, `quarantined` or `skipped`. A skipped item (an attachment labelled "not an order", or an inline image) is counted from the moment a person sends it to extraction, in the month it is sent. Duplicates linked to an existing document (7.8) are not counted twice. The count is visible to the tenant on their dashboard and to the founder on the tenant list ("312 / 300").
+
+**Founder approval:** 2026-11-03.
+
+**Related:** Sections 3, 7.1, 7.2, 7.8, 7.10, 7.13, 7.16.1, 7.16.3; D-195, D-226, D-228; `packages/core/docflow_core/email_intake.py`, `extraction.py`, `duplicates.py`, `constants.py`.

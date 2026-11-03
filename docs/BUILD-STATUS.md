@@ -108,9 +108,8 @@ in its clean-up, a staging-suite failure, not a CI flake (D-229 items 1 to 3). *
 VPN connection on this PC** (founder, 2026-11-03; D-229 item 4): on 2026-11-02, with NordVPN
 connected, the worker and API suites took about 1.8 times their 2026-10-27 times; the cause is not
 proved and won't be investigated. **Next, in order (D-228 item 7):** A2, then A3 to A6, with A5
-absorbing the 375 px fix. B1, the inbound-mail item, whose place is decided after its sizing and may move after M10 and
-D-195 change 1. M10, with D-195 change 1 straight after it and M10's model-ID part folded into
-change 1. Blocker 3's background commit with the duplicate SKU index (0041). Counting rows before
+absorbing the 375 px fix. M10, with D-195 change 1 straight after it and M10's model-ID part folded
+into change 1. B1's demo half, the inbound-mail item (D-230). Blocker 3's background commit with the duplicate SKU index (0041). Counting rows before
 extraction. E1, then E2a. The staging API's redeploy, and the worker's again if those changed it,
 with the staging suites and D-209's smoke test, owed since the worker's deploy of 2026-11-01 (there
 is no demo tenant yet, and it needs a model call). The docs PR, which ends Stage 5 (it also takes
@@ -2227,6 +2226,15 @@ here is built.
     errors only reach a log line: no alert, no error tracker
     (main.py:134-143). Fix the wording before the first pilot; step h's
     monitoring covers error tracking (founder, 2026-11-02).
+  - **What B1 defers past the demo** (founder, 2026-11-03; D-230 item 11):
+    - labels on attachments;
+    - item 4's rule for attachments (D-230 item 4);
+    - inline-image detection, proved on a real Postmark capture;
+    - the skipped status and its list;
+    - "send to extraction";
+    - Section 7.16.1's metering change (D-230 item 13);
+    - changes and cancellations as review-queue items (D-230 item 5, version (b)), and the decision on version (c);
+    - how long inbound e-mail bodies are kept, decided together with the privacy policy (D-230 item 8). Until then a body is kept like `raw_emails`: for the tenant's lifetime, removed at the hard delete.
 - **Security upgrades, 2026-09-30 (branch `phase55/security-pyjwt-next`,
   founder-approved as its own PR before 3b merges). MERGED 2026-09-30 (PR
   #30, main `166896e`), before 3b.** CI's dependency audit
