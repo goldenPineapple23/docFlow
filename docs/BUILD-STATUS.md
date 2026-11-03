@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-02, with Blocker 3 confirmed, staging shut down and the viewer's decisions recorded:** Phase 5.5,
+**Status, as of 2026-11-03, with A1 merged and the worker suite's re-run passed:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -67,8 +67,9 @@ tenant named in lower case is never listed or swept (D-224 item 14). **The warni
 tests run on a fake clock, and a new test checks that a slow busy answer uses up the patience
 (D-212 item 8). A PR that changes only tests runs the staging suites only if the staging
 environment can change those tests' results in a way CI can't show (D-223 item 5). **The CI infrastructure flake
-count is 9** (D-199 item 10; flakes 5 to 9 are parse's LibreOffice install timing out at 15 min on
-2026-10-26, D-219 items 8 and 9, D-222 items 8 and 9). **A standing rule (D-213 item 6, tightened
+count is 10** (D-199 item 10; flakes 5 to 9 are parse's LibreOffice install timing out at 15 min on
+2026-10-26, D-219 items 8 and 9, D-222 items 8 and 9; flake 10 is main's push run #510 on `91d4962`,
+where Inbucket's host port 54324 was already in use at the api job's stack start, D-229 item 7). **A standing rule (D-213 item 6, tightened
 in D-214): a staging suite, a Fly action or any write to staging starts only after a message from
 the founder that begins with "Grant" and names the step.** Any change to a granted command, a flag
 such as `--app` included, is told to the founder before it runs (founder, 2026-10-27). **Two new
@@ -97,17 +98,28 @@ got TLS connect errors (exit 35) for about 30 s, 15:17:43Z to 15:18:12Z, before 
 They failed before the edge reached the machine, outside the system under test, so they weren't a
 stop (founder). The next time a gate retries, curl's error text is captured with `-sS`. **The
 partner walkthrough is postponed until A4 is on staging** (founder, 2026-11-02; D-228 item 8), and
-its step is cancelled. **The founder's viewer decisions are D-228.** **Next, in order (D-228 item
-7):** A1, in progress on `phase55/stage5-viewer-a1`, then A2 to A6, with A5 absorbing the 375 px
-fix. B1, the inbound-mail item, whose place is decided after its sizing and may move after M10 and
+its step is cancelled. **The founder's viewer decisions are D-228.** **A1 is merged** (PR #90,
+`main` is `91d4962`; D-228 item 12; main's push run #510 green on a re-run of its api job, after
+flake 10): a PDF goes to a download panel, downloads are attachments, and a missing signing secret
+answers SYS-002. Its staging suites passed on `1309a0b`, the worker's on a re-run alone on
+2026-11-03, `260 passed, 8 skipped in 2171.77s (0:36:11)`. On 2026-11-02 the worker's
+`test_C1_property_random_decimals_survive_model_db_edit_approve_and_every_export` hit a Storage 503
+in its clean-up, a staging-suite failure, not a CI flake (D-229 items 1 to 3). **Suites run with no
+VPN connection on this PC** (founder, 2026-11-03; D-229 item 4): on 2026-11-02, with NordVPN
+connected, the worker and API suites took about 1.8 times their 2026-10-27 times; the cause is not
+proved and won't be investigated. **Next, in order (D-228 item 7):** A2, then A3 to A6, with A5
+absorbing the 375 px fix. B1, the inbound-mail item, whose place is decided after its sizing and may move after M10 and
 D-195 change 1. M10, with D-195 change 1 straight after it and M10's model-ID part folded into
 change 1. Blocker 3's background commit with the duplicate SKU index (0041). Counting rows before
 extraction. E1, then E2a. The staging API's redeploy, and the worker's again if those changed it,
 with the staging suites and D-209's smoke test, owed since the worker's deploy of 2026-11-01 (there
 is no demo tenant yet, and it needs a model call). The docs PR, which ends Stage 5 (it also takes
 `apps/web/AGENTS.md`, whose first heading `next dev` rewrote from `#` to `##` when it started on
-2026-10-27: either commit that heading or stop `next dev` from rewriting the file; founder). The
-production environment. Demo content: both demo tenants, seeded history, a reset procedure, the
+2026-10-27: either commit that heading or stop `next dev` from rewriting the file; founder), CLAUDE.md
+naming the three staging apps, and RUNBOOK 1.4's hand-started dev parse service checked against the
+suites that use it (D-229 item 6). **The 2026-10-28 environments can be deleted**
+(`DocFlow-evidence/2026-10-28-venv-rebuild/`), now that all three suites have passed on the new
+ones; the founder decides when (D-229 item 8). The production environment. Demo content: both demo tenants, seeded history, a reset procedure, the
 synthetic POs, the accuracy bar set before anything is measured, and the D-195 comparison. Two
 rehearsals from every machine stopped, fastener first, then welding, the smoke test, tag demo-1.
 Then the independent review, then pilots. **To investigate later, not now (founder, 2026-10-27):**
@@ -1857,6 +1869,18 @@ here is built.
 ---
 
 ## Known open items (across phases)
+
+- **For a later CI PR, not the docs PR (founder, 2026-11-03; D-229 item 7):** the api job's "Build
+  the API's image" step runs on `success() || failure()`, so when an earlier step fails and
+  `docker/setup-buildx-action` is skipped, it fails too, with `Cache export is not supported for the
+  docker driver` (main's push run #510). That second red step points away from the real cause.
+
+- **For a later CI PR, together with the image-build fix (founder, 2026-11-03; D-229 item 7):** as
+  the first step of each job that starts the Supabase stack, reserve its local ports from automatic
+  assignment with `sudo sysctl -w net.ipv4.ip_local_reserved_ports=54320-54327`, and print the
+  setting back. Flakes 3 (port 54322) and 10 (port 54324) were both a stack port already held on the
+  runner, and Linux's default ephemeral range is 32768 to 60999
+  (docs.kernel.org/networking/ip-sysctl.html). Turning the mail catcher off in CI is not taken.
 
 - **Step h, the production environment (founder, 2026-11-01; D-226 item 10):**
   - `/docs`, `/redoc` and `/openapi.json` turned off or put behind login. FastAPI's defaults serve

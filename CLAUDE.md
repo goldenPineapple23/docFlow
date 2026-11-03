@@ -375,6 +375,7 @@ Sections 0, 3, 7 and 10 above are the prompt's own words and are unchanged, exce
 - Run each suite as `pytest -q -rs` with its output to a log file outside the repository, then read the last lines and the failures, not the whole log. `-rs` keeps every skip's reason. Add `--durations=25` on the worker run.
 - This changes how the output is read, not what runs: the same suites, one at a time or core, worker and API together through the runner, against the same staging database (RUNBOOK 1.4).
 - Before changing any file outside one app, search the repo for every reader of it and run their tests (D-216 item 6).
+- Before a suite: no VPN connection active on this PC and the AC sleep timeout at least 120 minutes, or it doesn't start; after it, the VPN check again (RUNBOOK 1.4; D-229 item 5).
 
 ### Starting a session
 - Read this file and the status paragraph near the top of `docs/BUILD-STATUS.md` ("Status, as of ..."). Then read other files as the task needs them, a named section first, not the whole file.
