@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { originalDocumentUrl, type CatalogError } from "@/lib/review";
+import {
+  ReviewApiError,
+  UNEXPECTED,
+  originalDocumentUrl,
+  triggerDownload,
+  type CatalogError,
+} from "@/lib/review";
 
 /**
  * The original document, beside the extracted data (CLAUDE.md Section 7.12).
@@ -20,7 +26,12 @@ import { originalDocumentUrl, type CatalogError } from "@/lib/review";
  * raw email and TIFF faxes, and no browser renders any of those. Serving
  * them into the frame produces a blank panel that reads as a broken screen,
  * so the API says up front whether the file is previewable and this offers
- * the file itself when it is not (DECISIONS.md D-091).
+ * the file itself when it is not (DECISIONS.md D-091). A PDF is one of these
+ * too: browsers refuse to show one in a sandboxed frame (D-228).
+ *
+ * The file itself is always **saved, never opened**. A link's `download`
+ * attribute does nothing across origins, so the API sends it as an attachment,
+ * and a PDF never reaches a tab outside the sandbox (D-228).
  *
  * Nothing from the document is ever rendered as HTML by this app. The only
  * thing that touches document bytes is the iframe, and the iframe cannot
@@ -36,7 +47,12 @@ type Minted = {
   filename: string;
   previewKind: "converted_image" | "extracted_text" | null;
   unavailable: CatalogError | null;
+  notShown: CatalogError | null;
 };
+
+function catalogEntryOf(error: unknown): CatalogError {
+  return error instanceof ReviewApiError ? error.catalog : UNEXPECTED;
+}
 
 export function DocumentViewer({
   documentId,
@@ -46,7 +62,7 @@ export function DocumentViewer({
   filename: string;
 }) {
   const [minted, setMinted] = useState<Minted | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<CatalogError | null>(null);
 
   // No synchronous reset here: the caller passes `key={documentId}`, so a
   // different document remounts this component with fresh state rather than
@@ -64,11 +80,12 @@ export function DocumentViewer({
             filename: result.filename ?? filename,
             previewKind: result.preview_kind ?? null,
             unavailable: result.unavailable ?? null,
+            notShown: result.not_shown ?? null,
           });
         }
       })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
+      .catch((error: unknown) => {
+        if (!cancelled) setFailure(catalogEntryOf(error));
       });
 
     return () => {
@@ -76,15 +93,10 @@ export function DocumentViewer({
     };
   }, [documentId, filename]);
 
-  if (failed) {
+  if (failure) {
     return (
       <Panel testId="viewer-unavailable">
-        <p className="text-sm font-medium text-gray-900">
-          We couldn&apos;t load the original document
-        </p>
-        <p className="mt-1 text-sm text-gray-600">
-          The extracted values are still shown beside this. Reload the page to try again.
-        </p>
+        <CatalogMessage entry={failure} />
       </Panel>
     );
   }
@@ -102,10 +114,7 @@ export function DocumentViewer({
   if (minted.unavailable) {
     return (
       <Panel testId="viewer-original-unavailable">
-        <p className="text-sm font-medium text-gray-900">{minted.unavailable.title}</p>
-        <p className="mt-1 text-sm text-gray-600">{minted.unavailable.message}</p>
-        <p className="mt-1 text-sm text-gray-600">{minted.unavailable.action}</p>
-        <p className="mt-2 text-xs text-gray-400">{minted.unavailable.code}</p>
+        <CatalogMessage entry={minted.unavailable} />
       </Panel>
     );
   }
@@ -113,24 +122,21 @@ export function DocumentViewer({
   if (!minted.previewable) {
     return (
       <Panel testId="viewer-not-previewable">
-        <p className="text-sm font-medium text-gray-900">
-          This order came in as {minted.format ?? "a format"} DocFlow can read but a browser
-          can&apos;t display
-        </p>
-        <p className="mt-1 text-sm text-gray-600">
-          Everything DocFlow read from it is shown beside this. Open the original if you need to
-          check a value against it.
-        </p>
-        <a
-          href={minted.url}
-          target="_blank"
-          rel="noreferrer noopener"
-          download={minted.filename}
-          data-testid="download-original"
-          className="mt-3 inline-block rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 hover:bg-gray-50"
-        >
-          Open {minted.filename}
-        </a>
+        {minted.notShown ? (
+          <CatalogMessage entry={minted.notShown} />
+        ) : (
+          <>
+            <p className="text-sm font-medium text-gray-900">
+              This order came in as {minted.format ?? "a format"} DocFlow can read but a browser
+              can&apos;t display
+            </p>
+            <p className="mt-1 text-sm text-gray-600">
+              Everything DocFlow read from it is shown beside this. Download the original if you
+              need to check a value against it.
+            </p>
+          </>
+        )}
+        <DownloadOriginal documentId={documentId} filename={minted.filename} />
       </Panel>
     );
   }
@@ -164,6 +170,58 @@ export function DocumentViewer({
         className="min-h-0 w-full flex-1 rounded-xl border border-gray-200 bg-white"
       />
     </div>
+  );
+}
+
+/**
+ * Mints its link on the click, not with the panel: a link lasts a few minutes
+ * and the panel can sit open for longer, and an expired one is a bare 404.
+ */
+function DownloadOriginal({ documentId, filename }: { documentId: string; filename: string }) {
+  const [working, setWorking] = useState(false);
+  const [failure, setFailure] = useState<CatalogError | null>(null);
+
+  async function download() {
+    setWorking(true);
+    setFailure(null);
+    try {
+      const fresh = await originalDocumentUrl(documentId);
+      triggerDownload(`${API_BASE_URL}${fresh.download_url}`);
+    } catch (error) {
+      setFailure(catalogEntryOf(error));
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={download}
+        disabled={working}
+        data-testid="download-original"
+        className="mt-3 inline-block rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-60"
+      >
+        Download {filename}
+      </button>
+      {failure ? (
+        <div data-testid="download-failed" className="mt-3">
+          <CatalogMessage entry={failure} />
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function CatalogMessage({ entry }: { entry: CatalogError }) {
+  return (
+    <>
+      <p className="text-sm font-medium text-gray-900">{entry.title}</p>
+      <p className="mt-1 text-sm text-gray-600">{entry.message}</p>
+      <p className="mt-1 text-sm text-gray-600">{entry.action}</p>
+      <p className="mt-2 text-xs text-gray-400">{entry.code}</p>
+    </>
   );
 }
 

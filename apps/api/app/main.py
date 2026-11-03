@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from docflow_core import db, worker_starts
 from docflow_core.config import get_settings
 from docflow_core.dispatch import health as dispatcher_health
+from docflow_core.signed_urls import SigningKeyMissing
 from fastapi import Depends, FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
@@ -98,6 +99,21 @@ def console_mfa_startup_check() -> bool:
     return False
 
 
+def document_signing_startup_check() -> bool:
+    """
+    Without this secret no original opens and no export downloads, and until
+    now the first sign of it was a reviewer's error. Said at startup; never
+    a refusal, because everything else works without it (D-223, D-228).
+    """
+    if get_settings().document_url_signing_secret:
+        return True
+    logger.warning(
+        "document_signing_secret_unset: DOCUMENT_URL_SIGNING_SECRET is not set, so originals "
+        "can't be opened and exports can't be downloaded -- RUNBOOK 9.7."
+    )
+    return False
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     try:
@@ -106,6 +122,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         print(f"DocFlow API refused to start: {exc}", file=sys.stderr, flush=True)
         raise SystemExit(1) from None
     console_mfa_startup_check()
+    document_signing_startup_check()
     yield
 
 
@@ -201,6 +218,13 @@ async def _malformed_document_id(request: Request, exc: RequestValidationError) 
 # before its 403 goes out (D-178); the handler lives in the admin router, the
 # only module allowed to write the audit.
 app.add_exception_handler(ConsoleRefused, admin.console_refused_handler)
+
+
+@app.exception_handler(SigningKeyMissing)
+async def _signing_key_missing(request: Request, _exc: SigningKeyMissing) -> JSONResponse:
+    """Every route that signs or checks a file link ends up here (D-228)."""
+    logger.error("document_signing_secret_unset method=%s path=%s", request.method, request.url.path)
+    return JSONResponse(status_code=503, content={"detail": catalog_detail("SYS-002")})
 
 app.include_router(auth.router)
 app.include_router(activity.router)

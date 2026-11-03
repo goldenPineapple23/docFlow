@@ -26,7 +26,6 @@ storage path never reaches the client (Section 7.4).
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 from uuid import UUID
 
@@ -53,6 +52,7 @@ from sqlalchemy import text
 
 from app.actor import Actor, current_actor
 from app.celery_client import celery_client
+from app.downloads import attachment_headers, safe_filename_part
 from app.errors import catalog_error
 
 logger = logging.getLogger(__name__)
@@ -194,9 +194,6 @@ def export_status(
     return response
 
 
-_UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
-
-
 def _download_filename(snapshot: dict[str, Any] | None, fmt: str) -> str:
     """
     `PO-<number>.<ext>`, from the approved PO number with everything but
@@ -204,7 +201,7 @@ def _download_filename(snapshot: dict[str, Any] | None, fmt: str) -> str:
     a stranger's document (Section 7.11: filenames are untrusted).
     """
     po_number = ((snapshot or {}).get("header") or {}).get("po_number") or ""
-    safe = _UNSAFE_FILENAME_CHARS.sub("-", po_number).strip(".-")[:40]
+    safe = safe_filename_part(po_number)[:40]
     return f"PO-{safe}.{fmt}" if safe else f"purchase-order.{fmt}"
 
 
@@ -256,11 +253,5 @@ def download_export(export_id: UUID, token: str = Query(min_length=1)) -> Respon
     return Response(
         content=content,
         media_type=_MEDIA_TYPES[row["format"]],
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "X-Content-Type-Options": "nosniff",
-            "Cache-Control": "private, no-store",
-            # Never rendered, whatever a browser thinks of the type.
-            "Content-Security-Policy": "default-src 'none'; sandbox",
-        },
+        headers=attachment_headers(filename),
     )

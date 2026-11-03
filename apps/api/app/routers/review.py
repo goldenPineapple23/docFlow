@@ -70,6 +70,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.actor import Actor, current_actor
+from app.downloads import attachment_headers, safe_filename_part
 from app.errors import catalog_detail, catalog_error
 
 router = APIRouter(prefix="/review", tags=["review"])
@@ -794,8 +795,12 @@ def original_document_url(
     previewable = has_preview or (detected is not None and detected.name not in _NOT_PREVIEWABLE)
 
     token, expires_at = mint_document_token(document_id, tenant_id)
+    url = f"/review/documents/{document_id}/original/content?token={token}"
     return {
-        "url": f"/review/documents/{document_id}/original/content?token={token}",
+        "url": url,
+        # The same token, saved as a file. Decided here so the screen never
+        # builds a URL (founder, 2026-11-02: never a new tab; D-228).
+        "download_url": f"{url}&download=1",
         "expires_at": expires_at,
         "previewable": previewable,
         "format": (
@@ -820,6 +825,13 @@ def original_document_url(
             None
             if unreadable_because is None
             else catalog_detail("DOC-028" if unreadable_because == "unavailable" else "DOC-027")
+        ),
+        # A readable PDF with nothing to show in the frame (D-228). Told in the
+        # catalog's words, because "a browser can't display" isn't true of a PDF.
+        "not_shown": (
+            catalog_detail("DOC-031")
+            if detected is not None and detected.name == file_types.FileTypeName.PDF
+            else None
         ),
     }
 
@@ -884,6 +896,7 @@ def _extension(filename: str | None) -> str:
 def original_document_content(
     document_id: UUID,
     token: str = Query(min_length=1),
+    download: bool = Query(default=False),
 ) -> Response:
     """
     Serve the original file for the sandboxed viewer.
@@ -899,6 +912,10 @@ def original_document_content(
     required a session that had already passed `require_tenant_member`. The
     tenant then comes out of the token and opens an ordinary tenant-scoped
     session, so RLS still decides what can be read.
+
+    With `download`, the original itself is saved as a file and nothing is
+    rendered, whichever browser asks (D-228). A preview is never what's sent
+    then: the reviewer asked for what the buyer sent.
     """
     try:
         verified = verify_document_token(token, document_id)
@@ -916,6 +933,16 @@ def original_document_content(
         ).mappings().first()
     if row is None:
         raise HTTPException(status_code=404)
+
+    if download:
+        content, _ = _read_for_viewer(tenant_id, row["storage_path"], document_id)
+        if content is None:
+            raise HTTPException(status_code=404)
+        return Response(
+            content=content,
+            media_type="application/octet-stream",
+            headers=attachment_headers(_download_filename(row["original_filename"])),
+        )
 
     # A stored preview is served as it was produced, under the media type
     # recorded with it. 0009 constrains that column to a short allowlist, so
@@ -973,7 +1000,12 @@ _VIEWABLE_MEDIA_TYPES: dict[file_types.FileTypeName, str] = {
 # into the iframe produces a blank panel that looks like a bug, so the
 # viewer is told up front that there is nothing to show and offers the file
 # instead (DECISIONS.md D-091).
+#
+# A PDF is here for a different reason: browsers show one, but not in a frame
+# with `sandbox=""` (measured in Chrome, D-228), and Section 7.12 keeps it in
+# that frame.
 _NOT_PREVIEWABLE = {
+    file_types.FileTypeName.PDF,
     file_types.FileTypeName.TIFF,
     file_types.FileTypeName.DOCX,
     file_types.FileTypeName.XLSX,
@@ -992,6 +1024,7 @@ _NOT_PREVIEWABLE = {
 
 # What a person calls the format, for the "we can't show this one" message.
 _FORMAT_NAMES: dict[file_types.FileTypeName, str] = {
+    file_types.FileTypeName.PDF: "a PDF",
     file_types.FileTypeName.TIFF: "a TIFF scan",
     file_types.FileTypeName.DOCX: "a Word document",
     file_types.FileTypeName.DOC: "a Word document",
@@ -1005,6 +1038,12 @@ _FORMAT_NAMES: dict[file_types.FileTypeName, str] = {
     file_types.FileTypeName.HEIC: "an iPhone photo",
     file_types.FileTypeName.HTML: "a web page",
 }
+
+
+def _download_filename(original_filename: str | None) -> str:
+    """The buyer's own filename, made safe. The end of a long one is kept,
+    because that's where its extension is."""
+    return safe_filename_part(original_filename or "")[-120:] or "original-document"
 
 
 def _viewable_media_type(content: bytes) -> str:

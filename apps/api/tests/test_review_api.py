@@ -805,6 +805,150 @@ def test_a_preview_that_cant_be_read_falls_back_to_the_original(client):
             delete_tenant_storage(tenant.tenant_id)
 
 
+def _pdf_document(tenant, filename: str = "po.pdf") -> tuple[UUID, bytes]:
+    """A readable PDF original, with no stored preview: what every PDF is
+    until page images exist (D-228). The caller removes the tenant's Storage."""
+    content = b"%PDF-1.4\n% Fake order for testing\n%%EOF\n"
+    document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+    with platform_session() as session:
+        session.execute(
+            text("UPDATE documents SET storage_path = :p, original_filename = :f WHERE id = :id"),
+            {
+                "p": save_file(tenant.tenant_id, "po.pdf", content),
+                "f": filename,
+                "id": str(document),
+            },
+        )
+    return document, content
+
+
+@requires_review_schema
+def test_a_pdf_goes_to_the_download_panel_not_the_frame(client):
+    """Browsers refuse a PDF in `sandbox=""` (D-228), so the frame must never
+    get one, and the screen says why in the catalog's words."""
+    from docflow_core.storage import delete_tenant_storage
+
+    with _ReviewTenant("Acme Test Distributor -- pdf panel") as tenant:
+        try:
+            document, _ = _pdf_document(tenant)
+            minted = client.get(f"/review/documents/{document}/original", headers=tenant.headers()).json()
+
+            assert minted["previewable"] is False
+            assert minted["format"] == "a PDF"
+            assert minted["not_shown"]["code"] == "DOC-031"
+            assert minted["unavailable"] is None
+            assert minted["download_url"] == f"{minted['url']}&download=1"
+        finally:
+            delete_tenant_storage(tenant.tenant_id)
+
+
+@requires_review_schema
+def test_only_a_pdf_says_doc_031(client):
+    from docflow_core.storage import delete_tenant_storage
+
+    with _ReviewTenant("Acme Test Distributor -- not a pdf") as tenant:
+        try:
+            document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+            _set_storage_path(document, save_file(tenant.tenant_id, "po.txt", b"PO Number: BCH-2291\n"))
+            minted = client.get(f"/review/documents/{document}/original", headers=tenant.headers()).json()
+
+            assert minted["previewable"] is True
+            assert minted["not_shown"] is None
+        finally:
+            delete_tenant_storage(tenant.tenant_id)
+
+
+@requires_review_schema
+def test_a_download_is_an_attachment_under_a_safe_name(client):
+    """Never a new tab (founder, 2026-11-02). Only the API can guarantee it:
+    a link's `download` attribute does nothing across origins."""
+    from docflow_core.storage import delete_tenant_storage
+
+    with _ReviewTenant("Acme Test Distributor -- download") as tenant:
+        try:
+            document, content = _pdf_document(tenant, filename='../../po "copy"\r\nX-Evil: 1.pdf')
+            minted = client.get(f"/review/documents/{document}/original", headers=tenant.headers()).json()
+
+            served = client.get(minted["download_url"])
+
+            assert served.status_code == 200
+            assert served.content == content
+            assert served.headers["content-type"] == "application/octet-stream"
+            assert served.headers["content-disposition"] == 'attachment; filename="po-copy-X-Evil-1.pdf"'
+            assert "x-evil" not in served.headers
+            assert served.headers["content-security-policy"] == "default-src 'none'; sandbox"
+            assert served.headers["x-content-type-options"] == "nosniff"
+        finally:
+            delete_tenant_storage(tenant.tenant_id)
+
+
+@requires_review_schema
+def test_a_download_is_the_original_even_with_a_preview_stored(client):
+    from docflow_core.storage import delete_tenant_storage, save_derived
+
+    with _ReviewTenant("Acme Test Distributor -- download with preview") as tenant:
+        try:
+            document, content = _pdf_document(tenant)
+            preview_path = save_derived(tenant.tenant_id, document, "preview", b"DocFlow's own text")
+            with platform_session() as session:
+                session.execute(
+                    text(
+                        "UPDATE documents SET preview_storage_path = :p, "
+                        "preview_media_type = 'text/plain; charset=utf-8', preview_kind = 'extracted_text' "
+                        "WHERE id = :id"
+                    ),
+                    {"p": preview_path, "id": str(document)},
+                )
+            minted = client.get(f"/review/documents/{document}/original", headers=tenant.headers()).json()
+
+            assert client.get(minted["url"]).content == b"DocFlow's own text"
+            assert client.get(minted["download_url"]).content == content
+        finally:
+            delete_tenant_storage(tenant.tenant_id)
+
+
+@requires_review_schema
+def test_a_download_needs_the_same_valid_token(client):
+    """`download` changes how the file is sent, never who may have it."""
+    from docflow_core.storage import delete_tenant_storage
+
+    with _ReviewTenant("Acme Test Distributor -- download token a") as a, _ReviewTenant(
+        "Acme Test Distributor -- download token b"
+    ) as b:
+        try:
+            document, _ = _pdf_document(a)
+            other, _ = _pdf_document(b)
+            minted = client.get(f"/review/documents/{document}/original", headers=a.headers()).json()
+            token = minted["url"].split("token=")[1]
+
+            forged = client.get(
+                f"/review/documents/{document}/original/content",
+                params={"token": f"{a.tenant_id}.9999999999.forged", "download": 1},
+            )
+            elsewhere = client.get(
+                f"/review/documents/{other}/original/content", params={"token": token, "download": 1}
+            )
+
+            assert forged.status_code == 404
+            assert elsewhere.status_code == 404
+        finally:
+            delete_tenant_storage(a.tenant_id)
+            delete_tenant_storage(b.tenant_id)
+
+
+@requires_review_schema
+def test_with_no_signing_secret_the_viewer_gets_sys_002_not_a_500(client, monkeypatch):
+    with _ReviewTenant("Acme Test Distributor -- no signing secret") as tenant:
+        document = tenant.create_document(header=CLEAN_HEADER, lines=CLEAN_LINES)
+        monkeypatch.setenv("DOCUMENT_URL_SIGNING_SECRET", "")
+        get_settings.cache_clear()
+
+        refused = client.get(f"/review/documents/{document}/original", headers=tenant.headers())
+
+        assert refused.status_code == 503
+        assert refused.json()["detail"]["code"] == "SYS-002"
+
+
 @requires_review_schema
 def test_a_path_under_another_tenants_folder_is_refused_and_alerts_the_founder(client, monkeypatch):
     """Section 7.5 caught something: the file is never served, and a critical

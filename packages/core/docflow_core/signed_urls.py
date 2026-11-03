@@ -59,13 +59,19 @@ class SignedDocumentToken:
     expires_at: int
 
 
+class SigningKeyMissing(RuntimeError):
+    """DOCUMENT_URL_SIGNING_SECRET isn't set, so no link can be signed or
+    checked. The API answers SYS-002 for it (apps/api/app/main.py), never a
+    bare 500 (D-228)."""
+
+
 def _signing_key() -> bytes:
     settings = get_settings()
     secret = settings.document_url_signing_secret
     if not secret:
-        raise RuntimeError(
+        raise SigningKeyMissing(
             "DOCUMENT_URL_SIGNING_SECRET is not set, so document viewer URLs cannot be "
-            "signed. See SETUP.md Step 2 and .env.example."
+            "signed. See SETUP.md Step 4 and .env.example."
         )
     return secret.encode("utf-8")
 

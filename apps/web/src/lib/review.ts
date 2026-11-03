@@ -319,6 +319,9 @@ export function createMapping(
 
 export function originalDocumentUrl(id: string): Promise<{
   url: string;
+  // The same file, saved rather than shown (D-228). Good for as long as `url`,
+  // a few minutes, so mint a fresh one when the reviewer asks for the file.
+  download_url: string;
   expires_at: number;
   // Word, Excel, email and TIFF are all valid intake formats that no browser
   // renders, so the API says whether there is anything to show.
@@ -334,8 +337,21 @@ export function originalDocumentUrl(id: string): Promise<{
   // unreachable): the catalog entry to show instead, DOC-027. Not the same as
   // `previewable: false`, where the file is fine but no browser renders it.
   unavailable?: CatalogError | null;
+  // A readable PDF with nothing to show: the catalog's words for it, DOC-031.
+  not_shown?: CatalogError | null;
 }> {
   return request(`${reviewApiBase()}/documents/${id}/original`);
+}
+
+export function triggerDownload(url: string) {
+  // The API answers with Content-Disposition: attachment, so following the
+  // link saves the file and leaves this page where it is.
+  const link = document.createElement("a");
+  link.href = url;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 // ── Exports (CLAUDE.md Section 7.4, Phase 4) ────────────────────────────────

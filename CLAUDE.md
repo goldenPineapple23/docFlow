@@ -142,6 +142,8 @@ The review UI renders text that came from an untrusted document. Treat it accord
 
 - Every extracted value rendered in the UI is escaped; nothing from a document is ever rendered as HTML.
 - The original-document viewer (PDF/image) renders inside a sandboxed iframe with a strict Content-Security-Policy; the document is served from a signed, short-lived, same-tenant URL.
+- Clarification (founder, 2026-11-02; D-228): the rule above and its line in Section 10 cover originals, the sender's own bytes, and stand unchanged. A page image is DocFlow's output, not the original: the parse job decodes the document in the isolated worker (Section 7.11) and produces a new PNG or JPEG. Page images may be shown in the page as images, from a signed, short-lived, same-tenant URL, so zoom, pan and later highlight boxes over the page are possible.
+- Likewise, the text DocFlow stored from a document is DocFlow's output. It may be shown in the page as escaped text, never as HTML.
 - Standard framework protections stay on: secure/httpOnly/sameSite session cookies, CSRF protection on every state-changing route, CSP and security headers on every response, server-side authorization on every request (Section 7.5).
 - Stripe webhooks verify signatures and are idempotent on event ID.
 - No `dangerouslySetInnerHTML` (or its equivalent) anywhere in the review or operator surfaces.
@@ -362,7 +364,7 @@ The intake address is unguessable (7.2) until the customer forwards it to a buye
 
 ## Working rules added by the founder (2026-10-05; not part of the Master Build Prompt)
 
-Sections 0, 3, 7 and 10 above are the prompt's own words and are unchanged. The rules below are the founder's, decided on 2026-10-05 (`DECISIONS.md` D-191). They change how Claude reads and reports, never what is checked. Backup-first, the suite and merge bar, ask-first, design-before-build, the gate lists, and RUNBOOK 1.3, 1.4, 1.6, 9.2 and 10.2 stand exactly as written. If following one of these rules would weaken any of those, stop and ask.
+Sections 0, 3, 7 and 10 above are the prompt's own words and are unchanged, except the clarification marked in 7.12 (D-228). The rules below are the founder's, decided on 2026-10-05 (`DECISIONS.md` D-191). They change how Claude reads and reports, never what is checked. Backup-first, the suite and merge bar, ask-first, design-before-build, the gate lists, and RUNBOOK 1.3, 1.4, 1.6, 9.2 and 10.2 stand exactly as written. If following one of these rules would weaken any of those, stop and ask.
 
 ### Reporting
 - Report only what changed since the last message. Don't repeat standing reminders (backup dates, the gate list, "nothing built until approved"): they live in `docs/BUILD-STATUS.md`, and the founder reads them there.

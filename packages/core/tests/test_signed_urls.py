@@ -18,6 +18,7 @@ import pytest
 from docflow_core.config import get_settings
 from docflow_core.signed_urls import (
     InvalidSignedUrl,
+    SigningKeyMissing,
     mint_document_token,
     verify_document_token,
 )
@@ -131,6 +132,18 @@ def test_a_token_minted_under_a_different_secret_is_refused(monkeypatch):
 
     with pytest.raises(InvalidSignedUrl):
         verify_document_token(token, document_id)
+
+
+def test_with_no_secret_nothing_is_signed_and_the_error_says_where_to_look(monkeypatch):
+    """The API answers this error with SYS-002, so it has to be its own kind
+    (D-228). It stays a RuntimeError for anything that already expects one."""
+    monkeypatch.setenv("DOCUMENT_URL_SIGNING_SECRET", "")
+    get_settings.cache_clear()
+
+    with pytest.raises(SigningKeyMissing, match=r"SETUP\.md Step 4") as raised:
+        mint_document_token(uuid4(), uuid4())
+
+    assert isinstance(raised.value, RuntimeError)
 
 
 def test_the_token_never_contains_the_storage_path():

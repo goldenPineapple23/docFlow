@@ -5614,3 +5614,34 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** 2026-11-01 (the fix, the CI step with its cache and time limit, no staging suites).
 
 **Related:** D-194, D-196, D-202, D-209, D-223, D-225, D-226; `apps/api/app/serve.py`, `apps/api/tests/test_serve_dual_stack.py`, `scripts/ci/api_image_listen.sh`.
+
+---
+
+## D-228 — The original-document viewer: page images in the page, the A0 proof, and the new order (founder, 2026-11-02)
+
+**Context:** a local test on 2026-11-02 showed Chrome displays a PDF in a plain frame, even with the route's exact headers, and blocks it once `sandbox=""` is set. So the sandbox alone blocks it. The founder's requirement: "the viewer must show every PO format a distributor receives, in Chrome, Edge, Firefox and Safari, on desktop and at 375 px: PDF (digital, scanned, fax), TIFF including multi-page, JPG, PNG, HEIC, e-mail body, XLSX, CSV and DOCX." Items 4 and 10 qualify it. Evidence is in the founder's folders `DocFlow-evidence/2026-11-02-pdf-sandbox/` and `DocFlow-evidence/2026-11-02-viewer-a0/`.
+
+1. **Option 3: the parse job renders pages to images.** Originals stay in the one sandboxed iframe, and Sections 7.12 and 10 stay unchanged for originals. Page images rendered by the parse job are our output, not the original, and may be shown in the page as images, so zoom, pan and later highlight boxes over the page are possible. A sender's JPG, PNG, GIF, WEBP, HEIC and TIFF get page images from the parse job too, and TXT, CSV and MD show as stored text in the page. The A4 plan says what the frame is then still used for. If nothing, it proposes the change to Section 7.12, Section 10 and the one-iframe guard test (originals only ever downloaded) for the founder's decision. A frame nothing uses isn't kept, and the frame isn't removed without that decision.
+2. **A4 includes zoom and pan, and pages must be readable at fax and poor-scan quality.** Claude's choice, reported 2026-11-02: 200 dpi, keeping the smaller of PNG and JPEG per page. Measured sizes per page: clean 250 KB, poor scan 815 KB, fine fax 229 KB, standard fax 188 KB. These pages are synthetic degradations of a fake page, not real scanner output. On standard fax some zeros start to look like eights, and that damage is in the fax. At 815 KB a page about 44 pages reach the 48 MiB answer cap, assuming base64 in the answer, so A2 can't send 100 such pages in one answer as built.
+3. **A0 ran** local only, with fake fixtures, outside the repo (item 9).
+4. **XLSX and DOCX:** extracted text is acceptable for now. B2 is deferred, and done before pilots only if a pilot customer sends those formats.
+5. **B1 is in, grown into one inbound-mail item, label only, no automation:** read and store every inbound e-mail's body and show it to the reviewer beside each document from that e-mail; accept a PO in the e-mail body (a Section 7.16.3 change); classify each e-mail and attachment with one cheap model call into order, change, cancellation, quote request, status question or not an order, shown as a label, with a person deciding and no automatic action; skip extraction for "not an order" and inline images such as signature logos, kept visible with a way to send one to extraction. If it sizes over 6 days it splits: before the demo, the body storage and display, body POs and the classifier as their filter; before pilots, attachment labels and junk skipping. Its place in the order is decided after its sizing.
+6. **PDF fallback:** force a download, never a new tab.
+7. **New order, replacing D-226 item 5:** A0 to A6, then B1, then M10, then D-195 change 1, then Blocker 3's background commit with the duplicate SKU index (0041). B1's place stays open until its sizing; it may move after M10 and D-195 change 1. A5 absorbs the 375 px fix. Counting rows before extraction, E1, E2a, the worker's redeploy if needed, the docs PR, production, demo content and rehearsals follow Blocker 3 in D-226's order. Blocker 3 is before-first-pilot: fastener distributors carry catalogs far above 17,500 items, and catalog import is a pilot's first step.
+8. **The partner walkthrough waits until A4 is on staging.** `DOCUMENT_URL_SIGNING_SECRET`: the founder generates and sets it per the 2026-10-01 decision, when the viewer reaches staging (RUNBOOK 9.7).
+9. **A0 results (founder's testing, 2026-11-02).** The request log shows each browser fetched the page; no Firefox request appears.
+
+| Browser | PNG and JPG in the frame | PNG and JPG in the page | Text in the frame |
+|---|---|---|---|
+| Chrome, Edge, DuckDuckGo (PC) | Show | Show | Shows |
+| Safari 26.4 (Mac) | Show | Show | Shows, black background (Mac likely in dark mode) |
+| Safari 27.0.1 (iPhone) | Show, heavily zoomed in | Whole PO fitted to the screen | Shows |
+
+   Text in an image tag showed a broken icon everywhere, as expected. In-page images were same-origin in this test and will be cross-origin in production, so A4 must prove that case.
+10. **Firefox:** not tested, because the founder's Firefox hangs on every site. Real Firefox is deferred to before pilots. Playwright's Firefox covers it in CI from A6; until then CI runs Chromium only.
+11. **Conclusions from A0:** page images are shown in the page, with our own fit-to-width, zoom and pan, never inside the frame. Text previews must not depend on the browser's colours or fit, so they are shown in the page as escaped text, never HTML.
+12. **A1 as approved.** A PDF goes to a download panel in the catalog's words (DOC-031), never the frame. A download is a server-side attachment under a sanitized filename, on a link minted at the click. With no signing secret, every route that signs or checks a file link answers SYS-002 rather than a 500, and the API warns at startup. No alert is raised for a missing secret. SYS-002's action is "DocFlow has logged this. If it keeps happening, contact DocFlow support.": it must not imply the problem fixes itself or that anyone has been alerted.
+
+**Founder approval:** 2026-11-02.
+
+**Related:** D-085, D-089, D-091, D-092, D-195, D-226.

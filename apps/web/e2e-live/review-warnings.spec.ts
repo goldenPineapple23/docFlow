@@ -31,6 +31,7 @@ type Seed = {
   clean_document_id: string;
   flagged_document_id: string;
   ack_document_id: string;
+  pdf_document_id: string;
 };
 
 const seed: Seed = JSON.parse(readFileSync(SEED_FILE, "utf8"));
@@ -260,4 +261,25 @@ test("an edit to the very number a ticked check is about clears that tick", asyn
   await expect(returned.getByRole("checkbox")).not.toBeChecked();
   await expect(returned).toContainText(/New/);
   await expect(page.getByTestId("approve-button")).toBeDisabled();
+});
+
+// A stub decides for itself what comes back, so only the real API can prove
+// the browser saves the file instead of opening it (D-228).
+test("a real PDF is saved as a file, with no new tab, and the frame never gets it", async ({ page }) => {
+  await signIn(page);
+  await openOrder(page, seed.pdf_document_id);
+
+  const panel = page.getByTestId("viewer-not-previewable");
+  await expect(panel).toContainText("DOC-031");
+  await expect(page.getByTestId("document-viewer")).toHaveCount(0);
+
+  const opened: string[] = [];
+  page.context().on("page", (other) => opened.push(other.url()));
+  const downloading = page.waitForEvent("download");
+  await page.getByTestId("download-original").click();
+  const download = await downloading;
+
+  expect(download.suggestedFilename()).toBe("live-e2e-order.pdf");
+  expect(opened).toEqual([]);
+  await expect(page.getByTestId("save-button")).toBeVisible();
 });
