@@ -233,6 +233,26 @@ DISPATCH_TASK_TIME_LIMIT_SECONDS = 60
 # process reads only this queue and never claims a document).
 DISPATCH_QUEUE = "dispatch"
 
+# Viewer A3 (founder, 2026-11-03; D-232): a document's page images are drawn
+# by `docflow.render_pages`, on a queue of its own read by one process of its
+# own (app.run_workers), so a long render never takes a document's slot.
+PAGES_QUEUE = "pages"
+# Its hard limit. The worst case is far past it: 50 answers by bytes, 100 by
+# time, about 5 hours (D-232). The largest real fixture, 30 poor-scan pages,
+# took one answer and 7.3 s. A document cut off here keeps page_count NULL:
+# the viewer falls back, and A6's backfill finds it.
+PAGES_TASK_TIME_LIMIT_SECONDS = 15 * 60
+# The waits before each retry of a render the parse service or Storage
+# couldn't serve. After the last, the task gives up and cleans up.
+PAGES_RETRY_COUNTDOWNS_SECONDS = (60, 300, 900)
+# What the render's deadline allows for re-sending the original (at most the
+# 25 MB upload cap) to the parse service, and only that: an estimate,
+# unmeasured, to be checked on staging at A6 (D-232). Storing pages needs
+# none of it: each page is stored only after a deadline check passes. The
+# deadline is the hard limit minus the most one answer can take
+# (app.tasks.render_pages.PAGES_DEADLINE_SECONDS).
+PAGES_UPLOAD_ALLOWANCE_SECONDS = 60
+
 # Stage 3e, the worker's restart record (founder, 2026-10-01): the launcher
 # records every start and raises `worker_restarting` (high, at most hourly)
 # when this many fall within WORKER_RESTART_WINDOW_MIN, this one included.

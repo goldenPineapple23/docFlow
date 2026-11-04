@@ -4,13 +4,16 @@ process is deliberately separate from the FastAPI web app (apps/api), on
 its own deploy, so a crash here takes one document to `failed`, never the
 web app down.
 
-Three queues:
+Four queues:
   - "interactive": every document task, sent only by the dispatcher
     (docflow_core.dispatch), plus exports and imports.
   - "bulk": scheduled sweeps and other background work.
   - "dispatch": the dispatch task, and nothing else. Read only by the worker
     machine's one dispatch process (app.run_workers), never by the document
     worker (founder, 2026-10-01).
+  - "pages": a document's page images (`docflow.render_pages`, viewer A3),
+    read only by the machine's one pages process, so a long render never
+    takes a document's slot (founder, 2026-11-03; D-232).
 Celery's Redis transport takes turns between the queues a worker reads
 (kombu's round-robin queue order); it does NOT drain "interactive" first.
 Until Stage 3d this docstring claimed it did (a doc/code contradiction found
@@ -31,7 +34,12 @@ from celery.schedules import crontab
 from celery.signals import worker_init, worker_process_init
 from docflow_core import db
 from docflow_core.config import get_settings
-from docflow_core.constants import DISPATCH_INTERVAL_SECONDS, DISPATCH_QUEUE, WORKER_MAX_MEMORY_PER_CHILD_KIB
+from docflow_core.constants import (
+    DISPATCH_INTERVAL_SECONDS,
+    DISPATCH_QUEUE,
+    PAGES_QUEUE,
+    WORKER_MAX_MEMORY_PER_CHILD_KIB,
+)
 
 settings = get_settings()
 
@@ -57,6 +65,7 @@ celery_app = Celery(
         "app.tasks.lifecycle_sweep",
         "app.tasks.stuck_sweep",
         "app.tasks.dispatch",
+        "app.tasks.render_pages",
     ],
 )
 
@@ -108,6 +117,7 @@ celery_app.conf.update(
         "interactive": {"exchange": "interactive", "routing_key": "interactive"},
         "bulk": {"exchange": "bulk", "routing_key": "bulk"},
         DISPATCH_QUEUE: {"exchange": DISPATCH_QUEUE, "routing_key": DISPATCH_QUEUE},
+        PAGES_QUEUE: {"exchange": PAGES_QUEUE, "routing_key": PAGES_QUEUE},
     },
     task_acks_late=True,
     worker_prefetch_multiplier=1,

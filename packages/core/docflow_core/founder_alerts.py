@@ -616,13 +616,14 @@ def report_refused_storage_path(
 
 
 def raise_seccomp_kill(
-    session: Session, *, tenant_id: UUID, where: str, ref_id: UUID | None, error_code: str
+    session: Session, *, tenant_id: UUID, where: str, ref_id: UUID | None, error_code: str | None
 ) -> bool:
     """
     A parse job killed by the seccomp filter (founder, 2026-10-01). Its own
     alert type, raised for every kill: the dedupe key names the document or
     import, and there is no daily or hourly window. Its own savepoint; never
-    raises.
+    raises. `error_code` None leaves it out of the payload: a page render's
+    kill fails no document, so no catalog code fits (founder, 2026-11-04).
     """
     savepoint = session.begin_nested()
     try:
@@ -632,7 +633,7 @@ def raise_seccomp_kill(
             severity="high",
             tenant_id=tenant_id,
             payload={
-                "error_code": error_code,
+                **({"error_code": error_code} if error_code is not None else {}),
                 "cause": "seccomp_kill",
                 "signal": "SIGSYS (31)",
                 "syscall": None,
@@ -654,7 +655,7 @@ def raise_seccomp_kill(
     return raised
 
 
-def alert_seccomp_kill(tenant_id: UUID, *, where: str, ref_id: UUID | None, error_code: str) -> None:
+def alert_seccomp_kill(tenant_id: UUID, *, where: str, ref_id: UUID | None, error_code: str | None) -> None:
     """raise_seccomp_kill in its own tenant session. Never raises."""
     try:
         from docflow_core.db import tenant_session

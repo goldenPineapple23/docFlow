@@ -45,6 +45,7 @@ from typing import Protocol
 from uuid import UUID, uuid4
 
 from docflow_core.config import get_settings
+from docflow_core.file_types import MAX_DOCUMENT_PAGES
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +101,8 @@ def _safe_extension(original_filename: str) -> str:
 # generated from an approved snapshot (Section 7.4), `onboarding` holds a
 # prospect's files moved out of staging when their tenant is created (Section
 # 7.15.2 Step 2), and `derived` holds each document's preview and extracted
-# text under fixed keys (Stage 3b item 4).
+# text under fixed keys (Stage 3b item 4), and its page images under
+# `derived/{doc}/pages/` (viewer A3).
 STORAGE_AREAS: frozenset[str] = frozenset({"uploads", "exports", "onboarding", "derived"})
 
 # Areas written once under a fresh random name. `derived` is not one: its
@@ -127,6 +129,21 @@ def derived_path(tenant_id: UUID, document_id: UUID, kind: str) -> str:
     if kind not in DERIVED_KINDS:
         raise UnsafeStoragePathError(f"Unknown derived kind: {kind!r}")
     return f"tenants/{tenant_id}/derived/{UUID(str(document_id))}/{DERIVED_KINDS[kind]}"
+
+
+def pages_folder(tenant_id: UUID, document_id: UUID) -> str:
+    """Where a document's page images live (viewer A3, D-232), without the
+    trailing slash: `tenants/{t}/derived/{doc}/pages`."""
+    return f"tenants/{UUID(str(tenant_id))}/derived/{UUID(str(document_id))}/pages"
+
+
+def page_path(tenant_id: UUID, document_id: UUID, index: int) -> str:
+    """The fixed key of page `index` (from 0): `.../pages/0001` for the first.
+    A redraw writes the same keys; a key the new list doesn't name is deleted
+    after the list is written (app.tasks.render_pages)."""
+    if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < MAX_DOCUMENT_PAGES:
+        raise UnsafeStoragePathError(f"Page index out of range: {index!r}")
+    return f"{pages_folder(tenant_id, document_id)}/{index + 1:04d}"
 
 
 def build_staging_path(intake_id: UUID, original_filename: str) -> str:
@@ -386,6 +403,34 @@ def save_derived(
     check_tenant_path(tenant_id, storage_path)
     _get_backend().put(storage_path, content, content_type)
     return storage_path
+
+
+def save_page(tenant_id: UUID, document_id: UUID, index: int, content: bytes, *, content_type: str) -> str:
+    """Writes one page image to its fixed key (viewer A3)."""
+    storage_path = page_path(tenant_id, document_id, index)
+    check_tenant_path(tenant_id, storage_path)
+    _get_backend().put(storage_path, content, content_type)
+    return storage_path
+
+
+def list_pages(tenant_id: UUID, document_id: UUID) -> list[str]:
+    """Every key under the document's pages folder, each checked against the
+    tenant's prefix before it is returned."""
+    folder = check_tenant_path(tenant_id, pages_folder(tenant_id, document_id))
+    keys = _get_backend().list_keys(folder + "/")
+    return [check_tenant_path(tenant_id, key) for key in keys if key.startswith(folder + "/")]
+
+
+def delete_pages(tenant_id: UUID, document_id: UUID, keys: list[str]) -> None:
+    """Deletes some of the document's page keys. Each must sit in that
+    document's own pages folder, or nothing is deleted."""
+    folder = pages_folder(tenant_id, document_id) + "/"
+    for key in keys:
+        check_tenant_path(tenant_id, key)
+        if not key.startswith(folder) or "/" in key[len(folder):]:
+            raise UnsafeStoragePathError(f"Not one of this document's page keys: {key!r}")
+    if keys:
+        _get_backend().delete_keys(list(keys))
 
 
 def read_file(tenant_id: UUID, storage_path: str) -> bytes:

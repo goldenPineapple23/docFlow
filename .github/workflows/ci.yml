@@ -364,6 +364,13 @@ jobs:
           name: 0039-forward-state
           path: packages/core/0039-forward-state.json
           if-no-files-found: warn
+      # Stage 5, viewer A3 (D-232): 0040's reverse, the same way. After the
+      # reverse its two columns and three checks are gone and nothing else on
+      # documents differs; after forward again the state is the first, its own
+      # columns allowed at the end of the table (scripts/ci/roundtrip_columns.py).
+      - name: Migration 0040 forward -> reverse -> forward
+        id: roundtrip_0040
+        run: python "${{ github.workspace }}/scripts/ci/migration_0040_roundtrip.py"
       - name: Turn on the four logins (migration 0036 creates them), as RUNBOOK 10.2 does
         id: app_role
         run: python "${{ github.workspace }}/scripts/ci/create_logins.py"

@@ -156,6 +156,51 @@ def test_an_unknown_derived_kind_is_refused():
         storage.derived_path(uuid4(), uuid4(), "../../x")
 
 
+# ── Viewer A3 (D-232): page images under fixed keys ─────────────────────────
+
+
+def test_page_images_have_fixed_keys_from_0001_in_the_document_s_pages_folder(fake):
+    tenant, document = uuid4(), uuid4()
+    first = storage.save_page(tenant, document, 0, b"p1", content_type="image/png")
+    again = storage.save_page(tenant, document, 0, b"p1 again", content_type="image/jpeg")
+    last = storage.save_page(tenant, document, 99, b"p100", content_type="image/png")
+    assert first == again == f"tenants/{tenant}/derived/{document}/pages/0001"
+    assert last == f"tenants/{tenant}/derived/{document}/pages/0100"
+    assert fake.objects[first] == b"p1 again" and fake.content_types[first] == "image/jpeg"
+    assert storage.list_pages(tenant, document) == [first, last]
+
+
+@pytest.mark.parametrize("index", [-1, 100, True, "1", 1.0])
+def test_a_page_index_outside_the_page_cap_is_refused(fake, index):
+    with pytest.raises(UnsafeStoragePathError):
+        storage.page_path(uuid4(), uuid4(), index)
+    assert fake.calls == []
+
+
+def test_listing_one_document_s_pages_never_returns_another_s(fake):
+    tenant, document, other = uuid4(), uuid4(), uuid4()
+    mine = storage.save_page(tenant, document, 0, b"x", content_type="image/png")
+    storage.save_page(tenant, other, 0, b"y", content_type="image/png")
+    storage.save_derived(tenant, document, "preview", b"z", content_type="image/png")
+    assert storage.list_pages(tenant, document) == [mine]
+
+
+def test_deleting_pages_takes_only_that_document_s_page_keys(fake):
+    tenant, document, other = uuid4(), uuid4(), uuid4()
+    keep = storage.save_page(tenant, document, 0, b"x", content_type="image/png")
+    stale = storage.save_page(tenant, document, 1, b"x", content_type="image/png")
+    preview = storage.save_derived(tenant, document, "preview", b"z", content_type="image/png")
+    others = storage.save_page(tenant, other, 0, b"y", content_type="image/png")
+    storage.delete_pages(tenant, document, [stale])
+    assert set(fake.objects) == {keep, preview, others}
+    for refused in (preview, others, f"tenants/{uuid4()}/derived/{document}/pages/0001", keep + "/x"):
+        with pytest.raises(UnsafeStoragePathError):
+            storage.delete_pages(tenant, document, [keep, refused])
+    assert set(fake.objects) == {keep, preview, others}
+    storage.delete_pages(tenant, document, [])
+    assert set(fake.objects) == {keep, preview, others}
+
+
 # ── Item 8: tenant creation copies staging files server side ───────────────
 
 

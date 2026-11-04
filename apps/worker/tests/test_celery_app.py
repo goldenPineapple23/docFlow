@@ -101,9 +101,11 @@ def test_the_document_worker_has_exactly_the_dispatchers_target_and_the_dispatch
     """Stage 3d (Q2, gap 1; founder's condition 2026-10-01): the document
     slots are the in-flight target, from the one setting. The dispatch pass
     has one process of its own that reads ONLY the dispatch queue, and the
-    document worker doesn't read that queue at all."""
+    document worker doesn't read that queue at all. Viewer A3 (D-232): the
+    page renders have one process of their own too, reading ONLY the pages
+    queue, so a render never takes a document's slot."""
     from docflow_core.config import get_settings
-    from docflow_core.constants import DISPATCH_QUEUE
+    from docflow_core.constants import DISPATCH_QUEUE, PAGES_QUEUE
 
     from app.run_workers import commands
 
@@ -114,13 +116,15 @@ def test_the_document_worker_has_exactly_the_dispatchers_target_and_the_dispatch
         return argv[argv.index(flag) + 1]
 
     workers = commands()
-    assert set(workers) == {"documents", "dispatch"}
-    documents, dispatcher = workers["documents"], workers["dispatch"]
+    assert set(workers) == {"documents", "dispatch", "pages"}
+    documents, dispatcher, renders = workers["documents"], workers["dispatch"], workers["pages"]
     assert option(documents, "-Q").split(",") == ["interactive", "bulk"]
     assert f"--concurrency={target}" in documents
     assert option(dispatcher, "-Q") == DISPATCH_QUEUE
     assert "--concurrency=1" in dispatcher
-    assert option(documents, "-n") != option(dispatcher, "-n")
+    assert option(renders, "-Q") == PAGES_QUEUE == "pages"
+    assert "--concurrency=1" in renders
+    assert len({option(argv, "-n") for argv in workers.values()}) == 3
     for argv in workers.values():
         assert "-B" not in argv and "--beat" not in argv
 

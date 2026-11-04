@@ -41,6 +41,7 @@ EXPECTED_LIMITS = {
     "docflow.run_lifecycle_sweep": constants.LIFECYCLE_SWEEP_TASK_TIME_LIMIT_SECONDS,
     "docflow.sweep_stuck_documents": constants.STUCK_SWEEP_TASK_TIME_LIMIT_SECONDS,
     "docflow.dispatch": constants.DISPATCH_TASK_TIME_LIMIT_SECONDS,
+    "docflow.render_pages": constants.PAGES_TASK_TIME_LIMIT_SECONDS,
 }
 
 

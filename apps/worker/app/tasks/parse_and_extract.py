@@ -80,6 +80,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
+from app.tasks.render_pages import queue_pages
 
 logger = logging.getLogger(__name__)
 
@@ -969,6 +970,9 @@ def _parse_and_extract(tid: UUID, did: UUID) -> None:
     # only serves what this wrote.
     _store_preview(tid, did, answer)
     _store_extracted_text(tid, did, parts)
+    # Viewer A3 (D-232): the page images, drawn on their own queue. Never
+    # raises and never waits on the broker: the order's review comes first.
+    queue_pages(tid, did)
 
     settings = get_settings()
     # Two retries is the SDK's default, stated here because the read budget

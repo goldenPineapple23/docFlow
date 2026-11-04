@@ -123,6 +123,21 @@ def test_the_same_file_gives_the_same_bytes_twice():
     assert [page["data"] for page in first["pages"]] == [page["data"] for page in second["pages"]]
 
 
+@pytest.mark.parametrize("name", sorted(PAGED))
+def test_every_paged_format_gives_the_same_pages_twice(name):
+    """A3 (D-232): two runs that draw the same document write the same keys,
+    and first write wins only because what the loser wrote is the same bytes.
+    So drawing is deterministic for every format that has pages."""
+    first = conftest.answer("pages", POSITIVE / name)
+    second = conftest.answer("pages", POSITIVE / name)
+    assert first["outcome"] == "ok" and first == second
+
+
+def test_a_multi_page_tiff_gives_the_same_pages_twice():
+    content = fb.build_tiff(pages=3)
+    assert _all_pages(content, "po.tif") == _all_pages(content, "po.tif")
+
+
 def test_first_page_starts_the_answer_there():
     content = fb.build_pdf(["one", "two", "three"])
     answer = conftest.answer_for("pages", content, "po.pdf", first_page=2)

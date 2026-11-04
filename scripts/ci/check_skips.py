@@ -137,6 +137,7 @@ STEP_NAMES = {
     "roundtrip": "Migration 0036 forward -> reverse -> forward",
     "roundtrip_0037": "Migration 0037 forward -> reverse -> forward",
     "roundtrip_0038": "Migration 0038 forward -> reverse -> forward",
+    "roundtrip_0040": "Migration 0040 forward -> reverse -> forward",
     "app_role": "Turn on the four logins",
     "buildx": "Run docker/setup-buildx-action@v4",
     "libreoffice": "Install LibreOffice",

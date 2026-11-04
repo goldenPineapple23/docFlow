@@ -5823,3 +5823,112 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** the founder, 2026-11-03.
 
 **Related:** D-199, D-214, D-218, D-225, D-227, D-229; `.github/workflows/ci.yml`, `.github/workflows/catalog-sizing.yml`, `scripts/ci/show_port_54322.sh`, `scripts/ci/check_skips.py`, `packages/core/tests/test_ci_guards.py`.
+
+---
+
+## D-232 — Viewer A3: the worker draws and stores every page, migration 0040, and the 0037 round trip fixed (founder, 2026-11-03)
+
+**Context:** D-228 item 7's order puts A3 after A2 (D-228; PR #91). A2's parse service draws page images on `POST /v1/pages`. A3 is the worker's half: it asks for every page and stores it, and migration 0040 records how many pages there are and what each one is. The plan was approved on 2026-11-03 at 4 days, with the founder's answers and ten changes. The branch is `phase55/stage5-viewer-a3`, from `main` at `c36ca96` (#92's merge).
+
+1. **The task.**
+   - `docflow.render_pages(tenant_id, document_id)` (`apps/worker/app/tasks/render_pages.py`).
+   - **When it is queued:** `parse_and_extract` queues it after its parse step, beside the preview and the extracted text (`queue_pages`).
+   - **What it does:** it reads the original and checks its hash, as the document task does. Then it asks `/v1/pages` from page 0, and again from each answer's `next_page`, until there is no next page.
+   - **What it stores:** each drawn page goes to `tenants/{t}/derived/{doc}/pages/0001`, `0002`, …, through `storage.save_page`, with the media type set on the object.
+   - **Memory (founder's build note):** each page is decoded, uploaded and released before the next, so the task never holds every decoded page at once.
+2. **Its queue and process (founder).**
+   - `PAGES_QUEUE = "pages"` is read only by a third worker process, `pages`, with concurrency 1 (`app.run_workers`). It doesn't share concurrency with `parse_and_extract`.
+   - **`PARSE_SLOTS = 2` fits only while `dispatch_in_flight_target` is 1:** one document job plus one page job.
+     - The guard: `packages/core/tests/test_ci_guards.py::test_parse_slots_were_sized_for_one_document_slot_and_one_page_job` fails if either value changes without the other.
+     - It can't see a value set as a Fly secret. That is read on the worker app at A6.
+     - RUNBOOK 9.2 says to revisit both together.
+   - **No per-document lock (founder, 2026-11-04).** `give_up` deletes the document's page keys while `page_count` is NULL. If two runs of one document overlap, a failing run can delete pages the other has stored and is about to list, and the written list then names missing images (read in the code: `give_up` checks only `page_count`, and `write_list` follows the last page's upload). No lock is built.
+     - `render_pages` is safe only with one pages process at concurrency 1. A second worker machine, or a pages concurrency above 1, needs a per-document lock first (RUNBOOK 9.2).
+     - The guard above also fails if `run_workers`' pages command stops being `--concurrency=1`, or has an element equal to `-c` or starting with `--autoscale`. It can't see a second worker machine.
+3. **What 0040 stores (founder).**
+   - `documents.page_count`: NULL means not drawn (never run, or failed or cut off); 0 means a format with no pages.
+   - `documents.pages`: a JSON array. A drawn page is `{"index", "media_type", "width", "height"}` (the width and height come from A2's answer, `pages.py:106-107`). A page not drawn is `{"index", "rendered": false, "reason"}`.
+   - **Three checks:** a count of at least 0; both NULL or both set; and, when set, an array whose length is the count, through `case`, because `jsonb_array_length` raises on a non-array.
+   - **The reverse:** `supabase/reverse/0040_reverse.sql`, run in CI forward → reverse → forward (`scripts/ci/migration_0040_roundtrip.py`, step `roundtrip_0040`, named in `STEP_NAMES`).
+   - It touches no row, policy or grant.
+4. **Every write (founder).**
+   - **Before each write**, the document must still exist and not be deleted, and its tenant must not be `pending_deletion` or `deleted`. Otherwise the task stops and logs `pages_skipped`, writing and deleting nothing.
+   - **A document that already has its list:** if `page_count` is already set when the task starts, it does nothing.
+   - **The one write:** both columns are set together, once, after every page is stored, `… WHERE id = :id AND deleted_at IS NULL AND page_count IS NULL` with the tenant check.
+   - **First write wins:** if that update changes 0 rows, the task stops without deleting any key (`pages_not_written`).
+   - **After the write:** page keys the new list doesn't name are deleted, covering a redraw that drew fewer pages and a page not drawn this time.
+5. **How a run fails (founder): best effort, no founder alert for a render failure.**
+   - **Retried:** `ParseUnavailable` and a Storage outage, after 60, 300 and 900 s (`PAGES_RETRY_COUNTDOWNS_SECONDS`).
+   - **Not retried:** `ParseLost`, `ParseAnswerInvalid`, a refused, stopped, crashed or error answer, a hash mismatch, a refused stored path, and anything else.
+   - **A retry Celery can't queue** (`Reject`) ends as a failure too.
+   - **Every failed end is the same:** giving up after the last retry, an error that isn't retried, and the deadline all log one line, `pages_failed document_id=… error_type=…`, with the type only. The page keys are then deleted best effort, but only while `page_count` is NULL, so a list another run wrote keeps its pages. Both columns stay NULL. The viewer falls back, and A6's backfill and a query find the document.
+     - Tests: `test_render_pages.py::test_any_other_render_failure_raises_no_alert`.
+   - **The gap (founder, 2026-11-04):** the clean-up that starts at the deadline can be cut off at the 15-minute hard limit (a hard kill runs no clean-up at all), leaving page keys with both columns NULL. A later successful run overwrites those keys and deletes stale ones, and A6's backfill finds documents with no page count.
+   - **Two security events keep their alerts (founder, 2026-11-04).** The no-alert ruling covers ordinary render failures, not these:
+     - **A refused stored path** is reported as every reader of a stored path reports one (`test_storage.py`'s guard), and a cross-tenant path raises the existing critical alert.
+     - **A seccomp kill** (`crashed:signal_31`) on a pages job raises `parse_seccomp_kill` with `where="pages"`, so the alert names the render and keeps its own dedupe key, `parse_seccomp_kill:pages:{document}` (founder, 2026-11-04). It must not say the document failed: DOC-030 means it did ("We couldn't read this file"), so DOC-030 is not passed. **Decision (founder, 2026-11-04):** `error_code` is optional on `alert_seccomp_kill` and on `raise_seccomp_kill`, which it passes the code to; None leaves it out of the payload. Tests: `test_render_pages.py::test_a_seccomp_kill_raises_its_own_alert_naming_the_render`, `test_render_pages_db.py::test_a_seccomp_kill_gives_up_and_raises_one_alert_naming_the_render`, `test_seccomp_alert_payload.py::test_a_none_error_code_is_left_out_of_the_payload`, and `test_parse_client.py::test_a_seccomp_kill_on_pages_comes_through_as_the_worker_matches_it`.
+6. **The deadline (founder: no Celery soft limit).**
+   - The rule that no task has a soft limit stands (`constants.py:63`; `apps/worker/tests/test_time_limits.py:75`).
+   - `PAGES_DEADLINE_SECONDS` is the hard limit minus the most one answer can take: 900 − (45 s of patience to get in + 60 s for the upload + 210 s of read timeout) = **585 s**.
+   - **The 60 s upload allowance** (`PAGES_UPLOAD_ALLOWANCE_SECONDS`) covers re-sending the original (at most 25 MB) to the parse service, and only that. It is an estimate, unmeasured, to be checked on staging at A6 (approved, founder, 2026-11-04). Nothing enforces the 60 s: the client's write timeout is 210 s per operation. An upload that runs longer ends at the hard limit, which is the gap in item 5.
+   - **Storing pages needs no allowance.** The task checks the deadline before each answer and before each page's upload, so an answer that ends past 585 s stores nothing, and a Storage call (about two minutes at worst, `storage.S3Backend`) started just before 585 s ends by about 705 s. The two never stack: the work ends by 585 + 315 = 900 s at the latest.
+   - At the deadline it cleans up, leaves both columns NULL, and logs `error_type=deadline`.
+   - **Once every page is stored, the list is written, even past the deadline (founder, 2026-11-04).** No check stands between `draw` and the one UPDATE: a check there would discard a render whose every page is stored, to guard one statement. An UPDATE the hard limit cuts off writes nothing (it is one statement) and leaves the gap in item 5. Tests: `test_render_pages.py::test_a_draw_that_ends_past_the_deadline_is_still_written` and `test_render_pages_db.py::test_a_run_whose_last_page_is_stored_past_the_deadline_still_writes_its_list`.
+7. **The hard limit, 15 minutes (founder).**
+   - **Worst case, by bytes: 50 answers.** A page is at most 8 MiB, which is 11,184,812 base64 characters. Two such pages are 22,369,624 characters. A third would make 33,554,436, past the 33,554,432-character answer budget, so one answer holds two such pages.
+   - **Worst case, by time: 100 answers.** Each answer takes at least one page and stops taking new ones after 120 s. One answer is capped by the job's 180 s wall and the client's 210 s read timeout.
+   - That is about **5 hours** (100 × 180 s).
+   - **The largest real fixture**, 30 poor-scan pages (23.7 MB, the most under the upload cap), came back in one answer of 32,619,120 characters in **7.3 s**.
+   - **A document cut off** stays NULL, for the viewer's fallback and A6's backfill.
+   - **Revisit** the 15 minutes only if the logs show `error_type=deadline` on real documents.
+8. **Queueing never costs the document (founder).**
+   - `queue_pages` sends with `retry=False`. Any error is caught and logged as `pages_enqueue_failed`, and the document task carries on.
+   - **Measured on this PC:** a broker that refuses connections costs 6.26 s. `retry=False` stops the publish retries, but kombu still makes its own connection attempts within its connect timeout; a raw refused connect alone takes 2.05 s here.
+   - The test requires under 10 s, with the real client against a port nothing listens on.
+   - A broker that drops packets instead of refusing was not measured.
+9. **Drawing is deterministic.** First write wins is safe only because a run that loses wrote the same bytes to the same keys. A2's renderer gives byte-identical answers twice for every paged fixture and for a 3-page TIFF (`apps/parse/tests/test_pages.py`).
+10. **0037's round trip was fixed in this PR (founder).**
+    - **Why it would have gone red:** it reads `documents`' columns `ORDER BY ordinal_position` (`scripts/ci/migration_0037_roundtrip.py:70`), and its forward-again state had to equal the first (`:208`). Once 0040 adds columns, running 0037 again after its reverse puts `fault_keys` behind `page_count` and `pages`.
+    - **The fix:** `scripts/ci/roundtrip_columns.py`. A migration's own columns may move to the end of their tables, in the order it adds them. Any other column moved fails, and a missing column fails. Tested in `test_migration_0037.py` and `test_migration_0040.py`.
+    - 0040's round trip uses the same comparison.
+    - **Unaffected:** 0038's round trip drops no column and compares checks by name; 0039's compares grants and policies; 0036's compares policies.
+    - This is from reading the scripts; the first run against a database is CI's.
+11. **What reads `documents`' columns.**
+    - The only `select *` is `SELECT d.*` in a `WITH` clause at `packages/core/docflow_core/tenant_home.py:116`. Its outer query selects counts and a median only.
+    - It reads the same in `56e00f3` (`main` when API v3 was deployed, 2026-11-02) and in `4cadcaa` (worker v12).
+    - None of `main`, `56e00f3` or `4cadcaa` has an ORM mapping of `documents`, a `RETURNING *`, or a model with `extra="forbid"`. The web app reads no `documents` directly.
+12. **Every document delete path, and the pages:**
+    - **Quarantine clear** (`quarantine.py:282`, founder only): a soft delete. Nothing in Storage is removed, and a quarantined document is never parsed, so it has no pages.
+    - **The tenant hard delete** (`storage.delete_tenant_storage`): removes all of `tenants/{id}/`, pages included, and sweeps again after its commit.
+    - **Test clean-up and the sweep script:** remove the whole tenant prefix.
+    - **The four seed scripts** (`seed_demo_data.py:192`, `seed_live_e2e.py:462`, `seed_merge_demo.py:229`, `seed_quarantine_demo.py:83`) delete document rows with SQL and leave `derived/` behind, previews included. They stay out of A3, and **that leftover is recorded for step i's demo reset procedure** (founder).
+13. **`image_preview` stays until A6's backfill is done; whether it retires is decided then (founder).**
+14. **Every format A2 draws gets pages (founder):** PDF, TIFF, HEIC, JPG, PNG, GIF and WEBP. Every other format gets `page_count` 0.
+15. **Memory (founder: measure before and after building, record both).**
+    - **Before building**, through the plan's stand-in path (POST, JSON, base64-decode every page and hold it):
+      - peak working set 157.5 MiB, from 34.2 MiB;
+      - growth 123.3 MiB;
+      - Python's peak allocation 117.6 MiB.
+    - **After building**, through the built `draw` (each page decoded, uploaded and released; the database reads and Storage stubbed, each upload dropped):
+      - start 97.6 MiB, with the worker's modules imported and the file read;
+      - peak working set 197.5 MiB;
+      - growth 99.9 MiB;
+      - Python's peak allocation 94.7 MiB.
+    - **Both** were on the 30-page, 23.7 MB fixture, one answer, on Windows, through the dev parse service with isolation off, and without Celery's own process.
+    - The two peaks aren't like for like: the second starts after the worker's imports. Growth and Python's peak are the comparable figures.
+    - Evidence: `C:\Users\NK\DocFlow-evidence\2026-11-03-a3-plan\` (`a3-memory.txt`, `a3-memory-built.txt`, and the scripts as `.txt`). A6 sizes the machine from them.
+16. **Staging (founder).**
+    - **A3 needs the staging suites.** D-223 item 5 exempts only lock-only and tests-only PRs, and A3 adds 0040 and new worker writes to the database and Storage.
+    - **No staging deploy is needed for them.** The worker suite starts its own dev parse service; the API suite needs one started by hand on 8100 (RUNBOOK 1.4).
+    - **CI first (founder, 2026-11-04):** the commit, the push on the founder's word, a green PR run, then RUNBOOK 1.12's staging steps, then the merge. No commit follows the suites.
+    - **The staging order is RUNBOOK 1.12.** Only the suites need a Grant. The backup and the migration are SQL the founder runs; the six counts are read-only. A worker suite starts by 22:30Z.
+    - **No Fly action in A3.** Parse and the worker are deployed at A6, each under its own Grant.
+17. **The tests' first real run is CI's.** On this PC there is no database, so the worker's database tests (`test_render_pages_db.py`, 23 tests) skip. They first run in CI on the push, then in the staging suites.
+    - **Their first run (founder, 2026-11-04):** push run #517 (41860566030) was the database tests' first run. 16 of the 23 failed on a test-helper bug, not in `render_pages`: `_build_pdf` loaded `fixture_builders.py` without registering it in `sys.modules`, so its `@dataclass` failed on load. Fixed by registering it. Not a CI flake.
+18. **A finding from #515 (founder, 2026-11-03; D-231).**
+    - In the api job, "Set up job" showed Runner Image Version 20261025.353.1, while the before step printed `Runner image: ubuntu24 20261026.354.1`. The before step's image line is `$ImageVersion`, and it can differ from "Set up job"'s Runner Image in the same job. D-231 item 2's readings all come from "Set up job".
+    - **For the next CI PR, not A3 (founder, 2026-11-04):** the before step's "Containers publishing 54322:" line still checks only 54322.
+
+**Founder approval:** 2026-11-03 (the plan at 4 days, its four answers and ten changes); 2026-11-04 (the two security alerts, the gap's wording, CI before staging, the upload allowance as the re-send only, the write past the deadline, no per-document lock, RUNBOOK 9.2, the seccomp alert's `where="pages"` and optional error code).
+
+**Related:** D-191, D-199, D-203, D-206, D-223, D-225, D-227, D-228, D-231; `apps/worker/app/tasks/render_pages.py`, `supabase/migrations/0040_document_pages.sql`, `supabase/reverse/0040_reverse.sql`, `scripts/ci/migration_0040_roundtrip.py`, `scripts/ci/roundtrip_columns.py`.
