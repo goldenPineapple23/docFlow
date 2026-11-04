@@ -46,6 +46,12 @@ const TEXT = [
   "po.html",
 ];
 
+test("every document the seed made has a test here, and no test lacks its document", () => {
+  // A new positive fixture is seeded automatically; this fails until it is
+  // named in DRAWN or TEXT, so it can't reach web-live without a test.
+  expect(Object.keys(seed.viewer_documents).sort()).toEqual([...DRAWN, ...TEXT, "markup.txt"].sort());
+});
+
 async function imageLoaded(page: Page) {
   const image = page.getByTestId("page-image");
   await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBeGreaterThan(0);

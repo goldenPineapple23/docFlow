@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PageViewer } from "./PageViewer";
@@ -122,6 +122,78 @@ describe("the page viewer (D-233)", () => {
 
     expect(await screen.findByTestId("page-unavailable")).toHaveTextContent("DOC-032");
     expect(minted).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives a page that failed one more try when the reviewer leaves and returns to it", async () => {
+    minted.mockResolvedValueOnce(remint("second")).mockResolvedValueOnce(remint("third"));
+    viewer();
+
+    // The first visit spends its budget: one re-mint, one retry, DOC-032.
+    fireEvent.error(image());
+    await waitFor(() => expect(image().src).toMatch(/pages\/0\?token=second$/));
+    fireEvent.error(image());
+    expect(await screen.findByTestId("page-unavailable")).toHaveTextContent("DOC-032");
+    expect(minted).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(screen.getByTestId("page-next"));
+    await userEvent.click(screen.getByTestId("page-prev"));
+
+    // A new visit: the page shows again, and has exactly one more re-mint.
+    expect(image().src).toMatch(/pages\/0\?token=second$/);
+    fireEvent.error(image());
+    await waitFor(() => expect(image().src).toMatch(/pages\/0\?token=third$/));
+    expect(minted).toHaveBeenCalledTimes(2);
+    fireEvent.error(image());
+    expect(await screen.findByTestId("page-unavailable")).toHaveTextContent("DOC-032");
+    expect(minted).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["resolves", "rejects"] as const)(
+    "a re-mint still running when the reviewer leaves can't spend the next visit's budget (it %s late)",
+    async (outcome) => {
+      let settle: () => void = () => {};
+      const held = new Promise<OriginalDocument>((resolve, reject) => {
+        settle = () =>
+          outcome === "resolves" ? resolve(remint("second")) : reject(new ReviewApiError(SYS_002, 503));
+      });
+      minted.mockReturnValueOnce(held).mockResolvedValueOnce(remint("third"));
+      viewer();
+
+      // The image fails and its re-mint is held; the reviewer leaves and returns.
+      fireEvent.error(image());
+      expect(minted).toHaveBeenCalledTimes(1);
+      await userEvent.click(screen.getByTestId("page-next"));
+      await userEvent.click(screen.getByTestId("page-prev"));
+      await act(async () => {
+        settle();
+        await held.catch(() => undefined);
+      });
+
+      // The new visit has its own full budget: one re-mint and one retry.
+      expect(screen.queryByTestId("page-unavailable")).toBeNull();
+      fireEvent.error(image());
+      await waitFor(() => expect(image().src).toMatch(/pages\/0\?token=third$/));
+      expect(minted).toHaveBeenCalledTimes(2);
+      fireEvent.error(image());
+      expect(await screen.findByTestId("page-unavailable")).toHaveTextContent("DOC-032");
+      expect(minted).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("within one visit, still one re-mint and one retry, and then nothing more", async () => {
+    minted.mockResolvedValue(remint("second"));
+    viewer();
+
+    fireEvent.error(image());
+    await waitFor(() => expect(image().src).toMatch(/token=second$/));
+    fireEvent.error(image());
+    expect(await screen.findByTestId("page-unavailable")).toHaveTextContent("DOC-032");
+
+    // Time passes on the same visit: no further mint, no image, no loop.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(minted).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("page-image")).toBeNull();
+    expect(screen.getByTestId("page-unavailable")).toBeInTheDocument();
   });
 
   it("says DOC-032 when the fresh links can't be had", async () => {

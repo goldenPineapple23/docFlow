@@ -331,7 +331,7 @@ def test_stored_text_and_text_previews_are_cut_at_200000_characters_and_say_so(c
             _store_text(tenant, long_text, b"x" * 200_001)
             # A preview the worker cut: its first 200,000 characters and its note.
             preview = _with_original(tenant, "po.rtf", b"{\\rtf1 PO Number: BCH-2291}")
-            cut =("y" * 200_000 + "\n\n[…truncated for viewing]").encode("utf-8")
+            cut = ("y" * 200_000 + "\n\n[…truncated for viewing]").encode("utf-8")
             path = save_derived(tenant.tenant_id, preview, "preview", cut, content_type=PLAIN_TEXT)
             _set(
                 preview,

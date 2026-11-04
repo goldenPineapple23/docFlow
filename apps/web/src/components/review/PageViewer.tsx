@@ -14,10 +14,12 @@ import { API_BASE_URL, CatalogMessage, DownloadOriginal, Panel } from "./viewerP
  * `<img>` without `crossorigin` never asks for it, and nothing here reads its
  * pixels -- later highlight boxes are laid over it.
  *
- * **One retry, never a loop.** A page whose image fails to load mints the
- * document's links once more and tries once again; failing that, it shows the
- * catalog's words for it (DOC-032). The fresh links replace every page's, so
- * later pages use the new token.
+ * **One retry per visit, never a loop.** A page whose image fails to load
+ * mints the document's links once more and tries once again; failing that, it
+ * shows the catalog's words for it (DOC-032). The budget belongs to one visit
+ * to the page: a page that failed gets one more try only when the reviewer
+ * returns to it (founder, 2026-11-04; D-233 item 6). The fresh links replace
+ * every page's, so later pages use the new token.
  */
 
 const MIN_ZOOM = 0.5;
@@ -45,6 +47,10 @@ export function PageViewer({
   const [current, setCurrent] = useState(0);
   // 1 is the page's width fitted to the panel's.
   const [zoom, setZoom] = useState(1);
+  // Each move to a page is a new visit, with its own budget: the sets below
+  // hold visits, not pages, so a re-mint still running when the reviewer
+  // leaves can't spend the next visit's.
+  const [visit, setVisit] = useState(0);
   const [retried, setRetried] = useState<ReadonlySet<number>>(new Set());
   const [failed, setFailed] = useState<ReadonlySet<number>>(new Set());
   // Moves on only when fresh links arrive, so the image loads again then,
@@ -60,31 +66,32 @@ export function PageViewer({
   const page = pages[current];
   const label = `Page ${current + 1} of ${total}`;
 
-  function markFailed(index: number) {
-    setFailed((before) => new Set(before).add(index));
+  function markFailed(onVisit: number) {
+    setFailed((before) => new Set(before).add(onVisit));
   }
 
-  async function imageFailed(index: number) {
-    if (retried.has(index)) {
-      markFailed(index);
+  async function imageFailed(onVisit: number) {
+    if (retried.has(onVisit)) {
+      markFailed(onVisit);
       return;
     }
-    setRetried((before) => new Set(before).add(index));
+    setRetried((before) => new Set(before).add(onVisit));
     try {
       const fresh = await originalDocumentUrl(documentId);
       if (fresh.view === "pages" && fresh.pages && fresh.pages.length === total) {
         setPages(fresh.pages);
         setGeneration((g) => g + 1);
       } else {
-        markFailed(index);
+        markFailed(onVisit);
       }
     } catch {
-      markFailed(index);
+      markFailed(onVisit);
     }
   }
 
   function goTo(index: number) {
     setCurrent(index);
+    setVisit((v) => v + 1);
     if (scroller.current) {
       scroller.current.scrollLeft = 0;
       scroller.current.scrollTop = 0;
@@ -128,7 +135,7 @@ export function PageViewer({
     if (active.length === 1) startDrag(active[0]);
   }
 
-  const showable = page !== undefined && page.drawn && !failed.has(current);
+  const showable = page !== undefined && page.drawn && !failed.has(visit);
 
   return (
     <div className="flex h-full flex-col gap-2" data-testid="page-viewer">
@@ -198,9 +205,9 @@ export function PageViewer({
               through Next's own image server. */}
           {/* eslint-disable-next-line @next/next/no-img-element -- see above */}
           <img
-            // Remounted when fresh links arrive, so it loads again even if the
-            // fresh link happens to read the same.
-            key={`${current}:${generation}`}
+            // Remounted on each visit and when fresh links arrive, so it loads
+            // again even if the fresh link happens to read the same.
+            key={`${visit}:${generation}`}
             data-testid="page-image"
             src={`${API_BASE_URL}${page.url}`}
             alt={label}
@@ -208,7 +215,7 @@ export function PageViewer({
             height={page.height ?? undefined}
             referrerPolicy="no-referrer"
             draggable={false}
-            onError={() => void imageFailed(current)}
+            onError={() => void imageFailed(visit)}
             style={{ width: `${zoom * 100}%`, maxWidth: "none", height: "auto" }}
             className="block select-none bg-white"
           />
