@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
+import sys
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -42,6 +43,9 @@ def _build_pdf(page_texts: list[str]) -> bytes:
     )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
+    # Registered before it runs: its @dataclass looks the module up in
+    # sys.modules, and fails on load without it (push run #517; D-232 item 17).
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module.build_pdf(page_texts)
 

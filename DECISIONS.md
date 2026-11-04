@@ -5924,6 +5924,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
     - **The staging order is RUNBOOK 1.12.** Only the suites need a Grant. The backup and the migration are SQL the founder runs; the six counts are read-only. A worker suite starts by 22:30Z.
     - **No Fly action in A3.** Parse and the worker are deployed at A6, each under its own Grant.
 17. **The tests' first real run is CI's.** On this PC there is no database, so the worker's database tests (`test_render_pages_db.py`, 23 tests) skip. They first run in CI on the push, then in the staging suites.
+    - **Their first run (founder, 2026-11-04):** push run #517 (41860566030) was the database tests' first run. 16 of the 23 failed on a test-helper bug, not in `render_pages`: `_build_pdf` loaded `fixture_builders.py` without registering it in `sys.modules`, so its `@dataclass` failed on load. Fixed by registering it. Not a CI flake.
 18. **A finding from #515 (founder, 2026-11-03; D-231).**
     - In the api job, "Set up job" showed Runner Image Version 20261025.353.1, while the before step printed `Runner image: ubuntu24 20261026.354.1`. The before step's image line is `$ImageVersion`, and it can differ from "Set up job"'s Runner Image in the same job. D-231 item 2's readings all come from "Set up job".
     - **For the next CI PR, not A3 (founder, 2026-11-04):** the before step's "Containers publishing 54322:" line still checks only 54322.
