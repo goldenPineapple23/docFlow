@@ -221,6 +221,49 @@ def test_a_second_forward_that_differs_from_the_first_fails(roundtrip, capsys):
     assert "forward again: the state differs" in capsys.readouterr().out
 
 
+def _with_a_later_column() -> dict:
+    """The first forward state once a later migration (0040) has added a
+    column behind 0037's: documents reads id, fault_keys, page_count."""
+    state = _forward()
+    later = dict(state["columns"][0], column="page_count", data_type="integer", udt_name="int4")
+    state["columns"].insert(2, later)
+    return state
+
+
+def _columns(state: dict, table: str) -> list[str]:
+    return [c["column"] for c in state["columns"] if c["table"] == table]
+
+
+def test_0037s_columns_moved_to_the_end_of_their_tables_pass(roundtrip, capsys):
+    """D-232: run again after its reverse, 0037 adds fault_keys behind 0040's
+    page_count. That alone is not a difference."""
+    forward = _with_a_later_column()
+    again = copy.deepcopy(forward)
+    documents = [c for c in again["columns"] if c["table"] == "documents"]
+    again["columns"] = [documents[0], documents[2], documents[1]] + again["columns"][3:]
+    assert _columns(again, "documents") == ["id", "page_count", "fault_keys"]
+    assert roundtrip.check_states(forward, roundtrip.without_0037(forward), again, ("p",) * 3) == 0
+    assert "0 problem(s)" in capsys.readouterr().out
+
+
+def test_any_other_column_moved_fails(roundtrip, capsys):
+    forward = _with_a_later_column()
+    again = copy.deepcopy(forward)
+    documents = [c for c in again["columns"] if c["table"] == "documents"]
+    again["columns"] = [documents[2], documents[0], documents[1]] + again["columns"][3:]
+    assert _columns(again, "documents") == ["page_count", "id", "fault_keys"]
+    assert roundtrip.check_states(forward, roundtrip.without_0037(forward), again, ("p",) * 3) == 1
+    assert "forward again: the state differs" in capsys.readouterr().out
+
+
+def test_a_missing_column_fails(roundtrip, capsys):
+    forward = _with_a_later_column()
+    again = copy.deepcopy(forward)
+    again["columns"] = [c for c in again["columns"] if c["column"] != "page_count"]
+    assert roundtrip.check_states(forward, roundtrip.without_0037(forward), again, ("p",) * 3) == 1
+    assert "forward again: the state differs" in capsys.readouterr().out
+
+
 def test_a_policy_or_grant_that_changed_on_the_way_fails(roundtrip, capsys):
     forward = _forward()
     assert roundtrip.check_states(forward, roundtrip.without_0037(forward), _forward(), ("p", "q", "p")) == 1

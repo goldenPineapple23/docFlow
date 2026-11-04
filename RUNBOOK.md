@@ -808,6 +808,43 @@ production. `service_role` keeps its grants.
 
 ---
 
+### 1.12 Migration 0040: a document's page images (Stage 5, viewer A3; D-232)
+
+`supabase/migrations/0040_document_pages.sql` adds two nullable columns to
+`documents`, `page_count` and `pages`, and three checks on them: a count of
+at least 0, both NULL or both set, and a list whose length is the count. It
+changes no row, policy or grant.
+
+- **The order is the migration first, then the code.** The code that comes
+  with it writes both columns. Code from before 0040 reads neither.
+- **CI first** (founder, 2026-11-04): the commit, the push on the
+  founder's word, and a green PR run come before any staging step. No
+  commit follows the suites.
+- **Staging, in this order. Only step 5 needs a Grant** (founder,
+  2026-11-03):
+  1. Claude checks your SQL read-only first: the backup's `SELECT` and
+     1.2's count are `PREPARE`d, and the DDL is reported as not checkable,
+     with the CI run that covers it.
+  2. You: the standard backup (1.1) of `documents` into `backup_0040`, RLS
+     on, then 1.2's row-count check.
+  3. Claude: the six leftover counts, read-only.
+  4. You: apply 0040 in the SQL Editor. Then Claude reads `documents`'
+     columns and checks, read-only.
+  5. **Grant: the staging suites** (1.4): no VPN connection, the AC sleep
+     timeout at least 120 minutes, Memurai's PONG and uptime, the dev parse
+     service on 8100 for the API suite (the worker suite starts its own),
+     the UTC clock read, and a worker suite started by 22:30Z. Core, worker
+     and API through the runner; the VPN check again after.
+  6. Claude: the six counts again, read-only, expecting `+0`.
+
+  Then the PR merges. No Fly action: the parse service and the worker are
+  deployed at A6, each under its own Grant.
+- **Going back** is `supabase/reverse/0040_reverse.sql`, run only with the
+  code from before 0040 deployed. Every page list is lost; the page images
+  stay in Storage under `derived/{document}/pages/` until the tenant is
+  deleted. CI runs reverse and forward on every push
+  (`scripts/ci/migration_0040_roundtrip.py`).
+
 ## 2. Inbound email (Postmark)
 
 The inbound webhook answers two separate questions, and it is worth keeping them
@@ -1333,6 +1370,9 @@ which starts a real prefork worker in CI (Linux). On Windows it skips.
 | `SCHEDULED_JOBS_TASK_TIME_LIMIT_SECONDS` | 10 min | Check-ins, reminders, digests. |
 | `LIFECYCLE_SWEEP_TASK_TIME_LIMIT_SECONDS` / `LIFECYCLE_SWEEP_TIME_BOX_SECONDS` | 10 min / 4 min | Past the time box the sweep takes no new tenant; the next tick takes the rest. |
 | `STUCK_SWEEP_TASK_TIME_LIMIT_SECONDS` | 4 min | The stuck sweep. |
+| `PAGES_TASK_TIME_LIMIT_SECONDS` | 15 min | Hard limit on drawing one document's page images (viewer A3, D-232). The worst case is far past it, about 5 hours; a document cut off keeps `page_count` NULL, for the viewer's fallback and A6's backfill. Revisit only if the logs show `pages_failed ... error_type=deadline` on real documents. |
+| `PAGES_UPLOAD_ALLOWANCE_SECONDS` | 60 s | What the render's deadline allows for re-sending the original (at most 25 MB) to the parse service, and only that: an estimate, unmeasured, to be checked on staging at A6. Storing pages needs none of it: each page is stored only after a deadline check passes. The deadline, `PAGES_DEADLINE_SECONDS` in `app.tasks.render_pages`, is 900 - (45 + 60 + 210) = 585 s, checked before each answer and each page's upload. There is no soft limit. |
+| `PAGES_RETRY_COUNTDOWNS_SECONDS` | 60, 300, 900 s | The waits before each retry of a render the parse service or Storage couldn't serve. After the last, the render gives up: its page keys are deleted and both columns stay NULL. |
 | `WORKER_MAX_MEMORY_PER_CHILD_KIB` | 500 MiB | A worker process is replaced after a task that took it past this. It isn't a cap during a task (the parse service's limits are, from 3c). 700 MiB until 2026-10-08; lowered by the founder after the memory measurement at the first worker deploy (D-196). |
 | `STUCK_PROCESSING_TIMEOUT_MIN` | 30 | A document in `processing` this long is retried or failed (DOC-022). An export still `pending`, or an import still `parsing`, this long after it was created is failed (EXP-009 / IMP-009). |
 | `MAX_PROCESSING_ATTEMPTS` | 3 | Tries before a document whose worker stopped is failed (DOC-022, cause `worker_stopped`). A timeout gets one retry only (cause `timeout`). |
@@ -1787,18 +1827,26 @@ minutes), and `/healthz` shows `"stale": true`.
 
 `DISPATCH_IN_FLIGHT_TARGET` (a setting, staging 1) is the worker's document
 slots. The worker machine runs one command, `python -m app.run_workers`,
-which starts two Celery workers and keeps them together (if one exits, it
-stops the other and exits non-zero, and Fly restarts the machine):
+which starts three Celery workers and keeps them together (if one exits, it
+stops the others and exits non-zero, and Fly restarts the machine):
 - `documents`: `DISPATCH_IN_FLIGHT_TARGET` processes, reading `interactive`
   and `bulk` (documents, exports, imports, sweeps);
 - `dispatch`: one process, reading only the `dispatch` queue. It never
-  claims a document, so a long order can't hold up the heartbeat.
+  claims a document, so a long order can't hold up the heartbeat;
+- `pages`: one process, reading only the `pages` queue: a document's page
+  images (viewer A3, D-232), so a long render never takes a document's slot.
+  `render_pages` has no per-document lock: it is safe only with one pages
+  process at concurrency 1. A second worker machine, or a pages concurrency
+  above 1, needs a per-document lock first (D-232).
 
 With one worker machine:
 1. Set `DISPATCH_IN_FLIGHT_TARGET` to the new number of slots, on the worker
    app AND the API app (the API doesn't use it today, but keep them equal).
-2. Size the machine for two Celery main processes, the dispatch process and
-   one process per slot (each document process may reach
+   Revisit the parse service's `PARSE_SLOTS` with it: 2 is one document job
+   plus one page job, and fits only while the target is 1 (D-232). A test
+   fails if one changes without the other; it can't see a Fly secret.
+2. Size the machine for three Celery main processes, the dispatch process,
+   the pages process and one process per slot (each document process may reach
    `WORKER_MAX_MEMORY_PER_CHILD_KIB` before it is replaced). Measure it on
    the machine (below) before relying on it.
 3. Deploy the worker.

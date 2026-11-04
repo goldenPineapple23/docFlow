@@ -4,6 +4,139 @@ Each entry is the status paragraph `docs/BUILD-STATUS.md` carried until the date
 for word, newest first (founder, 2026-10-05; D-191). The current status is in BUILD-STATUS
 itself. This file is not read at the start of a session; it is here so nothing is lost.
 
+## Replaced on 2026-11-04 (the port PR merged; A3 built on the branch)
+
+<!-- the paragraph as it stood, starting on the next line -->
+**Status, as of 2026-11-03, with A2 merged:** Phase 5.5,
+**Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
+(review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
+CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
+matched and the three staging suites passed (D-214 item 14). `backup_0039` stays until the founder
+drops it. **Next.js 16.4.1 is merged** (PR #78; D-216): three new advisories fixed. **zod 4.6.6 is
+merged** (PR #79; D-217) and **undici 7.30.1 is merged** (PR #80; D-221): new dev-only advisories,
+each fixed in the lock file. **D-215 (CLAUDE.md capped at 28k tokens) is merged** (PR #77). **The CI
+PR is merged** (PR #81; D-218): the port-54322 before/after steps in the four jobs that start the
+Supabase stack, and step timeouts on `supabase/setup-cli` (5 min, every use) and parse's LibreOffice
+install (15 min). **The audit PR is merged** (PR #82; D-219): a known vulnerability in what an app
+ships blocks only when that app's dependency files changed, a dev-only one warns, and there are no
+exceptions; pip-audit 2.10.1 audits each app's requirements files; a daily audit of `main` (its
+first run, by hand, and its first scheduled run, 2026-10-27, both green); and a check before every
+deploy (RUNBOOK 11). **The LibreOffice cache PR is merged** (PR #83; D-222): parse's LibreOffice
+.debs are cached under a key that follows the runner image, each one checked against the signed
+package lists before apt uses it; `main`'s cache is saved and every pull request restores from it
+(on 2026-10-27 a new runner image restored the older image's entry and saved one under its own key,
+as designed). **D-178 is merged** (PR #84, at `3e021a6`; D-220; main's push run #490 green): a
+Console request refused with AUTH-006 or AUTH-007 is recorded (5 rows per account per 15 min, the
+5th raises a high alert, the rest are logged), and every Console write records its outcome, so the
+Audit tab says "Outcome unknown" rather than showing a stopped request as done. The step-up
+measurement on staging gave 0 AUTH-006 and 1 AUTH-007, so the 5-in-15-minute threshold stays (D-220
+item 7), and the three staging suites passed on its head with the six counts +0. Supabase limits MFA
+code checks per IP only (GoTrue v2.197.0, no per-account lockout): per-account protection is a gate
+before the first pilot. **The dnspython fix is merged** (PR #85, at `ea6a988`; D-223; main's push
+run #493 green): GHSA-45c3-73f7-pv4m in dnspython 2.8.0 had stopped the API's deploy at RUNBOOK 11's
+check; the API's lock moved to 2.9.0 and nothing else moved. A lock-only PR runs the staging suites
+only when the changed package is on a path the suites exercise (founder, D-223). **The API is
+deployed to `docflow-api-staging`** (release v2, `ea6a988`'s image
+`deployment-01M5Z5Z0ER07M6JHKGSBKAA8XA`; rollback is v1's image
+`deployment-01M48YSNPWSEXNDWZ3NEERM5QA`), and one refusal was recorded live through it: row
+`036931c2-37e0-4b10-9b2c-0132c3563242`, AUTH-007, the code 460 s old (D-220 item 11). `fly proxy`
+traffic doesn't keep the API machine up: a staging step through the proxy starts the machine and
+expects it to stop after a few idle minutes (founder; RUNBOOK 11.2; fly.toml unchanged). **The
+sweep script is merged** (PR #86, at `d053cca`; D-224; main's push run #498 green):
+`scripts/sweep_test_tenants.py` lists old "Acme Test" tenants read-only and deletes one at a time
+under a Grant, after a backup (RUNBOOK 12); the proof delete on staging removed one tenant, by id
+only (D-224 item 12). The three staging suites passed on its head, the API's on a re-run alone: in
+the parallel run `test_for_cause_is_immediate` took 15.49 s against its 5 s limit, a staging-suite
+timing failure, not a CI flake (D-224 item 13). The sweep's prefix match is case-sensitive, so a
+tenant named in lower case is never listed or swept (D-224 item 14). **The warnings PR is merged**
+(PR #87, `main` is `8d31b07`; main's push run #501 green, the API's tests `774 passed, 3 deselected,
+1 warning in 64.38s (0:01:04)`, the one warning starlette's DeprecationWarning from
+`testclient.py:53`, the `anyio.abc.BlockingPortal` alias): the API's test signing keys are at least
+32 bytes and `InsecureKeyLengthWarning` fails a test; the two busy-retry `test_parse_client.py`
+tests run on a fake clock, and a new test checks that a slow busy answer uses up the patience
+(D-212 item 8). A PR that changes only tests runs the staging suites only if the staging
+environment can change those tests' results in a way CI can't show (D-223 item 5). **The CI infrastructure flake
+count is 11** (D-199 item 10; flakes 5 to 9 are parse's LibreOffice install timing out at 15 min on
+2026-10-26, D-219 items 8 and 9, D-222 items 8 and 9; flake 10 is main's push run #510 on `91d4962`,
+where Inbucket's host port 54324 was already in use at the api job's stack start, D-229 item 7; flake 11 is
+A2's branch push run #511 on `1a04530`, the same port at the same step, holder not identified, D-231
+item 1). **The port-reservation CI PR is built** (`ci/supabase-port-reservation`; D-231): each job
+that starts the Supabase stack first keeps 54320 to 54327 out of automatic port assignment, and the
+steps around the stack's start print every socket on those ports with its process, and the runner
+image; "Build the API's image" now runs only when buildx was set up, so a failed stack start no longer
+turns it red too. **A standing rule (D-213 item 6, tightened
+in D-214): a staging suite, a Fly action or any write to staging starts only after a message from
+the founder that begins with "Grant" and names the step.** Any change to a granted command, a flag
+such as `--app` included, is told to the founder before it runs (founder, 2026-10-27). **Two new
+rules:** SQL the founder runs on staging is first checked by Claude read-only (D-214 item 15), and
+before a file outside one app is changed, every reader of it is found and its tests are run (D-216
+item 6). **The dev-tools PR is merged** (PR #88, `main` is `4cadcaa`; D-225; main's push run
+#504 green, its image check 15 s on api and 12 s on worker; PR run #503's API tests read `774 passed,
+3 deselected, 1 warning in 89.97s (0:01:29)`, the same starlette warning, and its image check took
+23 s and 17 s): the dev tools are out of the API's and the worker's images, openpyxl and lxml are out
+of the API's, and the local environments are rebuilt on Python 3.13.17. **The founder's decisions of
+2026-10-28 and 2026-10-29 are D-226**, which changes D-199's order. **Rule (a) has dropped:** the
+Memurai restart task runs at sign-in since 2026-10-29, so a suite needs only PONG and an uptime under
+9 days (RUNBOOK 1.4). **The worker is deployed to staging** (2026-11-01; D-227 item 2): `4cadcaa`, release v12,
+`deployment-01M6C0E3KRZKC7DSMAKJA002PZ`. **The API's bind fix is merged** (PR #89, `main` is
+`56e00f3`; D-227; main's push run #507 green): PR run #506's API tests read `779 passed, 3
+deselected, 1 warning in 87.77s (0:01:27)`, every leftover count +0. The API's image build and
+listen step took 52 s and 6 s on #506, 56 s and 5 s on #505, and 48 s and 5 s on #507. **The API is
+redeployed to staging** (2026-11-02): release v3, `deployment-01M6EBY8KNF3TAE702XSMSWWN4`; rollback
+is v2's image, `deployment-01M5Z5Z0ER07M6JHKGSBKAA8XA`. **Blocker 3 is confirmed (2026-11-02):** the
+commit was cut at about 60 s with no rollback. All 20,000 items are correct, at 292 items a second,
+but the browser showed 409 IMP-006 for a commit that succeeded in 68.43 s. A second POST arrived
+60.06 s after the first, from the browser or Fly's edge, not proved which; the founder pressed
+Commit once. Its fix is before-first-pilot (D-228 item 7). Step 2b did not run: the commit wasn't a
+clean 200 (founder). **An observation, cause not proved:** on a newly allocated shared IPv4, curl
+got TLS connect errors (exit 35) for about 30 s, 15:17:43Z to 15:18:12Z, before the edge served it.
+They failed before the edge reached the machine, outside the system under test, so they weren't a
+stop (founder). The next time a gate retries, curl's error text is captured with `-sS`. **The
+partner walkthrough is postponed until A4 is on staging** (founder, 2026-11-02; D-228 item 8), and
+its step is cancelled. **The founder's viewer decisions are D-228.** **A1 is merged** (PR #90,
+`main` is `91d4962`; D-228 item 12; main's push run #510 green on a re-run of its api job, after
+flake 10): a PDF goes to a download panel, downloads are attachments, and a missing signing secret
+answers SYS-002. Its staging suites passed on `1309a0b`, the worker's on a re-run alone on
+2026-11-03, `260 passed, 8 skipped in 2171.77s (0:36:11)`. On 2026-11-02 the worker's
+`test_C1_property_random_decimals_survive_model_db_edit_approve_and_every_export` hit a Storage 503
+in its clean-up, a staging-suite failure, not a CI flake (D-229 items 1 to 3). **Suites run with no
+VPN connection on this PC** (founder, 2026-11-03; D-229 item 4): on 2026-11-02, with NordVPN
+connected, the worker and API suites took about 1.8 times their 2026-10-27 times; the cause is not
+proved and won't be investigated. **A2 is merged** (PR #91, `main` is `56fe7d2`; main's push run #513 green; PR run #512's parse HTTP
+step `478 passed`, parse unit `635 passed, 17 warnings`, parse audit no known vulnerabilities, API
+`798 passed, 3 deselected, 1 warning in 90.37s (0:01:30)`, every left-behind count +0; D-228): the parse
+service draws page images on a new `POST /v1/pages`: every page of a PDF or TIFF, and a sender's
+single image, a PDF at 200 dpi, each page the smaller of PNG and JPEG, a gray page stored as gray,
+in answers of at most 32 MiB of base64 that say where the next starts. Nothing stores or shows them
+yet (A3, A4). A 25 MB upload holds at most about 30 poor-scan pages (23.7 MB), which fit in one
+answer; D-228 item 2's 44-page figure assumed more could arrive. The batching still serves long PDFs
+whose pages are small on disk but large as images. **Next, in order (D-228 item 7):** A3 to A6, with A5
+absorbing the 375 px fix. M10, with D-195 change 1 straight after it and M10's model-ID part folded
+into change 1. B1's demo half, the inbound-mail item (D-230). Blocker 3's background commit with the duplicate SKU index (0041). Counting rows before
+extraction. E1, then E2a. The staging API's redeploy, and the worker's again if those changed it,
+with the staging suites and D-209's smoke test, owed since the worker's deploy of 2026-11-01 (there
+is no demo tenant yet, and it needs a model call). The docs PR, which ends Stage 5 (it also takes
+`apps/web/AGENTS.md`, whose first heading `next dev` rewrote from `#` to `##` when it started on
+2026-10-27: either commit that heading or stop `next dev` from rewriting the file; founder), CLAUDE.md
+naming the three staging apps, and RUNBOOK 1.4's hand-started dev parse service checked against the
+suites that use it (D-229 item 6). **The 2026-10-28 environments can be deleted**
+(`DocFlow-evidence/2026-10-28-venv-rebuild/`), now that all three suites have passed on the new
+ones; the founder decides when (D-229 item 8). The production environment. Demo content: both demo tenants, seeded history, a reset procedure, the
+synthetic POs, the accuracy bar set before anything is measured, and the D-195 comparison. Two
+rehearsals from every machine stopped, fastener first, then welding, the smoke test, tag demo-1.
+Then the independent review, then pilots. **To investigate later, not now (founder, 2026-10-27):**
+CI's "Install Playwright browser" step (web-live) took 9 to 11 minutes on PR runs #489 and #492 but
+under 30 seconds on main's push run #490, likely a cache miss on PR runs, costing about 10 minutes
+per PR. On main's push run #498 (`d053cca`) it took 16 seconds. The 50,000-row cap and IMP-003's
+wording: one PR, before pilots, only if a pilot prospect has more than 50,000 SKUs. **Staging:** the
+database has 0039. `docflow-api-staging` runs v3, is stopped, and has no address: 66.241.124.71 was
+released at 15:40:14Z on 2026-11-02. `docflow-parse-staging` runs PR B's image (`b1af531`; Pillow
+13.0.0), is stopped, and stays private. `docflow-worker-staging` is on v12 with no machines: worker
+and beat were destroyed in the shutdown of 2026-11-02. Tenant `a7492bf7` still holds the 20,000 test
+items and import `96bc7e0c`. Four `tenant_ready_to_delete` alerts are open, and the leftover line's
+start is tenants 34, founder alerts 8, e-mails 34, scheduled jobs 35, admin rows 12, users with no
+tenant 15. The Healthchecks.io check is live while the worker runs, and paused when it stops.
+
 ## Replaced on 2026-11-03, after A2's merge (the port-reservation CI PR built)
 
 <!-- the paragraph as it stood, starting on the next line -->

@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-03, with A2 merged:** Phase 5.5,
+**Status, as of 2026-11-04, with the port PR merged and A3 built:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -71,7 +71,8 @@ count is 11** (D-199 item 10; flakes 5 to 9 are parse's LibreOffice install timi
 2026-10-26, D-219 items 8 and 9, D-222 items 8 and 9; flake 10 is main's push run #510 on `91d4962`,
 where Inbucket's host port 54324 was already in use at the api job's stack start, D-229 item 7; flake 11 is
 A2's branch push run #511 on `1a04530`, the same port at the same step, holder not identified, D-231
-item 1). **The port-reservation CI PR is built** (`ci/supabase-port-reservation`; D-231): each job
+item 1). **The port-reservation CI PR is merged** (PR #92, `main` is `c36ca96`; main's push run #516
+green; D-231): each job
 that starts the Supabase stack first keeps 54320 to 54327 out of automatic port assignment, and the
 steps around the stack's start print every socket on those ports with its process, and the runner
 image; "Build the API's image" now runs only when buildx was set up, so a failed stack start no longer
@@ -121,7 +122,13 @@ single image, a PDF at 200 dpi, each page the smaller of PNG and JPEG, a gray pa
 in answers of at most 32 MiB of base64 that say where the next starts. Nothing stores or shows them
 yet (A3, A4). A 25 MB upload holds at most about 30 poor-scan pages (23.7 MB), which fit in one
 answer; D-228 item 2's 44-page figure assumed more could arrive. The batching still serves long PDFs
-whose pages are small on disk but large as images. **Next, in order (D-228 item 7):** A3 to A6, with A5
+whose pages are small on disk but large as images. **A3 is built** (`phase55/stage5-viewer-a3`;
+D-232): the worker asks the parse service for every page and stores it under
+`derived/{doc}/pages/`, on a queue and process of its own, and migration 0040 adds
+`documents.page_count` and `pages`, written once when every page is stored. A failed or cut-off render
+leaves both NULL, and the viewer falls back; a seccomp kill still alerts, and a stored path in another tenant's folder raises the existing critical alert. It
+merges only after a green PR run, then 0040 on staging and the staging suites passing (RUNBOOK 1.12);
+its database tests first run in CI. **Next, in order (D-228 item 7):** A4 to A6, with A5
 absorbing the 375 px fix. M10, with D-195 change 1 straight after it and M10's model-ID part folded
 into change 1. B1's demo half, the inbound-mail item (D-230). Blocker 3's background commit with the duplicate SKU index (0041). Counting rows before
 extraction. E1, then E2a. The staging API's redeploy, and the worker's again if those changed it,
@@ -1885,6 +1892,16 @@ here is built.
 
 - If the port printout names a program binding 54320 to 54327 itself, move the mail catcher's port
   or turn it off in CI (not proposed until a program is named; D-231).
+
+- **For the next CI PR (founder, 2026-11-03; D-232 item 18):** the before step's "Containers
+  publishing 54322:" line still checks only 54322. Its runner image line is `$ImageVersion`, which
+  can differ from "Set up job"'s Runner Image in the same job (#515).
+
+- **For A6 (D-232):** deploy the parse service (A2's `/v1/pages`) and the worker (A3's `pages`
+  process), each under its own Grant; size the worker machine from D-232 item 15's memory figures;
+  read `DISPATCH_IN_FLIGHT_TARGET` on the worker app (a Fly secret the `PARSE_SLOTS` guard can't
+  see); the Console's queue strip shows the pages queue (`admin.py:1629`); backfill every document
+  with `page_count` NULL; then decide whether `image_preview` retires.
 
 - **Step h, the production environment (founder, 2026-11-01; D-226 item 10):**
   - `/docs`, `/redoc` and `/openapi.json` turned off or put behind login. FastAPI's defaults serve

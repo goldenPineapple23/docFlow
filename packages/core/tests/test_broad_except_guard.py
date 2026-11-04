@@ -134,6 +134,23 @@ LISTED: dict[tuple[str, str, int], tuple[str, str]] = {
     (_TASK, "_alert_failure", 1): (BEST_EFFORT, _NOT_RAISED),
     (_TASK, "_fail_parse_ours", 1): (BEST_EFFORT, _NOT_RAISED),
     (_TASK, "dispatch_after_task", 1): (BEST_EFFORT, "beat's backstop runs the next pass"),
+    # Viewer A3 (D-232): page images are best effort, never an alert (founder).
+    (f"{_WORKER}/tasks/render_pages.py", "delete_stale", 1): (
+        BEST_EFFORT,
+        "the list is written; a key left behind is only storage",
+    ),
+    (f"{_WORKER}/tasks/render_pages.py", "give_up", 1): (
+        BEST_EFFORT,
+        "clean-up after a failed render: the columns stay NULL either way",
+    ),
+    (f"{_WORKER}/tasks/render_pages.py", "render_pages", 1): (
+        OUR_STEP,
+        "any error not retried ends as pages_failed with its type, keys deleted, both columns NULL",
+    ),
+    (f"{_WORKER}/tasks/render_pages.py", "queue_pages", 1): (
+        BEST_EFFORT,
+        "a page render that can't be queued never costs the document its review",
+    ),
     (_TASK, "_parse_and_extract", 1): (
         OUR_STEP,
         "saving: a database outage waits and extracts once more (D-206); else DOC-021 and the alert",

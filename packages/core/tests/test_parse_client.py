@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from docflow_core import parse_client
+from docflow_core import founder_alerts, parse_client
 from docflow_core.config import get_settings
 
 
@@ -390,3 +390,124 @@ def test_a_malformed_lost_list_is_refused_not_used(service, lost, reason):
 def test_an_80_character_label_is_accepted():
     body = {**OK_ANSWER, "lost": [{"code": "VAL-017", "filename": "x" * 76 + ".zip"}]}
     assert parse_client._check_document(body).lost[0]["filename"] == "x" * 76 + ".zip"
+
+
+# ── Page images (viewer A3; D-232) ────────────────────────────────────────────
+
+
+def _drawn(index: int, data: bytes = b"\x89PNG fake page", media_type: str = "image/png") -> dict:
+    return {
+        "index": index,
+        "rendered": True,
+        "media_type": media_type,
+        "width": 1700,
+        "height": 2200,
+        "dpi": 200,
+        "data": base64.standard_b64encode(data).decode(),
+    }
+
+
+def _pages(page_count: int, pages: list[dict], *, first_page: int = 0, next_page: int | None = None) -> dict:
+    return {
+        "outcome": "ok",
+        "file_type": "pdf",
+        "page_count": page_count,
+        "first_page": first_page,
+        "next_page": next_page,
+        "pages": pages,
+    }
+
+
+def test_a_pages_answer_comes_back_checked_with_the_first_page_asked_for(service):
+    body = _pages(3, [_drawn(1), {"index": 2, "rendered": False, "reason": "too_large"}], first_page=1)
+    stub = service(_json(200, body))
+    answer = parse_client.render_pages(b"%PDF", "Order from Acme Test.pdf", 1)
+    request = stub.requests[0]
+    assert request["path"] == "/v1/pages"
+    assert request["headers"]["X-First-Page"] == "1"
+    assert request["headers"]["X-File-Extension"] == ".pdf"
+    assert (answer.outcome, answer.page_count, answer.first_page, answer.next_page) == ("ok", 3, 1, None)
+    assert answer.pages[0] == {
+        "index": 1, "media_type": "image/png", "width": 1700, "height": 2200, "data": body["pages"][0]["data"]
+    }
+    assert answer.pages[1] == {"index": 2, "reason": "too_large"}
+    # Decoded only when asked, one page at a time.
+    assert parse_client.page_bytes(answer.pages[0]) == b"\x89PNG fake page"
+
+
+def test_a_format_with_no_pages_answers_none(service):
+    service(_json(200, {**_pages(0, []), "file_type": "docx"}))
+    answer = parse_client.render_pages(b"PK", "po.docx", 0)
+    assert (answer.page_count, answer.pages, answer.next_page) == (0, [], None)
+
+
+def test_the_documents_task_sends_no_first_page_header(service):
+    stub = service(_json(200, OK_ANSWER))
+    parse_client.parse_document(b"bytes", "po.docx")
+    assert "X-First-Page" not in stub.requests[0]["headers"]
+
+
+@pytest.mark.parametrize(
+    "body, reason",
+    [
+        ({**_pages(2, [_drawn(0), _drawn(1)]), "file_type": "exe"}, "unknown_file_type"),
+        (_pages(101, [_drawn(0)], next_page=1), "bad_page_count"),
+        ({**_pages(1, [_drawn(0)]), "page_count": True}, "bad_page_count"),
+        ({**_pages(1, [_drawn(0)]), "first_page": 3}, "bad_pages"),
+        # Pages must run from first_page, without a gap, to the end or next_page.
+        (_pages(3, [_drawn(0), _drawn(2)]), "bad_page_order"),
+        (_pages(3, [_drawn(0), _drawn(1)]), "bad_page_order"),
+        (_pages(3, [_drawn(0)], next_page=2), "bad_page_order"),
+        (_pages(3, [_drawn(0)], next_page=3), "bad_page_order"),
+        (_pages(1, []), "bad_page_order"),
+        (_pages(0, [_drawn(0)]), "bad_page_order"),
+        (_pages(2, [_drawn(1), _drawn(0)]), "bad_page_index"),
+        # A drawn page: exact keys, PNG or JPEG, a sane size, a bounded image.
+        (_pages(1, [{**_drawn(0), "media_type": "image/svg+xml"}]), "bad_page_media_type"),
+        (_pages(1, [{**_drawn(0), "media_type": "text/html"}]), "bad_page_media_type"),
+        (_pages(1, [{**_drawn(0), "width": 0}]), "bad_page_size"),
+        (_pages(1, [{**_drawn(0), "height": "2200"}]), "bad_page_size"),
+        (_pages(1, [{**_drawn(0), "width": 10_000, "height": 10_000}]), "bad_page_size"),
+        (_pages(1, [{**_drawn(0), "dpi": -1}]), "bad_page_size"),
+        (_pages(1, [{**_drawn(0), "data": "A" * (parse_client._MAX_PAGE_CHARS + 4)}]), "page_too_large"),
+        (_pages(1, [{**_drawn(0), "data": ""}]), "page_too_large"),
+        (_pages(1, [{**_drawn(0), "filename": "po.pdf"}]), "bad_page"),
+        # A page not drawn names a known reason and nothing else.
+        (_pages(1, [{"index": 0, "rendered": False, "reason": "ran out"}]), "bad_page"),
+        (_pages(1, [{"index": 0, "rendered": False, "reason": "too_large", "data": "x"}]), "bad_page"),
+        (_pages(1, [{"index": 0, "rendered": "yes"}]), "bad_page"),
+    ],
+)
+def test_a_malformed_pages_answer_is_refused_not_used(service, body, reason):
+    service(_json(200, body))
+    with pytest.raises(parse_client.ParseAnswerInvalid) as excinfo:
+        parse_client.render_pages(b"%PDF", "po.pdf", 0)
+    assert excinfo.value.reason == reason
+
+
+def test_a_page_whose_image_is_not_base64_is_refused_when_decoded(service):
+    service(_json(200, _pages(1, [{**_drawn(0), "data": "not base64!"}])))
+    answer = parse_client.render_pages(b"%PDF", "po.pdf", 0)
+    with pytest.raises(parse_client.ParseAnswerInvalid) as excinfo:
+        parse_client.page_bytes(answer.pages[0])
+    assert excinfo.value.reason == "page_bad_base64"
+
+
+@pytest.mark.parametrize(
+    "body, outcome",
+    [
+        ({"outcome": "rejected", "code": "DOC-014", "file_type": "pdf"}, "rejected"),
+        ({"outcome": "stopped", "cause": "memory"}, "stopped"),
+        ({"outcome": "crashed", "cause": "signal_9"}, "crashed"),
+    ],
+)
+def test_the_service_s_verdicts_on_pages_come_through(service, body, outcome):
+    service(_json(200, body))
+    assert parse_client.render_pages(b"%PDF", "po.pdf", 0).outcome == outcome
+
+
+def test_a_seccomp_kill_on_pages_comes_through_as_the_worker_matches_it(service):
+    """The render task alerts on exactly `crashed:signal_31` (D-232)."""
+    service(_json(200, {"outcome": "crashed", "cause": "signal_31"}))
+    answer = parse_client.render_pages(b"%PDF", "po.pdf", 0)
+    assert f"{answer.outcome}:{answer.cause}" == founder_alerts.SECCOMP_KILL_CAUSE

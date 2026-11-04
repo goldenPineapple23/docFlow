@@ -1,6 +1,6 @@
 """
 The worker machine's one command (Stage 3d; founder's condition on the extra
-process, 2026-10-01). It starts two Celery workers and keeps them together:
+process, 2026-10-01). It starts three Celery workers and keeps them together:
 
   documents -- DISPATCH_IN_FLIGHT_TARGET processes, reading `interactive` and
                `bulk`: every document task, exports, imports and the sweeps.
@@ -8,13 +8,17 @@ process, 2026-10-01). It starts two Celery workers and keeps them together:
                pass, so a long order can never hold up the heartbeat (gap 1).
                It never claims a document (parse_and_extract hands one that
                arrives here back to `interactive`).
+  pages     -- ONE process, reading only the `pages` queue: a document's page
+               images (viewer A3; founder, 2026-11-03; D-232), so a long
+               render never takes a document's slot, and the parse service's
+               second slot (PARSE_SLOTS = 2) is the most it ever uses.
 
-If either worker exits, the other is stopped and this exits non-zero, so Fly
+If any worker exits, the others are stopped and this exits non-zero, so Fly
 restarts the machine (its default `on-failure` policy, set explicitly in
-fly.toml): one never runs without the other. A stop signal (Fly sends SIGINT)
-is passed to both, and this exits 0 once both have ended.
+fly.toml): none runs without the others. A stop signal (Fly sends SIGINT)
+is passed to all, and this exits 0 once all have ended.
 
-Before either starts (Stage 3e): it refuses to start holding another
+Before any starts (Stage 3e): it refuses to start holding another
 service's database URL or connecting as the wrong login, and it records the
 start, raising `worker_restarting` at 3 starts in an hour
 (docflow_core.worker_starts).
@@ -32,7 +36,7 @@ from collections.abc import Mapping, Sequence
 
 from docflow_core import db, worker_starts
 from docflow_core.config import get_settings
-from docflow_core.constants import DISPATCH_QUEUE
+from docflow_core.constants import DISPATCH_QUEUE, PAGES_QUEUE
 
 # How long a worker gets to finish after the other has died, before it is killed.
 PARTNER_STOP_SECONDS = 30
@@ -40,8 +44,8 @@ POLL_SECONDS = 0.5
 
 
 def commands(app: str = "app.celery_app") -> dict[str, list[str]]:
-    """The two workers' command lines. Their node names differ, so Celery
-    sees two workers, not one started twice.
+    """The three workers' command lines. Their node names differ, so Celery
+    sees three workers, not one started three times.
 
     Both start without mingle and without gossip (D-212). For about
     BROKER_POLL_SECONDS after every start a worker received nothing, a job
@@ -63,6 +67,7 @@ def commands(app: str = "app.celery_app") -> dict[str, list[str]]:
             "-n", "documents@%h",
         ],
         "dispatch": [*celery, "-Q", DISPATCH_QUEUE, "--concurrency=1", "-n", "dispatch@%h"],
+        "pages": [*celery, "-Q", PAGES_QUEUE, "--concurrency=1", "-n", "pages@%h"],
     }
 
 
@@ -130,7 +135,7 @@ def foreign_login_refusal() -> str | None:
 
 def main() -> int:
     """The worker machine's start: refuse a wrong configuration, record the
-    start (3e, part B), then run the two workers."""
+    start (3e, part B), then run the three workers."""
     refusal = foreign_login_refusal()
     if refusal is not None:
         print(f"run_workers refused to start: {refusal}", file=sys.stderr, flush=True)

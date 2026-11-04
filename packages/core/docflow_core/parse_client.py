@@ -37,12 +37,13 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
+from typing import TypeGuard
 
 import httpx
 
 from docflow_core.config import get_settings
 from docflow_core.errors import CATALOG
-from docflow_core.file_types import FileTypeName
+from docflow_core.file_types import MAX_DOCUMENT_PAGES, MAX_IMAGE_PIXELS, FileTypeName
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,14 @@ LOST_ATTACHMENT = "VAL-017"
 LOST_BODY = "VAL-018"
 MAX_LOST = MAX_PARTS
 _LABEL = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
+# Page images (viewer A3, D-232): one drawn page's image at most, as the parse
+# service caps it (apps/parse/parse_service/config.py, PAGE_MAX_BYTES), and
+# its base64 length. A page the service didn't draw names one of PAGE_REASONS.
+MAX_PAGE_BYTES = 8 * 1024 * 1024
+_MAX_PAGE_CHARS = 4 * -(-MAX_PAGE_BYTES // 3)
+PAGE_REASONS = {"too_large", "unreadable"}
+_DRAWN_KEYS = {"index", "rendered", "media_type", "width", "height", "dpi", "data"}
+_NOT_DRAWN_KEYS = {"index", "rendered", "reason"}
 
 
 class ParseUnavailable(Exception):
@@ -121,6 +130,23 @@ class ParseAnswer:
     columns: list[str] = field(default_factory=list)
     rows: list[list[str]] = field(default_factory=list)
     header_row_number: int | None = None
+
+
+@dataclass
+class PagesAnswer:
+    """One answer of `/v1/pages` (viewer A3). `pages` holds, from
+    `first_page` on, either {"index", "media_type", "width", "height", "data"}
+    -- `data` still base64 text, decoded one page at a time by `page_bytes`
+    -- or {"index", "reason"} for a page the service didn't draw."""
+
+    outcome: str  # ok | rejected | stopped | crashed | error
+    code: str | None = None
+    cause: str | None = None
+    file_type: str | None = None
+    page_count: int = 0
+    first_page: int = 0
+    next_page: int | None = None
+    pages: list[dict] = field(default_factory=list)
 
 
 def extension_of(filename: str | None) -> str:
@@ -254,10 +280,81 @@ def _check_table(body: dict) -> ParseAnswer:
     return ParseAnswer("ok", columns=columns, rows=rows, header_row_number=header)
 
 
-def _post(kind: str, content: bytes, filename: str | None) -> dict:
+def _is_count(value: object) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _check_page(page: object, index: int) -> dict:
+    """One page of a pages answer, at the index the answer's order says it
+    must have. The image is not decoded here (page_bytes does it, one page at
+    a time), only its length checked."""
+    if not isinstance(page, dict) or page.get("index") != index:
+        raise ParseAnswerInvalid("bad_page_index")
+    if page.get("rendered") is False:
+        if set(page) != _NOT_DRAWN_KEYS or page.get("reason") not in PAGE_REASONS:
+            raise ParseAnswerInvalid("bad_page")
+        return {"index": index, "reason": page["reason"]}
+    if page.get("rendered") is not True or set(page) != _DRAWN_KEYS:
+        raise ParseAnswerInvalid("bad_page")
+    width, height, dpi, data = page["width"], page["height"], page["dpi"], page["data"]
+    if page["media_type"] not in PREVIEW_MEDIA_TYPES:
+        raise ParseAnswerInvalid("bad_page_media_type")
+    if not (_is_count(width) and _is_count(height) and width >= 1 and height >= 1):
+        raise ParseAnswerInvalid("bad_page_size")
+    if width * height > MAX_IMAGE_PIXELS or not (dpi is None or (_is_count(dpi) and dpi >= 1)):
+        raise ParseAnswerInvalid("bad_page_size")
+    if not isinstance(data, str) or not data or len(data) > _MAX_PAGE_CHARS:
+        raise ParseAnswerInvalid("page_too_large")
+    return {"index": index, "media_type": page["media_type"], "width": width, "height": height, "data": data}
+
+
+def _check_pages(body: dict, first_page: int) -> PagesAnswer:
+    outcome = body.get("outcome")
+    if outcome in ("rejected", "stopped", "crashed", "error"):
+        other = _check_document(body)
+        return PagesAnswer(other.outcome, code=other.code, cause=other.cause)
+    if outcome != "ok":
+        raise ParseAnswerInvalid("unknown_outcome")
+    file_type, page_count = body.get("file_type"), body.get("page_count")
+    next_page, pages = body.get("next_page"), body.get("pages")
+    if file_type not in {t.value for t in FileTypeName}:
+        raise ParseAnswerInvalid("unknown_file_type")
+    if not _is_count(page_count) or not 0 <= page_count <= MAX_DOCUMENT_PAGES:
+        raise ParseAnswerInvalid("bad_page_count")
+    if body.get("first_page") != first_page or not isinstance(pages, list):
+        raise ParseAnswerInvalid("bad_pages")
+    # Pages run from first_page without a gap, to the end or to next_page.
+    end = first_page + len(pages)
+    if page_count == 0:
+        in_order = not pages and next_page is None
+    elif next_page is None:
+        in_order = bool(pages) and end == page_count
+    else:
+        in_order = bool(pages) and _is_count(next_page) and next_page == end and end < page_count
+    if not in_order:
+        raise ParseAnswerInvalid("bad_page_order")
+    checked = [_check_page(page, first_page + offset) for offset, page in enumerate(pages)]
+    return PagesAnswer(
+        "ok",
+        file_type=file_type,
+        page_count=page_count,
+        first_page=first_page,
+        next_page=next_page,
+        pages=checked,
+    )
+
+
+def page_bytes(page: dict) -> bytes:
+    """A drawn page's image, decoded and checked against MAX_PAGE_BYTES."""
+    return _b64(page.get("data"), MAX_PAGE_BYTES, "page")
+
+
+def _post(kind: str, content: bytes, filename: str | None, *, first_page: int | None = None) -> dict:
     settings = get_settings()
     url = f"{settings.parse_service_url.rstrip('/')}/v1/{kind}"
     headers = {"Content-Type": "application/octet-stream", "X-File-Extension": extension_of(filename)}
+    if first_page is not None:
+        headers["X-First-Page"] = str(first_page)
     if settings.parse_service_token:
         headers["Authorization"] = f"Bearer {settings.parse_service_token}"
     timeout = httpx.Timeout(READ_TIMEOUT_SECONDS, connect=CONNECT_TIMEOUT_SECONDS)
@@ -307,3 +404,9 @@ def parse_document(content: bytes, filename: str | None) -> ParseAnswer:
 
 def parse_table(content: bytes, filename: str | None) -> ParseAnswer:
     return _check_table(_post("table", content, filename))
+
+
+def render_pages(content: bytes, filename: str | None, first_page: int) -> PagesAnswer:
+    """One answer of page images from `first_page` (viewer A3): ask again from
+    `next_page` until it is None."""
+    return _check_pages(_post("pages", content, filename, first_page=first_page), first_page)

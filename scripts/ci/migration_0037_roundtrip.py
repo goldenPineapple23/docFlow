@@ -9,7 +9,11 @@ Run after `supabase start` has applied every migration, 0037 included:
   2. run supabase/reverse/0037_reverse.sql. The four objects must be gone,
      and every other column and index of both tables must be exactly as it
      was: the reverse removes what 0037 added and nothing else;
-  3. run 0037 again. The state must equal step 1's.
+  3. run 0037 again. The state must equal step 1's, except that 0037's two
+     columns may now sit at the end of their tables: run again, they are
+     added behind any column a later migration added (0040's; D-232,
+     scripts/ci/roundtrip_columns.py). Any other column moved, or any
+     column missing, still fails.
 Across all three the policies and the function grants must not change
 (scripts/ci/policy_snapshot.py): 0037 and its reverse touch neither.
 
@@ -204,8 +208,10 @@ def check_states(
 ) -> int:
     """Compare the three states; print the result, with annotations.
     `policies` is the policy-and-grant snapshot at each of the three."""
+    from roundtrip_columns import same_after_rerun
+
     problems = check_forward(forward) + check_reversed(forward, reversed_)
-    if again != forward:
+    if not same_after_rerun(forward, again, set(EXPECTED_COLUMNS)):
         problems.append("forward again: the state differs from the first forward state")
     if not (policies[0] == policies[1] == policies[2]):
         problems.append("the policies or the function grants changed across the round trip")

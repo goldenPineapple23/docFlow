@@ -9,6 +9,7 @@ unapproved skips. Removing one is then a deliberate, visible change to this
 file too, not a quiet edit to the workflow.
 """
 
+import ast
 import re
 from pathlib import Path
 
@@ -95,6 +96,74 @@ def test_the_core_job_runs_the_0038_round_trip_after_0037s_and_the_skip_check_ca
     )
     assert "id: roundtrip_0038\n" in block
     assert "roundtrip_0038" in _check_skips().STEP_NAMES
+
+
+def test_the_core_job_runs_the_0040_round_trip_after_0038s_and_the_skip_check_can_name_it():
+    """D-232: 0040's reverse is tested the same way, after the earlier round
+    trips and before the suite, and a run where it failed says so by name."""
+    block = _job_block(WORKFLOW.read_text(encoding="utf-8"), "core")
+    assert (
+        block.index("scripts/ci/migration_0038_roundtrip.py")
+        < block.index("scripts/ci/migration_0040_roundtrip.py")
+        < block.index("id: test\n")
+    )
+    assert "id: roundtrip_0040\n" in block
+    assert "roundtrip_0040" in _check_skips().STEP_NAMES
+
+
+PARSE_CONFIG = REPO / "apps" / "parse" / "parse_service" / "config.py"
+WORKER_FLY_TOML = REPO / "apps" / "worker" / "fly.toml"
+RUN_WORKERS = REPO / "apps" / "worker" / "app" / "run_workers.py"
+
+
+def _pages_command_strings() -> list[str]:
+    """The string elements of run_workers' "pages" command, read from its
+    source (core can't import the worker app)."""
+    tree = ast.parse(RUN_WORKERS.read_text(encoding="utf-8"))
+    commands = [
+        value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Dict)
+        for key, value in zip(node.keys, node.values, strict=True)
+        if isinstance(key, ast.Constant) and key.value == "pages"
+    ]
+    assert len(commands) == 1 and isinstance(commands[0], ast.List), "run_workers has no one pages command"
+    return [
+        element.value
+        for element in commands[0].elts
+        if isinstance(element, ast.Constant) and isinstance(element.value, str)
+    ]
+
+
+def test_parse_slots_were_sized_for_one_document_slot_and_one_page_job():
+    """D-232: PARSE_SLOTS = 2 is one document job plus one page job, and fits
+    only while the worker has one document slot. Raising the target without
+    revisiting PARSE_SLOTS fails here. It can't see a value set as a Fly
+    secret: that is read on the app at deploy (A6). It also fails if the
+    pages worker stops being --concurrency=1, or gains a -c or an
+    --autoscale; it can't see a second worker machine."""
+    from docflow_core.config import Settings
+
+    found = re.search(r"^PARSE_SLOTS = (\d+)$", PARSE_CONFIG.read_text(encoding="utf-8"), re.M)
+    assert found, "PARSE_SLOTS is no longer a plain number in the parse service's config"
+    slots = int(found.group(1))
+    target = Settings.model_fields["dispatch_in_flight_target"].default
+    fly = WORKER_FLY_TOML.read_text(encoding="utf-8")
+    assert re.search(r"^\s*DISPATCH_IN_FLIGHT_TARGET\s*=", fly, re.M) is None
+    assert (target, slots) == (1, 2), (
+        "PARSE_SLOTS = 2 is one document job plus one page job, and fits only while "
+        "dispatch_in_flight_target is 1: revisit both together (A3)"
+    )
+    # render_pages has no per-document lock (founder, 2026-11-04; D-232): it
+    # is safe only with one pages process at concurrency 1.
+    pages = _pages_command_strings()
+    assert [s for s in pages if s.startswith("--concurrency")] == ["--concurrency=1"], (
+        "the pages worker must run at --concurrency=1: render_pages has no per-document lock, "
+        "and a second render of one document can delete the pages of another (D-232)"
+    )
+    assert [s for s in pages if s == "-c" or s.startswith("--autoscale")] == [], (
+        "the pages worker's concurrency is set by --concurrency=1 alone: no -c and no --autoscale (D-232)"
+    )
 
 
 # A skip on docflow-staging only (founder, 2026-10-05; D-189). No CI job reads

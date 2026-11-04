@@ -184,6 +184,29 @@ requires_m7_schema = pytest.mark.skipif(
 )
 
 
+def pages_schema_available() -> bool:
+    """True once supabase/migrations/0040_document_pages.sql has been applied
+    (documents.page_count and documents.pages; viewer A3, D-232). CI applies
+    0040 itself, so these tests never skip there."""
+    if not database_available():
+        return False
+    from docflow_core.db import engine_for
+    from sqlalchemy import text
+
+    try:
+        with engine_for("worker").connect() as conn:
+            conn.execute(text("SELECT page_count, pages FROM documents LIMIT 0"))
+        return True
+    except Exception:
+        return False
+
+
+requires_pages_schema = pytest.mark.skipif(
+    not pages_schema_available(),
+    reason="supabase/migrations/0040_document_pages.sql has not been applied to this database yet.",
+)
+
+
 @pytest.fixture(autouse=True)
 def _no_real_dispatch_or_provider_state(request, monkeypatch):
     """
@@ -211,6 +234,19 @@ def _no_real_dispatch_or_provider_state(request, monkeypatch):
     monkeypatch.setattr(
         model_provider, "alert_routing_failure", lambda error: calls.append(("routing_failure", error))
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_real_page_renders(request, monkeypatch):
+    """Viewer A3 (D-232): the document task queues its page render on the
+    real broker, which no test reads. Every test, real_dispatch ones too,
+    records the call on `request.node.page_renders` instead; a test of the
+    queueing itself calls app.tasks.render_pages.queue_pages directly."""
+    calls: list[tuple] = []
+    request.node.page_renders = calls
+    import app.tasks.parse_and_extract as task
+
+    monkeypatch.setattr(task, "queue_pages", lambda tid, did: calls.append((tid, did)))
 
 
 def pytest_configure(config):
