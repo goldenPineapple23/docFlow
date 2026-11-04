@@ -450,6 +450,26 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="info",
         audience="tenant",
     ),
+    # One page of the viewer, in two cases: the page wasn't drawn, or its
+    # image failed to load twice. True of both, and never says the document
+    # failed (founder, 2026-11-04; D-233).
+    "DOC-032": ErrorCatalogEntry(
+        code="DOC-032",
+        title="This page can't be shown",
+        message="DocFlow couldn't show this page here. What DocFlow read from the document isn't affected.",
+        action="Download the original to see this page.",
+        severity="info",
+        audience="tenant",
+    ),
+    # A text file with no stored text to show in the page (D-233).
+    "DOC-033": ErrorCatalogEntry(
+        code="DOC-033",
+        title="There's no text to show for this file",
+        message="DocFlow has no stored text from this file to show here.",
+        action="Download the original to read it.",
+        severity="info",
+        audience="tenant",
+    ),
     "INT-001": ErrorCatalogEntry(
         code="INT-001",
         title="No attachment to process",

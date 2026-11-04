@@ -12,7 +12,7 @@ import { DOCUMENT_ID, WARNING_ID, detail } from "./fixtures/review";
 /** Stubs the review API at the network boundary. */
 async function stubApi(page: Page, state: { detail: ReturnType<typeof detail>; approved?: boolean }) {
   await page.route("**/review/documents/*/original", (route) =>
-    route.fulfill({ json: { url: "/review/documents/x/original/content?token=t", expires_at: 0 } }),
+    route.fulfill({ json: { view: "frame", url: "/review/documents/x/original/content?token=t", expires_at: 0 } }),
   );
   await page.route("**/review/documents/*/original/content*", (route) =>
     route.fulfill({ body: "PO Number: BCH-2291", contentType: "application/octet-stream" }),
@@ -255,7 +255,7 @@ test("an order read with past examples says how many, and says nothing when ther
   await expect(page.getByTestId("examples-note")).toHaveCount(0);
 });
 
-test("the original document renders in a sandboxed frame", async ({ page }) => {
+test("a sender's image whose pages aren't drawn yet renders in the sandboxed frame", async ({ page }) => {
   const state = { detail: detail() };
   await stubApi(page, state);
   await page.goto(`/review/${DOCUMENT_ID}`);
@@ -274,6 +274,7 @@ test("an original that can't be read says so in the catalog's words, with no lin
   await page.route("**/review/documents/*/original", (route) =>
     route.fulfill({
       json: {
+        view: "panel",
         url: "/review/documents/x/original/content?token=t",
         expires_at: 0,
         previewable: false,
@@ -321,6 +322,7 @@ test("a PDF is offered as a download, on a fresh link, and never reaches the fra
     const token = `t${minted}`;
     return route.fulfill({
       json: {
+        view: "panel",
         url: `/review/documents/x/original/content?token=${token}`,
         download_url: `/review/documents/x/original/content?token=${token}&download=1`,
         expires_at: 0,
@@ -390,6 +392,102 @@ test("a viewer that can't get a link shows the catalog's words and code", async 
   await expect(panel).toContainText("contact DocFlow support");
   await expect(panel).toContainText("SYS-002");
   await expect(page.getByTestId("header-input-po_number")).toHaveValue("BCH-2291");
+});
+
+// A tiny grey page, standing in for one the parse job drew (A2).
+const GREY_PAGE = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAACgAAAA0CAAAAADdgSVRAAAAH0lEQVR4nGM4QSRgGFU4qnBU4ajCUYWjCkcVjirEDQAu5FlbqsktTwAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+const DOC_032 = {
+  code: "DOC-032",
+  title: "This page can't be shown",
+  message: "DocFlow couldn't show this page here. What DocFlow read from the document isn't affected.",
+  action: "Download the original to see this page.",
+};
+
+test("drawn pages show in the page, never the frame, and zoom by button in a real browser", async ({ page }) => {
+  // D-233: page images are DocFlow's output, shown in the page (D-228 item 11).
+  const state = { detail: detail() };
+  await stubApi(page, state);
+  await page.route("**/review/documents/*/original", (route) =>
+    route.fulfill({
+      json: {
+        view: "pages",
+        pages: [0, 1].map((index) => ({
+          index,
+          drawn: true,
+          width: 40,
+          height: 52,
+          url: `/review/documents/x/pages/${index}?token=p`,
+        })),
+        page_unavailable: DOC_032,
+        url: "/review/documents/x/original/content?token=t",
+        download_url: "/review/documents/x/original/content?token=t&download=1",
+        expires_at: 0,
+        previewable: true,
+        format: "a PDF",
+        filename: "po.pdf",
+        preview_kind: null,
+      },
+    }),
+  );
+  await page.route("**/review/documents/*/pages/*", (route) =>
+    route.fulfill({ body: GREY_PAGE, contentType: "image/png" }),
+  );
+  await page.goto(`/review/${DOCUMENT_ID}`);
+
+  const image = page.getByTestId("page-image");
+  await expect(image).toHaveAttribute("alt", "Page 1 of 2");
+  await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(40);
+  await expect(page.getByTestId("document-viewer")).toHaveCount(0);
+
+  const fitted = (await image.boundingBox())!.width;
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await expect.poll(async () => Math.round((await image.boundingBox())!.width)).toBe(Math.round(fitted * 1.25));
+  await page.getByRole("button", { name: "Fit to width" }).click();
+  await expect.poll(async () => Math.round((await image.boundingBox())!.width)).toBe(Math.round(fitted));
+
+  await page.getByTestId("page-next").click();
+  await expect(image).toHaveAttribute("alt", "Page 2 of 2");
+});
+
+test("a text file's stored text shows in the page as characters, never as HTML", async ({ page }) => {
+  // CLAUDE.md 7.12: stored text is shown as escaped text, never HTML (D-233).
+  const stored = '<img src="x" onerror="window.__ran = true"><script>window.__ran = true</script><b>bold</b>';
+  const state = { detail: detail() };
+  await stubApi(page, state);
+  await page.route("**/review/documents/*/original", (route) =>
+    route.fulfill({
+      json: {
+        view: "text",
+        url: "/review/documents/x/original/content?token=t",
+        download_url: "/review/documents/x/original/content?token=t&download=1",
+        expires_at: 0,
+        previewable: true,
+        format: "a text file",
+        filename: "po.txt",
+        preview_kind: null,
+      },
+    }),
+  );
+  await page.route("**/review/documents/*/text", (route) =>
+    route.fulfill({ json: { kind: "extracted_text", text: stored, truncated: false, cut_at: 200000 } }),
+  );
+  const dialogs: string[] = [];
+  page.on("dialog", (dialog) => {
+    dialogs.push(dialog.message());
+    void dialog.dismiss();
+  });
+  await page.goto(`/review/${DOCUMENT_ID}`);
+
+  const shown = page.getByTestId("document-text");
+  await expect(shown).toHaveText(stored);
+  await expect(shown.locator("img, script, b")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as { __ran?: boolean }).__ran)).toBeUndefined();
+  expect(dialogs).toEqual([]);
+  await expect(page.getByTestId("document-viewer")).toHaveCount(0);
 });
 
 test("a read-only reviewer cannot edit or approve", async ({ page }) => {

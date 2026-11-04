@@ -37,6 +37,7 @@ def _well_formed_token() -> str:
     "path",
     [
         f"/review/documents/{uuid4()}/original/content",
+        f"/review/documents/{uuid4()}/pages/0",
         f"/review/exports/{uuid4()}/download",
     ],
 )

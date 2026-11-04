@@ -286,6 +286,14 @@ DOC-031 [info/tenant] This PDF can't be shown here
   what+why: DocFlow read this PDF, but it can't show the pages in this panel. Everything DocFlow read from it is shown beside this.
   next:     Download the original if you need to check a value against it.
 
+DOC-032 [info/tenant] This page can't be shown
+  what+why: DocFlow couldn't show this page here. What DocFlow read from the document isn't affected.
+  next:     Download the original to see this page.
+
+DOC-033 [info/tenant] There's no text to show for this file
+  what+why: DocFlow has no stored text from this file to show here.
+  next:     Download the original to read it.
+
 EXM-001 [warning/founder] Confirm the live golden check first
   what+why: Example prompting changes what the extraction model is sent, so it may only be switched on after a live golden-fixture run with examples has passed (Section 7.13). The confirmation wasn't ticked, so nothing was changed.
   next:     Run `pytest -m live_api tests/test_example_prompting_golden.py` in apps/api; when it passes, tick the confirmation and switch it on again.

@@ -58,7 +58,17 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${PORT}`,
     trace: "on-first-retry",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] }, testIgnore: /viewer-cross-site\.spec\.ts/ },
+    // The web app on `localhost`, the API on `127.0.0.1`: different sites, as
+    // they will be once deployed, so a page image is proved to load across
+    // sites (D-228 item 9; D-233). The same server answers both names.
+    {
+      name: "cross-site",
+      use: { ...devices["Desktop Chrome"], baseURL: `http://localhost:${PORT}` },
+      testMatch: /viewer-cross-site\.spec\.ts/,
+    },
+  ],
   webServer: {
     // Builds as well as serves. Next compiles NEXT_PUBLIC_* into the
     // bundle, so a build made earlier -- or for a different stack -- serves

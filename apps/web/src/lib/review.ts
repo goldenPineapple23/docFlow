@@ -317,7 +317,29 @@ export function createMapping(
   });
 }
 
+// One page of a document, as the parse job drew it (A2, A3; D-233). A page
+// that wasn't drawn carries no link; the screen shows `page_unavailable`.
+export type DocumentPage =
+  | { index: number; drawn: true; width: number | null; height: number | null; url: string }
+  | { index: number; drawn: false };
+
+// What the viewer panel shows, decided by the API (D-233): page images, the
+// stored text, the sandboxed frame (only while a drawn format has no pages
+// yet: D-228 item 1's answer), or a message and the download.
+export type ViewerView = "pages" | "text" | "frame" | "panel";
+
+export type OriginalDocument = Awaited<ReturnType<typeof originalDocumentUrl>>;
+
 export function originalDocumentUrl(id: string): Promise<{
+  view: ViewerView;
+  // With `view: "pages"`: every page, their links sharing one token of purpose
+  // "page" that lasts as long as `url`; and the catalog entry for a page that
+  // can't be shown, DOC-032.
+  pages?: DocumentPage[];
+  pages_expire_at?: number;
+  page_unavailable?: CatalogError;
+  // A text file with no stored text to show: DOC-033.
+  no_text?: CatalogError | null;
   url: string;
   // The same file, saved rather than shown (D-228). Good for as long as `url`,
   // a few minutes, so mint a fresh one when the reviewer asks for the file.
@@ -341,6 +363,20 @@ export function originalDocumentUrl(id: string): Promise<{
   not_shown?: CatalogError | null;
 }> {
   return request(`${reviewApiBase()}/documents/${id}/original`);
+}
+
+// The text DocFlow stored from a document, shown in the page as escaped text,
+// never HTML (CLAUDE.md 7.12; D-233). Cut at `cut_at` characters when
+// `truncated`.
+export type DocumentText = {
+  kind: "extracted_text";
+  text: string;
+  truncated: boolean;
+  cut_at: number;
+};
+
+export function documentText(id: string): Promise<DocumentText> {
+  return request(`${reviewApiBase()}/documents/${id}/text`);
 }
 
 export function triggerDownload(url: string) {
