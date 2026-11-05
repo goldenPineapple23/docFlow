@@ -56,12 +56,15 @@ from docflow_core.review import (
 from docflow_core.signed_urls import (
     InvalidSignedUrl,
     mint_document_token,
+    mint_page_token,
     verify_document_token,
+    verify_page_token,
 )
 from docflow_core.storage import (
     StorageObjectMissingError,
     StorageUnavailableError,
     UnsafeStoragePathError,
+    page_path,
     read_file,
 )
 from docflow_core.validation import warning_entry
@@ -105,6 +108,25 @@ def _viewer_headers() -> dict[str, str]:
             "script-src 'none'; style-src 'unsafe-inline'; "
             f"frame-ancestors {origins}; base-uri 'none'; form-action 'none'"
         ),
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store",
+        "Referrer-Policy": "no-referrer",
+    }
+
+
+def _page_headers() -> dict[str, str]:
+    """
+    A page image is shown in the page as an `<img>`, not framed (D-228 item
+    11; D-233), and the web app and the API are different sites once deployed.
+    `Cross-Origin-Resource-Policy: cross-origin` lets that image load, and
+    would still let it load if the web app ever sent COEP; `same-site` would
+    block `localhost` against `127.0.0.1`, and `same-origin` always would.
+    The CSP doesn't apply to an embedded image: it makes sure a page link
+    opened in a tab of its own runs nothing.
+    """
+    return {
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+        "Cross-Origin-Resource-Policy": "cross-origin",
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, no-store",
         "Referrer-Policy": "no-referrer",
@@ -769,7 +791,8 @@ def original_document_url(
         row = session.execute(
             text(
                 "SELECT storage_path, original_filename, preview_storage_path, preview_media_type, "
-                "preview_kind FROM documents WHERE id = :id AND deleted_at IS NULL"
+                "preview_kind, page_count, pages, extracted_text_path "
+                "FROM documents WHERE id = :id AND deleted_at IS NULL"
             ),
             {"id": str(document_id)},
         ).mappings().first()
@@ -796,7 +819,25 @@ def original_document_url(
 
     token, expires_at = mint_document_token(document_id, tenant_id)
     url = f"/review/documents/{document_id}/original/content?token={token}"
+    view = _view(row, has_preview, detected, unreadable_because)
+    pages: dict[str, Any] = {}
+    if view == "pages":
+        page_token, page_expires_at = mint_page_token(document_id, tenant_id)
+        pages = {
+            "pages": _page_entries(document_id, row, page_token),
+            "pages_expire_at": page_expires_at,
+            # Shown for a page that wasn't drawn and for one whose image
+            # failed to load twice; the screen never words it itself.
+            "page_unavailable": catalog_detail("DOC-032"),
+        }
     return {
+        # What the panel shows (D-233): page images, text, the sandboxed
+        # frame (only when a drawn format has no pages yet: D-228 item 1's
+        # answer), or a message with the download.
+        "view": view,
+        **pages,
+        # A text file with no stored text to show (D-233).
+        "no_text": catalog_detail("DOC-033") if view == "panel" and _is_text_file(detected) else None,
         "url": url,
         # The same token, saved as a file. Decided here so the screen never
         # builds a URL (founder, 2026-11-02: never a new tab; D-228).
@@ -838,6 +879,96 @@ def original_document_url(
 
 def _has_preview(row: Any) -> bool:
     return bool(row["preview_storage_path"] and row["preview_media_type"])
+
+
+# The text files whose own text is shown in the page (D-228 item 1): the text
+# the worker stored, never the sender's bytes (founder, 2026-11-04; D-233).
+_TEXT_FILES = {file_types.FileTypeName.TXT, file_types.FileTypeName.CSV, file_types.FileTypeName.MD}
+
+# A sender's image, which the frame still shows while its pages aren't drawn
+# (D-228 item 1's answer: the frame's only use in A4).
+_FRAMED_UNTIL_DRAWN = {
+    file_types.FileTypeName.PNG,
+    file_types.FileTypeName.JPEG,
+    file_types.FileTypeName.GIF,
+    file_types.FileTypeName.WEBP,
+}
+
+# The two types A2 draws a page as (D-228 item 2). The page route serves
+# nothing else, whatever the list says.
+_PAGE_MEDIA_TYPES = {"image/png", "image/jpeg"}
+
+# Where the page cuts a file's text, the same as the worker's text previews
+# (`docflow_core.previews.MAX_PREVIEW_CHARS`, which the API may not import;
+# packages/core/tests/test_ci_guards.py holds the two together).
+_TEXT_VIEW_CHARS = 200_000
+
+
+def _is_text_file(detected: file_types.FileType | None) -> bool:
+    return detected is not None and detected.name in _TEXT_FILES
+
+
+def _drawn(row: Any) -> bool:
+    """The worker wrote this document's page list, with at least one page
+    (0040: NULL means not drawn, 0 means a format with no pages)."""
+    return isinstance(row["page_count"], int) and row["page_count"] > 0 and isinstance(row["pages"], list)
+
+
+def _page_entry(row: Any, index: int) -> dict[str, Any] | None:
+    """Page `index`'s entry in the list, or None when it wasn't drawn."""
+    if not _drawn(row) or not 0 <= index < row["page_count"] or index >= len(row["pages"]):
+        return None
+    entry = row["pages"][index]
+    if not isinstance(entry, dict) or entry.get("index") != index or entry.get("rendered") is False:
+        return None
+    return entry
+
+
+def _view(
+    row: Any,
+    has_preview: bool,
+    detected: file_types.FileType | None,
+    unreadable_because: str | None,
+) -> str:
+    """
+    What the viewer panel shows (D-233). Page images first, whenever the
+    worker drew them. The frame only for a drawn format whose pages aren't
+    there yet: a TIFF's or HEIC's stored preview, or a sender's own image.
+    A PDF without pages is the download panel (DOC-031), as before.
+    """
+    if _drawn(row):
+        return "pages"
+    if has_preview:
+        return "text" if row["preview_kind"] == "extracted_text" else "frame"
+    if unreadable_because is not None or detected is None:
+        return "panel"
+    if detected.name in _TEXT_FILES:
+        return "text" if row["extracted_text_path"] else "panel"
+    if detected.name in _FRAMED_UNTIL_DRAWN:
+        return "frame"
+    return "panel"
+
+
+def _page_entries(document_id: UUID, row: Any, page_token: str) -> list[dict[str, Any]]:
+    """Every page, in order: a drawn one with its link and shape, the shape
+    being what the screen holds while it loads (and, later, what highlight
+    boxes are placed against); one that wasn't drawn says only that."""
+    entries: list[dict[str, Any]] = []
+    for index in range(row["page_count"]):
+        entry = _page_entry(row, index)
+        if entry is None:
+            entries.append({"index": index, "drawn": False})
+            continue
+        entries.append(
+            {
+                "index": index,
+                "drawn": True,
+                "width": entry.get("width"),
+                "height": entry.get("height"),
+                "url": f"/review/documents/{document_id}/pages/{index}?token={page_token}",
+            }
+        )
+    return entries
 
 
 def _read_for_viewer(
@@ -972,6 +1103,114 @@ def original_document_content(
     )
 
 
+@router.get("/documents/{document_id}/pages/{index}")
+def page_image(
+    document_id: UUID,
+    index: int,
+    token: str = Query(min_length=1),
+) -> Response:
+    """
+    One page image, drawn by the parse job and stored by the worker (A2, A3):
+    DocFlow's output, not the sender's bytes, so it is shown in the page
+    (CLAUDE.md 7.12's clarification; D-228 item 11; D-233).
+
+    **Authenticated by a page token alone,** for the same reason as the
+    original's route: an `<img>` sends no Authorization header. The token's
+    purpose is `page`, so it opens no original and no export, and no other
+    token opens a page. Only `image/png` and `image/jpeg` are ever served,
+    whatever the stored list says.
+    """
+    try:
+        verified = verify_page_token(token, document_id)
+    except InvalidSignedUrl as exc:
+        raise HTTPException(status_code=404) from exc
+    tenant_id = verified.tenant_id
+
+    with tenant_session(tenant_id) as session:
+        row = session.execute(
+            text("SELECT page_count, pages FROM documents WHERE id = :id AND deleted_at IS NULL"),
+            {"id": str(document_id)},
+        ).mappings().first()
+    entry = _page_entry(row, index) if row is not None else None
+    if entry is None:
+        raise HTTPException(status_code=404)
+    media_type = entry.get("media_type")
+    if media_type not in _PAGE_MEDIA_TYPES:
+        logger.error("page_media_type_refused document_id=%s index=%s", document_id, index)
+        raise HTTPException(status_code=404)
+
+    content, _ = _read_for_viewer(tenant_id, page_path(tenant_id, document_id, index), document_id)
+    if content is None:
+        raise HTTPException(status_code=404)
+    return Response(content=content, media_type=media_type, headers=_page_headers())
+
+
+@router.get("/documents/{document_id}/text")
+def document_text(
+    document_id: UUID,
+    actor: Actor = Depends(current_actor),
+) -> dict:
+    """
+    The text DocFlow stored from a document, for the viewer to show in the
+    page as escaped text, never as HTML (CLAUDE.md 7.12's clarification;
+    D-233). A TXT, CSV or MD file: `extracted_text_path`, the text the worker
+    sent the model, never the sender's bytes. A Word file, a spreadsheet or
+    an e-mail: its text preview. Cut at the text previews' length, and says
+    so.
+
+    An ordinary signed-in request: unlike an `<img>`, the screen fetches this
+    itself and sends its session.
+    """
+    tenant_id = actor.tenant_id
+    with tenant_session(tenant_id) as session:
+        row = session.execute(
+            text(
+                "SELECT storage_path, original_filename, preview_storage_path, preview_media_type, "
+                "preview_kind, extracted_text_path "
+                "FROM documents WHERE id = :id AND deleted_at IS NULL"
+            ),
+            {"id": str(document_id)},
+        ).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404)
+
+    # The mint route's rule (founder, 2026-11-04): a text preview when there
+    # is one; otherwise the format from the original's own bytes, and a TXT,
+    # CSV or MD file shows `extracted_text_path` (Q2). No TXT, CSV or MD file
+    # ever has a preview: packages/core/tests/test_previews.py holds that.
+    unreadable_because: str | None = None
+    if _has_preview(row) and row["preview_kind"] == "extracted_text":
+        path = row["preview_storage_path"]
+    else:
+        original, unreadable_because = _read_for_viewer(tenant_id, row["storage_path"], document_id)
+        detected = (
+            file_types.detect_file_type(original, _extension(row["original_filename"]))
+            if original is not None
+            else None
+        )
+        path = row["extracted_text_path"] if _is_text_file(detected) else None
+    if path is None:
+        if unreadable_because == "unavailable":
+            raise catalog_error("DOC-028", status_code=503)
+        raise catalog_error("DOC-033", status_code=404)
+    content, unreadable_because = _read_for_viewer(tenant_id, path, document_id)
+    if content is None:
+        if unreadable_because == "unavailable":
+            raise catalog_error("DOC-028", status_code=503)
+        raise catalog_error("DOC-033", status_code=404)
+
+    stored = content.decode("utf-8", errors="replace")
+    # A text preview was already cut by the worker, its note after the cut;
+    # the same length here cuts both alike and drops that note, since the
+    # screen says it itself.
+    return {
+        "kind": "extracted_text",
+        "text": stored[:_TEXT_VIEW_CHARS],
+        "truncated": len(stored) > _TEXT_VIEW_CHARS,
+        "cut_at": _TEXT_VIEW_CHARS,
+    }
+
+
 # What the browser is allowed to render in the viewer, keyed by the type
 # detected from the file's own bytes -- never from its extension and never
 # from anything the sender claimed (Section 7.11: "magic-byte type detection
@@ -1037,6 +1276,9 @@ _FORMAT_NAMES: dict[file_types.FileTypeName, str] = {
     file_types.FileTypeName.RTF: "a rich-text document",
     file_types.FileTypeName.HEIC: "an iPhone photo",
     file_types.FileTypeName.HTML: "a web page",
+    file_types.FileTypeName.TXT: "a text file",
+    file_types.FileTypeName.CSV: "a CSV file",
+    file_types.FileTypeName.MD: "a Markdown file",
 }
 
 

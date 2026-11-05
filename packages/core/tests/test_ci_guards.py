@@ -166,6 +166,22 @@ def test_parse_slots_were_sized_for_one_document_slot_and_one_page_job():
     )
 
 
+REVIEW_ROUTER = REPO / "apps" / "api" / "app" / "routers" / "review.py"
+
+
+def test_the_viewers_text_cut_is_the_text_previews_cut():
+    """D-233: the API cuts a TXT, CSV or MD file's stored text where the worker
+    cuts every other text preview, so the page says "Cut at 200,000
+    characters" truthfully for both. The API may not import
+    docflow_core.previews (test_parsing_boundary.py), so it keeps its own
+    number, read here from its source."""
+    from docflow_core.previews import MAX_PREVIEW_CHARS
+
+    found = re.search(r"^_TEXT_VIEW_CHARS = ([\d_]+)$", REVIEW_ROUTER.read_text(encoding="utf-8"), re.M)
+    assert found, "_TEXT_VIEW_CHARS is no longer a plain number in the review router"
+    assert int(found.group(1)) == MAX_PREVIEW_CHARS
+
+
 # A skip on docflow-staging only (founder, 2026-10-05; D-189). No CI job reads
 # these lines, so the test still has to run in CI.
 STAGING_ONLY = tuple(f"{job}-staging" for job in PYTHON_JOBS)

@@ -63,6 +63,8 @@ ROUTE_ACCESS: dict[tuple[str, str], Access] = {
     ("GET", "/review/items"): "member",
     ("GET", "/review/documents/{document_id}/original"): "member",
     ("GET", "/review/documents/{document_id}/original/content"): "member",
+    ("GET", "/review/documents/{document_id}/pages/{index}"): "member",
+    ("GET", "/review/documents/{document_id}/text"): "member",
     # Export
     ("POST", "/review/documents/{document_id}/exports"): "member",
     ("GET", "/review/documents/{document_id}/exports"): "member",

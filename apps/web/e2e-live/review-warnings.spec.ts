@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 import { SEED_FILE } from "../playwright.live.config";
+import { openOrder, signIn } from "./session";
 
 /**
  * After an edit, the screen says what the checks now are (CLAUDE.md
@@ -40,65 +41,6 @@ const seed: Seed = JSON.parse(readFileSync(SEED_FILE, "utf8"));
 // because the checks panel sits below it.
 test.use({ viewport: { width: 1440, height: 900 } });
 
-async function signIn(page: Page) {
-  // Kept, not discarded, so a failure can be explained by the error itself.
-  const noticed: string[] = [];
-  page.on("console", (m) => {
-    if (m.type() === "error") noticed.push(`console error: ${m.text().slice(0, 200)}`);
-  });
-  page.on("requestfailed", (r) =>
-    noticed.push(`request failed: ${r.method()} ${r.url()} ${r.failure()?.errorText}`),
-  );
-  page.on("response", (r) => {
-    if (!r.ok()) noticed.push(`http ${r.status()} ${r.request().method()} ${r.url()}`);
-  });
-
-  await page.goto("/login");
-  await page.locator("#email").fill(seed.email);
-  await page.locator("#password").fill(seed.password);
-  await page.getByRole("button", { name: /sign in/i }).click();
-
-  try {
-    // Generous, and deliberately so: the first sign-in of a run pays for the
-    // web server's cold start and the API's first database connection. A
-    // browser suite that goes flaky is a browser suite someone switches off
-    // (D-086), and Section 10 forbids getting a merge through that way.
-    await page.waitForURL(/\/review/, { timeout: 60_000 });
-  } catch {
-    // "waitForURL timed out" says nothing about which of the three moving
-    // parts failed -- Supabase Auth, our API, or the page's own redirect --
-    // and whoever is reading this may not be able to open the CI log at all.
-    // So the error carries the answer instead of pointing at a log.
-    const visible = (await page.locator("body").innerText().catch(() => "")).
-      replace(/\s+/g, " ").slice(0, 400);
-    const session = await page.evaluate(() => {
-      try {
-        const key = Object.keys(localStorage).find((k) => k.includes("auth-token"));
-        return key ? "a Supabase session is stored, so Auth accepted the password" : "none stored";
-      } catch (e) {
-        return `localStorage unreadable: ${String(e).slice(0, 80)}`;
-      }
-    });
-    throw new Error(
-      [
-        "Signing in never reached the review queue.",
-        `still at: ${page.url()}`,
-        `session:  ${session}`,
-        `page says: ${visible || "(nothing)"}`,
-        "what the browser saw:",
-        ...(noticed.length ? noticed.slice(-15).map((n) => `  ${n}`) : ["  (nothing failed)"]),
-      ].join("\n"),
-    );
-  }
-}
-
-async function openOrder(page: Page, documentId: string) {
-  await page.goto(`/review/${documentId}`);
-  await expect(page.getByTestId("save-button")).toBeVisible();
-  // The detail read has landed once the checks panel has rendered.
-  await expect(page.locator("#warnings-heading")).toBeVisible();
-}
-
 /** Saves, and waits for the write and the re-read that follows it. */
 async function save(page: Page) {
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -132,7 +74,7 @@ async function inViewport(page: Page, testId: string): Promise<boolean> {
 test("an edit that raises a check says so, names it, and Approve says which one blocks it", async ({
   page,
 }) => {
-  await signIn(page);
+  await signIn(page, seed);
   await openOrder(page, seed.clean_document_id);
 
   // Nothing to tick: this order reconciles, so Approve is live.
@@ -193,7 +135,7 @@ test("an edit that raises a check says so, names it, and Approve says which one 
 });
 
 test("an unrelated edit keeps the checks a reviewer has already ticked", async ({ page }) => {
-  await signIn(page);
+  await signIn(page, seed);
   await openOrder(page, seed.flagged_document_id);
 
   // This order's total disagrees with its lines, so it arrives with a check.
@@ -218,7 +160,7 @@ test("an unrelated edit keeps the checks a reviewer has already ticked", async (
 });
 
 test("an edit to the very number a ticked check is about clears that tick", async ({ page }) => {
-  await signIn(page);
+  await signIn(page, seed);
   await openOrder(page, seed.ack_document_id);
 
   // The check is "the order total doesn't match the line items": 900.00
@@ -266,7 +208,7 @@ test("an edit to the very number a ticked check is about clears that tick", asyn
 // A stub decides for itself what comes back, so only the real API can prove
 // the browser saves the file instead of opening it (D-228).
 test("a real PDF is saved as a file, with no new tab, and the frame never gets it", async ({ page }) => {
-  await signIn(page);
+  await signIn(page, seed);
   await openOrder(page, seed.pdf_document_id);
 
   const panel = page.getByTestId("viewer-not-previewable");

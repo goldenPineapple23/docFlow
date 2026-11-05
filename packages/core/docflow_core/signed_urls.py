@@ -176,3 +176,27 @@ def mint_export_token(
 def verify_export_token(token: str, export_id: UUID) -> SignedDocumentToken:
     """The tenant an export token was minted for, or `InvalidSignedUrl`."""
     return _verify(token, export_id, "export")
+
+
+# ── Page images (viewer A4, D-233) ──────────────────────────────────────────
+#
+# One token for all of a document's page images, minted with the page list.
+# Its own purpose, so a page token never opens the original (the sender's
+# bytes) and an original or export token never opens a page. An `<img>` is a
+# plain browser GET too, so it carries no Authorization header either.
+
+
+def mint_page_token(
+    document_id: UUID, tenant_id: UUID, *, ttl_seconds: int = DEFAULT_TTL_SECONDS
+) -> tuple[str, int]:
+    """A token for one tenant's one document's page images. Minting is not
+    authorization: callers must already have established this tenant may read
+    this document."""
+    expires_at = int(time.time()) + ttl_seconds
+    payload = _payload(document_id, tenant_id, expires_at, "page")
+    return f"{tenant_id}.{expires_at}.{_sign(payload)}", expires_at
+
+
+def verify_page_token(token: str, document_id: UUID) -> SignedDocumentToken:
+    """The tenant a page token was minted for, or `InvalidSignedUrl`."""
+    return _verify(token, document_id, "page")

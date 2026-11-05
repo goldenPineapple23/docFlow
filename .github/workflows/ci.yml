@@ -217,7 +217,10 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: apps/api/requirements.lock.txt
+          # The parse lock too: the dev parse service below installs it.
+          cache-dependency-path: |
+            apps/api/requirements.lock.txt
+            apps/parse/requirements.lock.txt
       - run: python -m pip install --upgrade pip
       - run: pip install -r apps/api/requirements.lock.txt
       - run: pip install --no-deps -e packages/core
@@ -233,6 +236,25 @@ jobs:
           done
           curl -sf http://127.0.0.1:8000/healthz
         working-directory: apps/api
+      # The viewer's live specs need real page images and real stored text
+      # (D-233): the seed has this service read and draw each positive
+      # fixture, as SETUP.md 7a runs it on the founder's PC, isolation off. No
+      # LibreOffice here: its install timing out was flakes 5 to 9, and its
+      # cache misses on every new runner image (founder, 2026-11-04). Its own
+      # environment, so the parse lock never meets the API's.
+      - name: Start the dev parse service (isolation off, no LibreOffice; D-233)
+        run: |
+          python -m venv /tmp/parse-venv
+          /tmp/parse-venv/bin/python -m pip install -r requirements.lock.txt
+          /tmp/parse-venv/bin/python -m pip install --no-deps -e ../../packages/core -e .
+          if command -v soffice > /dev/null; then echo "LibreOffice is on this runner: $(command -v soffice)"; fi
+          PARSE_ISOLATION=off nohup /tmp/parse-venv/bin/python -m parse_service.server > /tmp/parse.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8100/health && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8100/health
+        working-directory: apps/parse
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
@@ -257,6 +279,9 @@ jobs:
       - name: The API's log, if anything failed
         if: failure()
         run: cat /tmp/api.log
+      - name: The dev parse service's log, if anything failed
+        if: failure()
+        run: cat /tmp/parse.log
 
   core:
     name: core (lint, test, audit)

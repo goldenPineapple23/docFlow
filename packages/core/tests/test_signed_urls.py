@@ -199,3 +199,60 @@ def test_an_expired_export_token_is_refused():
     token, _ = mint_export_token(export_id, uuid4(), ttl_seconds=-1)
     with pytest.raises(InvalidSignedUrl):
         verify_export_token(token, export_id)
+
+
+# ── Page images (viewer A4, D-233) ──────────────────────────────────────────
+
+
+def test_a_page_token_verifies_for_its_own_document():
+    from docflow_core.signed_urls import mint_page_token, verify_page_token
+
+    document_id, tenant_id = uuid4(), uuid4()
+    token, expires_at = mint_page_token(document_id, tenant_id)
+    verified = verify_page_token(token, document_id)
+    assert (verified.tenant_id, verified.expires_at) == (tenant_id, expires_at)
+
+
+def test_page_original_and_export_tokens_open_only_their_own_routes():
+    """A page token never opens the original, the sender's bytes, and no
+    other token opens a page, even for the same id (founder, 2026-11-04)."""
+    from docflow_core.signed_urls import (
+        mint_export_token,
+        mint_page_token,
+        verify_export_token,
+        verify_page_token,
+    )
+
+    object_id, tenant_id = uuid4(), uuid4()
+    page_token, _ = mint_page_token(object_id, tenant_id)
+    original_token, _ = mint_document_token(object_id, tenant_id)
+    export_token, _ = mint_export_token(object_id, tenant_id)
+
+    with pytest.raises(InvalidSignedUrl):
+        verify_document_token(page_token, object_id)
+    with pytest.raises(InvalidSignedUrl):
+        verify_export_token(page_token, object_id)
+    with pytest.raises(InvalidSignedUrl):
+        verify_page_token(original_token, object_id)
+    with pytest.raises(InvalidSignedUrl):
+        verify_page_token(export_token, object_id)
+
+
+def test_a_page_token_cannot_be_moved_to_another_tenant_or_document():
+    from docflow_core.signed_urls import mint_page_token, verify_page_token
+
+    document_id, tenant_id = uuid4(), uuid4()
+    token, _ = mint_page_token(document_id, tenant_id)
+    with pytest.raises(InvalidSignedUrl):
+        verify_page_token(token.replace(str(tenant_id), str(uuid4())), document_id)
+    with pytest.raises(InvalidSignedUrl):
+        verify_page_token(token, uuid4())
+
+
+def test_an_expired_page_token_is_refused():
+    from docflow_core.signed_urls import mint_page_token, verify_page_token
+
+    document_id = uuid4()
+    token, _ = mint_page_token(document_id, uuid4(), ttl_seconds=-1)
+    with pytest.raises(InvalidSignedUrl):
+        verify_page_token(token, document_id)

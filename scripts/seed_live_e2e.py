@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import secrets
@@ -35,11 +36,29 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import httpx
+from docflow_core import file_types, parse_client, previews
 from docflow_core.config import get_settings
 from docflow_core.db import platform_session, tenant_session
-from docflow_core.storage import delete_tenant_storage, save_file
+from docflow_core.storage import delete_tenant_storage, save_derived, save_file, save_page
 from docflow_core.validation import validate_document
 from sqlalchemy import text
+
+# A real PO in each format (CLAUDE.md Section 7.11's positive fixtures), for
+# the viewer's live specs (D-233). Parsed and drawn by the dev parse service,
+# never by this script.
+POSITIVE_FIXTURES = Path(__file__).resolve().parents[1] / "apps" / "parse" / "tests" / "fixtures" / "positive"
+
+# Not in web-live (founder, 2026-11-04; D-233 item 8): .doc needs LibreOffice,
+# which the web-live job doesn't have, and its text shows by the same
+# text-preview path as .docx, which is tested.
+HELD_BACK = {"po.doc"}
+
+# Markup inside a text file, for the spec that the page shows it as the
+# characters it is, never as HTML (CLAUDE.md 7.12; D-233).
+MARKUP_ORDER = (
+    b"PO Number: LIVE-MARKUP-1\n"
+    b'<img src="x" onerror="window.__ran = true"><script>window.__ran = true</script><b>bold</b>\n'
+)
 
 # The model's answer is immutable and required on anything reviewable
 # (Section 7.1, D-158). These documents are inserted straight into review
@@ -254,6 +273,121 @@ def _create_document(
     return document_id, summary.created
 
 
+def _viewer_document(tenant_id: UUID, run: str, filename: str, content: bytes) -> dict:
+    """
+    One order whose original is a real file, with what the worker stores for
+    it beside it: the text preview or the image preview, the text it read,
+    and its page images and page list (A3). The dev parse service parses and
+    draws it; this only stores the answers, the way the worker does.
+    """
+    document_id, _ = _create_document(
+        tenant_id,
+        po_number=f"LIVE-{run}-{filename}",
+        order_total=Decimal("570.00"),
+        lines=[
+            {
+                "line_number": 1,
+                "sku": "CF-1001",
+                "description": "Colombian Whole Bean 5lb",
+                "quantity": Decimal("12.00"),
+                "unit_price": Decimal("47.50"),
+                "line_total": Decimal("570.00"),
+                "confidence": Decimal("0.97"),
+            }
+        ],
+    )
+    columns: dict[str, object] = {
+        "storage_path": save_file(tenant_id, filename, content),
+        "original_filename": filename,
+        "content_sha256": hashlib.sha256(content).hexdigest(),
+    }
+
+    answer = parse_client.parse_document(content, filename)
+    if answer.outcome != "ok":
+        why = answer.code or answer.cause
+        sys.exit(f"The dev parse service didn't read {filename}: {answer.outcome} {why}.")
+    # The format the parse service read it as, as the worker takes it.
+    name = file_types.FileTypeName(answer.file_type)
+    texts = [part["text"] for part in answer.parts if part["type"] == "text"]
+    all_text = len(texts) == len(answer.parts) and bool(texts)
+
+    if previews.is_image_like(name) and answer.image_preview is not None:
+        image = answer.image_preview
+        columns.update(
+            preview_storage_path=save_derived(
+                tenant_id, document_id, "preview", image["content"], content_type=image["media_type"]
+            ),
+            preview_media_type=image["media_type"],
+            preview_kind=image["kind"],
+        )
+    elif previews.needs_preview(name):
+        if not all_text:
+            sys.exit(f"{filename} came back with a visual part; this seed only shows text previews.")
+        preview = previews.text_preview("\n\n".join(texts))
+        if preview is None:
+            sys.exit(f"{filename} came back with no text.")
+        columns.update(
+            preview_storage_path=save_derived(
+                tenant_id, document_id, "preview", preview.content, content_type=preview.media_type
+            ),
+            preview_media_type=preview.media_type,
+            preview_kind=preview.kind,
+        )
+    stored_text = "\n\n".join(texts).strip() if all_text else ""
+    if stored_text:
+        columns["extracted_text_path"] = save_derived(
+            tenant_id, document_id, "extracted_text", stored_text.encode("utf-8"),
+            content_type=previews.PLAIN_TEXT,
+        )
+
+    entries: list[dict] = []
+    page_count = 0
+    first: int | None = 0
+    while first is not None:
+        drawn = parse_client.render_pages(content, filename, first)
+        if drawn.outcome != "ok":
+            why = drawn.code or drawn.cause
+            sys.exit(f"The dev parse service didn't draw {filename}: {drawn.outcome} {why}.")
+        page_count = drawn.page_count
+        for page in drawn.pages:
+            if "reason" in page:
+                entries.append({"index": page["index"], "rendered": False, "reason": page["reason"]})
+                continue
+            save_page(tenant_id, document_id, page["index"], parse_client.page_bytes(page),
+                      content_type=page["media_type"])
+            entries.append({key: page[key] for key in ("index", "media_type", "width", "height")})
+        first = drawn.next_page
+
+    assignments = ", ".join(f"{name} = :{name}" for name in columns)
+    with platform_session() as session:
+        session.execute(
+            text(
+                f"UPDATE documents SET {assignments}, page_count = :page_count, "
+                "pages = CAST(:pages AS jsonb) WHERE id = :id"
+            ),
+            {**columns, "page_count": page_count, "pages": json.dumps(entries), "id": str(document_id)},
+        )
+    return {
+        "document_id": str(document_id),
+        "pages": page_count,
+        # What the page must show, word for word: the start of the text
+        # DocFlow stored (the text preview's when there is one).
+        "text_starts": (texts[0].strip()[:40] if all_text else None),
+    }
+
+
+def _seed_viewer_documents(tenant_id: UUID, run: str) -> dict[str, dict]:
+    if not POSITIVE_FIXTURES.is_dir():
+        sys.exit(f"The positive fixtures aren't at {POSITIVE_FIXTURES}.")
+    seeded: dict[str, dict] = {}
+    for fixture in sorted(POSITIVE_FIXTURES.iterdir()):
+        if fixture.name in HELD_BACK:
+            continue
+        seeded[fixture.name] = _viewer_document(tenant_id, run, fixture.name, fixture.read_bytes())
+    seeded["markup.txt"] = _viewer_document(tenant_id, run, "markup.txt", MARKUP_ORDER)
+    return seeded
+
+
 def setup(out: Path) -> None:
     # A run that was cancelled between seeding and teardown leaves its file
     # and its rows behind. Clear them before making more: an interrupted run
@@ -401,6 +535,9 @@ def _seed_rows(
             {"path": pdf_path, "id": str(pdf_id)},
         )
 
+    # One per positive fixture, for the viewer's specs (D-233).
+    viewer_documents = _seed_viewer_documents(tenant_id, run)
+
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
         json.dumps(
@@ -414,6 +551,7 @@ def _seed_rows(
                 "flagged_document_id": str(flagged_id),
                 "ack_document_id": str(ack_id),
                 "pdf_document_id": str(pdf_id),
+                "viewer_documents": viewer_documents,
             },
             indent=2,
         ),

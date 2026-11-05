@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-04, with the port PR merged and A3 built:** Phase 5.5,
+**Status, as of 2026-11-04, with A3 merged and A4 built:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -104,8 +104,8 @@ clean 200 (founder). **An observation, cause not proved:** on a newly allocated 
 got TLS connect errors (exit 35) for about 30 s, 15:17:43Z to 15:18:12Z, before the edge served it.
 They failed before the edge reached the machine, outside the system under test, so they weren't a
 stop (founder). The next time a gate retries, curl's error text is captured with `-sS`. **The
-partner walkthrough is postponed until A4 is on staging** (founder, 2026-11-02; D-228 item 8), and
-its step is cancelled. **The founder's viewer decisions are D-228.** **A1 is merged** (PR #90,
+partner walkthrough is postponed until A6's deploys and backfill are on staging** (founder,
+2026-11-04; D-228 item 8, changed by D-233), and its step is cancelled. **The founder's viewer decisions are D-228.** **A1 is merged** (PR #90,
 `main` is `91d4962`; D-228 item 12; main's push run #510 green on a re-run of its api job, after
 flake 10): a PDF goes to a download panel, downloads are attachments, and a missing signing secret
 answers SYS-002. Its staging suites passed on `1309a0b`, the worker's on a re-run alone on
@@ -119,17 +119,25 @@ step `478 passed`, parse unit `635 passed, 17 warnings`, parse audit no known vu
 `798 passed, 3 deselected, 1 warning in 90.37s (0:01:30)`, every left-behind count +0; D-228): the parse
 service draws page images on a new `POST /v1/pages`: every page of a PDF or TIFF, and a sender's
 single image, a PDF at 200 dpi, each page the smaller of PNG and JPEG, a gray page stored as gray,
-in answers of at most 32 MiB of base64 that say where the next starts. Nothing stores or shows them
-yet (A3, A4). A 25 MB upload holds at most about 30 poor-scan pages (23.7 MB), which fit in one
+in answers of at most 32 MiB of base64 that say where the next starts. A3 stores them and A4 shows
+them. A 25 MB upload holds at most about 30 poor-scan pages (23.7 MB), which fit in one
 answer; D-228 item 2's 44-page figure assumed more could arrive. The batching still serves long PDFs
-whose pages are small on disk but large as images. **A3 is built** (`phase55/stage5-viewer-a3`;
-D-232): the worker asks the parse service for every page and stores it under
+whose pages are small on disk but large as images. **A3 is merged** (PR #93, `main` is
+`799c08a`; main's push run #521 green; D-232): the worker asks the parse service for every page and stores it under
 `derived/{doc}/pages/`, on a queue and process of its own, and migration 0040 adds
 `documents.page_count` and `pages`, written once when every page is stored. A failed or cut-off render
-leaves both NULL, and the viewer falls back; a seccomp kill still alerts, and a stored path in another tenant's folder raises the existing critical alert. It
-merges only after a green PR run, then 0040 on staging and the staging suites passing (RUNBOOK 1.12);
-its database tests first run in CI. **Next, in order (D-228 item 7):** A4 to A6, with A5
-absorbing the 375 px fix. M10, with D-195 change 1 straight after it and M10's model-ID part folded
+leaves both NULL, and the viewer falls back; a seccomp kill still alerts, and a stored path in another tenant's folder raises the existing critical alert. Migration
+0040 is on staging (2026-11-04; `backup_0040` stays until the founder drops it), and the three
+staging suites passed on `5180f59`: core `1283 passed, 1 skipped in 143.62s (0:02:23)`, worker
+`307 passed, 8 skipped in 2631.65s (0:43:51)`, API `797 passed, 1 skipped, 3 deselected, 1 warning
+in 2860.85s (0:47:40)`, the six counts +0 (RUNBOOK 1.12). **A4 is built**
+(`phase55/stage5-viewer-a4`; D-233): the viewer shows a document's page images in the page, with a
+pager, zoom and pan, and a text file's stored text in the page as escaped text; the sandboxed frame
+is used only while a drawn format has no pages yet. Page images come on one token of purpose
+`page`, and the page route serves only PNG and JPEG; the web-live job runs the dev parse service,
+and 21 of the 22 positive fixtures have a live test (`po.doc` needs LibreOffice; D-233 item 8). It
+merges only after a green PR run and the staging suites passing; nothing deploys in A4. **Next, in order (D-228 item 7):** A5 and A6, with
+A5 absorbing the 375 px fix. M10, with D-195 change 1 straight after it and M10's model-ID part folded
 into change 1. B1's demo half, the inbound-mail item (D-230). Blocker 3's background commit with the duplicate SKU index (0041). Counting rows before
 extraction. E1, then E2a. The staging API's redeploy, and the worker's again if those changed it,
 with the staging suites and D-209's smoke test, owed since the worker's deploy of 2026-11-01 (there
@@ -147,7 +155,7 @@ CI's "Install Playwright browser" step (web-live) took 9 to 11 minutes on PR run
 under 30 seconds on main's push run #490, likely a cache miss on PR runs, costing about 10 minutes
 per PR. On main's push run #498 (`d053cca`) it took 16 seconds. The 50,000-row cap and IMP-003's
 wording: one PR, before pilots, only if a pilot prospect has more than 50,000 SKUs. **Staging:** the
-database has 0039. `docflow-api-staging` runs v3, is stopped, and has no address: 66.241.124.71 was
+database has 0040 (2026-11-04). `docflow-api-staging` runs v3, is stopped, and has no address: 66.241.124.71 was
 released at 15:40:14Z on 2026-11-02. `docflow-parse-staging` runs PR B's image (`b1af531`; Pillow
 13.0.0), is stopped, and stays private. `docflow-worker-staging` is on v12 with no machines: worker
 and beat were destroyed in the shutdown of 2026-11-02. Tenant `a7492bf7` still holds the 20,000 test
@@ -1902,6 +1910,16 @@ here is built.
   read `DISPATCH_IN_FLIGHT_TARGET` on the worker app (a Fly secret the `PARSE_SLOTS` guard can't
   see); the Console's queue strip shows the pages queue (`admin.py:1629`); backfill every document
   with `page_count` NULL; then decide whether `image_preview` retires.
+  - **Also for A6 (D-233):** deploy the API too, since A4's page and text routes reach staging only
+    with it; check page images on staging's real hosts by hand; the partner walkthrough, after the
+    deploys and the backfill (D-228 item 8); and, after the backfill, propose the frame's removal
+    (Section 7.12, Section 10, the one-iframe guard test, originals only ever downloaded) for the
+    founder's decision (D-228 item 1's answer).
+
+- **Phase 6, the web app's CSP and security headers** (none yet; `docs/REVIEW-PHASE5.md:30`; D-233):
+  when a CSP is added, `img-src` must name the API's origin, or the viewer's page images stop
+  loading. A COEP needs the page route's `Cross-Origin-Resource-Policy: cross-origin`, which it
+  already sends.
 
 - **Step h, the production environment (founder, 2026-11-01; D-226 item 10):**
   - `/docs`, `/redoc` and `/openapi.json` turned off or put behind login. FastAPI's defaults serve
