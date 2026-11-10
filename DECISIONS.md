@@ -5638,7 +5638,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 | Safari 27.0.1 (iPhone) | Show, heavily zoomed in | Whole PO fitted to the screen | Shows |
 
    Text in an image tag showed a broken icon everywhere, as expected. In-page images were same-origin in this test and will be cross-origin in production, so A4 must prove that case.
-10. **Firefox:** not tested, because the founder's Firefox hangs on every site. Real Firefox is deferred to before pilots. Playwright's Firefox covers it in CI from A6; until then CI runs Chromium only.
+10. **Firefox:** not tested, because the founder's Firefox hangs on every site. Real Firefox is deferred to before pilots. Playwright's Firefox covers it in CI from A6; until then CI runs Chromium only. **Amended by D-234 (founder, 2026-11-05):** WebKit runs the review screen's 375 px layout spec in CI from A5; Firefox from A6.
 11. **Conclusions from A0:** page images are shown in the page, with our own fit-to-width, zoom and pan, never inside the frame. Text previews must not depend on the browser's colours or fit, so they are shown in the page as escaped text, never HTML.
 12. **A1 as approved.** A PDF goes to a download panel in the catalog's words (DOC-031), never the frame. A download is a server-side attachment under a sanitized filename, on a link minted at the click. With no signing secret, every route that signs or checks a file link answers SYS-002 rather than a 500, and the API warns at startup. No alert is raised for a missing secret. SYS-002's action is "DocFlow has logged this. If it keeps happening, contact DocFlow support.": it must not imply the problem fixes itself or that anyone has been alerted.
 
@@ -5982,3 +5982,93 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** 2026-11-04 (the plan at 4.5 days, its answers to Q1 to Q7, Q-A and Q-B, and eight changes).
 
 **Related:** D-089, D-091, D-092, D-223, D-228, D-229, D-232; `apps/api/app/routers/review.py`, `packages/core/docflow_core/signed_urls.py`, `apps/web/src/components/review/PageViewer.tsx`, `apps/web/src/components/review/DocumentText.tsx`, `scripts/seed_live_e2e.py`.
+
+---
+
+## D-234 — A5: the review screen at 375 px (founder, 2026-11-05)
+
+**Context:** D-228 item 7's order puts A5 after A4 (D-233; PR #94, merged as `014f6c8`). A5 absorbs the 375 px fix. The plan was approved on 2026-11-05 at 5 days, with the founder's answers ((a) A, (b) B, Q1 to Q5 yes), two changes and two additions. The branch is `phase55/stage5-review-a5`, from `main` at `014f6c8`. The approved plan and its evidence are kept outside the repository, in the founder's `DocFlow-evidence\2026-11-05-a5-plan\` folder.
+
+1. **What broke at 375 px on `014f6c8`** (measured in Chromium at 375 x 812, the API stubbed; `a5-plan-draft.md` section 1):
+   - The page scrolled sideways: 196 px with `/auth/me` unanswered, 426 px for an owner, whose header carries every link.
+   - Below 1280 the document had no height of its own. The frame fell to 152 px, and a 400-line text pushed the order details to 16,158 px.
+   - A swipe over the page image scrolled nothing, because the image took every touch.
+   - A pinch zoomed about the page's top-left corner, as did the zoom buttons.
+   - The actions sat only at the top, about 2,300 px above the checks.
+   - Most controls were under 44 px; the check's tick box was 13 x 13.
+2. **The 196 px: its cause (founder, 2026-11-05).**
+   - **What it was:** the line table's visually hidden labels (`LineTable.tsx:224-226` on `014f6c8`). They are `position: absolute` with no positioned ancestor, so they were placed against the page body, not inside the table's scroll box. The last one ended at x = 571 on a 375 px screen.
+   - **The fix:** `relative` on the table's scroll box below 1280 (`max-xl:relative`), so the labels stay inside it there; at 1280 and up the box isn't positioned (item 11).
+   - **The Console's acting-as review** scrolled 196 px for the same reason. No Console code changed.
+   - **The owner's 426 px** was the same 196 px plus the header (item 3).
+3. **The layout below 1280** (Q3). One copy of every control, moved by CSS, never a second rendering.
+   - **The document:** a box of its own height, `clamp(320px, 60svh, 560px)`, so the page scrolls past it whatever it shows. The page images zoom and pan inside it, the text scrolls inside it, and the frame fills it.
+   - **The actions:** a bar fixed to the bottom of the screen.
+     - Row 1: the hint, or "N checks left · Show next →" while a check is left.
+     - Row 2: Save and Approve, 48 px tall.
+     - Row 3: Reject, then Approve & export with its format, 44 px tall.
+     - Reject is never beside Approve. A decided order shows Reopen across row 2.
+     - The bar steps aside while a text field has the focus, so it never rides on a phone's on-screen keyboard.
+   - **The app header** (Q1): the tenant name and Sign out, then the links in a row of their own that scrolls sideways inside itself. Below 640 the header isn't sticky.
+   - **Below 640:** each line is a card (item 5), the ⌘ hints are hidden, and sections are padded `p-3`.
+   - **At 1280 and up,** compared with `014f6c8` in screenshots at 1280, 1440 and 1920, the review screen's layout is unchanged; item 11 has the detail.
+   - **Added during the build, after the plan:** the box's 320 px floor and the bar stepping aside while a text field has the focus.
+4. **Touch targets** (the founder's minimums, 2026-11-05):
+   - **Save and Approve:** 48 px (Material's 48 dp), because a mis-tap there is the costly one.
+   - **Every other control a reviewer taps:** 44 x 44 (WCAG 2.2 SC 2.5.5 and Apple's HIG). That covers the pager, zoom, fit, the tick box's hit area (20 px drawn), the line's flag and arrow, "This one", "Change", the catalog search and its button, "Show …", Download, the header's links and Sign out.
+   - **Text fields below 640:** 44 px tall with 16 px text, since iOS Safari zooms into smaller text.
+5. **The line cards below 640: the same table, restyled.**
+   - One `<table>`, one row per line and one input per value, so every id and test id exists once.
+   - CSS makes each row a two-column grid and shows each input's label.
+   - The table, row groups, rows, column headers and cells carry explicit `role` attributes (founder's addition), so the table stays a table for assistive technology.
+   - Each label's accessible name is unchanged at every width ("quantity for line 1"); a card shows the column's word ("Qty").
+6. **Zoom keeps its centre** (the A4 defect; Q2).
+   - **A pinch** keeps the page point under its centre there, following the fingers as they move. **The buttons** zoom about the middle of the box, and Fit to width keeps the middle's height.
+   - **When the scroll is set:** after the new width is laid out (`useLayoutEffect`), so the browser doesn't clamp it to the old size. The arithmetic is `zoomAnchor.ts`.
+   - **At fit to width** a finger is the browser's (`touch-action: pan-y`): a swipe scrolls as in any scroll box on any page. At fit the page image is a little taller than its box, so the first swipe ends the box's scroll and the next moves the page.
+   - **Zoomed in,** one finger pans the page image (`touch-action: none`).
+7. **Fresh links before a page turn near expiry** ((b) B; founder, 2026-11-05).
+   - **The rule:** a move to another page more than 240 s after the links arrived (lifetime 300 s minus a 60 s margin) asks for fresh links first, and the page loads on them.
+   - **The clock:** the browser's own monotonic one (`performance.now()`). The answer carries no server time, so `pages_expire_at` isn't used.
+   - **Why the margin is 60 s:** it covers the answer's own travel time and a slow load: a poor-scan page is about 815 KB (D-228 item 2), about 16 s at 400 kbit/s, and the same again in headroom.
+   - **No timer:** nothing is asked for unless the reviewer turns a page. A failed re-mint loads the page on the links it has. Neither spends the visit's one re-mint and one retry (D-233 item 6).
+   - **The lifetime constant:** `PAGE_TOKEN_LIFETIME_SECONDS = 300` in `PageViewer.tsx`, equal to `signed_urls.DEFAULT_TTL_SECONDS`. `packages/core/tests/test_ci_guards.py` fails if they differ.
+8. **Safe areas** (Q4):
+   - `viewport` exports `viewportFit: 'cover'`; Next keeps its defaults, and the tag reads `width=device-width, initial-scale=1, viewport-fit=cover`.
+   - The body has left and right `env(safe-area-inset-*)` padding, so no screen slides under the notch in landscape.
+   - The bottom bar carries its own left, right and bottom insets.
+   - No top padding: in a Safari tab the top inset is 0.
+9. **WebKit in CI** ((a) A; amends D-228 item 10).
+   - The `web` job installs `npx playwright install --with-deps chromium webkit`; `--with-deps` installs each browser's Linux system libraries.
+   - The `webkit-375` project runs `e2e/review-375.spec.ts` only. The gestures (`e2e/review-375-touch.spec.ts`) are Chromium's alone, because their touches go through CDP; no test is skipped.
+   - Firefox stays at A6. Neither Linux nor Windows WebKit is iOS Safari, so a real iPhone checks the screen at A6.
+10. **Tests.**
+    - **Stubbed e2e** (`e2e/review-375.spec.ts`, 26 tests in each of Chromium and WebKit):
+      - the page doesn't scroll sideways at 375 or 768, and at 1280 in a desktop browser, for an owner and for `/auth/me` unanswered, on the pages, text, frame and panel views;
+      - the document's box height;
+      - Save and Approve on screen wherever the page is scrolled, and the bar's next check;
+      - every target's size, and text fields at 16 px;
+      - the cards and their roles;
+      - the zoom buttons' centre;
+      - the Console's acting-as review at 375.
+    - **Touch e2e** (`e2e/review-375-touch.spec.ts`, 3 tests, Chromium): the swipe, the pinch's centre, and the drag once zoomed. Every touch is checked to land on the page image, above the bar, with the visual viewport unmoved and unzoomed.
+    - **Changed:** `e2e/review.spec.ts`'s 80-character check now asserts no sideways scroll at 375 too.
+    - **Vitest:** the zoom arithmetic; `touch-action` by zoom; the re-mint on a turn after 240 s, none within it, and a failed one; one input and one label per value, with the table's roles.
+    - **Core:** the lifetime guard.
+    - **The red runs, before any fix** (the founder's change: the tests and the fix in one commit, none committed alone):
+      - **`red-run-on-main.txt`:** `37 failed, 28 passed (53.9s)`. The pinch's centre moved 150 px against a limit of 2; the swipe scrolled 0 px against 100; and the 196 px scroll.
+      - **`red-run-on-main-touch-v2.txt`:** the touch spec as changed afterwards (touches kept above the bar, two swipes), `2 failed, 1 passed`. On main a page wider than the screen moves the visual viewport by itself, so in that run some touches land elsewhere. The first run's 150 px is the clean proof of the pinch defect.
+11. **At 1280 and up** (founder, 2026-11-05): the line table's scroll box isn't positioned (`max-xl:relative`), so the desktop is pixel-identical to `014f6c8`, and the 1280 check guards it: the page doesn't scroll sideways at 1280 in either browser (item 10). A5's screenshots of the pages and text views at 1280, 1440 and 1920 differ from `014f6c8`'s in 0 pixels. Zoomed screenshots differ in the page image, by the buttons' new centre (item 6).
+12. **No staging suites** (D-223 item 5; D-227 item 7).
+    - **What changed:** `apps/web`, `ci.yml`'s install line, and one core test that reads two source files.
+    - **Why staging can't show anything new:** the core, worker and API suites don't load the web app, and no database, Storage, worker or API path changes, so staging can't change any result in a way CI can't show.
+    - **Nothing deploys in A5.**
+13. **For A6's iPhone pass** (founder):
+    - the safe areas in portrait and landscape, on the review screen and one other screen;
+    - focus zoom on the text fields;
+    - swipe and pinch on real iOS Safari;
+    - the bottom bar with the on-screen keyboard open.
+
+**Founder approval:** 2026-11-05 (the plan at 5 days, (a) A, (b) B, Q1 to Q5, the two changes and two additions, `relative` on the table's scroll box below 1280 only, `max-xl:relative`).
+
+**Related:** D-166, D-207 (item 12), D-223, D-227, D-228, D-233; `apps/web/src/components/review/ReviewDocumentScreen.tsx`, `PageViewer.tsx`, `zoomAnchor.ts`, `LineTable.tsx`, `apps/web/src/components/AppHeader.tsx`, `apps/web/src/app/layout.tsx`, `apps/web/e2e/review-375.spec.ts`, `apps/web/e2e/review-375-touch.spec.ts`, `apps/web/playwright.config.ts`.

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { PageViewer } from "./PageViewer";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PAGE_TOKEN_LIFETIME_SECONDS, PageViewer, REMINT_MARGIN_SECONDS } from "./PageViewer";
 import { ReviewApiError, originalDocumentUrl, type DocumentPage, type OriginalDocument } from "@/lib/review";
 
 vi.mock("@/lib/review", async (importOriginal) => ({
@@ -208,6 +208,17 @@ describe("the page viewer (D-233)", () => {
     expect(minted).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves a swipe to the page at fit to width, and takes it to pan once zoomed in (D-234)", async () => {
+    viewer();
+    const scroller = () => screen.getByTestId("page-scroller");
+
+    expect(scroller().style.touchAction).toBe("pan-y");
+    await userEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(scroller().style.touchAction).toBe("none");
+    await userEvent.click(screen.getByRole("button", { name: "Fit to width" }));
+    expect(scroller().style.touchAction).toBe("pan-y");
+  });
+
   it("uses the new token for later pages once a re-mint succeeds", async () => {
     minted.mockResolvedValue(remint("second"));
     viewer();
@@ -218,5 +229,67 @@ describe("the page viewer (D-233)", () => {
 
     expect(image().src).toMatch(/pages\/1\?token=second$/);
     expect(minted).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("fresh links before a page turn near expiry (D-234)", () => {
+  // The browser's own clock, moved by hand: the links arrive at `now`.
+  let now = 0;
+  beforeEach(() => {
+    minted.mockReset();
+    now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("waits for 300 - 60 = 240 seconds, from the constants", () => {
+    expect(PAGE_TOKEN_LIFETIME_SECONDS - REMINT_MARGIN_SECONDS).toBe(240);
+  });
+
+  it("asks for fresh links before loading a page turned to after 240 s, and that visit keeps its retry", async () => {
+    minted.mockResolvedValueOnce(remint("second")).mockResolvedValueOnce(remint("third"));
+    viewer();
+
+    now += 241_000;
+    fireEvent.click(screen.getByTestId("page-next"));
+
+    // Loaded on the fresh links, never on the old ones.
+    await waitFor(() => expect(image().src).toMatch(/pages\/1\?token=second$/));
+    expect(minted).toHaveBeenCalledTimes(1);
+
+    // The visit still has its own one re-mint and one retry.
+    fireEvent.error(image());
+    await waitFor(() => expect(image().src).toMatch(/pages\/1\?token=third$/));
+    expect(minted).toHaveBeenCalledTimes(2);
+    fireEvent.error(image());
+    expect(await screen.findByTestId("page-unavailable")).toHaveTextContent("DOC-032");
+    expect(minted).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks for nothing on a turn within 240 s", () => {
+    viewer();
+
+    now += 239_000;
+    fireEvent.click(screen.getByTestId("page-next"));
+
+    expect(image().src).toMatch(/pages\/1\?token=first$/);
+    expect(minted).not.toHaveBeenCalled();
+  });
+
+  it("loads the page on the links it has when the fresh ones can't be had, with its retry untouched", async () => {
+    minted
+      .mockRejectedValueOnce(new ReviewApiError(SYS_002, 503))
+      .mockResolvedValueOnce(remint("second"));
+    viewer();
+
+    now += 241_000;
+    fireEvent.click(screen.getByTestId("page-next"));
+    await waitFor(() => expect(image().src).toMatch(/pages\/1\?token=first$/));
+    expect(minted).toHaveBeenCalledTimes(1);
+
+    fireEvent.error(image());
+    await waitFor(() => expect(image().src).toMatch(/pages\/1\?token=second$/));
+    expect(minted).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId("page-unavailable")).toBeNull();
   });
 });

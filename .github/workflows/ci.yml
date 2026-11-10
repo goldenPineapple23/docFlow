@@ -81,9 +81,11 @@ jobs:
         run: npm test
       # The review flow in a real browser (CLAUDE.md Section 6, Phase 3).
       # The API is stubbed at the network boundary -- its own behaviour is
-      # proven against real Postgres in the api job below.
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
+      # proven against real Postgres in the api job below. WebKit runs the
+      # review screen's 375 px layout spec only (D-234); --with-deps
+      # installs each browser's Linux system libraries.
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
       - name: End-to-end tests (playwright)
         run: npm run test:e2e
       # D-219: a high or critical advisory in a runtime dependency blocks

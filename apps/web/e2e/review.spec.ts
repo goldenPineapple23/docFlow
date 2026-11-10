@@ -208,14 +208,12 @@ test("an email attachment's 80-character name fits its check, and the check gate
     await expect(check).not.toContainText("filename:");
     const overflow = await check.evaluate((el) => el.scrollWidth - el.clientWidth);
     expect(overflow, `the check overflows its box at ${width}px`).toBeLessThanOrEqual(0);
-    if (width >= 768) {
-      // At phone width the review screen scrolls sideways with no check on it
-      // at all (196px, measured 2026-10-18): not this check's doing.
-      const pageOverflow = await page.evaluate(
-        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      );
-      expect(pageOverflow, `the page scrolls sideways at ${width}px`).toBeLessThanOrEqual(0);
-    }
+    // At every width, phone included: the 196 px the header pushed the page
+    // sideways at 375 (measured 2026-10-18) is fixed in A5 (D-234).
+    const pageOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(pageOverflow, `the page scrolls sideways at ${width}px`).toBeLessThanOrEqual(0);
   }
 
   await expect(page.getByTestId("approve-button")).toBeDisabled();

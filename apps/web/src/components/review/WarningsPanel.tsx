@@ -104,7 +104,7 @@ export function WarningsPanel({
     return (
       <section
         aria-labelledby="warnings-heading"
-        className="space-y-3 rounded-xl border border-amber-400 bg-amber-100/80 p-5"
+        className="space-y-3 rounded-xl border border-amber-400 bg-amber-100/80 p-3 sm:p-5"
       >
         <h2 id="warnings-heading" className="text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-900">
           Checks
@@ -119,7 +119,7 @@ export function WarningsPanel({
   return (
     <section
       aria-labelledby="warnings-heading"
-      className="space-y-3 rounded-xl border border-amber-400 bg-amber-100/80 p-5"
+      className="space-y-3 rounded-xl border border-amber-400 bg-amber-100/80 p-3 sm:p-5"
     >
       <div>
         <h2 id="warnings-heading" className="text-[11px] font-semibold uppercase tracking-[0.08em] text-amber-900">
@@ -144,22 +144,31 @@ export function WarningsPanel({
             id={warningRowId(warning.id)}
             data-testid={`warning-${warning.code}`}
             className={[
-              "rounded-lg border bg-white p-4 text-sm",
+              "rounded-lg border bg-white p-4 text-sm max-sm:p-3",
               warning.severity === "high" || warning.severity === "critical"
                 ? "border-red-200"
                 : "border-amber-200",
             ].join(" ")}
           >
-            <div className="flex items-start gap-2">
-              <input
-                id={`ack-${warning.id}`}
-                type="checkbox"
-                disabled={disabled}
-                checked={acknowledged.has(warning.id)}
-                onChange={(e) => onToggle(warning.id, e.target.checked)}
-                data-testid={`ack-${warning.id}`}
-                className="mt-1"
-              />
+            <div className="flex items-start gap-2 max-sm:flex-wrap">
+              {/* Below 640 the tick box gets a 44 px area to tap (D-234); from
+                  640 up this wrapper has no box of its own and nothing moves.
+                  It names the same box as the label beside it. */}
+              <label
+                htmlFor={`ack-${warning.id}`}
+                data-testid={`ack-hit-${warning.id}`}
+                className="-m-2.5 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center sm:contents"
+              >
+                <input
+                  id={`ack-${warning.id}`}
+                  type="checkbox"
+                  disabled={disabled}
+                  checked={acknowledged.has(warning.id)}
+                  onChange={(e) => onToggle(warning.id, e.target.checked)}
+                  data-testid={`ack-${warning.id}`}
+                  className="mt-1 max-sm:mt-0 max-sm:h-5 max-sm:w-5"
+                />
+              </label>
               {/* min-w-0 and overflow-wrap: a check's message can carry an
                   80-character attachment name with no space to break at
                   (VAL-017, D-207); it wraps inside the box at any width. */}
@@ -196,7 +205,7 @@ export function WarningsPanel({
                 <button
                   type="button"
                   onClick={() => goTo(warning)}
-                  className="shrink-0 text-xs font-medium text-blue-700 hover:underline"
+                  className="shrink-0 text-xs font-medium text-blue-700 hover:underline max-sm:min-h-11 max-sm:min-w-11 max-sm:basis-full max-sm:pl-8 max-sm:text-left max-sm:text-sm"
                 >
                   Show {fieldLabel(warning) ? `“${fieldLabel(warning)}”` : "it"} →
                 </button>

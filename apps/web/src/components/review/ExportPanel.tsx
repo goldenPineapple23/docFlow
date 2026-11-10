@@ -166,7 +166,7 @@ export function ExportPanel({ state, exportable }: { state: ExportState; exporta
     <section
       aria-labelledby="export-heading"
       data-testid="export-panel"
-      className="space-y-3 rounded-xl border border-gray-200 p-5"
+      className="space-y-3 rounded-xl border border-gray-200 p-3 sm:p-5"
     >
       <h2
         id="export-heading"
@@ -189,7 +189,7 @@ export function ExportPanel({ state, exportable }: { state: ExportState; exporta
                 onClick={() => void run(format)}
                 disabled={working !== null}
                 data-testid={`export-${format}`}
-                className="rounded-full bg-slate-800 px-3.5 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                className="rounded-full bg-slate-800 px-3.5 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300 max-sm:min-h-11"
               >
                 {working === format ? "Preparing…" : label}
               </button>
@@ -232,7 +232,7 @@ export function ExportPanel({ state, exportable }: { state: ExportState; exporta
                 <button
                   type="button"
                   onClick={() => void download(row.id)}
-                  className="text-blue-700 hover:underline"
+                  className="text-blue-700 hover:underline max-sm:min-h-11"
                 >
                   Download <span className="text-gray-400">({formatBytes(row.byte_size)})</span>
                 </button>
