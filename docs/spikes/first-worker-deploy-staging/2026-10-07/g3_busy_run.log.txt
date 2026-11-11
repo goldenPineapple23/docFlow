@@ -26,47 +26,47 @@ At line:1 char:780
     + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError
  
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP 
 Engine\apps\api\.venv\Lib\site-packages\httpx\_transports\default.py", line 101, in map_httpcore_exceptions
     yield
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP 
 Engine\apps\api\.venv\Lib\site-packages\httpx\_transports\default.py", line 250, in handle_request
     resp = self._pool.handle_request(req)
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP 
 Engine\apps\api\.venv\Lib\site-packages\httpcore\_sync\connection_pool.py", line 256, in handle_request
     raise exc from None
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP 
 Engine\apps\api\.venv\Lib\site-packages\httpcore\_sync\connection_pool.py", line 236, in handle_request
     response = connection.handle_request(
         pool_request.request
     )
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP 
 Engine\apps\api\.venv\Lib\site-packages\httpcore\_sync\connection.py", line 103, in handle_request
     return self._connection.handle_request(request)
            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP 
 Engine\apps\api\.venv\Lib\site-packages\httpcore\_sync\http11.py", line 136, in handle_request
     raise exc
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP 
 Engine\apps\api\.venv\Lib\site-packages\httpcore\_sync\http11.py", line 106, in handle_request
     ) = self._receive_response_headers(**kwargs)
         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP 
 Engine\apps\api\.venv\Lib\site-packages\httpcore\_sync\http11.py", line 177, in _receive_response_headers
     event = self._receive_event(timeout=timeout)
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP 
 Engine\apps\api\.venv\Lib\site-packages\httpcore\_sync\http11.py", line 217, in _receive_event
     data = self._network_stream.read(
         self.READ_NUM_BYTES, timeout=timeout
     )
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP 
 Engine\apps\api\.venv\Lib\site-packages\httpcore\_backends\sync.py", line 126, in read
     with map_exceptions(exc_map):
          ~~~~~~~~~~~~~~^^^^^^^^^
   File "C:\Python313\Lib\contextlib.py", line 162, in __exit__
     self.gen.throw(value)
     ~~~~~~~~~~~~~~^^^^^^^
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP 
 Engine\apps\api\.venv\Lib\site-packages\httpcore\_exceptions.py", line 14, in map_exceptions
     raise to_exc(exc) from exc
 httpcore.ReadError: [WinError 10054] An existing connection was forcibly closed by the remote host
@@ -74,23 +74,23 @@ httpcore.ReadError: [WinError 10054] An existing connection was forcibly closed 
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
-  File "C:\Users\NK\AppData\Local\Temp\claude\c--Users-NK-Agentic-Workflow-Port-DocFlow-IDP-Engine\59c2f3cb-4e4a-4560-9
+  File "<home>\AppData\Local\Temp\claude\c--Users-<user>-Agentic-Workflow-Port-DocFlow-IDP-Engine\59c2f3cb-4e4a-4560-9
 d20-90a2dafde4f2\scratchpad\g3_busy_hour.py", line 224, in <module>
     run(sys.argv[2])
     ~~~^^^^^^^^^^^^^
-  File "C:\Users\NK\AppData\Local\Temp\claude\c--Users-NK-Agentic-Workflow-Port-DocFlow-IDP-Engine\59c2f3cb-4e4a-4560-9
+  File "<home>\AppData\Local\Temp\claude\c--Users-<user>-Agentic-Workflow-Port-DocFlow-IDP-Engine\59c2f3cb-4e4a-4560-9
 d20-90a2dafde4f2\scratchpad\g3_busy_hour.py", line 168, in run
     up = httpx.post(f"{API}/documents/upload", headers=bearer(),
                     files={"file": (fname, text.encode(), "text/plain")},
                     data={"batch_size": "1"}, timeout=120)
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_api.py", line 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_api.py", line 
 304, in post
     return request(
         "POST",
     ...<13 lines>...
         trust_env=trust_env,
     )
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_api.py", line 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_api.py", line 
 109, in request
     return client.request(
            ~~~~~~~~~~~~~~^
@@ -101,38 +101,38 @@ d20-90a2dafde4f2\scratchpad\g3_busy_hour.py", line 168, in run
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     )
     ^
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_client.py", line 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_client.py", line 
 825, in request
     return self.send(request, auth=auth, follow_redirects=follow_redirects)
            ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_client.py", line 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_client.py", line 
 914, in send
     response = self._send_handling_auth(
         request,
     ...<2 lines>...
         history=[],
     )
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_client.py", line 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_client.py", line 
 942, in _send_handling_auth
     response = self._send_handling_redirects(
         request,
         follow_redirects=follow_redirects,
         history=history,
     )
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_client.py", line 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_client.py", line 
 979, in _send_handling_redirects
     response = self._send_single_request(request)
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_client.py", line 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP Engine\apps\api\.venv\Lib\site-packages\httpx\_client.py", line 
 1014, in _send_single_request
     response = transport.handle_request(request)
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP 
 Engine\apps\api\.venv\Lib\site-packages\httpx\_transports\default.py", line 249, in handle_request
     with map_httpcore_exceptions():
          ~~~~~~~~~~~~~~~~~~~~~~~^^
   File "C:\Python313\Lib\contextlib.py", line 162, in __exit__
     self.gen.throw(value)
     ~~~~~~~~~~~~~~^^^^^^^
-  File "C:\Users\NK\Agentic Workflow Port\DocFlow\IDP 
+  File "<home>\Agentic Workflow Port\DocFlow\IDP 
 Engine\apps\api\.venv\Lib\site-packages\httpx\_transports\default.py", line 118, in map_httpcore_exceptions
     raise mapped_exc(message) from exc
 httpx.ReadError: [WinError 10054] An existing connection was forcibly closed by the remote host

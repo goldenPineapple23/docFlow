@@ -479,7 +479,7 @@ tests), then the rollout in item 11.
 - **3b MERGED 2026-09-30 (PR #31, main `5810a54`).** PR run green: api 571,
   core 679, worker 141, web 73, web-live 3. Left to the founder: dropping
   `backup_3b` on staging (RUNBOOK 1.3), and deleting the temporary venvs in
-  `C:/Users/NK/AppData/Local/Temp/dfv`. The local `storage/` folder and its
+  `<home>/AppData/Local/Temp/dfv`. The local `storage/` folder and its
   zip are kept.
 - **Stage 5 (founder, 2026-09-30): the API suite's test clean-up never
   deletes its tenants' files.** Each full staging API run leaves about 46
