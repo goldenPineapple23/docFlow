@@ -87,6 +87,9 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
   // The one-step confirmation before a decided order goes back to review.
   const [reopening, setReopening] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
+  // A text field has the focus. Below 1280 the bottom bar then steps aside,
+  // so it never rides on top of a phone's on-screen keyboard (D-234).
+  const [typing, setTyping] = useState(false);
 
   const dirty = Object.keys(headerEdits).length > 0 || Object.keys(lineEdits).length > 0;
   // The format "Approve & export" produces. Only rendered after the order
@@ -275,6 +278,20 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
     if (await approve()) await exportState.run(exportFormat);
   }, [approve, exportState, exportFormat]);
 
+  useEffect(() => {
+    const isTextField = (target: EventTarget | null) =>
+      target instanceof HTMLTextAreaElement ||
+      (target instanceof HTMLInputElement && ["text", "search", ""].includes(target.type));
+    const onFocusIn = (e: FocusEvent) => setTyping(isTextField(e.target));
+    const onFocusOut = () => setTyping(false);
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
+    };
+  }, []);
+
   // Keyboard shortcuts. Every one has a visible button too.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -315,10 +332,16 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
   return (
     <>
     <ReviewChrome />
-    <main className="mx-auto max-w-[110rem] p-4">
+    {/* Below 1280 the actions sit in a bar along the bottom of the screen
+        (D-234), so the page keeps room for it under the trail. */}
+    <main className="mx-auto max-w-[110rem] p-4 max-xl:pb-[calc(11rem+env(safe-area-inset-bottom))]">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <Link href={back.href} data-testid="review-back" className="text-sm text-blue-700 underline">
+          <Link
+            href={back.href}
+            data-testid="review-back"
+            className="text-sm text-blue-700 underline max-xl:inline-flex max-xl:min-h-11 max-xl:min-w-11 max-xl:items-center"
+          >
             {back.label}
           </Link>
           <h1 className="text-lg font-semibold">
@@ -330,15 +353,30 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
           </p>
         </div>
 
-        <div className="flex flex-col items-end gap-1">
-          <div className="flex flex-wrap items-center gap-2">
+        {/*
+          The actions. Below 1280 the same controls, moved by CSS, are a bar
+          fixed to the bottom of the screen: Save and Approve in thumb reach,
+          Reject and Approve & export a row up, and never Reject beside
+          Approve (D-234). One copy of each control, never two.
+        */}
+        <div
+          data-testid="action-bar"
+          className={[
+            "flex flex-col items-end gap-1",
+            "max-xl:fixed max-xl:inset-x-0 max-xl:bottom-0 max-xl:z-30 max-xl:items-stretch max-xl:gap-2",
+            "max-xl:border-t max-xl:border-gray-200 max-xl:bg-white/95 max-xl:pt-2 max-xl:shadow-[0_-2px_8px_rgba(0,0,0,0.06)] max-xl:backdrop-blur",
+            "max-xl:pb-[max(0.5rem,env(safe-area-inset-bottom))] max-xl:pl-[max(1rem,env(safe-area-inset-left))] max-xl:pr-[max(1rem,env(safe-area-inset-right))]",
+            typing ? "max-xl:hidden" : "",
+          ].join(" ")}
+        >
+          <div className="flex flex-wrap items-center gap-2 max-xl:grid max-xl:grid-cols-6">
             {canReopen ? (
               <button
                 type="button"
                 onClick={() => setReopening((r) => !r)}
                 disabled={busy}
                 data-testid="reopen-button"
-                className="rounded border border-slate-400 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                className="rounded border border-slate-400 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50 max-xl:order-1 max-xl:col-span-6 max-xl:min-h-12"
               >
                 Reopen for review
               </button>
@@ -351,15 +389,15 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
               title={
                 !dirty ? "Nothing to save yet — this saves changes you make to the values" : undefined
               }
-              className="rounded border border-gray-300 px-3 py-1.5 text-sm disabled:text-gray-400"
+              className="rounded border border-gray-300 px-3 py-1.5 text-sm disabled:text-gray-400 max-xl:order-2 max-xl:col-span-3 max-xl:min-h-12 max-xl:bg-white max-xl:font-medium"
             >
-              {dirty ? "Save changes" : "Save"} <kbd className="text-xs text-gray-500">⌘S</kbd>
+              {dirty ? "Save changes" : "Save"} <kbd className="text-xs text-gray-500 max-sm:hidden">⌘S</kbd>
             </button>
             <button
               type="button"
               onClick={() => setRejecting((r) => !r)}
               disabled={busy || readOnly}
-              className="rounded border border-gray-300 px-3 py-1.5 text-sm disabled:text-gray-400"
+              className="rounded border border-gray-300 px-3 py-1.5 text-sm disabled:text-gray-400 max-xl:order-4 max-xl:col-span-2 max-xl:min-h-11 max-xl:bg-white"
             >
               Reject
             </button>
@@ -368,17 +406,17 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
               onClick={() => void approve()}
               disabled={busy || readOnly || !everyWarningAcknowledged}
               data-testid="approve-button"
-              className="rounded bg-green-700 px-3 py-1.5 text-sm font-medium text-white disabled:bg-gray-300"
+              className="rounded bg-green-700 px-3 py-1.5 text-sm font-medium text-white disabled:bg-gray-300 max-xl:order-3 max-xl:col-span-3 max-xl:min-h-12"
             >
-              Approve <kbd className="text-xs opacity-80">⌘↵</kbd>
+              Approve <kbd className="text-xs opacity-80 max-sm:hidden">⌘↵</kbd>
             </button>
-            <span className="inline-flex items-stretch overflow-hidden rounded bg-green-800 text-sm font-medium text-white has-[button:disabled]:bg-gray-300">
+            <span className="inline-flex items-stretch overflow-hidden rounded bg-green-800 text-sm font-medium text-white has-[button:disabled]:bg-gray-300 max-xl:order-5 max-xl:col-span-4 max-xl:min-h-11">
               <button
                 type="button"
                 onClick={() => void approveAndExport()}
                 disabled={busy || readOnly || !everyWarningAcknowledged || exportState.working !== null}
                 data-testid="approve-export-button"
-                className="px-3 py-1.5 disabled:text-white"
+                className="px-3 py-1.5 disabled:text-white max-xl:min-h-11 max-xl:flex-1 max-xl:whitespace-nowrap"
               >
                 Approve &amp; export
               </button>
@@ -395,7 +433,7 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
                   writePreferredFormat(next);
                 }}
                 disabled={busy || readOnly}
-                className="border-l border-white/30 bg-transparent px-1.5 text-sm text-white disabled:text-white [&>option]:text-gray-900"
+                className="border-l border-white/30 bg-transparent px-1.5 text-sm text-white disabled:text-white max-xl:min-h-11 max-xl:min-w-11 max-sm:text-base [&>option]:text-gray-900"
               >
                 {FORMATS.map(({ format, label }) => (
                   <option key={format} value={format}>
@@ -412,7 +450,14 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
             nothing happen -- Save was disabled because ticking a check is
             not an edit, and nothing on screen said so.
           */}
-          <p data-testid="action-hint" className="text-right text-xs text-gray-600">
+          {/* Below 1280 the bar shows this, or the way to the next check when there is one. */}
+          <p
+            data-testid="action-hint"
+            className={[
+              "text-right text-xs text-gray-600 max-xl:order-first max-xl:text-left",
+              !readOnly && blockingWarnings.length > 0 ? "max-xl:hidden" : "",
+            ].join(" ")}
+          >
             {actionHint({
               readOnly,
               status: detail.document.status,
@@ -422,6 +467,17 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
               canReopen,
             })}
           </p>
+          {/* Below 1280, the way to the first check Approve is waiting on, in thumb reach. */}
+          {!readOnly && blockingWarnings.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => focusWarning(blockingWarnings[0].id)}
+              data-testid="action-bar-next-check"
+              className="order-first min-h-11 rounded border border-amber-400 bg-amber-100 px-3 text-left text-sm font-medium text-amber-950 xl:hidden"
+            >
+              {blockingWarnings.length} {blockingWarnings.length === 1 ? "check" : "checks"} left · Show next →
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -466,7 +522,7 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
               onClick={() => void reopen()}
               disabled={busy}
               data-testid="reopen-confirm-button"
-              className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 max-xl:min-h-11"
             >
               Reopen
             </button>
@@ -474,7 +530,7 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
               type="button"
               onClick={() => setReopening(false)}
               disabled={busy}
-              className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700"
+              className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 max-xl:min-h-11"
             >
               Cancel
             </button>
@@ -532,7 +588,7 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
             type="button"
             onClick={() => focusWarning(blockingWarnings[0].id)}
             data-testid="approve-blocked-show"
-            className="font-medium text-blue-800 underline"
+            className="font-medium text-blue-800 underline max-xl:min-h-11 max-xl:px-1"
           >
             Show it →
           </button>
@@ -566,12 +622,12 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
             onChange={(e) => setRejectNote(e.target.value)}
             required
             data-testid="reject-note"
-            className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+            className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm max-xl:min-h-11 max-sm:text-base"
           />
           <button
             type="submit"
             disabled={busy || !rejectNote.trim()}
-            className="mt-2 rounded border border-gray-300 px-3 py-1 text-sm disabled:text-gray-400"
+            className="mt-2 rounded border border-gray-300 px-3 py-1 text-sm disabled:text-gray-400 max-xl:min-h-11"
           >
             Confirm rejection
           </button>
@@ -581,9 +637,11 @@ export function ReviewDocumentScreen({ id }: { id: string }) {
       {/* Side by side only where both halves have room (xl, 1280px); below
           that the original stacks above the fields, each at full width. The
           fields get the larger share: the line table needs it more than the
-          viewer, which scrolls and zooms on its own. */}
+          viewer, which scrolls and zooms on its own. Stacked, the document
+          has a box of its own height, min(60svh, 560px) and at least 320, so
+          the page scrolls past it whatever it shows (D-234). */}
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[5fr_7fr]">
-        <div className="xl:sticky xl:top-4 xl:h-[calc(100vh-6rem)]">
+        <div className="max-xl:h-[clamp(320px,60svh,560px)] xl:sticky xl:top-4 xl:h-[calc(100vh-6rem)]">
           <DocumentViewer key={id} documentId={id} filename={detail.document.original_filename} />
         </div>
 
@@ -766,7 +824,7 @@ function BannerView({ banner }: { banner: Banner }) {
           type="button"
           onClick={() => focusWarning(banner.jump!.warningId)}
           data-testid="banner-jump"
-          className="mt-2 inline-block font-medium text-blue-800 underline"
+          className="mt-2 inline-block font-medium text-blue-800 underline max-xl:min-h-11"
         >
           {banner.jump.label}
         </button>

@@ -62,7 +62,7 @@ export function HeaderFields({
       // began; a hairline border alone was not enough, so the three kinds of
       // information are now three surfaces -- slate for the order, indigo
       // for its lines, amber for the things needing attention.
-      className="space-y-4 rounded-xl border border-violet-200 bg-violet-50 p-5"
+      className="space-y-4 rounded-xl border border-violet-200 bg-violet-50 p-3 sm:p-5"
     >
       <div className="space-y-0.5">
         <h2
@@ -125,7 +125,9 @@ export function HeaderFields({
                 data-testid={`header-input-${name}`}
                 data-dirty={name in edits ? "true" : "false"}
                 className={[
-                  "mt-1.5 w-full rounded-md border px-2.5 py-1.5 text-sm transition-colors",
+                  // 44 px and 16 px text below 640: iOS Safari zooms the page into
+                  // a field whose text is smaller (D-234).
+                  "mt-1.5 w-full rounded-md border px-2.5 py-1.5 text-sm transition-colors max-sm:min-h-11 max-sm:text-base",
                   "focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100",
                   "disabled:bg-gray-50 disabled:text-gray-500",
                   low ? "border-amber-300 bg-amber-50" : "border-slate-300 bg-white",

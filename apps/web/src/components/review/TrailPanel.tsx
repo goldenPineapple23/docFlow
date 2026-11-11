@@ -26,7 +26,7 @@ export function TrailPanel({ trail }: { trail: TrailEntry[] }) {
   return (
     <section
       aria-labelledby="trail-heading"
-      className="space-y-3 rounded-xl border border-gray-200 p-5"
+      className="space-y-3 rounded-xl border border-gray-200 p-3 sm:p-5"
     >
       <h2
         id="trail-heading"

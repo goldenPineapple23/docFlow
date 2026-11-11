@@ -266,6 +266,38 @@ describe("line items (Section 7.6)", () => {
     expect(screen.getByText(/no catalog match/i)).toBeInTheDocument();
   });
 
+  it("labels every value once, for the card below 640, with the same name a screen reader reads at every width (D-234)", () => {
+    render(
+      <LineTable
+        lines={[line]}
+        edits={{}}
+        warnings={[]}
+        disabled={false}
+        onChange={() => {}}
+        onConfirmMapping={async () => {}}
+      />,
+    );
+    const cases: Array<[string, string, string]> = [
+      ["sku", "SKU", "sku for line 1"],
+      ["description", "Description", "description for line 1"],
+      ["quantity", "Qty", "quantity for line 1"],
+      ["unit", "Unit", "unit for line 1"],
+      ["unit_price", "Unit price", "unit price for line 1"],
+      ["line_total", "Line total", "line total for line 1"],
+    ];
+    for (const [field, shown, name] of cases) {
+      const input = screen.getByTestId(`line-1-${field}`);
+      // One input per value, and its one label carries the card's word and the name.
+      expect(screen.getAllByRole("textbox", { name })).toEqual([input]);
+      const label = document.querySelector(`label[for="${input.id}"]`)!;
+      expect(label.querySelector('[aria-hidden="true"]')).toHaveTextContent(shown);
+    }
+    // The table keeps its roles when it is restyled as cards.
+    expect(screen.getByRole("table")).toHaveAttribute("role", "table");
+    expect(screen.getByTestId("line-1")).toHaveAttribute("role", "row");
+    expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toContain("Qty");
+  });
+
   it("keeps quantity as a string at its stored scale", () => {
     render(
       <LineTable

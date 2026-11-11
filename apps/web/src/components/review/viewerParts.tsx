@@ -48,7 +48,7 @@ export function DownloadOriginal({ documentId, filename }: { documentId: string;
         onClick={download}
         disabled={working}
         data-testid="download-original"
-        className="mt-3 inline-block rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-60"
+        className="mt-3 inline-block rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-60 max-xl:min-h-11"
       >
         Download {filename}
       </button>
