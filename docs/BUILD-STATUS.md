@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-11, with A5 merged and the demo plan recorded:** Phase 5.5,
+**Status, as of 2026-11-11, with A6's code built:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -153,7 +153,14 @@ Vercel Pro with its CSP and security headers, and the API with a public address 
 `/redoc` and `/openapi.json` off. D-209's outreach rules apply to it, with 48 hours of quiet before a
 booked demo. Both synthetic PO sets, Ironline (welding) and Keystone (fasteners), run on staging
 after an accuracy bar for each; the founder then picks the vertical and one demo tenant is built.
-**Next, in order (D-235 item 18):** A6's code. Public staging's code. M10, with the routing default
+**A6's code is built**
+(`phase55/stage5-a6`; D-236): `python -m app.backfill_pages` queues the normal page render for
+every reviewable document with no pages, a batch at a time and only once the pages queue is empty
+(run at task 7 under a Grant, never in the 48 hours before a booked demo; RUNBOOK 9.2). The
+Console's strip shows "Pages waiting". The worker refuses to start with a `DISPATCH_IN_FLIGHT_TARGET`
+other than the one `PARSE_SLOTS` was sized for, and prints the value. `image_preview` stays until
+after the demo. Its core, worker and API suites run on staging under a Grant before the merge (D-223).
+**Next, in order (D-235 item 18):** A6's staging suites and merge. Public staging's code. M10, with the routing default
 at today's `claude-haiku-4-5`. The Debian snapshot PR (`deps/debian-snapshot-20261109`), then the
 deploys under Grants and the backfill. The Console's sweep, the Chrome and Safari pass, the
 real-iPhone checks and the partner walkthrough. Postmark inbound end to end. Both PO sets on
@@ -1930,7 +1937,7 @@ here is built.
   publishing 54322:" line still checks only 54322. Its runner image line is `$ImageVersion`, which
   can differ from "Set up job"'s Runner Image in the same job (#515).
 
-- **For A6 (D-232; D-235 item 11):** deploy the parse service (A2's `/v1/pages`) and the worker (A3's `pages`
+- **For A6 (D-232; D-235 item 11; the code is D-236):** deploy the parse service (A2's `/v1/pages`) and the worker (A3's `pages`
   process), each under its own Grant; size the worker machine from D-232 item 15's memory figures;
   read `DISPATCH_IN_FLIGHT_TARGET` on the worker app (a Fly secret the `PARSE_SLOTS` guard can't
   see); the Console's queue strip shows the pages queue (`admin.py:1629`); backfill every document

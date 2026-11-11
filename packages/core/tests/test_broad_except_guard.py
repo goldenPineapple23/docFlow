@@ -113,6 +113,15 @@ LISTED: dict[tuple[str, str, int], tuple[str, str]] = {
         "never leave a root process beside the job",
     ),
     # ── the worker ──────────────────────────────────────────────────────────
+    # A6 (D-236): the pages backfill stops on any broker failure.
+    (f"{_WORKER}/backfill_pages.py", "_send", 1): (
+        FAIL_CLOSED,
+        "a render that can't be queued stops the run",
+    ),
+    (f"{_WORKER}/backfill_pages.py", "_pages_queue_length", 1): (
+        FAIL_CLOSED,
+        "a queue length that can't be read stops the run",
+    ),
     (f"{_WORKER}/celery_app.py", "_check_own_login", 1): (
         BEST_EFFORT,
         "database unreachable at start: logged",

@@ -45,7 +45,12 @@ SETS_A_FLAG = re.compile(r"set_config\s*\(\s*'app\.|\bset\s+(local\s+)?app\.", r
 # (the Section 7.15.1 admin path) is also used by founder-run scripts under
 # scripts/, which no request can reach.
 ALLOWED_USERS = {
-    "pipeline_sweep_session": {"packages/core/docflow_core/stuck_documents.py"},
+    # Exactly two: the stuck sweep, and A6's pages backfill, which lists
+    # tenant ids only (founder, 2026-11-11; D-236, D-158's note).
+    "pipeline_sweep_session": {
+        "packages/core/docflow_core/stuck_documents.py",
+        "apps/worker/app/backfill_pages.py",
+    },
     "rollup_session": {"packages/core/docflow_core/metrics.py"},
     "lifecycle_session": {
         "packages/core/docflow_core/lifecycle.py",
@@ -108,6 +113,21 @@ def test_every_narrow_session_is_used_only_where_it_belongs():
                 continue
             offenders.append(f"{relative} uses {helper}")
     assert offenders == [], offenders
+
+
+def test_the_tenant_listing_session_has_exactly_its_two_callers():
+    """The stuck sweep and A6's pages backfill, and no third (founder,
+    2026-11-11; D-236). Both list tenant ids only, then read each tenant's
+    documents in its own tenant_session()."""
+    users = sorted(
+        path.relative_to(REPO).as_posix()
+        for path in _application_files()
+        if re.search(r"\bpipeline_sweep_session\b", path.read_text(encoding="utf-8"))
+    )
+    assert users == sorted(ALLOWED_USERS["pipeline_sweep_session"]) == [
+        "apps/worker/app/backfill_pages.py",
+        "packages/core/docflow_core/stuck_documents.py",
+    ]
 
 
 def test_the_stuck_order_sweep_is_reachable_only_from_the_worker():

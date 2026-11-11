@@ -120,8 +120,60 @@ def test_the_launcher_checks_its_login_records_the_start_then_runs_the_workers(l
     run_workers, calls, _ = launcher
     assert run_workers.main() == 0
     assert calls == ["verify ('worker',)", "record", "supervise"]
-    # The line the first deploy's check reads (RUNBOOK 9.7, step 7; D-194).
-    assert capsys.readouterr().err.splitlines() == ["run_workers: login check passed as docflow_worker"]
+    # The lines the deploy's checks read: the in-flight target (RUNBOOK 9.2;
+    # A6, D-236), then the login (RUNBOOK 9.7, step 7; D-194).
+    assert capsys.readouterr().err.splitlines() == [
+        "run_workers: dispatch_in_flight_target=1",
+        "run_workers: login check passed as docflow_worker",
+    ]
+
+
+# ── A6 (founder, 2026-11-11; D-236): the in-flight target the worker got ────
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "2", "two", "1.5", ""])
+def test_the_launcher_refuses_an_in_flight_target_the_parse_slots_were_not_sized_for(launcher, value, capsys):
+    """Only a whole number of at least 1 equal to the setting's default, the
+    value test_ci_guards.py holds against PARSE_SLOTS. The CI guard can't see
+    a Fly secret; this is where the value set on the app is checked."""
+    from docflow_core.config import get_settings
+
+    run_workers, calls, monkeypatch = launcher
+    monkeypatch.setenv("DISPATCH_IN_FLIGHT_TARGET", value)
+    get_settings.cache_clear()
+    assert run_workers.main() == 1
+    assert calls == []  # nothing checked, recorded or started
+    err = capsys.readouterr().err
+    assert err.startswith("run_workers refused to start: DISPATCH_IN_FLIGHT_TARGET is ")
+    # It names the value it got and the value it expected.
+    assert repr(value) in err or f"is {value};" in err
+    assert "expected 1." in err
+    assert "dispatch_in_flight_target=" not in err
+
+
+def test_the_launcher_starts_with_the_in_flight_target_set_to_its_default(launcher, capsys):
+    from docflow_core.config import get_settings
+
+    run_workers, calls, monkeypatch = launcher
+    monkeypatch.setenv("DISPATCH_IN_FLIGHT_TARGET", "1")
+    get_settings.cache_clear()
+    assert run_workers.main() == 0
+    assert calls == ["verify ('worker',)", "record", "supervise"]
+    assert "run_workers: dispatch_in_flight_target=1" in capsys.readouterr().err.splitlines()
+
+
+def test_the_launcher_expects_the_default_the_ci_guard_holds_against_parse_slots():
+    """The refusal's expected value is the setting's default, nothing typed
+    twice: test_ci_guards.py asserts that default is 1 with PARSE_SLOTS 2."""
+    import inspect
+
+    from docflow_core.config import Settings
+
+    import app.run_workers as run_workers
+
+    assert Settings.model_fields["dispatch_in_flight_target"].default == 1
+    source = inspect.getsource(run_workers.in_flight_target_refusal)
+    assert 'Settings.model_fields["dispatch_in_flight_target"].default' in source
 
 
 @pytest.mark.parametrize("setting", ["ADMIN_DATABASE_URL", "STRIPE_DATABASE_URL", "API_DATABASE_URL"])

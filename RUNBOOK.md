@@ -1845,6 +1845,13 @@ With one worker machine:
    Revisit the parse service's `PARSE_SLOTS` with it: 2 is one document job
    plus one page job, and fits only while the target is 1 (D-232). A test
    fails if one changes without the other; it can't see a Fly secret.
+   **The worker checks the value it got** (A6; founder, 2026-11-11; D-236):
+   `run_workers` refuses to start unless it is a whole number of at least 1
+   equal to the setting's default, the value that test holds against
+   `PARSE_SLOTS`; the refusal names the value it got and the one it expected.
+   So more slots means changing the default and `PARSE_SLOTS` together, in
+   code. At every start it prints `run_workers: dispatch_in_flight_target=N`;
+   the deploy's check reads that line in `fly logs`.
 2. Size the machine for three Celery main processes, the dispatch process,
    the pages process and one process per slot (each document process may reach
    `WORKER_MAX_MEMORY_PER_CHILD_KIB` before it is replaced). Measure it on
@@ -1947,6 +1954,38 @@ it leaves the machine stopped. Check it on the deploy with
 More than one worker machine is a Phase 6 decision. Until then,
 `DISPATCH_IN_FLIGHT_TARGET` must equal one machine's slots. The dispatcher
 would otherwise keep more documents in flight than any worker can take.
+
+**The pages backfill** (A6; founder, 2026-11-11; D-236). Documents stored
+before A3, and any whose render failed or was cut off, have no page images
+(`page_count` NULL). The backfill queues the normal render for them, on the
+`pages` queue, so it runs on the one pages process like any other render.
+- **When:** after the parse and worker deploys (plan task 7), each run under
+  its own Grant, since it is started on the worker machine with `fly ssh
+  console`. **Never in the 48 hours before a booked demo** (D-235 item 3).
+- **The commands,** on the worker machine:
+  - `python -m app.backfill_pages --dry-run`: the count per tenant ID and
+    the total; nothing is queued.
+  - `python -m app.backfill_pages --limit 5`: a first small run.
+  - `python -m app.backfill_pages`: everything still not drawn.
+  - `--batch N` (default 3, at most 10): how many renders it queues at once.
+    The next batch waits until the `pages` queue is empty, so a new document's
+    render waits behind one batch at most. Documents never wait on it.
+  - `--max-wait S` (default 1,800): a queue that doesn't empty in that time
+    stops the run (exit 1, "is the pages process running?").
+- **What it selects:** `page_count` NULL, not deleted, the tenant not
+  `pending_deletion` or `deleted`, status `needs_review`, `approved`,
+  `exported` or `rejected`. Never `quarantined`, `failed`, `pending`,
+  `staged` or `processing`.
+- **What it prints:** `backfill_pages queued tenant_id=... document_id=...`
+  for each document, then `backfill_pages done queued=N`. It prints IDs and
+  counts only. A render that fails logs `pages_failed document_id=...
+  error_type=...` (D-232 item 5) and stays NULL.
+- **Afterwards:** once the Console's "Pages waiting" reads 0, run `--dry-run`
+  again; its total is what is still not drawn. Running it again is safe:
+  it selects only what is still NULL, and a render whose list is already
+  written stops (`pages_skipped reason=already_drawn`).
+- Record each run (the date, the dry run's total before and after, and the
+  `pages_failed` count) in BUILD-STATUS.
 
 ### 9.3 Beat: exactly one, never two at once
 
