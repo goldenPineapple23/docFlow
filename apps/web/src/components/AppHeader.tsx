@@ -20,7 +20,7 @@ function NavLink({ href, children }: { href: string; children: React.ReactNode }
   return (
     <Link
       href={href}
-      className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900"
+      className="text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 max-xl:inline-flex max-xl:min-h-11 max-xl:items-center max-xl:whitespace-nowrap"
     >
       {children}
     </Link>
@@ -99,9 +99,14 @@ export function AppHeader({
   }
 
   return (
-    <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
-      <div className="mx-auto flex max-w-[110rem] items-center justify-between gap-4 px-5 py-3">
-        <nav className="flex items-center gap-5">
+    // Below 1280 the links take a row of their own that scrolls sideways
+    // inside itself, so the page never does; below 640 the header scrolls
+    // away with the page, since the review screen's actions sit at the
+    // bottom (D-234). At 1280 and up, one row exactly as before: the links'
+    // wrapper has no box of its own there (`xl:contents`).
+    <header className="relative top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur sm:sticky">
+      <div className="mx-auto flex max-w-[110rem] items-center justify-between gap-4 px-5 py-3 max-xl:px-4 max-xl:py-2">
+        <nav className="flex items-center gap-5 max-xl:min-w-0 max-xl:flex-1 max-xl:flex-wrap max-xl:gap-y-1">
           {/* The customer's own name leads; DocFlow's logo sits underneath as
               "Powered by" (founder's request, 2026-09-24). The logo is never
               inside the name element, which only ever holds escaped text. */}
@@ -130,24 +135,26 @@ export function AppHeader({
               <span aria-hidden="true" data-testid="tenant-name-pending" className="block h-[2.625rem] w-44" />
             )}
           </Link>
-          <NavLink href="/review">Purchase orders</NavLink>
-          <NavLink href="/upload">Upload</NavLink>
-          <NavLink href="/held">Held for review</NavLink>
-          {canReview ? <NavLink href="/activity">Activity</NavLink> : null}
-          {isAdmin ? <NavLink href="/dashboard">Dashboard</NavLink> : null}
-          {/* Only the account's admin adds or removes people (D-132). */}
-          {isAdmin ? <NavLink href="/team">Team</NavLink> : null}
-          {/* The card on file, for the account's admin (card billing, D-181). */}
-          {isAdmin ? <NavLink href="/billing">Billing</NavLink> : null}
+          <span className="flex items-center gap-5 max-xl:order-last max-xl:w-full max-xl:overflow-x-auto xl:contents">
+            <NavLink href="/review">Purchase orders</NavLink>
+            <NavLink href="/upload">Upload</NavLink>
+            <NavLink href="/held">Held for review</NavLink>
+            {canReview ? <NavLink href="/activity">Activity</NavLink> : null}
+            {isAdmin ? <NavLink href="/dashboard">Dashboard</NavLink> : null}
+            {/* Only the account's admin adds or removes people (D-132). */}
+            {isAdmin ? <NavLink href="/team">Team</NavLink> : null}
+            {/* The card on file, for the account's admin (card billing, D-181). */}
+            {isAdmin ? <NavLink href="/billing">Billing</NavLink> : null}
+          </span>
         </nav>
 
-        <div className="flex items-center gap-3 text-sm">
+        <div className="flex items-center gap-3 text-sm max-xl:self-start">
           {email ? <span className="hidden text-slate-500 sm:inline">{email}</span> : null}
           <button
             type="button"
             onClick={() => void signOut()}
             data-testid="sign-out"
-            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-700 transition-colors hover:bg-slate-50"
+            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-700 transition-colors hover:bg-slate-50 max-xl:min-h-11 max-xl:whitespace-nowrap"
           >
             Sign out
           </button>

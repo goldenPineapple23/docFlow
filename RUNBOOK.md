@@ -1986,8 +1986,10 @@ worker deploy (9.2): passing in CI and on staging.
 
 **Decided in 3e (founder, 2026-10-02): a push heartbeat for the worker, on
 Healthchecks.io's free plan** (Q1; BUILD-STATUS "3e detailed design", part
-C). A polled check of `/healthz` is for production's public API only, chosen
-in Phase 6 (the notes further down). Staging's API stays private.
+C). A polled check of `/healthz` is for a public API, chosen in Phase 6 (the
+notes further down). Staging's API is made public for the demo (founder,
+2026-11-11; D-235 item 2); a polled check of it is added if it fits in 0.25
+day, otherwise it is skipped and the founder is told.
 
 **What it covers.** After a dispatch pass that succeeded, the dispatch
 process pings `HEARTBEAT_URL` (`docflow_core.heartbeat`). The pings stop when
@@ -2514,7 +2516,7 @@ above, and what to do the same way next time:**
   worker has stopped, not before, and resume it when the worker is
   deployed again.
 - **`fly` or `flyctl`:** on 2026-10-09 flyctl updated itself (to v0.4.115)
-  and the `fly` command name disappeared from `C:\Users\NK\.fly\bin` on
+  and the `fly` command name disappeared from `<home>\.fly\bin` on
   the founder's machine. `flyctl` is the same program and takes the same
   commands.
 
@@ -3002,7 +3004,7 @@ nothing else moved:
    (Windows' path limit breaks lxml's install under a long one), with the
    Python CI uses (3.13):
    ```
-   py -3.13 -m venv C:\Users\NK\AppData\Local\Temp\relock
+   py -3.13 -m venv <home>\AppData\Local\Temp\relock
    ```
 2. **Today's pins, exactly:** `<venv>\Scripts\python.exe -m pip install
    --no-deps -r apps/<app>/requirements.lock.txt`, then `pip freeze` into a

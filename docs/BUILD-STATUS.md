@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-04, with A3 merged and A4 built:** Phase 5.5,
+**Status, as of 2026-11-11, with A5 merged and the demo plan recorded:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -130,27 +130,46 @@ leaves both NULL, and the viewer falls back; a seccomp kill still alerts, and a 
 0040 is on staging (2026-11-04; `backup_0040` stays until the founder drops it), and the three
 staging suites passed on `5180f59`: core `1283 passed, 1 skipped in 143.62s (0:02:23)`, worker
 `307 passed, 8 skipped in 2631.65s (0:43:51)`, API `797 passed, 1 skipped, 3 deselected, 1 warning
-in 2860.85s (0:47:40)`, the six counts +0 (RUNBOOK 1.12). **A4 is built**
-(`phase55/stage5-viewer-a4`; D-233): the viewer shows a document's page images in the page, with a
+in 2860.85s (0:47:40)`, the six counts +0 (RUNBOOK 1.12). **A4 is merged**
+(PR #94, `main` is `014f6c8`; main's push run #524 green; D-233): the viewer shows a document's page images in the page, with a
 pager, zoom and pan, and a text file's stored text in the page as escaped text; the sandboxed frame
 is used only while a drawn format has no pages yet. Page images come on one token of purpose
 `page`, and the page route serves only PNG and JPEG; the web-live job runs the dev parse service,
-and 21 of the 22 positive fixtures have a live test (`po.doc` needs LibreOffice; D-233 item 8). It
-merges only after a green PR run and the staging suites passing; nothing deploys in A4. **Next, in order (D-228 item 7):** A5 and A6, with
-A5 absorbing the 375 px fix. M10, with D-195 change 1 straight after it and M10's model-ID part folded
-into change 1. B1's demo half, the inbound-mail item (D-230). Blocker 3's background commit with the duplicate SKU index (0041). Counting rows before
-extraction. E1, then E2a. The staging API's redeploy, and the worker's again if those changed it,
-with the staging suites and D-209's smoke test, owed since the worker's deploy of 2026-11-01 (there
-is no demo tenant yet, and it needs a model call). The docs PR, which ends Stage 5 (it also takes
-`apps/web/AGENTS.md`, whose first heading `next dev` rewrote from `#` to `##` when it started on
-2026-10-27: either commit that heading or stop `next dev` from rewriting the file; founder), CLAUDE.md
-naming the three staging apps, and RUNBOOK 1.4's hand-started dev parse service checked against the
-suites that use it (D-229 item 6). **The 2026-10-28 environments can be deleted**
-(`DocFlow-evidence/2026-10-28-venv-rebuild/`), now that all three suites have passed on the new
-ones; the founder decides when (D-229 item 8). The production environment. Demo content: both demo tenants, seeded history, a reset procedure, the
-synthetic POs, the accuracy bar set before anything is measured, and the D-195 comparison. Two
-rehearsals from every machine stopped, fastener first, then welding, the smoke test, tag demo-1.
-Then the independent review, then pilots. **To investigate later, not now (founder, 2026-10-27):**
+and 21 of the 22 positive fixtures have a live test (`po.doc` needs LibreOffice; D-233 item 8). Its
+staging suites passed on `ef96859`, the tree `014f6c8` merged: core `1289 passed, 1 skipped in
+132.68s (0:02:12)`, worker `307 passed, 8 skipped in 2563.54s (0:42:43)`, API `813 passed, 1 skipped,
+3 deselected, 1 warning in 2899.02s (0:48:19)`, the six counts +0. **A5 is merged**
+(PR #95, `main` is `ec3509a`; main's push run #527 green; D-234): the review screen at 375 px. Below 1280 the document has a box
+of its own height, the actions sit in a bar fixed to the bottom of the screen, and the app header's
+links scroll sideways in a row of their own; below 640 each line is a card made from the same table,
+which keeps its table roles. Every control a reviewer taps is at least 44 px, Save and Approve 48.
+Pinch and the zoom buttons keep their centre, and at fit to width a swipe scrolls as on any page. A
+page turn more than 240 s after the links arrived asks for fresh ones first. The page no longer
+scrolls sideways at 375: the 196 px came from the line table's hidden labels, not the header (D-234
+item 2). WebKit runs the 375 px layout spec in CI (amending D-228 item 10). No staging suites, and
+nothing deploys in A5. **The demo plan is D-235** (founder,
+2026-11-10 and 2026-11-11): the demo runs on staging, made publicly reachable: the web app on
+Vercel Pro with its CSP and security headers, and the API with a public address and `/docs`,
+`/redoc` and `/openapi.json` off. D-209's outreach rules apply to it, with 48 hours of quiet before a
+booked demo. Both synthetic PO sets, Ironline (welding) and Keystone (fasteners), run on staging
+after an accuracy bar for each; the founder then picks the vertical and one demo tenant is built.
+**Next, in order (D-235 item 18):** A6's code. Public staging's code. M10, with the routing default
+at today's `claude-haiku-4-5`. The Debian snapshot PR (`deps/debian-snapshot-20261109`), then the
+deploys under Grants and the backfill. The Console's sweep, the Chrome and Safari pass, the
+real-iPhone checks and the partner walkthrough. Postmark inbound end to end. Both PO sets on
+staging. E1, then E2a. B1's demo half, labelling with the routing model. The pricing-unit fix and
+the export preset, only if needed. One demo tenant. The final redeploy with the staging suites,
+D-209's smoke test (owed since the worker's deploy of 2026-11-01) and `demo-1`. The demo routine
+and two cold rehearsals. About 32 working days with contingency: demo-ready about 29 December
+2026. **After the demo:** Blocker 3's background commit with the duplicate SKU index (0041). The
+docs PR, which ends Stage 5 (it also takes `apps/web/AGENTS.md`, whose first heading `next dev`
+rewrote from `#` to `##` when it started on 2026-10-27: either commit that heading or stop `next
+dev` from rewriting the file; founder), CLAUDE.md naming the three staging apps, and RUNBOOK 1.4's
+hand-started dev parse service checked against the suites that use it (D-229 item 6). Counting rows
+before extraction. Firefox in CI. The production environment. D-195's changes 1 and 2 and its
+comparison. Then the independent review, then pilots. **The 2026-10-28 environments can be
+deleted** (`DocFlow-evidence/2026-10-28-venv-rebuild/`), now that all three suites have passed on
+the new ones; the founder decides when (D-229 item 8). **To investigate later, not now (founder, 2026-10-27):**
 CI's "Install Playwright browser" step (web-live) took 9 to 11 minutes on PR runs #489 and #492 but
 under 30 seconds on main's push run #490, likely a cache miss on PR runs, costing about 10 minutes
 per PR. On main's push run #498 (`d053cca`) it took 16 seconds. The 50,000-row cap and IMP-003's
@@ -348,7 +367,8 @@ the engine works well in a demo. **The order:** the leftover-count PR;
 Stage 4; Stage 5 (the worker-start fix and the cleanup that does not depend
 on a model); demo readiness, with D-195's model work; the Phase 6
 pilot-blocker subset (under Phase 6, below); then pilots with two or three
-customers. Of all this, only the leftover-count PR is built. Changed by D-226 item 5.
+customers. Of all this, only the leftover-count PR is built. Changed by D-226 item 5, and by
+D-235, whose item 18 is the working plan.
 
 **Stage 4, the load.** It replaces the approved design's 50,000-item tenant
 under test, its 250,000 rows on staging and its 2.5 million row CI job:
@@ -446,7 +466,10 @@ are PyJWT's `InsecureKeyLengthWarning` from short test keys and 1 is a
   real keys. If it does, it moves into production setup before pilots.
 - **Added 2026-10-18 (founder; D-207 item 12), found in 1b-ii, not changed:**
   - the review screen scrolls sideways by 196 pixels at a 375-pixel width,
-    and does so with no warning on the screen at all;
+    and does so with no warning on the screen at all; **closed by A5 at its
+    merge (D-234 item 2): its cause was LineTable's hidden labels
+    (`LineTable.tsx:224-226` on `014f6c8`), placed against the page body,
+    not the header with `/auth/me` unanswered as A5's draft plan first said;**
   - `test_a_hard_delete_empties_the_tenants_folder_in_the_real_bucket`
     cleans up only in its own body, not in a teardown, so a failure between
     its writes and its delete leaves objects in the bucket;
@@ -484,7 +507,8 @@ are PyJWT's `InsecureKeyLengthWarning` from short test keys and 1 is a
   a miss then a hit in both of the PR's scopes; `main`'s cache saved
   2026-10-27 00:15:30Z (D-222 item 9).
 
-**D-195 (the model policy) in this order:**
+**D-195 (the model policy) in this order:** *(Changed by D-235 item 4: changes 1 and 2 and the
+comparison wait until after the demo.)*
 - Change 1, the model config module, goes at the start of demo readiness,
   right before the extraction comparison, which it makes possible. It
   touches core code, so it needs all three suites.
@@ -497,7 +521,8 @@ are PyJWT's `InsecureKeyLengthWarning` from short test keys and 1 is a
   can be retired from 2026-10-15. The deprecations page is read again on
   or after 2026-10-16.
 
-**Demo readiness (new, after Stage 5):**
+**Demo readiness (new, after Stage 5):** *(Changed by D-235: one demo tenant, of the vertical the
+founder picks after both PO sets run on staging; the working plan is D-235 item 18.)*
 - A fastener demo tenant with a realistic catalog and 15 to 20 POs across
   formats: clean PDF, scan, PO in the e-mail body, abbreviated
   descriptions like "1/4-20 x 1 HHCS GR5 ZP".
@@ -1905,18 +1930,26 @@ here is built.
   publishing 54322:" line still checks only 54322. Its runner image line is `$ImageVersion`, which
   can differ from "Set up job"'s Runner Image in the same job (#515).
 
-- **For A6 (D-232):** deploy the parse service (A2's `/v1/pages`) and the worker (A3's `pages`
+- **For A6 (D-232; D-235 item 11):** deploy the parse service (A2's `/v1/pages`) and the worker (A3's `pages`
   process), each under its own Grant; size the worker machine from D-232 item 15's memory figures;
   read `DISPATCH_IN_FLIGHT_TARGET` on the worker app (a Fly secret the `PARSE_SLOTS` guard can't
   see); the Console's queue strip shows the pages queue (`admin.py:1629`); backfill every document
   with `page_count` NULL; then decide whether `image_preview` retires.
   - **Also for A6 (D-233):** deploy the API too, since A4's page and text routes reach staging only
     with it; check page images on staging's real hosts by hand; the partner walkthrough, after the
-    deploys and the backfill (D-228 item 8); and, after the backfill, propose the frame's removal
-    (Section 7.12, Section 10, the one-iframe guard test, originals only ever downloaded) for the
-    founder's decision (D-228 item 1's answer).
+    deploys and the backfill (D-228 item 8). The proposal of the frame's removal (Section 7.12,
+    Section 10, the one-iframe guard test, originals only ever downloaded; D-228 item 1's answer)
+    waits until after the demo (D-235 item 11).
+  - **Also for A6 (D-235 items 11 and 15):** the Debian snapshot PR (`deps/debian-snapshot-20261109`)
+    merges before the three deploys, since it changes all three images. The API's deploy sets
+    `DOCUMENT_URL_SIGNING_SECRET` (D-228 item 8) and carries public staging's address, CORS and
+    webhook credentials (plan tasks 5 and 7). Firefox in CI waits until after the demo.
+  - **Also for A6 (D-234 item 13), on a real iPhone:** the safe areas in portrait and landscape, on
+    the review screen and one other screen; focus zoom on the text fields; swipe and pinch in iOS
+    Safari; the review screen's bottom bar with the on-screen keyboard open.
 
-- **Phase 6, the web app's CSP and security headers** (none yet; `docs/REVIEW-PHASE5.md:30`; D-233):
+- **The web app's CSP and security headers** (none yet; `docs/REVIEW-PHASE5.md:30`; D-233), moved
+  from Phase 6 to plan task 5, before the web app is public (D-235 item 2):
   when a CSP is added, `img-src` must name the API's origin, or the viewer's page images stop
   loading. A COEP needs the page route's `Cross-Origin-Resource-Policy: cross-origin`, which it
   already sends.
@@ -1927,6 +1960,9 @@ here is built.
     on staging for the Blocker 3 test's window only.
   - Behind Fly's edge, `request.client.host` is the proxy's address, so the intake's source-IP note
     (`email_intake.py`, log-only) can't see the real sender.
+  - **Changed by D-235 items 2 and 9 (founder, 2026-11-11):** production waits until after the
+    demo. The first bullet is done on public staging in plan task 5, with all three routes off;
+    the second applies to public staging too.
 
 - IIF export not yet validated against real QuickBooks Desktop (Phase 4).
 - **A known limit: a 40-line order on a 250,000-item catalog (founder, 2026-10-12; D-201).**
@@ -2253,8 +2289,9 @@ here is built.
   - **Blocker 3's background commit**, with a committing status and
     progress columns, plus the duplicate SKU index (founder, 2026-11-02;
     D-228 item 7).
-  - **A real Firefox pass of the viewer.** CI covers Firefox only from A6
-    (D-228 item 10).
+  - **A real Firefox pass of the viewer.** Firefox in CI waits until after
+    the demo (D-235 item 11; D-228 item 10 had it at A6). WebKit runs the review screen's 375 px layout spec in CI
+    from A5 (D-234 item 9).
   - **Inbound e-mail bodies are discarded today**, including cover notes on
     a PO attachment, short of Section 7.2's "store the raw email". B1 (D-228
     item 5) fixes it; it must not slip past the first pilot (founder,

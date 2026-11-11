@@ -182,6 +182,25 @@ def test_the_viewers_text_cut_is_the_text_previews_cut():
     assert int(found.group(1)) == MAX_PREVIEW_CHARS
 
 
+PAGE_VIEWER = REPO / "apps" / "web" / "src" / "components" / "review" / "PageViewer.tsx"
+
+
+def test_the_viewers_page_token_lifetime_is_the_apis():
+    """D-234: the page viewer asks for fresh links on a page turn 60 s before
+    the page token runs out, timed from when the links arrived, so it has to
+    know the token's lifetime. It keeps its own copy (the answer carries no
+    server time), read here from its source."""
+    from docflow_core.signed_urls import DEFAULT_TTL_SECONDS
+
+    found = re.search(
+        r"^export const PAGE_TOKEN_LIFETIME_SECONDS = (\d+);$",
+        PAGE_VIEWER.read_text(encoding="utf-8"),
+        re.M,
+    )
+    assert found, "PAGE_TOKEN_LIFETIME_SECONDS is no longer a plain number in PageViewer.tsx"
+    assert int(found.group(1)) == DEFAULT_TTL_SECONDS
+
+
 # A skip on docflow-staging only (founder, 2026-10-05; D-189). No CI job reads
 # these lines, so the test still has to run in CI.
 STAGING_ONLY = tuple(f"{job}-staging" for job in PYTHON_JOBS)

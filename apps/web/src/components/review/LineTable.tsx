@@ -27,6 +27,13 @@ import { focusWarning } from "./WarningsPanel";
  * Confirming a candidate creates a learned rule, which is why it is an
  * explicit click per line rather than anything that happens on focus or blur.
  * Section 10: no rule activates without a human confirmation.
+ *
+ * **Below 640 px each line is a card (A5; D-234): the same table, restyled.**
+ * One `<table>`, one row per line, one input per value, so every id and test
+ * id exists once. CSS turns each row into a two-column grid and shows each
+ * input's label; the explicit table roles keep the table a table for
+ * assistive technology, which some browsers stop treating it as once its
+ * parts are displayed as blocks. At 640 and up it is the table, unchanged.
  */
 
 // Widths are tuned to the values these columns actually hold: a quantity is
@@ -90,7 +97,7 @@ export function LineTable({
   return (
     <section
       aria-labelledby="lines-heading"
-      className="space-y-4 rounded-xl border border-sky-200 bg-sky-50 p-5"
+      className="space-y-4 rounded-xl border border-sky-200 bg-sky-50 p-3 sm:p-5"
     >
       <div className="space-y-0.5">
         <h2
@@ -111,18 +118,24 @@ export function LineTable({
       ) : (
         // A floor on the table's width, and sideways scrolling below it: the
         // columns are percentages, so without one they squeeze down until
-        // numbers and inputs are unreadable on a narrow screen.
-        <div className="overflow-x-auto rounded-lg border border-sky-200 bg-white shadow-sm">
-          <table className="w-full min-w-[40rem] table-fixed border-collapse">
+        // numbers and inputs are unreadable on a narrow screen. Below 1280,
+        // `max-xl:relative` keeps the inputs' visually hidden labels inside
+        // this box: placed against the page body, they pushed the whole page
+        // 196 px sideways at 375. At 1280 and up the box isn't positioned, so
+        // the desktop draws as on 014f6c8, and review-375.spec.ts checks the
+        // page doesn't scroll sideways at 1280 (founder, 2026-11-05; D-234).
+        <div className="max-xl:relative overflow-x-auto rounded-lg border border-sky-200 bg-white shadow-sm max-sm:overflow-visible max-sm:border-0 max-sm:bg-transparent max-sm:shadow-none">
+          <table role="table" className="w-full min-w-[40rem] table-fixed border-collapse max-sm:block max-sm:min-w-0">
             <caption className="sr-only">Line items on this order</caption>
-            <thead>
-              <tr className="bg-sky-100/70 text-left text-[11px] uppercase tracking-[0.05em] text-sky-900/70">
-                <th scope="col" className="w-[5%] px-2 py-2 font-semibold">
+            <thead role="rowgroup" className="max-sm:sr-only">
+              <tr role="row" className="bg-sky-100/70 text-left text-[11px] uppercase tracking-[0.05em] text-sky-900/70">
+                <th role="columnheader" scope="col" className="w-[5%] px-2 py-2 font-semibold">
                   #
                 </th>
                 {COLUMNS.map((column) => (
                   <th
                     key={column.name}
+                    role="columnheader"
                     scope="col"
                     className={`px-2 py-2 font-semibold ${column.width} ${
                       column.numeric ? "text-right" : ""
@@ -131,10 +144,10 @@ export function LineTable({
                     {column.label}
                   </th>
                 ))}
-                <th scope="col" className="w-[4%] px-1 py-2" />
+                <th role="columnheader" scope="col" className="w-[4%] px-1 py-2" />
               </tr>
             </thead>
-            <tbody>
+            <tbody role="rowgroup" className="max-sm:block max-sm:space-y-3">
               {lines.map((line) => (
                 <LineRow
                   key={line.id}
@@ -191,9 +204,12 @@ function LineRow({
   return (
     <>
       <tr
+        role="row"
         data-testid={`line-${line.line_number}`}
         className={[
           "border-t border-sky-50",
+          // Below 640: a card, two values to a row, Description and SKU across both.
+          "max-sm:grid max-sm:grid-cols-2 max-sm:gap-x-3 max-sm:gap-y-2 max-sm:rounded-lg max-sm:border max-sm:border-sky-200 max-sm:p-3",
           warnings.length > 0
             ? "bg-amber-100/70"
             : low
@@ -201,14 +217,14 @@ function LineRow({
               : "odd:bg-white even:bg-sky-50/30",
         ].join(" ")}
       >
-        <td className="px-2 py-1.5 align-middle text-xs text-gray-400">
+        <td role="cell" className="px-2 py-1.5 align-middle text-xs text-gray-400 max-sm:flex max-sm:items-center max-sm:gap-2 max-sm:p-0 max-sm:text-sm">
           {warnings.length > 0 ? (
             <button
               type="button"
               onClick={() => focusWarning(warnings[0].id)}
               data-testid={`line-${line.line_number}-flag`}
               title={warnings.map((w) => w.title || w.code).join("; ")}
-              className="mr-1 rounded bg-amber-900 px-1 font-semibold text-white"
+              className="mr-1 rounded bg-amber-900 px-1 font-semibold text-white max-sm:mr-0 max-sm:min-h-11 max-sm:min-w-11"
             >
               !
             </button>
@@ -216,13 +232,31 @@ function LineRow({
           {line.line_number}
         </td>
 
-        {COLUMNS.map(({ name, numeric }) => {
+        {COLUMNS.map(({ name, label, numeric }) => {
           const stored = line[name as keyof DocumentLine] as string | null;
           const current = name in edits ? edits[name] : stored;
           return (
-            <td key={name} className="px-2 py-1.5 align-middle">
-              <label htmlFor={`line-${line.id}-${name}`} className="sr-only">
-                {name.replace(/_/g, " ")} for line {line.line_number}
+            <td
+              key={name}
+              role="cell"
+              className={[
+                "px-2 py-1.5 align-middle max-sm:block max-sm:p-0",
+                name === "sku" || name === "description" ? "max-sm:col-span-2" : "",
+              ].join(" ")}
+            >
+              {/* Hidden in the table, where the column says it. On a card the
+                  column's own word shows ("Qty"); the name a screen reader
+                  reads is the same at every width. */}
+              <label
+                htmlFor={`line-${line.id}-${name}`}
+                className="sr-only max-sm:not-sr-only max-sm:mb-1 max-sm:block max-sm:text-xs max-sm:font-medium max-sm:text-sky-900/80"
+              >
+                <span aria-hidden="true" className="hidden max-sm:inline">
+                  {label}
+                </span>
+                <span className="max-sm:sr-only">
+                  {name.replace(/_/g, " ")} for line {line.line_number}
+                </span>
               </label>
               <input
                 id={`line-${line.id}-${name}`}
@@ -248,7 +282,7 @@ function LineRow({
                     : undefined
                 }
                 className={[
-                  "w-full rounded border px-1.5 py-1 text-[13px] transition-colors",
+                  "w-full rounded border px-1.5 py-1 text-[13px] transition-colors max-sm:min-h-11 max-sm:text-base",
                   "focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100",
                   "disabled:bg-gray-50 disabled:text-gray-500",
                   // Numbers are read down a column and compared against the
@@ -265,7 +299,7 @@ function LineRow({
           );
         })}
 
-        <td className="px-1 py-1.5 text-center align-middle">
+        <td role="cell" className="px-1 py-1.5 text-center align-middle max-sm:col-start-2 max-sm:row-start-1 max-sm:p-0 max-sm:text-right">
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
@@ -273,7 +307,7 @@ function LineRow({
             aria-label={`Catalog match and checks for line ${line.line_number}`}
             title={open ? "Hide this line's catalog match and checks" : "Show this line's catalog match and checks"}
             className={[
-              "rounded px-1 text-xs leading-5",
+              "rounded px-1 text-xs leading-5 max-sm:min-h-11 max-sm:min-w-11 max-sm:text-sm",
               needsAttention
                 ? "bg-amber-200 text-amber-900"
                 : "text-gray-300 hover:bg-gray-100 hover:text-gray-600",
@@ -292,9 +326,9 @@ function LineRow({
         collapses it, or opens a line that is already fine to change its match.
       */}
       {open ? (
-        <tr className={low ? "bg-amber-50/70" : "bg-white"}>
-          <td />
-          <td colSpan={COLUMNS.length + 1} className="px-2 pb-3 pt-0">
+        <tr role="row" className={[low ? "bg-amber-50/70" : "bg-white", "max-sm:-mt-1 max-sm:block max-sm:rounded-lg max-sm:px-3 max-sm:py-2"].join(" ")}>
+          <td role="cell" className="max-sm:hidden" />
+          <td role="cell" colSpan={COLUMNS.length + 1} className="px-2 pb-3 pt-0 max-sm:block max-sm:p-0">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <ConfidenceBadge value={line.confidence} />
               <ProvenanceNote provenance={line.provenance?.matched_item_id} />
@@ -310,7 +344,7 @@ function LineRow({
               {!disabled && line.matched_item_id && !changing ? (
                 <button
                   type="button"
-                  className="text-xs text-blue-700 underline"
+                  className="text-xs text-blue-700 underline max-sm:min-h-11 max-sm:min-w-11 max-sm:text-sm"
                   onClick={() => setChanging(true)}
                 >
                   Change
@@ -371,7 +405,7 @@ function MatchPicker({
                 {!disabled && candidate.item_id ? (
                   <button
                     type="button"
-                    className="text-blue-700 underline"
+                    className="text-blue-700 underline max-sm:min-h-11 max-sm:min-w-11 max-sm:text-sm"
                     onClick={() => onConfirmMapping(line.id, candidate.item_id as string)}
                   >
                     This one
@@ -427,12 +461,12 @@ function SkuSearch({
           placeholder="Search the catalog by SKU or description"
           aria-label={`Search the catalog for line ${lineNumber}`}
           data-testid={`sku-search-${lineNumber}`}
-          className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+          className="w-full rounded border border-gray-300 px-2 py-1 text-xs max-sm:min-h-11 max-sm:min-w-0 max-sm:text-base"
         />
         <button
           type="submit"
           disabled={searching}
-          className="rounded border border-gray-300 bg-white px-2 py-1 text-xs disabled:text-gray-400"
+          className="rounded border border-gray-300 bg-white px-2 py-1 text-xs disabled:text-gray-400 max-sm:min-h-11 max-sm:min-w-11 max-sm:shrink-0 max-sm:px-3 max-sm:text-sm"
         >
           {searching ? "Searching…" : "Search"}
         </button>
@@ -446,7 +480,7 @@ function SkuSearch({
               <span className="text-gray-600">{item.description}</span>
               <button
                 type="button"
-                className="text-blue-700 underline"
+                className="text-blue-700 underline max-sm:min-h-11 max-sm:text-sm"
                 onClick={() => onConfirm(lineId, item.id)}
               >
                 Use this &amp; remember it

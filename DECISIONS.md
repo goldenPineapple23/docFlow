@@ -3050,7 +3050,7 @@ The evidence turned up a second thing. `record_worker_start` returned 7: the sui
 1. **Fix it now, before G,** so the memory measurement, the drills and the 500 + 1 run are on the image that stays. The fix: httpx's request log is switched off for the ping only (`heartbeat._httpx_request_log_off`); every other request keeps its log line.
 2. **Replace the ping URL when the fixed worker is deployed.** The founder adds a new Healthchecks.io check with the same settings, sets its URL on the worker app, and deletes the old check once the new one has its first ping (RUNBOOK 9.4, "If the ping URL has been seen where it should not be"). The exposed URL then stops working.
 3. **One machine each: `--ha=false` on the worker and API deploys.** The commands in the two `fly.toml` files did not say, and Fly's default adds a stopped spare beside each machine: two `worker` and two `beat` machines, against RUNBOOK 9.7's "one `worker` machine and one `beat` machine" and 9.3's exactly one beat. Asked before the worker deploy, so no spare was ever created. Staging only, as for the parse app (RUNBOOK 8.2); production's count is a Phase 6 decision.
-4. **No Flycast address on the API.** `apps/api/fly.toml` listed `fly ips allocate-v6 --private`. It was not run: no gate calls the API from another Fly app, and an address would only make the API reachable from more places. `fly ips list` is empty. The API machine stops itself when idle and nothing wakes it, so it is started by hand before `fly proxy`.
+4. **No Flycast address on the API.** `apps/api/fly.toml` listed `fly ips allocate-v6 --private`. It was not run: no gate calls the API from another Fly app, and an address would only make the API reachable from more places. `fly ips list` is empty. The API machine stops itself when idle and nothing wakes it, so it is started by hand before `fly proxy`. **Changed by D-235 item 2 (founder, 2026-11-11):** for the demo, staging's API gets a public address.
 5. **The launcher says when its login check passes.** RUNBOOK 9.7 step 7 asks for a log showing "the login check passed as `docflow_worker`", but the launcher printed only refusals and "database unreachable at start". On 2026-10-06 the evidence was therefore indirect: neither line in the log, and the start recorded through the worker's login. From this change it prints `run_workers: login check passed as docflow_worker` (the role, never the URL), and prints nothing of the kind when the database was unreachable, because not checked is not passed.
 
 **Steps 2 to 8 as run (2026-10-06, UTC):**
@@ -3340,7 +3340,7 @@ Neither change starts before the founder's "go".
 
 **1. The "go".** The founder approved the diff of the checkpoint's record as written and merged PR #58 as `main` `d674d4a` at 19:44:29. Stage 3 is complete; CHECKPOINTS.md's heading says so. Row 3 of the stage table keeps the decision numbers it listed (D-179, D-182 to D-186, D-188 to D-190, D-192 to D-194, D-196 to D-198). CI: the pull-request run 38169004692 on `8cb7d95` and the push run 38169295323 on `d674d4a` were each green on all six jobs at the first attempt, with the counts unchanged (api 631, core 807, worker 198, parse 128 and 56, web 73, web-live 3).
 
-**2. The order from here.** The founder is not in a hurry to pilot: the goal is that nothing breaks and the engine works well in a demo. The leftover-count PR; Stage 4; Stage 5 (the worker-start fix and the cleanup that does not depend on a model); demo readiness, with D-195's model work; the Phase 6 pilot-blocker subset; then pilots with two or three customers. BUILD-STATUS carries the whole plan under "The plan after the Stage 3 "go"" and, for the subset, under Phase 6.
+**2. The order from here.** The founder is not in a hurry to pilot: the goal is that nothing breaks and the engine works well in a demo. The leftover-count PR; Stage 4; Stage 5 (the worker-start fix and the cleanup that does not depend on a model); demo readiness, with D-195's model work; the Phase 6 pilot-blocker subset; then pilots with two or three customers. BUILD-STATUS carries the whole plan under "The plan after the Stage 3 "go"" and, for the subset, under Phase 6. **Changed by D-235 items 9 and 18 (founder, 2026-11-11):** the docs PR, which ends Stage 5, waits until after the demo; the working plan is D-235 item 18.
 
 **3. An API run that does not leave the database as it found it fails** (branch `phase55/api-leftover-count-fails`, commit `b278490`; RUNBOOK 1.4). D-198 item 3 had the six counts printed only, until a staging run of record read `+0` on each; the run at `5a09632` did.
 - **What fails:** a run that does not read `+0` on all six counts. It exits 1, pytest's last line counts `1 error`, a line under the counts names the ones that moved, and in CI the annotation `api leftover count` is an error instead of a notice.
@@ -3365,14 +3365,14 @@ Neither change starts before the founder's "go".
 - **The 657 test warnings are not a new item.** Stage 5 already held the warnings triage and a test JWT secret of at least 32 bytes (D-163: 438 of 439 warnings on 2026-09-26 were PyJWT's `InsecureKeyLengthWarning` from short test keys). The staging run of item 3 is the same: of its 657 warnings, 656 are that warning and 1 is a `DeprecationWarning` from starlette's test client (tallied from the run's log). The two are now one item.
 - **Its sub-point, kept apart:** first, whether the key-length check covers real keys. If it does, it moves into production setup before pilots.
 
-**7. D-195 in this order.**
+**7. D-195 in this order.** **Changed by D-235 item 4 (founder, 2026-11-11):** changes 1 and 2 and the comparison wait until after the demo.
 - **Change 1, the model config module,** goes at the start of demo readiness, right before the extraction comparison, which it makes possible. It touches core code (`extraction.py`, `config.py`, `model_runs.py`) and is followed by its migration, so it needs all three suites.
 - **Change 2, routing to `claude-haiku-5-5`,** is gated by D-195's own comparison of Haiku 4.5's and Haiku 5.5's routing answers, not by the extraction comparison.
 - **The extraction comparison** (`claude-haiku-5-5` against `claude-sonnet-5`, D-198 item 9) runs at demo readiness and decides only the extraction model.
 - **If Stage 4 is not merged by 2026-11-02, changes 1 and 2 go next, before Stage 5.** D-195 has both landing by 2026-11-16, and Haiku 4.5 can be retired from 2026-10-15. Claude reads the deprecations page again on or after 2026-10-16 and reports.
 - Neither change blocks Stage 4.
 
-**8. Demo readiness (new, after Stage 5).** A fastener demo tenant with a realistic catalog and 15 to 20 POs across formats (clean PDF, scan, PO in the e-mail body, abbreviated descriptions like "1/4-20 x 1 HHCS GR5 ZP"). Header-field accuracy and line-match rate are measured against a bar set in advance, which Claude proposes to the founder before measuring. A full rehearsal through both portals: e-mail in, extraction, matching, review, export. The demo risks named: the API stops itself about 6 minutes after a start (set `min_machines_running = 1`); the worker must be up, and no deploy during a demo; alert links point at localhost; the 10 seconds after a worker start. Prospects' own documents are never used until the pilot blockers are fixed.
+**8. Demo readiness (new, after Stage 5).** A fastener demo tenant with a realistic catalog and 15 to 20 POs across formats (clean PDF, scan, PO in the e-mail body, abbreviated descriptions like "1/4-20 x 1 HHCS GR5 ZP"). Header-field accuracy and line-match rate are measured against a bar set in advance, which Claude proposes to the founder before measuring. A full rehearsal through both portals: e-mail in, extraction, matching, review, export. The demo risks named: the API stops itself about 6 minutes after a start (set `min_machines_running = 1`); the worker must be up, and no deploy during a demo; alert links point at localhost; the 10 seconds after a worker start. Prospects' own documents are never used until the pilot blockers are fixed. **Changed by D-235 item 8 (founder, 2026-11-11):** one demo tenant, of the vertical the founder picks after both PO sets run on staging.
 
 **9. The Phase 6 pilot-blocker subset.** Fixed before pilots; everything else in Phase 6 waits for pilot feedback.
 - The localhost alert links.
@@ -4085,8 +4085,8 @@ Everything else fails as before: a deadlock (40P01), a serialization failure (40
 
 **Context:** demo readiness (BUILD-STATUS, "The plan after the Stage 3 "go"") plans one fastener demo. The product is not only for fasteners, and the founder decided on a second demo, for welding supplies, at the Stage 4 checkpoint.
 
-1. **Fastener goes first.** Demo readiness builds and rehearses the fastener demo as BUILD-STATUS describes it: a realistic catalog; 15 to 20 POs across formats; a bar set in advance; a full rehearsal through both portals.
-2. **Welding starts only after the fastener rehearsal has passed, and never blocks it.** No welding work goes before that rehearsal, or into the same PR as fastener work. If welding work would delay any fastener step, the welding work waits.
+1. **Fastener goes first.** Demo readiness builds and rehearses the fastener demo as BUILD-STATUS describes it: a realistic catalog; 15 to 20 POs across formats; a bar set in advance; a full rehearsal through both portals. **Replaced by D-235 item 8 (founder, 2026-11-11).**
+2. **Welding starts only after the fastener rehearsal has passed, and never blocks it.** No welding work goes before that rehearsal, or into the same PR as fastener work. If welding work would delay any fastener step, the welding work waits. **Replaced by D-235 item 8 (founder, 2026-11-11).**
 3. **D-195's comparison runs on fastener POs only.** Its 2026-11-16 deadline is unchanged. No welding PO enters the comparison or its result.
 4. **Welding has its own of everything:**
    - its own catalog, in its own demo tenant (a catalog belongs to one tenant);
@@ -4103,7 +4103,7 @@ Everything else fails as before: a deadlock (40P01), a serialization failure (40
 
 **Context:** the founder decided these in chat on 2026-10-13. They were not recorded then, and are recorded now at the Stage 4 checkpoint, on the founder's instruction. These E numbers are product enhancements. They are not the 3c and 3e designs' E1 to E5, which are start-up checks of the parse service and the logins.
 
-**1. The rules for every enhancement here.**
+**1. The rules for every enhancement here.** **Changed by D-235 item 12 (founder, 2026-11-11):** E2a's label replaces the existing "Filled in by a saved rule".
 - Additions only: no existing behaviour changes.
 - New tests only: no existing test is changed to make room.
 - Each is its own small PR.
@@ -4115,7 +4115,7 @@ Everything else fails as before: a deadlock (40P01), a serialization failure (40
 - No migration. About 1 day. It changes core, so all three suites run.
 - No "hours saved" claim, and no vendor figures such as "8-20 min/PO".
 
-**3. E2a: a "Saved rule · applied N times" label** on lines a learned rule filled in. N is `learned_rules.times_applied`, and the line's provenance is `learned_rule:<id>`. An API read plus the label in `apps/web/src/components/review/confidence.tsx`. About half a day.
+**3. E2a: a "Saved rule · applied N times" label** on lines a learned rule filled in. N is `learned_rules.times_applied`, and the line's provenance is `learned_rule:<id>`. An API read plus the label in `apps/web/src/components/review/confidence.tsx`. About half a day. **Changed by D-235 item 12 (founder, 2026-11-11):** the label reads "Saved rule · used N times".
 
 **4. E3a: keyboard shortcuts on the review screen:** next and previous line, focus the fields, pick candidate 1 to 5, next PO.
 - There is no shortcut to reject, and none to approve and export.
@@ -4125,9 +4125,9 @@ Everything else fails as before: a deadlock (40P01), a serialization failure (40
 
 **5. Dropped:** E2b and E3b.
 
-**6. The order:** Stage 5 in full, then E1 and E2a, then demo readiness. Stage 5 runs in full before demo readiness, as D-199 says.
+**6. The order:** Stage 5 in full, then E1 and E2a, then demo readiness. Stage 5 runs in full before demo readiness, as D-199 says. **Changed by D-235 items 9 and 18 (founder, 2026-11-11):** demo readiness starts before the docs PR ends Stage 5.
 
-**7. The outreach-period rules (decided the same day; none of them was in the repository, read 2026-10-19).**
+**7. The outreach-period rules (decided the same day; none of them was in the repository, read 2026-10-19).** **Changed by D-235 item 3 (founder, 2026-11-11):** they apply to the environment the demo runs from, and nothing deploys and no staging suite runs in the 48 hours before a booked demo.
 - **Demo releases are pinned as git tags** (`demo-1`, `demo-2`, ...) and recorded in BUILD-STATUS.
 - **Staging is redeployed only after a merge.** Each redeploy is followed by the demo smoke test, about 15 minutes: upload, review, approve, export, and the dashboard, including E1 and E2a. If the smoke test fails, the last good tag is redeployed.
   - **Added 2026-10-19 (founder; D-210):** the smoke test also sends one test e-mail to the demo tenant's intake address and confirms it arrives as a document. That catches a deploy that breaks intake for every tenant.
@@ -5362,7 +5362,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 - **Removed:** 13 rows and 2 Storage objects.
   - **The rows:** `buyers` 1, `document_headers` 2, `documents` 2, `intake_addresses` 1, `tenant_daily_metrics` 5, `tenants` 1, `users` 1.
   - **The objects:** two 38-byte files under `uploads/`.
-- **The backup:** `C:\Users\NK\docflow-sweep-backups\21d1215f-2cca-4dbc-a732-b46ab67a7029-20261027T185413Z`, each file's SHA-256 matching when hashed again separately:
+- **The backup:** `<home>\docflow-sweep-backups\21d1215f-2cca-4dbc-a732-b46ab67a7029-20261027T185413Z`, each file's SHA-256 matching when hashed again separately:
   - `rows.json`: `b65fe82cf2936635de7dfd37370ff3891dd901d846ac8521dffa2f94a5d05cca`
   - `storage/…/uploads/7363981dc04c4d458c4e147085944bec.txt`: `763144c8a9c35f93349ec718a9ab31065910b5416bba8099c03b1b973a843693`
   - `storage/…/uploads/fbc412cf88c14041bf2f8bf5fed61f9c.txt`: `73fb7fae43dafbe9c20af00140bb1cd746a3ed3c2e28c687aeb7a95c8ca1f44b`
@@ -5483,7 +5483,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 - **The newest 3.13 with a Windows installer:** 3.13.17. 3.13 is security-only, and python.org says of 3.13.18: "binary installers are no longer provided".
 - **The installer:** `https://www.python.org/ftp/python/3.13.17/python-3.13.17-amd64.exe`, SHA-256 `5da012101ba2e17113a9a1cd901e9ce1441086f2b7ecb5de06ec94163899a190`, matching python.org's. Authenticode: Valid, signed by the Python Software Foundation and timestamped by Microsoft's time-stamping authority.
 - **The install:** an upgrade of the all-users install at `C:\Python313`, run by the founder in an elevated PowerShell with `/passive` and `/log`; exit 0. Afterwards `py -3.13 -V` reads `Python 3.13.17`, and `py -0p` lists `-V:3.13 * C:\Python313\python.exe`.
-- **Kept outside the repository:** `C:\Users\NK\DocFlow-evidence\2026-10-28-venv-rebuild\` holds the installer, its logs, and the records of item 8.
+- **Kept outside the repository:** `<evidence-dir>\2026-10-28-venv-rebuild\` holds the installer, its logs, and the records of item 8.
 
 **8. The local environments (founder's answers 4 and 5).**
 - **Before:** each old venv's `python -V` (3.13.1) and `pip freeze` (the API's 106 lines, the worker's 98) were recorded in the evidence folder.
@@ -5534,10 +5534,10 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Context:** recorded together on the founder's instruction ("to record as one new D-number in the next PR's records commit"). Items 1 to 6 are the founder's text. Item 5 changes D-199's order.
 
 1. Focus verticals: welding supply and fastener/hardware distributors in the USA, not limited to them.
-2. Demos run from the production environment, not staging. docflow-prod is built before demo readiness and holds only synthetic demo tenants until the before-first-pilot items in D-220 item 8 are done; those still gate any real customer data. Staging stays private (D-194) and in its current Supabase Free organization. docflow-prod goes in a new Supabase organization on Pro. D-209's outreach-period rules now apply to production: demo releases tagged demo-1, demo-2 and recorded in BUILD-STATUS; the smoke test, including one inbound e-mail, after every production deploy; no production deploys in the 24 hours before a booked demo; machines started early on demo day.
-3. D-208 changes: the D-195 comparison runs on fastener and welding POs. Both demo tenants are built together. The fastener rehearsal still runs first, then welding's.
+2. Demos run from the production environment, not staging. docflow-prod is built before demo readiness and holds only synthetic demo tenants until the before-first-pilot items in D-220 item 8 are done; those still gate any real customer data. Staging stays private (D-194) and in its current Supabase Free organization. docflow-prod goes in a new Supabase organization on Pro. D-209's outreach-period rules now apply to production: demo releases tagged demo-1, demo-2 and recorded in BUILD-STATUS; the smoke test, including one inbound e-mail, after every production deploy; no production deploys in the 24 hours before a booked demo; machines started early on demo day. **Replaced by D-235 item 2 (founder, 2026-11-11):** the demo runs on staging, made publicly reachable; staging stays in the Supabase Free organization.
+3. D-208 changes: the D-195 comparison runs on fastener and welding POs. Both demo tenants are built together. The fastener rehearsal still runs first, then welding's. **Replaced by D-235 item 8 (founder, 2026-11-11).**
 4. Your item 6 changes my custom SMTP decision. DocFlow never asks Supabase Auth to send mail, so custom SMTP for Supabase Auth is not needed and leaves the plan. The outbox sender (delivering queued rows through Postmark) stays on the before-first-pilot list. Demos send no outbound mail; if a prospect asks, held mail is shown on the Console's Outbox page. When the sender is built, outbound app e-mail is sent from a subdomain of our domain.
-5. The order, which changes D-199:
+5. The order, which changes D-199: **Changed by D-235 (founder, 2026-11-11):** M10 keeps its model-ID part (b; item 4); c, g and h follow the demo (item 9); counting rows is out of the demo (d; item 5); one demo tenant and two cold rehearsals (i and j; item 8). The working plan is D-235 item 18.
    - a. The staging worker deploy (D-209), then the Blocker 3 test.
    - b. M10, then D-195 change 1 straight after it, with M10's model-ID part folded into change 1.
    - c. If Blocker 3 is confirmed, its fix, with the duplicate SKU index in the same migration.
@@ -5556,7 +5556,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 7. **Rule (a) has dropped (founder, 2026-11-01).** On 2026-10-29 the founder replaced the Memurai restart task's daily 04:00 trigger with an At log on trigger for the founder's account. The confirming line, `2026-10-29 12:42:20 restarted, status Running`, follows Windows' sign-in event (Winlogon 7001) of 12:42:19; the lines of 10-30 and 10-31 follow sign-ins the same way, and on 2026-11-01 Memurai's uptime of 89,692 s put its start two seconds after the last line. The live task's trigger can't be read without administrator rights, so the evidence is the log and the events. A suite now needs only PONG and an uptime under 9 days.
 8. **RUNBOOK 1.4 gains, word for word:** "Before a suite: PONG on 6379 and Memurai's `uptime_in_seconds` under 777,600 (9 days)." Rule (a) was written in no file of the repository, so nothing else changes, CLAUDE.md included.
 9. **The finding (founder, 2026-11-01).** Fly's edge can't reach the API because it listens on IPv6 only, found 2026-11-01 at 17:08Z. The address was public 90 seconds. The evidence is `api-edge-503-log.txt` in the founder's evidence folder for the day, `DocFlow-evidence/2026-11-01-blocker3/`. It moves the API's redeploy ahead of step f. D-227 has the rest.
-10. **For step h (founder, 2026-11-01):**
+10. **For step h (founder, 2026-11-01):** **Changed by D-235 item 2 (founder, 2026-11-11):** the first bullet is done on public staging, with all three routes off.
     - `/docs`, `/redoc` and `/openapi.json` turned off or put behind login. On staging they were accepted for the test window only.
     - Behind Fly's edge, `request.client.host` is the proxy's address, so the intake's source-IP note can't see the real sender.
 11. **D-209's smoke test is owed at step f (founder, 2026-11-01).** It didn't run after the worker's deploy of 2026-11-01: there is no demo tenant yet, and it needs a model call.
@@ -5627,7 +5627,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 4. **XLSX and DOCX:** extracted text is acceptable for now. B2 is deferred, and done before pilots only if a pilot customer sends those formats.
 5. **B1 is in, grown into one inbound-mail item, label only, no automation:** read and store every inbound e-mail's body and show it to the reviewer beside each document from that e-mail; accept a PO in the e-mail body (a Section 7.16.3 change); classify each e-mail and attachment with one cheap model call into order, change, cancellation, quote request, status question or not an order, shown as a label, with a person deciding and no automatic action; skip extraction for "not an order" and inline images such as signature logos, kept visible with a way to send one to extraction. If it sizes over 6 days it splits: before the demo, the body storage and display, body POs and the classifier as their filter; before pilots, attachment labels and junk skipping. Its place in the order is decided after its sizing.
 6. **PDF fallback:** force a download, never a new tab.
-7. **New order, replacing D-226 item 5:** A0 to A6, then B1, then M10, then D-195 change 1, then Blocker 3's background commit with the duplicate SKU index (0041). B1's place stays open until its sizing; it may move after M10 and D-195 change 1. A5 absorbs the 375 px fix. Counting rows before extraction, E1, E2a, the worker's redeploy if needed, the docs PR, production, demo content and rehearsals follow Blocker 3 in D-226's order. Blocker 3 is before-first-pilot: fastener distributors carry catalogs far above 17,500 items, and catalog import is a pilot's first step.
+7. **New order, replacing D-226 item 5:** A0 to A6, then B1, then M10, then D-195 change 1, then Blocker 3's background commit with the duplicate SKU index (0041). B1's place stays open until its sizing; it may move after M10 and D-195 change 1. A5 absorbs the 375 px fix. Counting rows before extraction, E1, E2a, the worker's redeploy if needed, the docs PR, production, demo content and rehearsals follow Blocker 3 in D-226's order. Blocker 3 is before-first-pilot: fastener distributors carry catalogs far above 17,500 items, and catalog import is a pilot's first step. **Replaced by D-235 item 18 (founder, 2026-11-11).**
 8. **The partner walkthrough waits until A4 is on staging.** `DOCUMENT_URL_SIGNING_SECRET`: the founder generates and sets it per the 2026-10-01 decision, when the viewer reaches staging (RUNBOOK 9.7). **Changed by D-233 (founder, 2026-11-04):** the walkthrough waits for A6's deploys and backfill, not for A4, because until then no staging document has page images.
 9. **A0 results (founder's testing, 2026-11-02).** The request log shows each browser fetched the page; no Firefox request appears.
 
@@ -5638,7 +5638,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 | Safari 27.0.1 (iPhone) | Show, heavily zoomed in | Whole PO fitted to the screen | Shows |
 
    Text in an image tag showed a broken icon everywhere, as expected. In-page images were same-origin in this test and will be cross-origin in production, so A4 must prove that case.
-10. **Firefox:** not tested, because the founder's Firefox hangs on every site. Real Firefox is deferred to before pilots. Playwright's Firefox covers it in CI from A6; until then CI runs Chromium only.
+10. **Firefox:** not tested, because the founder's Firefox hangs on every site. Real Firefox is deferred to before pilots. Playwright's Firefox covers it in CI from A6; until then CI runs Chromium only. **Amended by D-234 (founder, 2026-11-05):** WebKit runs the review screen's 375 px layout spec in CI from A5; Firefox from A6. **Changed by D-235 item 11 (founder, 2026-11-11):** Firefox in CI waits until after the demo.
 11. **Conclusions from A0:** page images are shown in the page, with our own fit-to-width, zoom and pan, never inside the frame. Text previews must not depend on the browser's colours or fit, so they are shown in the page as escaped text, never HTML.
 12. **A1 as approved.** A PDF goes to a download panel in the catalog's words (DOC-031), never the frame. A download is a server-side attachment under a sanitized filename, on a link minted at the click. With no signing secret, every route that signs or checks a file link answers SYS-002 rather than a 500, and the API warns at startup. No alert is raised for a missing secret. SYS-002's action is "DocFlow has logged this. If it keeps happening, contact DocFlow support.": it must not imply the problem fixes itself or that anyone has been alerted.
 
@@ -5691,7 +5691,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 
 **Context:** B1, the inbound-mail item (D-228 item 5: label only, no automation), was sized read-only on 2026-11-03. The body is never read today (`email_intake.parse_postmark_payload`), so `raw_emails` keeps headers but no body, short of Section 7.2's "store the raw email", and an e-mail with no attachment is refused as INT-001 (Section 7.16.3). Postmark's inbound pages show `ContentID` on attachments only in examples. They don't say that an image the HTML body references by `cid:` arrives in `Attachments`, so the inline-image rule is proved on a real message before it is relied on. These are the founder's rulings on that sizing.
 
-1. **Order: both halves come after M10 and D-195 change 1**, so the labelling call's model ID and price come from change 1's config module from its first commit. This settles the place D-228 item 7 left open: A2 to A6, M10, D-195 change 1, B1's demo half, then Blocker 3's background commit and the rest of D-228 item 7's order. B1's pilots half is a before-first-pilot item.
+1. **Order: both halves come after M10 and D-195 change 1**, so the labelling call's model ID and price come from change 1's config module from its first commit. This settles the place D-228 item 7 left open: A2 to A6, M10, D-195 change 1, B1's demo half, then Blocker 3's background commit and the rest of D-228 item 7's order. B1's pilots half is a before-first-pilot item. **Changed by D-235 item 4 (founder, 2026-11-11):** change 1 waits until after the demo; B1 labels with the routing model and its existing price, from M10's config.
 2. **Two halves.**
    - **Before the demo:** the body stored and shown beside each document from its e-mail, HTML-only bodies included; a PO printed in the body; the body labelling call as their filter; and item 4's rule for bodies.
    - **Before the first pilot:** labels on attachments, inline images, skipping, item 4's rule for attachments, item 5 at version (b), and item 7.
@@ -5916,7 +5916,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
       - Python's peak allocation 94.7 MiB.
     - **Both** were on the 30-page, 23.7 MB fixture, one answer, on Windows, through the dev parse service with isolation off, and without Celery's own process.
     - The two peaks aren't like for like: the second starts after the worker's imports. Growth and Python's peak are the comparable figures.
-    - Evidence: `C:\Users\NK\DocFlow-evidence\2026-11-03-a3-plan\` (`a3-memory.txt`, `a3-memory-built.txt`, and the scripts as `.txt`). A6 sizes the machine from them.
+    - Evidence: `<evidence-dir>\2026-11-03-a3-plan\` (`a3-memory.txt`, `a3-memory-built.txt`, and the scripts as `.txt`). A6 sizes the machine from them.
 16. **Staging (founder).**
     - **A3 needs the staging suites.** D-223 item 5 exempts only lock-only and tests-only PRs, and A3 adds 0040 and new worker writes to the database and Storage.
     - **No staging deploy is needed for them.** The worker suite starts its own dev parse service; the API suite needs one started by hand on 8100 (RUNBOOK 1.4).
@@ -5937,7 +5937,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 
 ## D-233 — Viewer A4: page images and stored text in the page, the frame only as a fallback, and DOC-032 and DOC-033 (founder, 2026-11-04)
 
-**Context:** D-228 item 7's order puts A4 after A3 (D-232; PR #93, merged as `799c08a`). A4 is the viewer's half: it shows the page images A2 draws and A3 stores, and the text DocFlow stored, in the page. The chat outline of 2026-11-02 sized A4 at 1.5 days as "API page parameter, and web pager in the one sandboxed iframe"; D-228 item 11 then put page images in the page, never the frame. The plan was approved on 2026-11-04 at 4.5 days, with the founder's answers and eight changes. The branch is `phase55/stage5-viewer-a4`, from `main` at `799c08a`. The approved plan is in `C:\Users\NK\DocFlow-evidence\2026-11-04-a4-plan\`.
+**Context:** D-228 item 7's order puts A4 after A3 (D-232; PR #93, merged as `799c08a`). A4 is the viewer's half: it shows the page images A2 draws and A3 stores, and the text DocFlow stored, in the page. The chat outline of 2026-11-02 sized A4 at 1.5 days as "API page parameter, and web pager in the one sandboxed iframe"; D-228 item 11 then put page images in the page, never the frame. The plan was approved on 2026-11-04 at 4.5 days, with the founder's answers and eight changes. The branch is `phase55/stage5-viewer-a4`, from `main` at `799c08a`. The approved plan is in `<evidence-dir>\2026-11-04-a4-plan\`.
 
 1. **What the panel shows is the API's answer (`view` in the mint answer).**
    - `pages`: `page_count` above 0. The page images, in the page.
@@ -5982,3 +5982,237 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** 2026-11-04 (the plan at 4.5 days, its answers to Q1 to Q7, Q-A and Q-B, and eight changes).
 
 **Related:** D-089, D-091, D-092, D-223, D-228, D-229, D-232; `apps/api/app/routers/review.py`, `packages/core/docflow_core/signed_urls.py`, `apps/web/src/components/review/PageViewer.tsx`, `apps/web/src/components/review/DocumentText.tsx`, `scripts/seed_live_e2e.py`.
+
+---
+
+## D-234 — A5: the review screen at 375 px (founder, 2026-11-05)
+
+**Context:** D-228 item 7's order puts A5 after A4 (D-233; PR #94, merged as `014f6c8`). A5 absorbs the 375 px fix. The plan was approved on 2026-11-05 at 5 days, with the founder's answers ((a) A, (b) B, Q1 to Q5 yes), two changes and two additions. The branch is `phase55/stage5-review-a5`, from `main` at `014f6c8`. The approved plan and its evidence are kept outside the repository, in the founder's `DocFlow-evidence\2026-11-05-a5-plan\` folder.
+
+1. **What broke at 375 px on `014f6c8`** (measured in Chromium at 375 x 812, the API stubbed; `a5-plan-draft.md` section 1):
+   - The page scrolled sideways: 196 px with `/auth/me` unanswered, 426 px for an owner, whose header carries every link.
+   - Below 1280 the document had no height of its own. The frame fell to 152 px, and a 400-line text pushed the order details to 16,158 px.
+   - A swipe over the page image scrolled nothing, because the image took every touch.
+   - A pinch zoomed about the page's top-left corner, as did the zoom buttons.
+   - The actions sat only at the top, about 2,300 px above the checks.
+   - Most controls were under 44 px; the check's tick box was 13 x 13.
+2. **The 196 px: its cause (founder, 2026-11-05).**
+   - **What it was:** the line table's visually hidden labels (`LineTable.tsx:224-226` on `014f6c8`). They are `position: absolute` with no positioned ancestor, so they were placed against the page body, not inside the table's scroll box. The last one ended at x = 571 on a 375 px screen.
+   - **The fix:** `relative` on the table's scroll box below 1280 (`max-xl:relative`), so the labels stay inside it there; at 1280 and up the box isn't positioned (item 11).
+   - **The Console's acting-as review** scrolled 196 px for the same reason. No Console code changed.
+   - **The owner's 426 px** was the same 196 px plus the header (item 3).
+3. **The layout below 1280** (Q3). One copy of every control, moved by CSS, never a second rendering.
+   - **The document:** a box of its own height, `clamp(320px, 60svh, 560px)`, so the page scrolls past it whatever it shows. The page images zoom and pan inside it, the text scrolls inside it, and the frame fills it.
+   - **The actions:** a bar fixed to the bottom of the screen.
+     - Row 1: the hint, or "N checks left · Show next →" while a check is left.
+     - Row 2: Save and Approve, 48 px tall.
+     - Row 3: Reject, then Approve & export with its format, 44 px tall.
+     - Reject is never beside Approve. A decided order shows Reopen across row 2.
+     - The bar steps aside while a text field has the focus, so it never rides on a phone's on-screen keyboard.
+   - **The app header** (Q1): the tenant name and Sign out, then the links in a row of their own that scrolls sideways inside itself. Below 640 the header isn't sticky.
+   - **Below 640:** each line is a card (item 5), the ⌘ hints are hidden, and sections are padded `p-3`.
+   - **At 1280 and up,** compared with `014f6c8` in screenshots at 1280, 1440 and 1920, the review screen's layout is unchanged; item 11 has the detail.
+   - **Added during the build, after the plan:** the box's 320 px floor and the bar stepping aside while a text field has the focus.
+4. **Touch targets** (the founder's minimums, 2026-11-05):
+   - **Save and Approve:** 48 px (Material's 48 dp), because a mis-tap there is the costly one.
+   - **Every other control a reviewer taps:** 44 x 44 (WCAG 2.2 SC 2.5.5 and Apple's HIG). That covers the pager, zoom, fit, the tick box's hit area (20 px drawn), the line's flag and arrow, "This one", "Change", the catalog search and its button, "Show …", Download, the header's links and Sign out.
+   - **Text fields below 640:** 44 px tall with 16 px text, since iOS Safari zooms into smaller text.
+5. **The line cards below 640: the same table, restyled.**
+   - One `<table>`, one row per line and one input per value, so every id and test id exists once.
+   - CSS makes each row a two-column grid and shows each input's label.
+   - The table, row groups, rows, column headers and cells carry explicit `role` attributes (founder's addition), so the table stays a table for assistive technology.
+   - Each label's accessible name is unchanged at every width ("quantity for line 1"); a card shows the column's word ("Qty").
+6. **Zoom keeps its centre** (the A4 defect; Q2).
+   - **A pinch** keeps the page point under its centre there, following the fingers as they move. **The buttons** zoom about the middle of the box, and Fit to width keeps the middle's height.
+   - **When the scroll is set:** after the new width is laid out (`useLayoutEffect`), so the browser doesn't clamp it to the old size. The arithmetic is `zoomAnchor.ts`.
+   - **At fit to width** a finger is the browser's (`touch-action: pan-y`): a swipe scrolls as in any scroll box on any page. At fit the page image is a little taller than its box, so the first swipe ends the box's scroll and the next moves the page.
+   - **Zoomed in,** one finger pans the page image (`touch-action: none`).
+7. **Fresh links before a page turn near expiry** ((b) B; founder, 2026-11-05).
+   - **The rule:** a move to another page more than 240 s after the links arrived (lifetime 300 s minus a 60 s margin) asks for fresh links first, and the page loads on them.
+   - **The clock:** the browser's own monotonic one (`performance.now()`). The answer carries no server time, so `pages_expire_at` isn't used.
+   - **Why the margin is 60 s:** it covers the answer's own travel time and a slow load: a poor-scan page is about 815 KB (D-228 item 2), about 16 s at 400 kbit/s, and the same again in headroom.
+   - **No timer:** nothing is asked for unless the reviewer turns a page. A failed re-mint loads the page on the links it has. Neither spends the visit's one re-mint and one retry (D-233 item 6).
+   - **The lifetime constant:** `PAGE_TOKEN_LIFETIME_SECONDS = 300` in `PageViewer.tsx`, equal to `signed_urls.DEFAULT_TTL_SECONDS`. `packages/core/tests/test_ci_guards.py` fails if they differ.
+8. **Safe areas** (Q4):
+   - `viewport` exports `viewportFit: 'cover'`; Next keeps its defaults, and the tag reads `width=device-width, initial-scale=1, viewport-fit=cover`.
+   - The body has left and right `env(safe-area-inset-*)` padding, so no screen slides under the notch in landscape.
+   - The bottom bar carries its own left, right and bottom insets.
+   - No top padding: in a Safari tab the top inset is 0.
+9. **WebKit in CI** ((a) A; amends D-228 item 10).
+   - The `web` job installs `npx playwright install --with-deps chromium webkit`; `--with-deps` installs each browser's Linux system libraries.
+   - The `webkit-375` project runs `e2e/review-375.spec.ts` only. The gestures (`e2e/review-375-touch.spec.ts`) are Chromium's alone, because their touches go through CDP; no test is skipped.
+   - Firefox stays at A6. Neither Linux nor Windows WebKit is iOS Safari, so a real iPhone checks the screen at A6. **Changed by D-235 item 11 (founder, 2026-11-11):** Firefox in CI waits until after the demo; the real-iPhone checks stay at A6.
+10. **Tests.**
+    - **Stubbed e2e** (`e2e/review-375.spec.ts`, 26 tests in each of Chromium and WebKit):
+      - the page doesn't scroll sideways at 375 or 768, and at 1280 in a desktop browser, for an owner and for `/auth/me` unanswered, on the pages, text, frame and panel views;
+      - the document's box height;
+      - Save and Approve on screen wherever the page is scrolled, and the bar's next check;
+      - every target's size, and text fields at 16 px;
+      - the cards and their roles;
+      - the zoom buttons' centre;
+      - the Console's acting-as review at 375.
+    - **Touch e2e** (`e2e/review-375-touch.spec.ts`, 3 tests, Chromium): the swipe, the pinch's centre, and the drag once zoomed. Every touch is checked to land on the page image, above the bar, with the visual viewport unmoved and unzoomed.
+    - **Changed:** `e2e/review.spec.ts`'s 80-character check now asserts no sideways scroll at 375 too.
+    - **Vitest:** the zoom arithmetic; `touch-action` by zoom; the re-mint on a turn after 240 s, none within it, and a failed one; one input and one label per value, with the table's roles.
+    - **Core:** the lifetime guard.
+    - **The red runs, before any fix** (the founder's change: the tests and the fix in one commit, none committed alone):
+      - **`red-run-on-main.txt`:** `37 failed, 28 passed (53.9s)`. The pinch's centre moved 150 px against a limit of 2; the swipe scrolled 0 px against 100; and the 196 px scroll.
+      - **`red-run-on-main-touch-v2.txt`:** the touch spec as changed afterwards (touches kept above the bar, two swipes), `2 failed, 1 passed`. On main a page wider than the screen moves the visual viewport by itself, so in that run some touches land elsewhere. The first run's 150 px is the clean proof of the pinch defect.
+11. **At 1280 and up** (founder, 2026-11-05): the line table's scroll box isn't positioned (`max-xl:relative`), so the desktop is pixel-identical to `014f6c8`, and the 1280 check guards it: the page doesn't scroll sideways at 1280 in either browser (item 10). A5's screenshots of the pages and text views at 1280, 1440 and 1920 differ from `014f6c8`'s in 0 pixels. Zoomed screenshots differ in the page image, by the buttons' new centre (item 6).
+12. **No staging suites** (D-223 item 5; D-227 item 7).
+    - **What changed:** `apps/web`, `ci.yml`'s install line, and one core test that reads two source files.
+    - **Why staging can't show anything new:** the core, worker and API suites don't load the web app, and no database, Storage, worker or API path changes, so staging can't change any result in a way CI can't show.
+    - **Nothing deploys in A5.**
+13. **For A6's iPhone pass** (founder):
+    - the safe areas in portrait and landscape, on the review screen and one other screen;
+    - focus zoom on the text fields;
+    - swipe and pinch on real iOS Safari;
+    - the bottom bar with the on-screen keyboard open.
+
+**Founder approval:** 2026-11-05 (the plan at 5 days, (a) A, (b) B, Q1 to Q5, the two changes and two additions, `relative` on the table's scroll box below 1280 only, `max-xl:relative`).
+
+**Related:** D-166, D-207 (item 12), D-223, D-227, D-228, D-233; `apps/web/src/components/review/ReviewDocumentScreen.tsx`, `PageViewer.tsx`, `zoomAnchor.ts`, `LineTable.tsx`, `apps/web/src/components/AppHeader.tsx`, `apps/web/src/app/layout.tsx`, `apps/web/e2e/review-375.spec.ts`, `apps/web/e2e/review-375-touch.spec.ts`, `apps/web/playwright.config.ts`.
+
+---
+
+## D-235 — Demo readiness: a demo on public staging, the vertical left open, D-195's changes after the demo, and the working plan (founder, 2026-11-10 and 2026-11-11)
+
+**Context:** the founder's brief of 2026-11-10 set the goal: DocFlow demo-ready for distributors on staging, with no production environment; prospects are told the production app comes around January or February 2027. Claude's read-only status and sizing report (2026-11-10) found A1 to A4 merged, A5 committed but not pushed, A6 not started, and five records the brief disagreed with. Items 1 to 15 are the founder's answers and decisions of 2026-11-10; items 16 to 18 are the founder's rulings of 2026-11-11 on Claude's draft of this entry and on the conflicts it reported.
+
+1. **Demo-ready means:**
+   - the viewer works on staging in Chrome and Safari; Edge is covered by Chromium, with no separate pass;
+   - an e-mail, with an attachment or with the PO typed in the body, arrives in the review queue;
+   - the PO set raises no false warnings on correct lines, or the known ones are fixed or avoided;
+   - the export matches a real import layout from the demo vertical's ERP;
+   - two cold rehearsals pass.
+2. **The demo runs on staging, made publicly reachable. This replaces D-226 item 2.**
+   - The web app is hosted on Vercel, on the Pro plan.
+   - The API gets a public address, which replaces D-194 item 4 ("No Flycast address on the API") and RUNBOOK 9.4's "Staging's API stays private".
+   - `/docs`, `/redoc` and `/openapi.json` are turned off on the public API. This is D-226 item 10's first bullet, moved from step h to staging.
+   - **The web app gets its CSP and security headers before it is public** (Section 7.12; plan task 5), moved from Phase 6. `img-src` names the API's origin.
+   - **A polled check of `/healthz`** on the public staging API is added if it fits in 0.25 day; otherwise it is skipped and the founder is told (RUNBOOK 9.4).
+   - **Production was sized beside it:** about 6.5 working days for the environment against about 2.5 for public staging. That fails the founder's rule (switch only if production comes within about 2 days), so the demo stays on staging.
+   - **Staging stays in its Supabase Free organization** (D-226 item 2). The demo routine checks that the project isn't paused before each demo, and the demo tenant's reset procedure is its backup.
+3. **D-209 item 7's outreach-period rules, which D-226 item 2 had moved to production, apply to the environment the demo runs from:**
+   - demo releases are tagged `demo-1`, `demo-2`, ... and recorded in BUILD-STATUS;
+   - every deploy is followed by the smoke test, including one inbound e-mail;
+   - **no deploy and no staging suite in the 48 hours before a booked demo**, not 24;
+   - on demo day the machines are started 30 minutes early.
+4. **D-195 changes 1 and 2 wait until after the demo. This changes D-230 item 1 and D-226 item 5b.**
+   - M10 keeps its model-ID part, which D-226 item 5b had folded into change 1.
+   - M10 sets the routing model's config default to the string that runs today, `claude-haiku-4-5`, so reading config changes no behaviour and needs no golden re-run.
+   - B1's labelling call uses the routing model and its existing price. No new model-ID literal is added.
+   - D-199 item 7's "change 1 at the start of demo readiness" no longer holds.
+   - The comparison waits too (item 9).
+5. **Counting rows before extraction (D-226 item 5d, its second half) is out of the demo.** Spreadsheet POs stay out of the demo.
+6. **No new export format.** The welding ERP imports CSV or Excel, so the existing CSV and XLSX exports are used. A column-layout preset is built only if a real import sample needs one, sized at 0 to 1 day, pending the sample. Section 3's four formats are unchanged.
+7. **The two PO sets are synthetic.**
+   - Ironline (welding) and Keystone (fasteners) are fictional distributors, made by Claude (chat) on 2026-11-03.
+   - Only the Lincoln and Hypertherm manufacturer part numbers are real.
+   - No document comes from a prospect.
+   - The sets are kept outside the repository, in the founder's `DocFlow-evidence\po-set\` folder, and are never copied into it.
+   - **Seeds built from the sets stay outside the repository too.**
+8. **The vertical is not locked. This replaces D-208 items 1 and 2, and D-226 item 3.**
+   - Vertical-agnostic work goes first, with welding as the working default.
+   - Once staging is live, both sets are run, Ironline and Keystone. An accuracy bar is proposed for each before any run (D-208 item 4).
+   - The founder picks the demo vertical after those runs and the discovery calls.
+   - Then one demo tenant is built. The second is built after the first demo.
+   - This also changes:
+     - D-226 item 5i ("both demo tenants");
+     - D-226 item 5j ("fastener first, then welding"). The two rehearsals are now two cold rehearsals of the one tenant;
+     - D-199 item 8's fastener demo tenant.
+   - D-208 item 4 still holds for the chosen vertical: its own catalog, 15 to 20 synthetic POs, an accuracy bar proposed before anything is measured, and a full rehearsal through both portals.
+9. **After the demo:**
+   - Blocker 3 (D-228 item 7; still before the first pilot);
+   - the docs PR, except the path scrub (item 14);
+   - production;
+   - D-195's comparison.
+
+   The demo catalog stays small, 122 or 306 items. That is far below the size at which Blocker 3's import was seen failing in the browser, about 17,500 items, a figure inferred from 292 items a second and not measured.
+
+   **This changes the order:**
+   - D-209 item 6 and D-199 item 2: Stage 5 no longer runs in full before demo readiness, because the docs PR ends Stage 5 (D-226 item 5g).
+   - D-228 item 7 and D-230 item 1's order are replaced by item 18.
+   - D-226 items 5c, 5g and 5h move after the demo.
+10. **From the brief of 2026-11-10:**
+    - no unit-of-measure or pack conversion: VAL-008 flags only;
+    - a fix for pricing units only if the run of the chosen vertical's set on staging shows it is needed;
+    - deferred past the demo: Firefox in CI, outbound e-mail, the MFA guessing gate, the audit-trail fixes, W1 to W5, "hours saved", 2b, 3a and 3b;
+    - no further A5 work beyond what was committed.
+11. **A6's contents:**
+    - **Kept:** the partner walkthrough (D-228 item 8, D-233) and the real-iPhone checks (D-234 item 13).
+    - **Included:** the Console's queue strip showing the pages queue (`admin.py:1629`), and reading `DISPATCH_IN_FLIGHT_TARGET` on the worker app.
+    - **Firefox in CI waits until after the demo.** This changes D-228 item 10 and D-234 item 9 ("Firefox from A6").
+    - **The proposal to remove the frame (D-233 item 2) waits until after the demo.** The frame stays as the "not drawn" fallback.
+12. **E1 and E2a:**
+    - E1 is built as D-209 item 2 says: on the customer's dashboard, `approved_at` minus `review_started_at`, leaving out sessions over `ABANDONED_REVIEW_CEILING_MIN`.
+    - E2a's label reads "Saved rule · used N times", replacing D-209 item 3's "applied N times". It replaces the existing "Filled in by a saved rule" (`confidence.tsx`), an exception to D-209 item 1's "additions only".
+13. **B1's demo half handles HTML-only e-mail bodies** (D-230 item 2; carry item 38): no raw markup reaches extraction.
+14. **Personal paths:**
+    - D-234's context line was fixed in A5's commit before the push.
+    - Every other path into the founder's home folder in committed files is fixed in one small separate PR, the one that records this entry.
+    - Git history is not rewritten.
+15. **A5 and the Debian snapshot branches:**
+    - **A5:** `2168884` was amended to `224517a9856af77d469d958101524ee25d8506a2` for item 14 and pushed on 2026-11-11 at 00:21Z.
+      - Its push run, 42930645128, was green in all six jobs.
+      - "Install Playwright browsers" (Chromium and WebKit) took 57 s, against 19 s for Chromium alone on `014f6c8`'s push run.
+      - Merged as PR #95, `main` `ec3509a`; main's push run #527 green.
+    - **The Debian branches (D-183):**
+      - A PR is opened only for `deps/debian-snapshot-20261109`, before A6's deploys.
+      - It supersedes `-20261012`, `-20261019` and `-20261102`: each of the four changes the same three lines, `ARG DEBIAN_SNAPSHOT` in the API's, parse's and the worker's Dockerfiles, from `20261001T000000Z`.
+      - It changes all three images, so it goes before each of A6's three deploys.
+16. **Prospect documents and the demo tenant's mail (founder, 2026-11-11):**
+    - No prospect's real PO or data goes on staging before D-220 item 8's before-first-pilot items are done.
+    - Real POs from discovery calls are reference only, used to shape synthetic lookalikes with fictional names.
+    - **The demo tenant gets Section 7.16.3's sender allowlist** (strict sender mode, already built). Mail from a sender not on the list is quarantined: its attachments are stored on staging and never processed, and its raw e-mail record is kept.
+    - **The demo tenant's intake address is never given to prospects.** Demo e-mails are sent only from addresses the founder lists.
+    - **Anything in quarantine on the demo tenant is never released.** It is cleared with the Console's Clear (a soft delete).
+    - **If a cleared item holds a real prospect's document,** its stored file, `documents` row and `raw_emails` row are removed by hand under a Grant, with the founder's per-action confirmation (Section 0 rule 5), after a read-only dry run and a foreign-key check. No new hard-delete code (Section 7.10).
+17. **The D-224 sweep's criteria exclude the demo tenant** (founder, 2026-11-11).
+18. **The working plan (founder, 2026-11-11).** Sizes are working days, estimated 2026-11-10, including tests and records, and excluding waits for Grants.
+    1. A5 merged: 0.25.
+    2. The path scrub, with this entry: 0.25.
+    3. The Debian `20261109` PR: 0.25.
+    4. A6's code: the backfill, the queue strip, `DISPATCH_IN_FLIGHT_TARGET`, the `image_preview` proposal, and its staging suites: 2.
+    5. Public staging's code: `/docs`, `/redoc` and `/openapi.json` off; CORS for the Vercel origin; the web app's CSP and security headers; the Vercel project; Supabase Auth's redirect URLs: 1.5.
+    6. M10: 1.
+    7. The deploys, each under its own Grant: parse, the worker sized from D-232 item 15, the API with its public address, signing secret, CORS and webhook credentials. Then Vercel, the backfill, and page images checked on the real hosts: 1.5.
+    8. The Console cleaned up by the D-224 sweep: 0.5.
+    9. The Chrome and Safari pass, the real-iPhone checks, and the partner walkthrough: 1.
+    10. Postmark inbound end to end: 1.5.
+    11. An accuracy bar for each set: 0.25.
+    12. Both sets run in two working tenants, and their warnings triaged: 2.5.
+    13. E1: 1.
+    14. E2a: 0.5.
+    15. B1's demo half, then both sets' body POs: 7.25.
+    16. The pricing-unit fix, if needed: 0 to 2.
+    17. The export preset, if needed: 0 to 1.
+    18. One demo tenant: 2.5.
+    19. The final redeploy, the staging suites, the smoke test, and `demo-1`: 1.
+    20. The demo routine and two cold rehearsals: 1.5.
+
+    About 28 days, or about 32 with contingency. Demo-ready is about 29 December 2026, in a range of about 22 December to 4 January. The founder picks the vertical during tasks 13 to 15.
+
+**Changes:**
+- **Replaced:** D-226 items 2 and 3; D-208 items 1 and 2; the order of D-228 item 7 and D-230 item 1.
+- **Changed:**
+  - D-194 item 4 and RUNBOOK 9.4, for staging's API;
+  - D-226 item 5: b (M10's model-ID part), c, g and h (after the demo), d (counting rows), and i and j (one tenant);
+  - D-226 item 10, the first bullet now applying to staging;
+  - D-199 items 2, 7 and 8;
+  - D-209 items 1 and 3 (E2a's wording), 6 (the order) and 7 (48 hours; the demo's environment);
+  - D-230 item 1;
+  - D-228 item 10;
+  - D-234 item 9;
+  - BUILD-STATUS's Phase 6 web-headers item, now plan task 5.
+
+**Not changed:**
+- Sections 0, 3, 7 and 10;
+- D-195's policy, apart from the timing of changes 1 and 2;
+- D-220 item 8's before-first-pilot items, which still gate any real customer data;
+- Blocker 3's place before the first pilot;
+- B1's pilots half (D-230 items 2 and 11).
+
+**Founder approval:** 2026-11-11.
+
+**Related:** D-183, D-194, D-195, D-199, D-208, D-209, D-220, D-224, D-226, D-228, D-230, D-232, D-233, D-234; RUNBOOK 9.4; BUILD-STATUS's A6 items.
