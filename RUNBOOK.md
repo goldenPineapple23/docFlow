@@ -1986,8 +1986,10 @@ worker deploy (9.2): passing in CI and on staging.
 
 **Decided in 3e (founder, 2026-10-02): a push heartbeat for the worker, on
 Healthchecks.io's free plan** (Q1; BUILD-STATUS "3e detailed design", part
-C). A polled check of `/healthz` is for production's public API only, chosen
-in Phase 6 (the notes further down). Staging's API stays private.
+C). A polled check of `/healthz` is for a public API, chosen in Phase 6 (the
+notes further down). Staging's API is made public for the demo (founder,
+2026-11-11; D-235 item 2); a polled check of it is added if it fits in 0.25
+day, otherwise it is skipped and the founder is told.
 
 **What it covers.** After a dispatch pass that succeeded, the dispatch
 process pings `HEARTBEAT_URL` (`docflow_core.heartbeat`). The pings stop when
