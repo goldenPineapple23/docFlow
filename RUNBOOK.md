@@ -2514,7 +2514,7 @@ above, and what to do the same way next time:**
   worker has stopped, not before, and resume it when the worker is
   deployed again.
 - **`fly` or `flyctl`:** on 2026-10-09 flyctl updated itself (to v0.4.115)
-  and the `fly` command name disappeared from `C:\Users\NK\.fly\bin` on
+  and the `fly` command name disappeared from `<home>\.fly\bin` on
   the founder's machine. `flyctl` is the same program and takes the same
   commands.
 
@@ -3002,7 +3002,7 @@ nothing else moved:
    (Windows' path limit breaks lxml's install under a long one), with the
    Python CI uses (3.13):
    ```
-   py -3.13 -m venv C:\Users\NK\AppData\Local\Temp\relock
+   py -3.13 -m venv <home>\AppData\Local\Temp\relock
    ```
 2. **Today's pins, exactly:** `<venv>\Scripts\python.exe -m pip install
    --no-deps -r apps/<app>/requirements.lock.txt`, then `pip freeze` into a

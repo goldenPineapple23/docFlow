@@ -5362,7 +5362,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 - **Removed:** 13 rows and 2 Storage objects.
   - **The rows:** `buyers` 1, `document_headers` 2, `documents` 2, `intake_addresses` 1, `tenant_daily_metrics` 5, `tenants` 1, `users` 1.
   - **The objects:** two 38-byte files under `uploads/`.
-- **The backup:** `C:\Users\NK\docflow-sweep-backups\21d1215f-2cca-4dbc-a732-b46ab67a7029-20261027T185413Z`, each file's SHA-256 matching when hashed again separately:
+- **The backup:** `<home>\docflow-sweep-backups\21d1215f-2cca-4dbc-a732-b46ab67a7029-20261027T185413Z`, each file's SHA-256 matching when hashed again separately:
   - `rows.json`: `b65fe82cf2936635de7dfd37370ff3891dd901d846ac8521dffa2f94a5d05cca`
   - `storage/…/uploads/7363981dc04c4d458c4e147085944bec.txt`: `763144c8a9c35f93349ec718a9ab31065910b5416bba8099c03b1b973a843693`
   - `storage/…/uploads/fbc412cf88c14041bf2f8bf5fed61f9c.txt`: `73fb7fae43dafbe9c20af00140bb1cd746a3ed3c2e28c687aeb7a95c8ca1f44b`
@@ -5483,7 +5483,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 - **The newest 3.13 with a Windows installer:** 3.13.17. 3.13 is security-only, and python.org says of 3.13.18: "binary installers are no longer provided".
 - **The installer:** `https://www.python.org/ftp/python/3.13.17/python-3.13.17-amd64.exe`, SHA-256 `5da012101ba2e17113a9a1cd901e9ce1441086f2b7ecb5de06ec94163899a190`, matching python.org's. Authenticode: Valid, signed by the Python Software Foundation and timestamped by Microsoft's time-stamping authority.
 - **The install:** an upgrade of the all-users install at `C:\Python313`, run by the founder in an elevated PowerShell with `/passive` and `/log`; exit 0. Afterwards `py -3.13 -V` reads `Python 3.13.17`, and `py -0p` lists `-V:3.13 * C:\Python313\python.exe`.
-- **Kept outside the repository:** `C:\Users\NK\DocFlow-evidence\2026-10-28-venv-rebuild\` holds the installer, its logs, and the records of item 8.
+- **Kept outside the repository:** `<evidence-dir>\2026-10-28-venv-rebuild\` holds the installer, its logs, and the records of item 8.
 
 **8. The local environments (founder's answers 4 and 5).**
 - **Before:** each old venv's `python -V` (3.13.1) and `pip freeze` (the API's 106 lines, the worker's 98) were recorded in the evidence folder.
@@ -5916,7 +5916,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
       - Python's peak allocation 94.7 MiB.
     - **Both** were on the 30-page, 23.7 MB fixture, one answer, on Windows, through the dev parse service with isolation off, and without Celery's own process.
     - The two peaks aren't like for like: the second starts after the worker's imports. Growth and Python's peak are the comparable figures.
-    - Evidence: `C:\Users\NK\DocFlow-evidence\2026-11-03-a3-plan\` (`a3-memory.txt`, `a3-memory-built.txt`, and the scripts as `.txt`). A6 sizes the machine from them.
+    - Evidence: `<evidence-dir>\2026-11-03-a3-plan\` (`a3-memory.txt`, `a3-memory-built.txt`, and the scripts as `.txt`). A6 sizes the machine from them.
 16. **Staging (founder).**
     - **A3 needs the staging suites.** D-223 item 5 exempts only lock-only and tests-only PRs, and A3 adds 0040 and new worker writes to the database and Storage.
     - **No staging deploy is needed for them.** The worker suite starts its own dev parse service; the API suite needs one started by hand on 8100 (RUNBOOK 1.4).
@@ -5937,7 +5937,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 
 ## D-233 — Viewer A4: page images and stored text in the page, the frame only as a fallback, and DOC-032 and DOC-033 (founder, 2026-11-04)
 
-**Context:** D-228 item 7's order puts A4 after A3 (D-232; PR #93, merged as `799c08a`). A4 is the viewer's half: it shows the page images A2 draws and A3 stores, and the text DocFlow stored, in the page. The chat outline of 2026-11-02 sized A4 at 1.5 days as "API page parameter, and web pager in the one sandboxed iframe"; D-228 item 11 then put page images in the page, never the frame. The plan was approved on 2026-11-04 at 4.5 days, with the founder's answers and eight changes. The branch is `phase55/stage5-viewer-a4`, from `main` at `799c08a`. The approved plan is in `C:\Users\NK\DocFlow-evidence\2026-11-04-a4-plan\`.
+**Context:** D-228 item 7's order puts A4 after A3 (D-232; PR #93, merged as `799c08a`). A4 is the viewer's half: it shows the page images A2 draws and A3 stores, and the text DocFlow stored, in the page. The chat outline of 2026-11-02 sized A4 at 1.5 days as "API page parameter, and web pager in the one sandboxed iframe"; D-228 item 11 then put page images in the page, never the frame. The plan was approved on 2026-11-04 at 4.5 days, with the founder's answers and eight changes. The branch is `phase55/stage5-viewer-a4`, from `main` at `799c08a`. The approved plan is in `<evidence-dir>\2026-11-04-a4-plan\`.
 
 1. **What the panel shows is the API's answer (`view` in the mint answer).**
    - `pages`: `page_count` above 0. The page images, in the page.

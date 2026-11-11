@@ -3,7 +3,7 @@
 # process once, then read what the machine, the log, /healthz and the alerts show.
 set -u
 N="$1"
-REPO="/c/Users/NK/Agentic Workflow Port/DocFlow/IDP Engine"
+REPO="$(git rev-parse --show-toplevel)"
 cat > /tmp/kill-documents.sh <<'EOF'
 for d in /proc/[0-9]*; do
   p=${d#/proc/}
