@@ -121,11 +121,34 @@ def test_the_launcher_checks_its_login_records_the_start_then_runs_the_workers(l
     assert run_workers.main() == 0
     assert calls == ["verify ('worker',)", "record", "supervise"]
     # The lines the deploy's checks read: the in-flight target (RUNBOOK 9.2;
-    # A6, D-236), then the login (RUNBOOK 9.7, step 7; D-194).
+    # A6, D-236), the models (D-239), then the login (RUNBOOK 9.7, step 7; D-194).
     assert capsys.readouterr().err.splitlines() == [
         "run_workers: dispatch_in_flight_target=1",
+        "run_workers: model_ids: extraction=claude-sonnet-5 routing=claude-haiku-4-5",
         "run_workers: login check passed as docflow_worker",
     ]
+
+
+@pytest.mark.parametrize(
+    ("name", "model", "says"),
+    [
+        ("DOCFLOW_ROUTING_MODEL", "claude-haiku-4-5-20251001", "is not in MODEL_PRICES"),
+        ("DOCFLOW_EXTRACTION_MODEL", "claude-haiku-4-5", "may not fill the extraction role"),
+    ],
+)
+def test_the_launcher_refuses_a_model_settings_refuses_in_one_line(launcher, name, model, says, capsys):
+    """M10 (D-239): a model not priced for its role stops the worker before
+    anything is checked, recorded or started, in one line, not a traceback."""
+    from docflow_core.config import get_settings
+
+    run_workers, calls, monkeypatch = launcher
+    monkeypatch.setenv(name, model)
+    get_settings.cache_clear()
+    assert run_workers.main() == 1
+    assert calls == []
+    err = capsys.readouterr().err
+    assert err.splitlines() == [err.strip()]
+    assert err.startswith(f"run_workers refused to start: {name}={model!r} {says}")
 
 
 # ── A6 (founder, 2026-11-11; D-236): the in-flight target the worker got ────

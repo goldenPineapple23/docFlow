@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-12, with public staging merged and the Playwright install hardening built and ruled on:** Phase 5.5,
+**Status, as of 2026-11-12, with the CI hardening merged and M10 built:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -172,22 +172,22 @@ every e2e test fails on a CSP violation. `apps/web/vercel.json` turns off automa
 RUNBOOK 13 is task 7's order, starting with the Anthropic spend limit. Staging's sign-ups were
 read off. No `/healthz` poll before the demo; the web Console's browser-only gate, the HTTP rate
 limit and `Fly-Client-IP` move to Phase 6. No staging suites before merge (D-237 item 12).
-**The Playwright install hardening is built** (`ci/playwright-install-hardening`; D-238; CI
+**The Playwright install hardening is merged** (PR #100, `main` `2b95eef`; D-238; CI
 only). Both Playwright installs run through `scripts/ci/playwright_install.sh`: at most two
 attempts of 5 minutes, 30 s apart, inside an 11-minute step, `--with-deps` kept. Every job has a
 time limit, about twice its longest of the last 10 green runs on `main`, or more where its own
 step limits need it (web 14, web-live 15, core 7, api 21, worker 13, parse 21). Every
 upload-artifact step fails in 5 minutes and stays required. Evidence: #95's web install ran
 1 h 41 min on a DNS failure, and #97's uploads hung 11 to 13 minutes. The founder's rulings (D-238): the four job limits stay as set; slow installs failing is accepted, and the 5-minute limit is revisited if a 5-minute-plus install fails a run; #95 is flake 12 and #97 is flake 13, each run counted once, so the count in D-199 item 10 is now 13.
-**Next, in order (D-235 item 18):** the CI hardening's merge. M10, with the routing default
-at today's `claude-haiku-4-5`. Then the
+**M10 is built** (`phase55/stage6-m10`; D-239; design `docs/designs/m10.md`). The two model IDs are read from config, and `config.py` holds the only model-ID literals in the product's code: the defaults are the strings that run today (`claude-sonnet-5`, `claude-haiku-4-5`), and `MODEL_PRICES` holds exactly those two, with their prices and roles (Sonnet extraction only, Haiku routing only). A model not in the table, or set for a role it may not fill, stops Settings from loading in the apps, scripts and tests alike. The API and the worker print `model_ids: extraction=claude-sonnet-5 routing=claude-haiku-4-5` at start. `SESSION_SECRET` is removed; the other six unread settings stay, each with a comment. No golden re-run and no staging suites before merge.
+**Next, in order (D-235 item 18):** M10's merge. Then the
 deploys under Grants and the backfill. The Console's sweep, the Chrome and Safari pass, the
 real-iPhone checks and the partner walkthrough. Postmark inbound end to end. Both PO sets on
 staging. E1, then E2a. B1's demo half, labelling with the routing model. The pricing-unit fix and
 the export preset, only if needed. One demo tenant. The final redeploy with the staging suites,
 D-209's smoke test (owed since the worker's deploy of 2026-11-01) and `demo-1`. The demo routine
 and two cold rehearsals. About 32 working days with contingency: demo-ready about 29 December
-2026. **After the demo:** Blocker 3's background commit with the duplicate SKU index (0041). The
+2026. **After the demo:** pricing every lost call by its own model ID through `MODEL_PRICES` (an unknown ID gets tokens only), required before or with any change to either model setting (D-239 item 8). Blocker 3's background commit with the duplicate SKU index (0041). The
 docs PR, which ends Stage 5 (it also takes `apps/web/AGENTS.md`, whose first heading `next dev`
 rewrote from `#` to `##` when it started on 2026-10-27: either commit that heading or stop `next
 dev` from rewriting the file; founder), CLAUDE.md naming the three staging apps, and RUNBOOK 1.4's

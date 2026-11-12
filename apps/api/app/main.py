@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
 from docflow_core import db, worker_starts
-from docflow_core.config import Settings, get_settings
+from docflow_core.config import Settings, get_settings, model_ids_line, settings_refusal
 from docflow_core.dispatch import health as dispatcher_health
 from docflow_core.signed_urls import SigningKeyMissing
 from fastapi import Depends, FastAPI, Request
@@ -17,9 +17,17 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.deps import ConsoleRefused
-from app.errors import catalog_detail
-from app.routers import (
+# Before the routers: they import the extraction module, which reads the
+# model settings, so a model Settings refuses (D-239) would otherwise stop the
+# API with a traceback. One line instead, like the refusals below.
+_settings_refused = settings_refusal()
+if _settings_refused is not None:
+    print(f"DocFlow API refused to start: {_settings_refused}", file=sys.stderr, flush=True)
+    raise SystemExit(1)
+
+from app.deps import ConsoleRefused  # noqa: E402 -- after the settings check above
+from app.errors import catalog_detail  # noqa: E402
+from app.routers import (  # noqa: E402
     activity,
     admin,
     auth,
@@ -154,6 +162,15 @@ if _refusal is not None:
     raise SystemExit(1)
 
 
+def model_ids_startup_line() -> str:
+    """The models this API's code would call, one line at start (D-239). A
+    warning, not info, for the same reason as api_docs_off: it must reach
+    the machine's log."""
+    line = model_ids_line()
+    logger.warning(line)
+    return line
+
+
 def console_mfa_startup_check() -> bool:
     """
     Warn at startup while the Console's MFA enforcement is off (D-177; the
@@ -195,6 +212,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     console_mfa_startup_check()
     document_signing_startup_check()
     api_docs_startup_check()
+    model_ids_startup_line()
     yield
 
 

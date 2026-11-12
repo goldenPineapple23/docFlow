@@ -37,7 +37,7 @@ import time
 from collections.abc import Mapping, Sequence
 
 from docflow_core import db, worker_starts
-from docflow_core.config import Settings, get_settings
+from docflow_core.config import Settings, get_settings, model_ids_line, settings_refusal
 from docflow_core.constants import DISPATCH_QUEUE, PAGES_QUEUE
 from pydantic import ValidationError
 
@@ -166,7 +166,12 @@ def foreign_login_refusal() -> str | None:
 def main() -> int:
     """The worker machine's start: refuse a wrong configuration, record the
     start (3e, part B), then run the three workers."""
-    refusal = in_flight_target_refusal()
+    try:
+        refusal = in_flight_target_refusal()
+    except ValidationError:
+        # Settings refused something other than the in-flight target, such as
+        # a model not priced for its role (D-239): one line, not a traceback.
+        refusal = settings_refusal()
     if refusal is not None:
         print(f"run_workers refused to start: {refusal}", file=sys.stderr, flush=True)
         return 1
@@ -176,6 +181,8 @@ def main() -> int:
         file=sys.stderr,
         flush=True,
     )
+    # Which models the workers' code calls (D-239; RUNBOOK 9.2).
+    print(f"run_workers: {model_ids_line()}", file=sys.stderr, flush=True)
     refusal = foreign_login_refusal()
     if refusal is not None:
         print(f"run_workers refused to start: {refusal}", file=sys.stderr, flush=True)
