@@ -3235,6 +3235,8 @@ name.
    spend limit. Write the amount and the date in BUILD-STATUS. Once the API is
    public, DocFlow's own per-tenant cost breaker (Section 7.9) still applies;
    this is the ceiling above it.
+   **Done (founder, 2026-11-12):** a monthly spend limit of $100, with an
+   e-mail notification at $50.
 2. **Founder: create the Vercel project, with no environment variables yet.**
    Vercel (Pro team) -> Add New -> Project -> import
    `goldenPineapple23/docFlow`.
