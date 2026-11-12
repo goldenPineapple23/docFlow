@@ -6242,7 +6242,13 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
    - `apps/worker/tests/test_run_workers.py`: the start line; the refusal of `0`, `-1`, `2`, `two`, `1.5` and an empty value, each naming what it got and expected; a start at 1; the expected value read from the setting's default.
    - `apps/api/tests/test_dashboard_api.py` and `apps/web/e2e/dashboard.spec.ts`: the pages queue, and "—" when the broker gives no number.
    - `packages/core/tests/test_broad_except_guard.py`: the backfill's two broad handlers, both fail-closed.
-8. **Staging (founder: question 3, answer a).** As A3 did: CI green, then the core, worker and API suites on staging under a Grant, then the merge, then plan task 7. No exception to D-223. The suites need staging's database and Storage, not the Fly apps (D-232 item 16).
+8. **Staging (founder: question 3, answer a; order set 2026-11-12).** In this order, each step after the one before it:
+   1. #97 (the Debian snapshot PR) merged first, as `cb064ef`.
+   2. `origin/main` merged into `phase55/stage5-a6`.
+   3. CI green on the final head of the branch.
+   4. The core, worker and API suites on staging, under a Grant, on that same final head. No exception to D-223. The suites need staging's database and Storage, not the Fly apps (D-232 item 16).
+   5. The founder merges A6. Then plan task 7.
+   A commit pushed after step 3 or step 4 makes the head a new one, and both steps run again on it.
 
 **Changes:** D-158 (a second user of the tenant-listing session, item 2); D-232 item 13 (answered, item 5); RUNBOOK 9.2; BUILD-STATUS's A6 items.
 
