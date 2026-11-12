@@ -6373,3 +6373,59 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** 2026-11-12 (the design's twelve answers, the Site URL check, the two Phase 6 conditions, the bundle check and noindex).
 
 **Related:** D-089, D-105, D-151, D-177, D-194, D-196, D-220, D-223, D-226, D-227, D-232, D-234, D-235; `docs/designs/public-staging.md`; RUNBOOK 9.4 and 13.
+
+---
+
+## D-238 — CI: the Playwright installs retried once inside a time limit, a time limit on every job, and 5 minutes for every upload (founder, 2026-11-12)
+
+**Context:** a CI-only PR, branch `ci/playwright-install-hardening` from `main` at `637f96f` (#99's merge). Two failures outside the code, read from GitHub's API (job and step times; the logs themselves need a login):
+- **#95** (A5), pull-request run #526 (43042468035) on `224517a`:
+  - **Attempt 1:** the web job's "Install Playwright browsers" ran 1 h 41 min 17 s and was cancelled; the job took 1 h 42 min 36 s. The founder read the log: the runner couldn't resolve `azure.archive.ubuntu.com` inside `npx playwright install --with-deps`, and no time limit stopped it. web-live's "Install Playwright browser" failed after 10 min 09 s.
+  - **Attempt 2:** web's install failed after 20 min 23 s, and web-live's after 10 min 06 s.
+  - **Attempt 3:** green. The installs took 1 min 02 s and 20 s.
+- **#97** (the Debian snapshot), pull-request run #533 (43094831003) on `90705b9`:
+  - **Attempt 1:** three `actions/upload-artifact` steps hung, then failed. In core, "Keep the forward state CI found" after 11 min 27 s and "Keep the 0039 forward state CI found" after 11 min 21 s; in parse, "Keep the self-test evidence" after 12 min 53 s.
+  - **Attempt 2:** green, each upload in 1 to 2 s.
+
+1. **The two Playwright installs** go through one script, `scripts/ci/playwright_install.sh`, which runs the install command it is given.
+   - **At most two attempts,** each stopped after 5 minutes by `timeout`, with 30 seconds between them. `timeout` signals its whole process group, and `--kill-after=10` follows, so an `apt-get` under `npx` stops too.
+   - **Logging:** each attempt prints its number and the time. A failed attempt is a warning annotation. Two failed attempts end with the error annotation "both attempts failed" and exit 1.
+   - **`--with-deps` stays.** Without it, a missing system library would show up later as a browser that won't launch, which is harder to read than a DNS failure.
+   - **No third-party action.**
+   - **Each install step has `timeout-minutes: 11`:** two 5-minute attempts and the 30-second wait, rounded up.
+2. **The three `upload-artifact` steps** (core's two, parse's one) each have `timeout-minutes: 5`, so a hang fails in 5 minutes, not 13. They stay required: no `continue-on-error`. No other workflow has an upload.
+3. **A time limit on every job in `ci.yml`.** The founder set about twice the job's longest time in the last 10 green push runs on `main`: #544, #539, #535, #530, #527, #524, #521, #516, #513 and #510 (#510's green second attempt).
+
+   For four jobs that is less than the job's own step limits allow. A job limit below a step limit would end the job before the step's own limit, and would fail runs that are slow but sound. So those four are set to the job's other steps plus the step's limit.
+
+   | Job | Longest of the 10 | Twice that | What the job's own step limits need | Set |
+   |---|---|---|---|---|
+   | web | 4.0 min (#535) | 8.1 | other steps 2.7 + the install's 11 = 13.7 | **14** |
+   | web-live | 4.2 min (#524) | 8.5 | other steps 3.9 + the install's 11 = 14.9 | **15** |
+   | core | 3.5 min (#544) | 6.9 | — | **7** |
+   | api | 6.5 min (#535) | 12.9 | other steps 5.6 + the image build's own 15 = 20.6 | **21** |
+   | worker | 6.3 min (#527) | 12.7 | — | **13** |
+   | parse | 6.0 min (#535) | 12.1 | other steps 5.5 + the LibreOffice install's 15 (D-218; a cache miss took 10 min 24 s on `main` #470, D-221) = 20.5 | **21** |
+
+   Each value carries a one-line comment in `ci.yml` saying which rule set it.
+4. **A trade-off, recorded for the founder; nothing is ruled on it.** An install that is slow but would succeed now fails if it needs more than 5 minutes twice. Such installs have happened:
+   - web-live's install took 13 minutes and then passed (D-216, run 39997842492);
+   - #469's re-run took 8 min 03 s (D-221 item 4).
+
+   Under this PR both would end in "both attempts failed".
+5. **D-199 item 10 (the flake count):** whether #95's and #97's failures count as flakes is the founder's to decide, and nothing is recorded on it here. The count in D-199 item 10 stays at 11 until the founder rules.
+6. **Tests** (core, `packages/core/tests/test_ci_guards.py`):
+   - every job has exactly its limit;
+   - every upload step has `timeout-minutes: 5` and no `continue-on-error`;
+   - each Playwright install runs the script with `--with-deps` inside an 11-minute step.
+   - **The script itself, with stand-in commands:** a failure then a success passes on attempt 2; two failures end with the error annotation; a hung command is stopped at its limit twice. The guards catch a job missing its limit and an upload given `continue-on-error`.
+   - **Local runs, outside services blocked:** `test_ci_guards.py` gave 42 passed, and with the other readers of `ci.yml` (`test_npm_audit.py`, `test_pip_audit.py`, `test_image_check.py`) 142 passed. By hand, a grandchild process of a hung attempt was stopped with it.
+7. **No staging suites.** This is CI configuration, a CI script and its tests. No app code and no database, session, Storage or migration path changes, so staging can't change any result in a way CI can't show (D-223 item 5).
+
+**Changes:** `.github/workflows/ci.yml`; `scripts/ci/playwright_install.sh` (new); `packages/core/tests/test_ci_guards.py`; BUILD-STATUS.
+
+**Not changed:** any test, gate or pass mark of the apps; D-199 item 10's count; the LibreOffice install's and the image build's own 15-minute limits.
+
+**Founder approval:** 2026-11-12 (the change as specified; the four job limits above twice the longest run are for the founder's review).
+
+**Related:** D-199 (item 10), D-216, D-218, D-219, D-221, D-222, D-223, D-227, D-234, D-235.

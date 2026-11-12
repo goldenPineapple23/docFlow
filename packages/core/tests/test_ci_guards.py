@@ -10,7 +10,11 @@ file too, not a quiet edit to the workflow.
 """
 
 import ast
+import os
 import re
+import shutil
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -448,3 +452,106 @@ def test_the_public_staging_apis_fly_config_redirects_http_and_never_hides_its_a
     assert config["env"]["DOCFLOW_ENV"] == "staging"
     assert "fly deploy --config apps/api/fly.toml" in text
     assert "--no-public-ips" not in text
+
+
+# ── D-238: time limits on every job, the Playwright installs and the uploads ──
+
+INSTALL_SCRIPT = REPO / "scripts" / "ci" / "playwright_install.sh"
+CI_JOBS = ("web", "web-live", "core", "api", "worker", "parse")
+
+
+def _jobs(workflow: str) -> dict[str, str]:
+    """Each top-level job's text, by its key (two-space indent under jobs:)."""
+    body = workflow[workflow.index("\njobs:\n") :]
+    starts = [(m.group(1), m.start()) for m in re.finditer(r"^  ([a-z][a-z0-9_-]*):\n", body, re.M)]
+    return {
+        name: body[start : starts[i + 1][1] if i + 1 < len(starts) else len(body)]
+        for i, (name, start) in enumerate(starts)
+    }
+
+
+def _steps(job: str) -> list[str]:
+    """A job's steps, each as its text from `- ` to the next step."""
+    marks = [m.start() for m in re.finditer(r"^      - ", job, re.M)]
+    return [job[a : marks[i + 1] if i + 1 < len(marks) else len(job)] for i, a in enumerate(marks)]
+
+
+def test_every_ci_job_has_a_time_limit():
+    """A hang ends the job instead of running for hours (#95's web job ran
+    1 h 42 min). The values and why each is what it is: D-238 item 3."""
+    jobs = _jobs(WORKFLOW.read_text(encoding="utf-8"))
+    assert set(jobs) == set(CI_JOBS)
+    expected = {"web": 14, "web-live": 15, "core": 7, "api": 21, "worker": 13, "parse": 21}
+    for name, block in jobs.items():
+        found = re.findall(r"^    timeout-minutes: (\d+)$", block, re.M)
+        assert found == [str(expected[name])], (name, found)
+
+
+def test_every_upload_step_fails_in_5_minutes_and_stays_required():
+    """On #97 three uploads hung 11 to 13 minutes. They stay required: no
+    continue-on-error (founder, 2026-11-12)."""
+    uploads = [
+        step
+        for block in _jobs(WORKFLOW.read_text(encoding="utf-8")).values()
+        for step in _steps(block)
+        if "uses: actions/upload-artifact@" in step
+    ]
+    assert len(uploads) == 3
+    for step in uploads:
+        assert "\n        timeout-minutes: 5\n" in step, step
+        assert "continue-on-error" not in step, step
+
+
+@pytest.mark.parametrize(
+    ("job", "browsers"), [("web", "chromium webkit"), ("web-live", "chromium")]
+)
+def test_each_playwright_install_retries_once_inside_its_own_limit(job, browsers):
+    """Two attempts of 5 min, 30 s apart, inside an 11-min step; --with-deps
+    kept, so a missing library stays a visible install failure (D-238)."""
+    block = _jobs(WORKFLOW.read_text(encoding="utf-8"))[job]
+    installs = [step for step in _steps(block) if "playwright install" in step]
+    assert len(installs) == 1
+    step = installs[0]
+    assert "\n        timeout-minutes: 11\n" in step
+    assert (
+        'run: bash "${{ github.workspace }}/scripts/ci/playwright_install.sh" '
+        f"npx playwright install --with-deps {browsers}\n"
+    ) in step
+
+
+def _bash() -> str:
+    found = shutil.which("bash")
+    assert found, "bash is needed to run scripts/ci/playwright_install.sh"
+    return found
+
+
+def _install(command: list[str], tmp_path: Path, attempt_seconds: int = 300) -> subprocess.CompletedProcess:
+    env = {**os.environ, "PW_ATTEMPT_SECONDS": str(attempt_seconds), "PW_WAIT_SECONDS": "0"}
+    return subprocess.run(
+        [_bash(), str(INSTALL_SCRIPT), *command],
+        capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60,
+    )
+
+
+def test_the_install_script_tries_again_once_and_says_which_attempt(tmp_path):
+    flag = tmp_path / "failed-once"
+    done = _install(["bash", "-c", f"[ -f {flag.name} ] && exit 0; touch {flag.name}; exit 7"], tmp_path)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "attempt 1 of 2" in done.stdout and "attempt 2 of 2: done" in done.stdout
+    assert "::warning title=Playwright install::attempt 1 of 2 failed (exit 7)" in done.stdout
+
+
+def test_the_install_script_fails_loudly_after_two_attempts(tmp_path):
+    done = _install(["false"], tmp_path)
+    assert done.returncode == 1
+    assert done.stdout.count("::warning title=Playwright install::") == 2
+    assert "::error title=Playwright install::both attempts failed" in done.stdout
+
+
+def test_the_install_script_stops_a_hung_attempt_at_its_limit(tmp_path):
+    started = time.monotonic()
+    done = _install(["sleep", "50"], tmp_path, attempt_seconds=2)
+    assert done.returncode == 1
+    assert done.stdout.count("stopped at its 2 s limit") == 2
+    assert time.monotonic() - started < 20
+

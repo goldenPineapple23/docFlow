@@ -50,6 +50,8 @@ jobs:
   web:
     name: web (lint, typecheck, test, build, e2e, audit)
     runs-on: ubuntu-24.04
+    # D-238: twice its longest green run on main (4.0 min) is 8; its install step alone may take 11.
+    timeout-minutes: 14
     defaults:
       run:
         working-directory: apps/web
@@ -90,8 +92,11 @@ jobs:
       # review screen's 375 px layout spec (D-234), and the viewer and the
       # security headers at desktop size (D-237); --with-deps installs each
       # browser's Linux system libraries.
+      # D-238: at most two attempts of 5 min, 30 s apart (#95's web install ran
+      # 1 h 41 min on a DNS failure with no limit). The step's limit covers both.
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium webkit
+        timeout-minutes: 11
+        run: bash "${{ github.workspace }}/scripts/ci/playwright_install.sh" npx playwright install --with-deps chromium webkit
       - name: End-to-end tests (playwright)
         run: npm run test:e2e
       # D-219: a high or critical advisory in a runtime dependency blocks
@@ -117,6 +122,8 @@ jobs:
   web-live:
     name: web-live (the review screen against the real API)
     runs-on: ubuntu-24.04
+    # D-238: twice its longest green run on main (4.2 min) is 9; its install step alone may take 11.
+    timeout-minutes: 15
     steps:
       - name: Keep the stack's ports 54320 to 54327 out of automatic assignment (D-229 item 7; D-231)
         id: reserve_ports
@@ -270,8 +277,10 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
         working-directory: apps/web
+      # D-238: the same two attempts and limit as the web job's install.
       - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 11
+        run: bash "${{ github.workspace }}/scripts/ci/playwright_install.sh" npx playwright install --with-deps chromium
         working-directory: apps/web
       # Nothing is stubbed here: a real browser, the real API, real Postgres,
       # real RLS and a real sign-in (DECISIONS.md D-166). It has its own job
@@ -294,6 +303,8 @@ jobs:
   core:
     name: core (lint, test, audit)
     runs-on: ubuntu-24.04
+    # D-238: twice its longest green run on main (3.5 min).
+    timeout-minutes: 7
     services:
       redis:
         image: redis:7
@@ -370,6 +381,8 @@ jobs:
       # The state this run found, as a file, whether or not it matched.
       - name: Keep the forward state CI found
         if: success() || failure()
+        # D-238: a hang fails here in 5 min (on #97 these hung 11 to 13 min).
+        timeout-minutes: 5
         uses: actions/upload-artifact@v7
         with:
           name: 0036-forward-state
@@ -392,6 +405,8 @@ jobs:
         run: python "${{ github.workspace }}/scripts/ci/migration_0039_roundtrip.py" forward
       - name: Keep the 0039 forward state CI found
         if: success() || failure()
+        # D-238: a hang fails here in 5 min (on #97 these hung 11 to 13 min).
+        timeout-minutes: 5
         uses: actions/upload-artifact@v7
         with:
           name: 0039-forward-state
@@ -447,6 +462,8 @@ jobs:
   api:
     name: api (lint, typecheck, test, audit)
     runs-on: ubuntu-24.04
+    # D-238: twice its longest green run on main (6.5 min) is 13; its image build may take 15.
+    timeout-minutes: 21
     services:
       redis:
         image: redis:7
@@ -594,6 +611,8 @@ jobs:
   worker:
     name: worker (lint, typecheck, test, audit)
     runs-on: ubuntu-24.04
+    # D-238: twice its longest green run on main (6.3 min).
+    timeout-minutes: 13
     services:
       redis:
         image: redis:7
@@ -723,6 +742,8 @@ jobs:
     # so the Fly B tests gate production, RUNBOOK 8.1), seccomp and limits.
     name: parse service (lint, unit, image, sandbox, limits, audit)
     runs-on: ubuntu-24.04
+    # D-238: twice its longest green run on main (6.0 min) is 12; its LibreOffice install may take 15.
+    timeout-minutes: 21
     defaults:
       run:
         working-directory: apps/parse
@@ -903,6 +924,8 @@ jobs:
         run: python "${{ github.workspace }}/scripts/ci/selftest_annotations.py" parse-selftest.txt
       - name: Keep the self-test evidence
         if: success() || failure()
+        # D-238: a hang fails here in 5 min (on #97 these hung 11 to 13 min).
+        timeout-minutes: 5
         uses: actions/upload-artifact@v7
         with:
           name: parse-selftest
