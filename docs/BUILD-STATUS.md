@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-11, with A6's code built:** Phase 5.5,
+**Status, as of 2026-11-12, with A6's code built:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -160,8 +160,9 @@ every reviewable document with no pages, a batch at a time and only once the pag
 Console's strip shows "Pages waiting". The worker refuses to start with a `DISPATCH_IN_FLIGHT_TARGET`
 other than the one `PARSE_SLOTS` was sized for, and prints the value. `image_preview` stays until
 after the demo. Its core, worker and API suites run on staging under a Grant before the merge (D-223).
+**The Debian snapshot PR is merged** (PR #97, as `cb064ef`) and is merged into `phase55/stage5-a6`; A6's staging suites follow CI green on the branch's final head, under a Grant (D-236 item 8).
 **Next, in order (D-235 item 18):** A6's staging suites and merge. Public staging's code. M10, with the routing default
-at today's `claude-haiku-4-5`. The Debian snapshot PR (`deps/debian-snapshot-20261109`), then the
+at today's `claude-haiku-4-5`. Then the
 deploys under Grants and the backfill. The Console's sweep, the Chrome and Safari pass, the
 real-iPhone checks and the partner walkthrough. Postmark inbound end to end. Both PO sets on
 staging. E1, then E2a. B1's demo half, labelling with the routing model. The pricing-unit fix and
@@ -1948,7 +1949,7 @@ here is built.
     Section 10, the one-iframe guard test, originals only ever downloaded; D-228 item 1's answer)
     waits until after the demo (D-235 item 11).
   - **Also for A6 (D-235 items 11 and 15):** the Debian snapshot PR (`deps/debian-snapshot-20261109`)
-    merges before the three deploys, since it changes all three images. The API's deploy sets
+    merged as #97 (`cb064ef`) before the three deploys, since it changes all three images. The API's deploy sets
     `DOCUMENT_URL_SIGNING_SECRET` (D-228 item 8) and carries public staging's address, CORS and
     webhook credentials (plan tasks 5 and 7). Firefox in CI waits until after the demo.
   - **Also for A6 (D-234 item 13), on a real iPhone:** the safe areas in portrait and landscape, on
