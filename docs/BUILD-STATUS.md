@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-12, with public staging's code built:** Phase 5.5,
+**Status, as of 2026-11-12, with public staging merged and the Playwright install hardening built and ruled on:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -67,7 +67,7 @@ tenant named in lower case is never listed or swept (D-224 item 14). **The warni
 tests run on a fake clock, and a new test checks that a slow busy answer uses up the patience
 (D-212 item 8). A PR that changes only tests runs the staging suites only if the staging
 environment can change those tests' results in a way CI can't show (D-223 item 5). **The CI infrastructure flake
-count is 11** (D-199 item 10; flakes 5 to 9 are parse's LibreOffice install timing out at 15 min on
+count is 13** (D-199 item 10; flake 12 is #95's run #526 and flake 13 is #97's run #533, each counted once, D-238 item 5; flakes 5 to 9 are parse's LibreOffice install timing out at 15 min on
 2026-10-26, D-219 items 8 and 9, D-222 items 8 and 9; flake 10 is main's push run #510 on `91d4962`,
 where Inbucket's host port 54324 was already in use at the api job's stack start, D-229 item 7; flake 11 is
 A2's branch push run #511 on `1a04530`, the same port at the same step, holder not identified, D-231
@@ -161,7 +161,7 @@ other than the one `PARSE_SLOTS` was sized for, and prints the value. `image_pre
 after the demo. The Debian snapshot PR went first (PR #97, `cb064ef`); CI was green on A6's final
 head `1fd17d0`, and its staging suites passed there under a Grant: core 1291 passed / 1 skipped,
 worker 344 passed / 8 skipped, API 815 passed / 1 skipped / 3 deselected, the six counts +0
-(D-236 item 8). **Public staging's code is built** (`phase55/stage5-public-staging`; D-237;
+(D-236 item 8). **Public staging's code is merged** (PR #99, `main` `637f96f`; D-237;
 design `docs/designs/public-staging.md`). On Fly the API keeps `/docs`, `/redoc` and
 `/openapi.json` off and refuses to start without an exact `https` CORS origin. Every API response
 carries nosniff, no-referrer, a deny-all CSP and HSTS. The web app sends a per-request nonce CSP
@@ -172,7 +172,14 @@ every e2e test fails on a CSP violation. `apps/web/vercel.json` turns off automa
 RUNBOOK 13 is task 7's order, starting with the Anthropic spend limit. Staging's sign-ups were
 read off. No `/healthz` poll before the demo; the web Console's browser-only gate, the HTTP rate
 limit and `Fly-Client-IP` move to Phase 6. No staging suites before merge (D-237 item 12).
-**Next, in order (D-235 item 18):** public staging's merge. M10, with the routing default
+**The Playwright install hardening is built** (`ci/playwright-install-hardening`; D-238; CI
+only). Both Playwright installs run through `scripts/ci/playwright_install.sh`: at most two
+attempts of 5 minutes, 30 s apart, inside an 11-minute step, `--with-deps` kept. Every job has a
+time limit, about twice its longest of the last 10 green runs on `main`, or more where its own
+step limits need it (web 14, web-live 15, core 7, api 21, worker 13, parse 21). Every
+upload-artifact step fails in 5 minutes and stays required. Evidence: #95's web install ran
+1 h 41 min on a DNS failure, and #97's uploads hung 11 to 13 minutes. The founder's rulings (D-238): the four job limits stay as set; slow installs failing is accepted, and the 5-minute limit is revisited if a 5-minute-plus install fails a run; #95 is flake 12 and #97 is flake 13, each run counted once, so the count in D-199 item 10 is now 13.
+**Next, in order (D-235 item 18):** the CI hardening's merge. M10, with the routing default
 at today's `claude-haiku-4-5`. Then the
 deploys under Grants and the backfill. The Console's sweep, the Chrome and Safari pass, the
 real-iPhone checks and the partner walkthrough. Postmark inbound end to end. Both PO sets on
