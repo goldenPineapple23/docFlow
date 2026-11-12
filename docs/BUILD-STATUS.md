@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-12, with A6's code built:** Phase 5.5,
+**Status, as of 2026-11-12, with public staging's code built:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -153,15 +153,26 @@ Vercel Pro with its CSP and security headers, and the API with a public address 
 `/redoc` and `/openapi.json` off. D-209's outreach rules apply to it, with 48 hours of quiet before a
 booked demo. Both synthetic PO sets, Ironline (welding) and Keystone (fasteners), run on staging
 after an accuracy bar for each; the founder then picks the vertical and one demo tenant is built.
-**A6's code is built**
-(`phase55/stage5-a6`; D-236): `python -m app.backfill_pages` queues the normal page render for
+**A6 is merged** (PR #98, `main` `7d6bb45`; D-236): `python -m app.backfill_pages` queues the normal page render for
 every reviewable document with no pages, a batch at a time and only once the pages queue is empty
 (run at task 7 under a Grant, never in the 48 hours before a booked demo; RUNBOOK 9.2). The
 Console's strip shows "Pages waiting". The worker refuses to start with a `DISPATCH_IN_FLIGHT_TARGET`
 other than the one `PARSE_SLOTS` was sized for, and prints the value. `image_preview` stays until
-after the demo. Its core, worker and API suites run on staging under a Grant before the merge (D-223).
-**The Debian snapshot PR is merged** (PR #97, as `cb064ef`) and is merged into `phase55/stage5-a6`; A6's staging suites follow CI green on the branch's final head, under a Grant (D-236 item 8).
-**Next, in order (D-235 item 18):** A6's staging suites and merge. Public staging's code. M10, with the routing default
+after the demo. The Debian snapshot PR went first (PR #97, `cb064ef`); CI was green on A6's final
+head `1fd17d0`, and its staging suites passed there under a Grant: core 1291 passed / 1 skipped,
+worker 344 passed / 8 skipped, API 815 passed / 1 skipped / 3 deselected, the six counts +0
+(D-236 item 8). **Public staging's code is built** (`phase55/stage5-public-staging`; D-237;
+design `docs/designs/public-staging.md`). On Fly the API keeps `/docs`, `/redoc` and
+`/openapi.json` off and refuses to start without an exact `https` CORS origin. Every API response
+carries nosniff, no-referrer, a deny-all CSP and HSTS. The web app sends a per-request nonce CSP
+(no `'unsafe-inline'`, no `'unsafe-eval'`) and its security headers, `noindex` on `/admin`, and
+every page renders per request. `npm run check:bundle` proves the browser bundle carries only the
+three public values. A route walk classifies all 111 API routes. WebKit now runs the viewer, and
+every e2e test fails on a CSP violation. `apps/web/vercel.json` turns off automatic deploys.
+RUNBOOK 13 is task 7's order, starting with the Anthropic spend limit. Staging's sign-ups were
+read off. No `/healthz` poll before the demo; the web Console's browser-only gate, the HTTP rate
+limit and `Fly-Client-IP` move to Phase 6. No staging suites before merge (D-237 item 12).
+**Next, in order (D-235 item 18):** public staging's merge. M10, with the routing default
 at today's `claude-haiku-4-5`. Then the
 deploys under Grants and the backfill. The Console's sweep, the Chrome and Safari pass, the
 real-iPhone checks and the partner walkthrough. Postmark inbound end to end. Both PO sets on
@@ -1956,7 +1967,8 @@ here is built.
     the review screen and one other screen; focus zoom on the text fields; swipe and pinch in iOS
     Safari; the review screen's bottom bar with the on-screen keyboard open.
 
-- **The web app's CSP and security headers** (none yet; `docs/REVIEW-PHASE5.md:30`; D-233), moved
+- **The web app's CSP and security headers: BUILT in plan task 5** (D-237 item 3; live at task 7,
+  RUNBOOK 13). Before that: none yet (`docs/REVIEW-PHASE5.md:30`; D-233), moved
   from Phase 6 to plan task 5, before the web app is public (D-235 item 2):
   when a CSP is added, `img-src` must name the API's origin, or the viewer's page images stop
   loading. A COEP needs the page route's `Cross-Origin-Resource-Policy: cross-origin`, which it
@@ -1969,8 +1981,9 @@ here is built.
   - Behind Fly's edge, `request.client.host` is the proxy's address, so the intake's source-IP note
     (`email_intake.py`, log-only) can't see the real sender.
   - **Changed by D-235 items 2 and 9 (founder, 2026-11-11):** production waits until after the
-    demo. The first bullet is done on public staging in plan task 5, with all three routes off;
-    the second applies to public staging too.
+    demo. The first bullet is done on public staging in plan task 5, with all three routes off
+    (built, D-237 item 1); the second applies to public staging too, and stays in Phase 6 with the
+    HTTP rate limit (D-237 item 11).
 
 - IIF export not yet validated against real QuickBooks Desktop (Phase 4).
 - **A known limit: a 40-line order on a 250,000-item catalog (founder, 2026-10-12; D-201).**

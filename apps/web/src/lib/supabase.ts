@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { SUPABASE_ANON_KEY, SUPABASE_URL } from "./origins";
 
 // Browser-side Supabase client, used only for authentication (sign-in for
 // invited users). There is no signup call anywhere in this file or
@@ -9,7 +10,5 @@ import { createClient } from "@supabase/supabase-js";
 // load -- createClient() validates its URL argument eagerly. Any real
 // request against the placeholder host will simply fail at runtime, which
 // is correct: there is no working backend to reach until it's configured.
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-anon-key";
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Both values live in src/lib/origins.ts, which the CSP reads too (D-237).
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);

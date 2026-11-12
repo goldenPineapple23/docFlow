@@ -6255,3 +6255,120 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** 2026-11-11 (the design, its three answers and three additions).
 
 **Related:** D-158, D-223, D-228, D-232, D-233, D-235; `docs/designs/a6.md`, `apps/worker/app/backfill_pages.py`, `apps/worker/app/run_workers.py`.
+
+---
+
+## D-237 — Public staging's code: API docs off, CORS checked at start, the web app's CSP and headers, the Vercel project, Supabase Auth's URLs, and what stays for Phase 6 (founder, 2026-11-12)
+
+**Context:** plan task 5 in D-235 item 18, sized there at 1.5 working days. The design is `docs/designs/public-staging.md`, committed as `b30f2d4` with twelve questions and answered by the founder on 2026-11-12. The branch is `phase55/stage5-public-staging`, from `main` at `7d6bb45` (#98's merge). This task is code and records only. The deploys, the public addresses and the dashboard changes are plan task 7, each under its own Grant, in RUNBOOK 13.2's order.
+
+1. **`/docs`, `/redoc` and `/openapi.json` are off** (D-235 item 2; D-226 item 10's first bullet).
+   - A new setting, `API_DOCS_ENABLED`, off by default. Only `true` turns the routes on, for local development.
+   - **On Fly the setting is ignored** (founder). The routes stay off, and the API logs one line at startup, `api_docs_off: ...`. It logs at warning level, because only a `docflow.api` warning is sure to reach the machine's log (D-220 item 11).
+   - With `openapi_url` set to None, FastAPI adds none of the four routes, the OAuth2 redirect included. `app.openapi()` still builds the schema for the tests that walk the routes.
+   - **Tests:** under staging config (`DOCFLOW_ENV=staging`, set explicitly, in a fresh process) the four paths answer 404. With the setting on they answer 200, so the 404s are the setting's doing. On Fly they answer 404 with the setting on, and the startup line appears.
+2. **CORS** is unchanged in shape. It reads `CORS_ALLOWED_ORIGINS`, uses no wildcard and no origin regex, and sends no credentials, because DocFlow authenticates with a bearer header and never a cookie. Starlette's middleware answers preflight with the listed methods and headers and `max-age` 600, and refuses an unlisted origin with 400. The original's `frame-ancestors` reads the same setting.
+   - **A startup refusal on Fly** (founder). The API refuses to start when the setting is unset, contains `*`, holds an entry that isn't `https`, holds an entry with a path, or holds a loopback address. The refusal names the bad value. It runs at import, after the parse-token refusal (Q12), so the port never opens. Off Fly nothing is checked.
+   - Unset means unset: before this, an unset value quietly allowed only the loopback default (D-223 item 7).
+   - **Previews are never pointed at staging's API** (founder). The list holds `https://<vercel-host>` alone.
+   - **Tests:** each bad value is refused by name; an empty or unset list is refused, read without the `.env` file; good origins are accepted; nothing is checked off Fly. On Fly the import exits 1 with the message, and a control with a good origin imports. A preflight from the configured `https` origin is answered without a credentials header, and one from another origin gets 400.
+   - **Two existing tests changed.** `test_parse_token_boundary.py` and `test_serve_dual_stack.py` start the API in Fly mode, so each start now carries a good origin. The only fault each test exercises is still the parse token.
+3. **The web app's CSP and security headers** (CLAUDE.md 7.12; D-235 item 2).
+   - **The CSP** is set per request by `apps/web/src/proxy.ts` (Next 16's Proxy) with a fresh 128-bit nonce. **Nonces, not `'unsafe-inline'` scripts** (founder).
+   - The production policy reads: `default-src 'self'; script-src 'self' 'nonce-…' 'strict-dynamic'; style-src 'self' 'nonce-…'; img-src 'self' data: <API>; font-src 'self'; connect-src 'self' <API> <Supabase>; frame-src <API>; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`.
+   - **Production has no `'unsafe-inline'` and no `'unsafe-eval'`.** Development adds `'unsafe-eval'`, `'unsafe-inline'` styles and `ws:`, which the dev server needs.
+   - **Supabase Storage is not in the policy.** Page images and the original come from the API, which reads Storage server-side; the browser never contacts Storage. `data:` is there for the authenticator QR code.
+   - **The origins** come from one module, `src/lib/origins.ts`. The code that calls the API and Supabase reads it, and so does the CSP, so the two can't drift.
+   - **Every page renders per request.** The root layout awaits `connection()`, and the build lists every route as dynamic. **At task 7 the first page load on Vercel is measured cold and warm** (founder; RUNBOOK 13.2 step 6), so the cost can be judged.
+   - **The other headers**, on every response including built files, from `next.config.ts`:
+     - `Strict-Transport-Security: max-age=63072000; includeSubDomains`;
+     - `X-Content-Type-Options: nosniff`;
+     - `Referrer-Policy: no-referrer`;
+     - `X-Frame-Options: DENY`;
+     - `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), hid=()`.
+   - **`/admin` carries `X-Robots-Tag: noindex, nofollow`** (founder, item 10).
+   - **A Vercel build stops** when either URL is unset or not `https`, or the anon key is unset. Otherwise it would ship the localhost fallbacks and a CSP naming them.
+   - **Tests (vitest):** the exact policy; no inline script, eval, wildcard or Storage host in production; development's additions; a fresh nonce each time; the header list; the build check's cases; `vercel.json`.
+   - **Tests (Playwright, stubbed):** a CSP guard on every spec fails a test on any violation on the web app's own pages. The guard has two witnesses: the `securitypolicyviolation` event and the browser's own console message.
+     - `page.route` stubs sit behind the CSP, so every existing spec now also checks the policy against page images, the frame, the stored text, the Console and the API calls.
+     - One test breaks the policy on purpose and proves the guard sees it.
+     - `headers.spec.ts` checks every header on five pages, the nonce on every script tag, a fresh nonce per request, and a built file with the headers but no CSP.
+     - A new test shows the MFA QR, a `data:` image.
+   - **WebKit at desktop size** is a new project, `webkit`. It runs `headers.spec.ts` and the viewer tests: the sandboxed frame, an unreadable original, a link failure, drawn pages with zoom, and stored text. Before this, WebKit ran only the 375 px layout.
+     - **One viewer test is not in WebKit:** the PDF download. Playwright's WebKit fires no download event for that stubbed attachment, measured with the CSP switched off as well as on (2026-11-12), so it is a gap in the test harness, not the policy. Chromium runs it, and a real Safari download is plan task 9.
+   - **Tests (Playwright, live):** the three live specs run under the same guard against the real API, across sites in `viewer-cross-site`. **No WebKit in the live suite** (founder). The real Safari and iPhone check stays in plan task 9.
+4. **The API's own headers.** A plain ASGI middleware, outermost, adds four headers to every response that hasn't set them itself:
+   - `X-Content-Type-Options: nosniff`;
+   - `Referrer-Policy: no-referrer`;
+   - `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`;
+   - `Strict-Transport-Security: max-age=63072000; includeSubDomains`.
+
+   The original's, the page image's and a download's own headers are kept byte for byte. There is no `X-Frame-Options`, which would fight the original's frame. Preflight answers and SYS-001's 500 carry the headers too.
+5. **`apps/api/fly.toml`:** `force_https = true`. The header says the app is public for the demo. `--no-public-ips` is gone from the deploy line, and the addresses are allocated only under a Grant. A core guard test reads the file.
+6. **The Vercel project (founder: option (a)).** Git connected with automatic deploys off. `apps/web/vercel.json` holds `"git": {"deploymentEnabled": false}`, `npm ci`, `npm run build` and region `iad1`.
+   - Deploys happen only by hand, under a Grant, and never in the 48-hour freeze (D-235 item 3). The ways are a deploy hook for `main`, or the CLI.
+   - Vercel's docs don't say whether a hook builds while `deploymentEnabled` is false (read 2026-11-12), so the first use checks it.
+   - The founder's steps are RUNBOOK 13.2: the root directory, the build settings, Node 22.x, and the three environment variables with where each comes from.
+7. **Supabase Auth's URLs** (founder): at task 7, under the Grant, the Site URL becomes `https://<vercel-host>`, and `https://<vercel-host>/auth/accept` is added to the redirect URLs. `http://localhost:3000/auth/accept` stays, because local invites use it (D-105).
+   - **Nothing local depends on the old Site URL** (checked 2026-11-12):
+     - invites carry their own `redirect_to`;
+     - the seed scripts create users through the admin API with a password;
+     - the API and core tests mock the link;
+     - CI's local stack has its own `site_url`;
+     - no staging suite sends an Auth e-mail.
+   - Only a recovery e-mail sent from the dashboard lands on the Site URL.
+8. **No polled check of `/healthz` and no monitoring tool before the demo** (founder). It is left out because the pre-demo routine covers it: the machines are started 30 minutes early and the smoke test runs (D-235 item 3). This settles D-235 item 2's `/healthz` bullet and RUNBOOK 9.4's staging note (RUNBOOK 13.3). The worker's push heartbeat stays.
+9. **The route-walk test** (founder, +0.25 day). `apps/api/tests/test_route_walk.py` lists all 111 routes.
+   - **6 public**, each with what protects it instead:
+     - `/healthz`;
+     - the intake webhook (Basic credentials);
+     - the Stripe webhook (signature);
+     - three token routes: the original's content, a page image, an export download.
+   - **105 signed in.** The build fails when a route is on neither list, or a listed route no longer exists.
+   - Every signed-in route answers 401 with no session (a tenant route), or 404 (the Console and its acting-as mount).
+   - The token routes refuse a request without their token.
+10. **Admin exposure: the web Console's browser-only gate is accepted for the demo and moved to Phase 6** (founder: option (a)).
+    - Anyone can load the `/admin` page shell and its scripts, which show "not found" once the API answers. No data is reachable: every Console call is the API's 404 (`require_platform_admin`), and `CONSOLE_MFA_ENFORCED` is on for staging's API (D-220 item 11; re-read at task 7).
+    - A server-side gate needs the session in a cookie, which Phase 6 decides.
+    - **Added now** (founder):
+      - `X-Robots-Tag: noindex, nofollow` on `/admin` (item 3);
+      - **a check that the browser bundle carries no secret and no tenant data** (`npm run check:bundle`, a CI step after the build).
+    - **What `check:bundle` fails on:**
+      - a JWT whose role isn't `anon`;
+      - a Stripe, Anthropic or Supabase secret key;
+      - a database or Redis URL with a password;
+      - a private key;
+      - a Healthchecks.io URL;
+      - the value of any setting outside the three public ones, from the root `.env` and from secret-looking environment names;
+      - "Acme Test".
+    - **The three public values** are `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. `next.config.ts` now exposes those three names and no other `NEXT_PUBLIC_` key.
+    - A file planted with a fake Stripe key and "Acme Test" made it fail (2026-11-12).
+11. **The HTTP rate limit and `Fly-Client-IP` stay in Phase 6** (D-196), on the founder's two conditions:
+    - **Self sign-up on staging is off.** Read on 2026-11-12, read-only, from Auth's public settings: `disable_signup: true`, with e-mail the only provider. Nothing changes; task 7 re-reads it (RUNBOOK 13.2 step 7) and stops if it reads on.
+    - **A founder step at task 7:** a monthly spend limit on the Anthropic workspace whose key staging uses. It is RUNBOOK 13.2 step 1, the first step.
+12. **No staging suites before merge** (founder).
+    - **The rule:** D-223 item 5. A PR runs the staging suites only when the staging environment can change its tests' results in a way CI can't show.
+    - **Applied to code PRs:** D-227 item 7 (the API launcher) and D-234 item 12 (A5).
+    - **How D-232 reads it:** D-232's A3 entry reads it more narrowly, as exempting only lock-only and tests-only PRs. A3 needed the suites under either reading, because it added 0040 and new worker writes.
+    - **Why here:** this work changes no database, session or Storage code, and no migration. The Fly-only startup checks can't run in the local suites anyway. They are proven by the task 7 deploy and its smoke test.
+    - **The final diff was checked against that** before push. It touches `apps/api/app/main.py` (app construction, middleware and startup checks), `packages/core/docflow_core/config.py` (one setting), `apps/api/fly.toml`, the web app, CI's web job, tests and records. No `db`, `storage` or migration file. **One judgment for the founder:** the browser's `src/lib/supabase.ts` and `src/lib/api.ts` changed only in where they read their URL and key (`src/lib/origins.ts`, the same values and fallbacks). The Auth client's creation, `getSession`, and how the token is attached are unchanged, so no session handling changed, and the staging suites (Python) never load the web app.
+13. **Estimates.** The design's 1.6 to 1.65 days, plus 0.25 for the route walk. The bundle check and noindex came to about 0.1. No `/healthz` poll.
+
+**Changes:**
+- D-226 item 10, the first bullet: done in code, live at task 7;
+- D-235 item 2, the `/healthz` bullet: skipped, with the founder's reason;
+- D-223 item 7's "with no `CORS_ALLOWED_ORIGINS` the default allows `localhost:3000`" no longer holds on Fly;
+- RUNBOOK 9.4, and the new RUNBOOK 13;
+- `apps/api/fly.toml`'s header;
+- BUILD-STATUS.
+
+**Not changed:**
+- Sections 0, 3, 7 and 10;
+- D-223 item 5's rule;
+- D-235's order;
+- the Console's API gate and MFA;
+- the parse-token refusal, which still runs first.
+
+**Founder approval:** 2026-11-12 (the design's twelve answers, the Site URL check, the two Phase 6 conditions, the bundle check and noindex).
+
+**Related:** D-089, D-105, D-151, D-177, D-194, D-196, D-220, D-223, D-226, D-227, D-232, D-234, D-235; `docs/designs/public-staging.md`; RUNBOOK 9.4 and 13.

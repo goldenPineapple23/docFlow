@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./cspGuarded";
 import { SEED_FILE } from "../playwright.live.config";
 import { openOrder, signIn } from "./session";
 

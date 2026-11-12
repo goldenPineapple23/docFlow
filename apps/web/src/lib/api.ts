@@ -1,7 +1,9 @@
+import { API_BASE_URL } from "./origins";
 import { withStepUp } from "./stepUp";
 import { supabase } from "./supabase";
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+// From src/lib/origins.ts, the one place the CSP reads it too (D-237).
+export { API_BASE_URL };
 
 /**
  * Every call to the FastAPI backend goes through here so the Supabase

@@ -118,6 +118,10 @@ class Settings(BaseSettings):
     # startup, the Console shows a banner and a founder alert is raised.
     # RUNBOOK: docflow-prod is never deployed with this off after enrolment.
     console_mfa_enforced: bool = False
+    # FastAPI's /docs, /redoc and /openapi.json (D-235 item 2; D-237). Off
+    # unless set true, for local development only. On Fly (FLY_APP_NAME set)
+    # it is ignored: the routes stay off and the API says so at startup.
+    api_docs_enabled: bool = False
 
     sentry_dsn: str = ""
     llm_observability_api_key: str = ""

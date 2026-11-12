@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { API_BASE_URL } from "@/lib/origins";
 import {
   ReviewApiError,
   UNEXPECTED,
@@ -14,7 +15,8 @@ import {
  * words for a failure, the download, and the panel itself.
  */
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+// The same value the CSP allows for images and frames (src/lib/origins.ts).
+export { API_BASE_URL };
 
 export function catalogEntryOf(error: unknown): CatalogError {
   return error instanceof ReviewApiError ? error.catalog : UNEXPECTED;

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { connection } from "next/server";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -26,7 +27,12 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+// Every page renders per request (founder, 2026-11-12; D-237): the CSP's
+// nonce is new on each request (src/proxy.ts), and a page built ahead of time
+// would carry none, so its scripts would be refused. Waiting for the request
+// here makes that true of every page, including any added later.
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  await connection();
   return (
     <html
       lang="en"

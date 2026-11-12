@@ -1,26 +1,35 @@
 # The API on Fly staging (Stage 3c; BUILD-STATUS "3c detailed design",
-# item 12). Private only: no public IP (N1/N2). Reached for the G tests over
-# `fly proxy 8000 --app docflow-api-staging`. Stopped when idle.
+# item 12). Public for the demo (founder, 2026-11-11; D-235 item 2, which
+# replaces D-194 item 4): the web app on Vercel calls it from browsers, and
+# Postmark's and Stripe's webhooks reach it, at
+# https://docflow-api-staging.fly.dev. Plain http is redirected to https
+# (force_https). Stopped when idle; a request wakes it. D-237 has the rest.
 #
-# Deploy from the repository root, after RUNBOOK 11's dependency audit passes:
+# Deploy from the repository root, after RUNBOOK 11's dependency audit passes,
+# and only under a Grant (RUNBOOK 13 has the order at plan task 7):
 #
-#     fly deploy --config apps/api/fly.toml --dockerfile apps/api/Dockerfile \
-#         --ignorefile apps/api/Dockerfile.dockerignore --no-public-ips --ha=false .
+#     fly deploy --config apps/api/fly.toml --dockerfile apps/api/Dockerfile #         --ignorefile apps/api/Dockerfile.dockerignore --ha=false .
 #
 # --ha=false: one machine, staging only (founder, 2026-10-06; D-194).
-# No Flycast address is allocated (the same decision): nothing on staging
-# calls the API from another Fly app, and an address would only make it
-# reachable from more places. So `fly ips list` is empty, and nothing wakes a
-# stopped machine: start it first (`fly machine start <id>`), then `fly proxy`.
+# The public addresses are allocated once, each under its own Grant, never
+# by a deploy: `fly ips allocate-v4 --shared` and `fly ips allocate-v6`.
+# Still no Flycast address: nothing on staging calls the API from another
+# Fly app.
+#
+# On Fly the API refuses to start unless CORS_ALLOWED_ORIGINS holds the web
+# app's exact https origin, and /docs, /redoc and /openapi.json are always
+# off (D-237).
 #
 # It listens on IPv4 and IPv6 (app/serve.py; D-227): `fly proxy` comes in on
-# IPv6, and Fly's edge on IPv4 if a Grant ever adds a public address.
+# IPv6, and Fly's edge on IPv4.
 #
 # Secrets (set by the founder): DATABASE_URL (docflow_api), ADMIN_DATABASE_URL
 # (docflow_admin), STRIPE_DATABASE_URL (docflow_stripe) -- Stage 3e, RUNBOOK
 # 10; never WORKER_DATABASE_URL or HEARTBEAT_URL -- REDIS_URL, SUPABASE_*,
 # STORAGE_S3_*, DOCUMENT_URL_SIGNING_SECRET and the rest in BUILD-STATUS item
-# 12. Never PARSE_SERVICE_TOKEN: the API refuses to start with it (Q12).
+# 12, with CORS_ALLOWED_ORIGINS and APP_BASE_URL set to the Vercel origin
+# (RUNBOOK 13). Never PARSE_SERVICE_TOKEN: the API refuses to start with it
+# (Q12). Never API_DOCS_ENABLED: it is ignored here.
 
 app = "docflow-api-staging"
 primary_region = "iad"
@@ -30,7 +39,7 @@ primary_region = "iad"
 
 [http_service]
   internal_port = 8000
-  force_https = false
+  force_https = true
   auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 0

@@ -1,6 +1,6 @@
 # Public staging's code: API docs off, CORS, the web app's headers, the Vercel project, Supabase Auth's redirect URLs
 
-Status: **design, awaiting the founder's answers.** Nothing is built.
+Status: **approved by the founder on 2026-11-12**, with the answers in section 12, and **built** on this branch (D-237). The design was committed as `b30f2d4` before the answers. Sections 7 to 12 now carry the decisions.
 
 - **Plan:** task 5 in D-235 item 18, sized there at 1.5 working days.
 - **Base:** `main` at `7d6bb45`, which is #98's merge. **Branch:** `phase55/stage5-public-staging`.
@@ -275,6 +275,8 @@ Supabase dashboard → docflow-staging → Authentication → URL Configuration:
 
 ## 7. A polled check of `/healthz` on staging
 
+**Decided (founder, 2026-11-12): left out.** There is no poll and no monitoring tool before the demo. The pre-demo routine covers it: the machines start 30 minutes early and the smoke test runs (D-235 item 3). This is recorded in D-237 item 8 and RUNBOOK 13.3. The analysis below is kept as written.
+
 - **The code costs nothing.**
   - `/healthz` already answers without sign-in, always 200.
   - The keyword `"stale":false` is pinned by `test_healthz_dispatcher.py`.
@@ -307,6 +309,13 @@ Supabase dashboard → docflow-staging → Authentication → URL Configuration:
 
 ### 8.2 Findings and proposed fixes (nothing changed)
 
+**Decided (founder, 2026-11-12):**
+- Item 1, the route walk, is built (D-237 item 9).
+- Item 2: option (a), recorded for Phase 6, plus `X-Robots-Tag: noindex, nofollow` on `/admin` and a check that the browser bundle carries no secret and no tenant data (D-237 item 10).
+- Items 3 and 4 stay in Phase 6 (D-196), on two conditions (D-237 item 11):
+  - staging's self sign-up is off. It was read off on 2026-11-12, and task 7 re-reads it;
+  - a founder step at task 7 sets a monthly spend limit on staging's Anthropic workspace.
+
 1. **No test proves the list in 8.1 is complete.** A route added later without a gate would be public.
    - **Proposed:** a route-walk test. It walks every route, including the included routers and the acting-as mount, and calls each with no `Authorization` header.
    - Each must answer 401 or 404, except an explicit allowlist: the six routes above and the docs routes when they're on.
@@ -328,6 +337,8 @@ Supabase dashboard → docflow-staging → Authentication → URL Configuration:
 
 ## 9. The staging suites before merge
 
+**Decided (founder, 2026-11-12): none before merge** (D-237 item 12). If the final diff touches any database, session, Storage or migration code, Claude stops and tells the founder, because then the suites are needed.
+
 **Not needed, as I read the records.**
 - **The rule** is D-223 item 5: a PR runs the staging suites only when the staging environment can change its tests' results in a way CI can't show.
 - **The precedents:** that reasoning was applied to a code PR in D-227 item 7 (the API launcher) and to A5 in D-234 item 12.
@@ -337,22 +348,28 @@ Supabase dashboard → docflow-staging → Authentication → URL Configuration:
 
 ## 10. Task 7: every Grant and founder step, in order
 
-1. **Founder:** create the Vercel project with no deploy yet (RUNBOOK 13 step 1), and read `<vercel-host>` from the project page.
-2. **Grant:** the API deploy from `main`, after RUNBOOK 11's three checks. Set first, typed, history off, staged as RUNBOOK 8:
-   - `CORS_ALLOWED_ORIGINS=https://<vercel-host>`;
-   - `APP_BASE_URL=https://<vercel-host>`. Invite links, billing return URLs, alert links and the review digest all use it;
-   - the signing secret and webhook credentials, per D-235 item 18 task 7;
-   - not `API_DOCS_ENABLED`.
-3. **Grant:** `fly ips allocate-v4 --shared` and `fly ips allocate-v6` on `docflow-api-staging`. Then `GET https://docflow-api-staging.fly.dev/healthz` (read-only), with `/docs`, `/redoc` and `/openapi.json` all 404.
-4. **Founder:** set the three Vercel environment variables (RUNBOOK 13 step 2).
-5. **Grant:** the first Vercel production deploy of `main`, then the header and console checks (RUNBOOK 13 step 5).
-6. **Grant:** the Supabase Auth URL configuration: the redirect URL, the Site URL if question 7 is yes, and the sign-ups-off read.
-7. **Founder or Grant:** the `/healthz` monitor, if question 8 names a tool. Its on-the-day test stops the worker, which is a Fly action, so it needs its own Grant.
-8. **Read-only:** `fly secrets list --app docflow-api-staging` shows `CONSOLE_MFA_ENFORCED`.
+**Final, after the founder's answers (2026-11-12).** RUNBOOK 13.2 holds the full steps. Nothing here happens before task 7.
 
-The rest of task 7 follows its D-235 order: parse, worker, the backfill, page images on the real hosts. The steps above assume the API deploy is the one in that list, not an extra.
+1. **Founder:** a monthly spend limit on the Anthropic workspace whose key staging uses (RUNBOOK 13.2 step 1).
+2. **Founder:** create the Vercel project, with Root Directory `apps/web`, Next.js, `npm ci`, `npm run build`, Node 22.x and production branch `main`. Add no environment variables yet, so any first build stops at the build check. Read `<vercel-host>`. Keep Deployment Protection on previews, and leave the production domain public (step 2).
+3. **Grant:** the API deploy from `main`, after RUNBOOK 11's three checks. Staged first:
+   - `CORS_ALLOWED_ORIGINS=https://<vercel-host>`, without which the API refuses to start;
+   - `APP_BASE_URL=https://<vercel-host>`;
+   - the signing secret and webhook credentials (D-235 item 18 task 7);
+   - never `API_DOCS_ENABLED` and never `PARSE_SERVICE_TOKEN` (step 3).
+4. **Grant:** `fly ips allocate-v4 --shared` and `fly ips allocate-v6` on `docflow-api-staging`. Then, read-only: `/healthz` answers 200; the three docs routes answer 404; `http` redirects to `https`; the four API headers are present; the startup log has the `api_docs_off` line (step 4).
+5. **Founder:** the three Vercel environment variables, in Production scope only (step 5).
+6. **Grant:** the first Vercel production deploy of the named commit, by deploy hook or by the CLI. Then: the headers and the CSP nonce; `noindex` on `/admin`; the production domain opening with no Vercel sign-in; no CSP violation in the console on sign-in, a page image, the frame and the Console; and **the first page load, cold and warm, three of each** (step 6).
+7. **Grant:** Supabase Auth URL Configuration:
+   - **Site URL** changed to `https://<vercel-host>`;
+   - **Redirect URLs:** add `https://<vercel-host>/auth/accept`, and keep `http://localhost:3000/auth/accept`;
+   - **Sign-ups:** read only. They were read off on 2026-11-12, so "sign-up off" needs no change. If it reads on, Claude stops and tells the founder (step 7).
+8. **Read-only:** `fly secrets list` shows `CONSOLE_MFA_ENFORCED`, `CORS_ALLOWED_ORIGINS` and `APP_BASE_URL` (step 8).
+9. **Grant:** one invite to a fictional test user, landing on `https://<vercel-host>/auth/accept` (step 9).
 
-**The order's constraint.** `NEXT_PUBLIC_API_BASE_URL` is compiled into the web build, and the API's `CORS_ALLOWED_ORIGINS` and `APP_BASE_URL` need the Vercel host. The project is therefore created first to learn its host (step 1), and the web deploy comes after the API is public (step 5). The API's host is predictable from its app name, so neither side waits on a guess.
+The rest of task 7 follows its D-235 order: parse, worker, the backfill, page images on the real hosts. The API deploy in step 3 is the one in that list, not an extra.
+
+**The order's constraint.** `NEXT_PUBLIC_API_BASE_URL` is compiled into the web build, and the API's `CORS_ALLOWED_ORIGINS` and `APP_BASE_URL` need the Vercel host. The project is therefore created first to learn its host (step 2), and the web deploy comes after the API is public (step 6). The API's host is predictable from its app name, so neither side waits on a guess.
 
 **Demo day** (D-235 item 3): starting the machines 30 minutes early covers the API's cold start.
 
@@ -374,17 +391,25 @@ The rest of task 7 follows its D-235 order: parse, worker, the backfill, page im
 
 The task as asked is 0.1 to 0.15 over the plan's 1.5. Most of that is WebKit viewer coverage, which doesn't exist today. With both optional items it is 2.15, 0.65 over. Findings 2(b), 3 and 4 are outside these figures.
 
-## 12. Questions for the founder
+## 12. The founder's answers (2026-11-12)
 
-1. Docs: also ignore `API_DOCS_ENABLED` on Fly, with a startup line?
-2. CORS: refuse to start on Fly with origins that are unset, loopback only, `*`, not `https`, or with a path? Recommended.
-3. Vercel previews: never pointed at staging's API? Recommended.
-4. CSP: nonces through `proxy.ts`, with every page rendered per request, rather than `'unsafe-inline'` scripts? Recommended.
-5. Live e2e: add WebKit to `viewer-cross-site` (+0.1)? Not recommended.
-6. Vercel deploys: (a) Git connected with automatic deploys off (recommended), or (b) CLI only?
-7. Supabase Site URL: change it to the Vercel host at task 7?
-8. `/healthz` poll: which tool, if any? Without one named, it is left out and recorded.
-9. Add the route-walk test (+0.25)?
-10. The HTTP rate limit (finding 3, with finding 4): before the demo (about 1.1), or kept in Phase 6?
-11. Staging suites: none before merge, on D-223 item 5 as applied in D-227 item 7 and D-234 item 12?
-12. The web Console's client-only gate: (a) accept and record for Phase 6 (recommended), (b) cookies and a server gate, or (c) noindex only?
+1. **Docs on Fly:** yes. On Fly the API ignores `API_DOCS_ENABLED` and logs one line at startup saying the docs are off.
+2. **The CORS refusal:** yes. On Fly the API refuses to start if `CORS_ALLOWED_ORIGINS` is unset, loopback only, `*`, not `https`, or has a path. The refusal names the bad value. With tests.
+3. **Previews:** never pointed at staging's API.
+4. **The CSP:** nonces in `proxy.ts`, with no `'unsafe-inline'` scripts and no `'unsafe-eval'` in production. At task 7, report the first page load on the deployed Vercel app, cold and warm.
+5. **The live e2e:** no WebKit. The real Safari and iPhone check stays in plan task 9.
+6. **Vercel deploys:** (a). Git connected, automatic deploys off; deploys only by hand, under a Grant, never in the 48-hour freeze.
+7. **The Site URL:** changed at task 7 under the Grant. Confirm first that no local dev flow and no staging suite depends on the current Site URL, and keep localhost in the redirect list if local dev needs it.
+   - **Confirmed** (D-237 item 7): local invites carry their own `redirect_to`, which is `http://localhost:3000/auth/accept`, so it stays.
+8. **The `/healthz` poll:** no poll and no monitoring tool before the demo. The pre-demo routine covers it. Recorded as left out, with the reason.
+9. **The route walk:** yes, +0.25. It lists every API route, asserts which ones answer without a login, and fails when a new route isn't classified.
+10. **The rate limit and `Fly-Client-IP`:** kept in Phase 6 (D-196), on two conditions:
+    - confirm whether staging Supabase allows self sign-up, and if it does, turn it off at task 7. **Read off on 2026-11-12**;
+    - a founder step at task 7 sets a monthly spend limit on the Anthropic workspace whose key staging uses.
+
+    Both are recorded in D-237.
+11. **Staging suites:** none before merge, with the reasoning recorded in D-237. If the final diff touches any database, session, Storage or migration code, stop and tell the founder.
+12. **The web Console's gate:** (a), plus `noindex` on `/admin` and a check that the client bundle carries no secret and no tenant data, only the listed `NEXT_PUBLIC_` values. The browser-only gate is recorded in D-237 as accepted for the demo and moved to Phase 6.
+13. **BUILD-STATUS:** updated with the build, in the same commit as the change.
+
+The questions as asked are kept in `b30f2d4`.
