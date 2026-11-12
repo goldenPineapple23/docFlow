@@ -6295,7 +6295,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
      - `headers.spec.ts` checks every header on five pages, the nonce on every script tag, a fresh nonce per request, and a built file with the headers but no CSP.
      - A new test shows the MFA QR, a `data:` image.
    - **WebKit at desktop size** is a new project, `webkit`. It runs `headers.spec.ts` and the viewer tests: the sandboxed frame, an unreadable original, a link failure, drawn pages with zoom, and stored text. Before this, WebKit ran only the 375 px layout.
-     - **One viewer test is not in WebKit:** the PDF download. Playwright's WebKit fires no download event for that stubbed attachment, measured with the CSP switched off as well as on (2026-11-12), so it is a gap in the test harness, not the policy. Chromium runs it, and a real Safari download is plan task 9.
+     - **One viewer test is not in WebKit:** the PDF download. Playwright's WebKit fires no download event for that stubbed attachment, measured with the CSP switched off as well as on (2026-11-12), so it is a gap in the test harness, not the policy. Chromium runs it, and a real Safari download is plan task 9 (RUNBOOK 13.5).
    - **Tests (Playwright, live):** the three live specs run under the same guard against the real API, across sites in `viewer-cross-site`. **No WebKit in the live suite** (founder). The real Safari and iPhone check stays in plan task 9.
 4. **The API's own headers.** A plain ASGI middleware, outermost, adds four headers to every response that hasn't set them itself:
    - `X-Content-Type-Options: nosniff`;
@@ -6352,6 +6352,7 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
     - **How D-232 reads it:** D-232's A3 entry reads it more narrowly, as exempting only lock-only and tests-only PRs. A3 needed the suites under either reading, because it added 0040 and new worker writes.
     - **Why here:** this work changes no database, session or Storage code, and no migration. The Fly-only startup checks can't run in the local suites anyway. They are proven by the task 7 deploy and its smoke test.
     - **The final diff was checked against that** before push. It touches `apps/api/app/main.py` (app construction, middleware and startup checks), `packages/core/docflow_core/config.py` (one setting), `apps/api/fly.toml`, the web app, CI's web job, tests and records. No `db`, `storage` or migration file. **One judgment for the founder:** the browser's `src/lib/supabase.ts` and `src/lib/api.ts` changed only in where they read their URL and key (`src/lib/origins.ts`, the same values and fallbacks). The Auth client's creation, `getSession`, and how the token is attached are unchanged, so no session handling changed, and the staging suites (Python) never load the web app.
+   - **Ruled (founder, 2026-11-12):** the `supabase.ts` and `api.ts` changes don't count as session code for this rule. The staging suites are Python and never load them; the web e2e, `web-live` in CI and the task 7 smoke test cover them. No staging suites before merge.
 13. **Estimates.** The design's 1.6 to 1.65 days, plus 0.25 for the route walk. The bundle check and noindex came to about 0.1. No `/healthz` poll.
 
 **Changes:**

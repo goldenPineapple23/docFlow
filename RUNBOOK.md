@@ -3355,3 +3355,18 @@ worker's push heartbeat (9.4) stays. A poll is chosen with production
   (`Fly-Client-IP`). Both stay in Phase 6 (D-196). The abuse ceiling, the
   quarantine and the cost breaker still apply, sign-ups are off, and the
   Anthropic spend limit (13.2 step 1) caps the worst case.
+
+### 13.5 Plan task 9's hand checks in a real browser (founder, 2026-11-12; D-237)
+
+Plan task 9 is the Chrome and Safari pass, the real-iPhone checks and the
+partner walkthrough, on the deployed staging app. Hand checks that no CI
+browser can make:
+
+- **PDF download in Safari**, on a Mac and on a real iPhone: open an order
+  whose original is a PDF and press its download button. The file saves (or
+  iOS offers to save it), no new tab opens, and the frame never shows it.
+  Playwright's WebKit fires no download event for this, with the CSP on or
+  off, so CI runs it in Chromium only (D-237 item 3).
+- **The real-iPhone checks** listed in BUILD-STATUS (D-234 item 13): the safe
+  areas in portrait and landscape, focus zoom on the text fields, swipe and
+  pinch in iOS Safari, and the bottom bar with the on-screen keyboard open.
