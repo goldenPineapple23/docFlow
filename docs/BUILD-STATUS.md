@@ -182,6 +182,14 @@ upload-artifact step fails in 5 minutes and stays required. Evidence: #95's web 
 **M10 is merged** (PR #101, `main` `a670eef`; D-239; design `docs/designs/m10.md`). The two model IDs are read from config, and `config.py` holds the only model-ID literals in the product's code: the defaults are the strings that run today (`claude-sonnet-5`, `claude-haiku-4-5`), and `MODEL_PRICES` holds exactly those two, with their prices and roles (Sonnet extraction only, Haiku routing only). A model not in the table, or set for a role it may not fill, stops Settings from loading in the apps, scripts and tests alike. The API and the worker print `model_ids: extraction=claude-sonnet-5 routing=claude-haiku-4-5` at start. `SESSION_SECRET` is removed; the other six unread settings stay, each with a comment. No golden re-run and no staging suites before merge.
 **Task 7 has started** (RUNBOOK 13.2): the Anthropic workspace staging uses has a monthly
 spend limit of $100, with an e-mail notification at $50 (founder, 2026-11-12; step 1).
+RUNBOOK 13.2 is now the one place with task 7's full order (parse, the secrets, the API, its
+addresses, the worker and beat, Vercel, Supabase Auth, the backfill, and task 7's own smoke
+test), with the secrets each app needs. The founder's reads of 2026-11-12: `REDIS_URL` and the
+four `STORAGE_S3_*` match between the API and the worker, and parse's `PARSE_SERVICE_TOKEN`
+matches the worker's. `STRIPE_SECRET_KEY` on staging is a test-mode key only;
+`STRIPE_WEBHOOK_SECRET` stays unset, since billing isn't in the demo. Inbound e-mail moves
+from task 7's smoke test to task 10 (Postmark). The deploys are of `a670eef`; this branch
+(`phase55/task7-deploys`) merges with task 7's records at the end.
 **Next, in order (D-235 item 18):** the rest of task 7, the
 deploys under Grants and the backfill. The Console's sweep, the Chrome and Safari pass, the
 real-iPhone checks and the partner walkthrough. Postmark inbound end to end. Both PO sets on

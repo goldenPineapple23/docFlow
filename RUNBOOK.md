@@ -1815,6 +1815,11 @@ end of every document task, and from beat every 30 seconds.
 2. Deploy the worker with its `beat` process (9.3).
 3. Then deploy the API, which stops sending the document task.
 
+**Task 7 on staging (2026-11) follows RUNBOOK 13.2, not this list.** It
+deploys parse, then the API, then the worker and beat. The API comes first so
+`/healthz` can be read before the worker starts; it shows `"stale": true`
+until then, and nothing uploads in between.
+
 On staging the worker and API are not on Fly until 3e (their own database
 logins); until then step 2 is the local worker and beat (README), and only
 one stack runs against staging at a time (9.3).
@@ -1824,6 +1829,9 @@ waiting. `dispatcher_stopped` says so within `DISPATCHER_STALE_MIN` (10
 minutes), and `/healthz` shows `"stale": true`.
 
 ### 9.2 Adding worker capacity
+
+Task 7's deploy order, with the worker's own step and checks, is RUNBOOK
+13.2 (step 7); the backfill below is its step 11.
 
 `DISPATCH_IN_FLIGHT_TARGET` (a setting, staging 1) is the worker's document
 slots. The worker machine runs one command, `python -m app.run_workers`,
@@ -3197,13 +3205,14 @@ that window would pass the suites' database guard and reach staging (the
 ## 13. Public staging: the API's public address, the web app on Vercel, and Supabase Auth's URLs (founder, 2026-11-12; D-237)
 
 Plan task 7 in D-235 item 18 makes staging public for the demo. This
-section is the order of its Grants and founder steps. The code is merged first
+section is the one place with task 7's full order, its Grants and founder
+steps (13.2). The code is merged first
 (plan task 5, D-237). Nothing here is done before task 7, and every step
 marked **Grant** waits for a founder message that begins with "Grant" and
 names it (CLAUDE.md). No deploy and no staging suite in the 48 hours before a
 booked demo (D-235 item 3).
 
-`<vercel-host>` is the Vercel project's production domain, read in step 2.
+`<vercel-host>` is the Vercel project's production domain, read in 13.2 step 2.
 It isn't known before the project exists, so nothing in the repository names
 it. The API's public host is `docflow-api-staging.fly.dev`, from its Fly app
 name.
@@ -3224,54 +3233,142 @@ name.
   deploys nothing.
 - **A Vercel build stops** if `NEXT_PUBLIC_API_BASE_URL` or
   `NEXT_PUBLIC_SUPABASE_URL` is unset or not `https`, or the anon key is unset
-  (`next.config.ts`). A build started before step 5 fails there, which is
-  harmless.
+  (`next.config.ts`). A build started before 13.2 step 8 fails there, which
+  is harmless.
 
 ### 13.2 Task 7, in order
 
+**This is the one place with task 7's full order** (founder, 2026-11-12). Sections 9.1 and 9.2 point here.
+
+**Before anything deploys:**
+- Every deploy is of the commit its Grant names. On 2026-11-12 that is `a670eef`, M10's merge.
+- This RUNBOOK's own branch merges only with task 7's records, at the end, so `main` stays at that commit throughout.
+- Every Fly deploy follows RUNBOOK 11's three checks: the commit's CI run, the daily audit, and `bash scripts/ci/predeploy_audit.sh <app>`.
+- Read-only commands (`fly logs`, `fly status`, `fly machine list`, `fly ips list`, `fly secrets list`, `curl`) need no Grant. Claude names each one it ran in its next report.
+
 1. **Founder: a monthly spend limit on the Anthropic workspace whose key
-   staging uses** (founder, 2026-11-12). Anthropic Console -> the workspace
-   that holds the worker's `ANTHROPIC_API_KEY` -> its limits -> set a monthly
-   spend limit. Write the amount and the date in BUILD-STATUS. Once the API is
-   public, DocFlow's own per-tenant cost breaker (Section 7.9) still applies;
-   this is the ceiling above it.
-   **Done (founder, 2026-11-12):** a monthly spend limit of $100, with an
-   e-mail notification at $50.
+   staging uses** (founder, 2026-11-12).
+   - **Where:** Anthropic Console -> the workspace that holds the worker's `ANTHROPIC_API_KEY` -> its limits -> set a monthly spend limit.
+   - **Record:** write the amount and the date in BUILD-STATUS.
+   - **Why:** once the API is public, DocFlow's own per-tenant cost breaker (Section 7.9) still applies; this is the ceiling above it.
+
+   **Done (founder, 2026-11-12):** a monthly spend limit of $100, with an e-mail notification at $50.
 2. **Founder: create the Vercel project, with no environment variables yet.**
    Vercel (Pro team) -> Add New -> Project -> import
-   `goldenPineapple23/docFlow`.
-   - **Root Directory:** `apps/web`. Vercel then reads `apps/web/vercel.json`.
+   `goldenPineapple23/docFlow`. The project stays connected to Git, with automatic deploys off.
+   - **Root Directory:** `apps/web`. Vercel then reads `apps/web/vercel.json`, which turns off every automatic Git deployment (13.1).
    - **Framework preset:** Next.js. **Install:** `npm ci`. **Build:**
      `npm run build`. **Output:** the default (`.next`). These are also in
      `vercel.json`.
    - **Node.js version** (Project Settings -> Build and Deployment): 22.x, as CI
      uses.
    - **Production branch:** `main`.
-   - Add **no** environment variables in the import screen. If the import
-     starts a first build anyway, it stops at the build check (13.1), which
-     is the intended result. Nothing deploys.
-   - Read `<vercel-host>`, the production domain on the project page (it has
-     the form `<project>.vercel.app`). It feeds steps 3, 6 and 7.
-   - **Settings -> Deployment Protection:** keep Vercel Authentication on for
-     previews. The production domain must open without a Vercel sign-in,
-     because prospects open it. Checked in step 6.
-   - **Previews are never pointed at staging's API** (founder, 2026-11-12):
-     no preview deployments are made, and the API's CORS list names only
-     `<vercel-host>`.
-3. **Grant: the API deploy**, from `main`, after RUNBOOK 11's three checks.
-   First, typed with history off and staged (`fly secrets set ... --stage`),
-   as for every secret (RUNBOOK 8):
-   - `CORS_ALLOWED_ORIGINS=https://<vercel-host>`. Without it the API refuses
-     to start (13.1).
-   - `APP_BASE_URL=https://<vercel-host>`. Invite links, billing return
-     pages, alert links and the review digest are built from it.
-   - The signing secret and the webhook credentials, as D-235 item 18 task 7
-     lists.
-   - Never `API_DOCS_ENABLED` and never `PARSE_SERVICE_TOKEN`.
+   - **Add no environment variables** in the import screen. If the import starts a first build anyway, it stops at the build check (13.1), which is the intended result. Nothing deploys.
+   - **Read `<vercel-host>`,** the production domain on the project page (it has the form `<project>.vercel.app`). It feeds steps 4, 8, 9, 10 and 12.
+   - **Settings -> Deployment Protection:** keep Vercel Authentication on for previews. The production domain must open without a Vercel sign-in, because prospects open it. Checked in step 9.
+   - **Previews are never pointed at staging's API** (founder, 2026-11-12): no preview deployments are made, and the API's CORS list names only `<vercel-host>`.
+   - **Rollback:** delete the project.
+3. **Grant: the parse deploy, with `/v1/pages`.** Run the command in `apps/parse/fly.toml`'s header (`--no-public-ips --ha=false`) at the named commit.
+   - **The token:** parse needs only `PARSE_SERVICE_TOKEN`, and refuses to start without it on Fly. Its digest must equal the worker's (`fly secrets list` on both apps).
+     - Checked 2026-11-12: `6476737cbfa77c8c` on both.
+     - A mismatch fails every document at its parse call.
+   - **Check:**
+     - every canary line in `fly logs` is PASS (8.3);
+     - `fly ips list` shows one private IPv6 address and nothing else;
+     - `fly machine list` shows one machine, on the new image.
+   - **Rollback:** `fly deploy --image` with the previous release's image (`fly releases --image`), or `fly scale count 0`.
+4. **Founder: the secrets, staged** (`--stage` stores a value without starting anything). Run the commands below in a new PowerShell window. Each value is read from `.env`, generated, or built from `<vercel-host>`. None is typed, echoed or saved in history. The deploys in steps 5 and 7 apply them.
 
-   Then the deploy command in `apps/api/fly.toml`. It is the API deploy in
-   D-235's task 7 list, not an extra one.
-4. **Grant: the public addresses.** `fly ips allocate-v4 --shared --app
+   **`docflow-api-staging`:**
+
+   | Secret | Value | From where | If it's missing |
+   |---|---|---|---|
+   | `CORS_ALLOWED_ORIGINS` | `https://<vercel-host>` | step 2 | **the API won't start** (13.1) |
+   | `APP_BASE_URL` | `https://<vercel-host>` | step 2 | invite links and every e-mail link point at `http://localhost:3000` |
+   | `DOCUMENT_URL_SIGNING_SECRET` | a new random value | generated below | it starts with a warning; originals, page images and export downloads are refused |
+   | `SUPABASE_SERVICE_ROLE_KEY` | the project's secret key | `.env` | invites are refused (step 12) |
+   | `STRIPE_SECRET_KEY` | **a test-mode key, `sk_test_` only** | `.env` | creating a tenant from the Console is refused and rolled back |
+   | `FOUNDER_ALERT_EMAIL` | the founder's alert address | `.env` | alerts the API raises get no e-mail row |
+
+   Already set and checked on 2026-11-12: `DATABASE_URL`, `ADMIN_DATABASE_URL`, `STRIPE_DATABASE_URL`, `REDIS_URL`, `SUPABASE_URL`, the four `STORAGE_S3_*` and `CONSOLE_MFA_ENFORCED`. `REDIS_URL` and the four `STORAGE_S3_*` have the same digests as the worker's.
+
+   **`docflow-worker-staging`** (the worker and beat): `APP_BASE_URL=https://<vercel-host>`, so the links in alert e-mails and the review digest point at the web app. Its other ten secrets were staged before 2026-11-12:
+   - `ANTHROPIC_API_KEY`, `DATABASE_URL` (docflow_worker), `FOUNDER_ALERT_EMAIL`, `HEARTBEAT_URL`, `PARSE_SERVICE_TOKEN`, `REDIS_URL`;
+   - the four `STORAGE_S3_*`.
+
+   **Not set, on purpose:**
+   - **`STRIPE_WEBHOOK_SECRET`:** billing isn't in the demo (founder, 2026-11-12). The Stripe webhook refuses everything.
+   - **`POSTMARK_WEBHOOK_USERNAME` and `_PASSWORD`, and `INTAKE_EMAIL_DOMAIN`:** plan task 10. The intake webhook refuses everything until then.
+   - **`EMAIL_PROVIDER_API_KEY`:** no provider exists. All mail is held in the Console Outbox and sent by hand.
+   - **`SUPPORT_EMAIL`:** "Ask for a card" refuses without it (ONB-018).
+   - **`SUPABASE_JWT_SECRET`:** not needed. Only HS256 tokens use it, and staging signs with ES256 (its key list, read 2026-11-12), which the API checks through `SUPABASE_URL`.
+
+   **Never set:**
+   - **On the API:** `PARSE_SERVICE_TOKEN` (it refuses to start), `API_DOCS_ENABLED`, `WORKER_DATABASE_URL` or `HEARTBEAT_URL`.
+   - **On the worker:** `ADMIN_DATABASE_URL`, `STRIPE_DATABASE_URL` or `API_DATABASE_URL` (it refuses to start).
+   - **On either:** `DOCFLOW_EXTRACTION_MODEL` or `DOCFLOW_ROUTING_MODEL` (D-239; the defaults are the pinned models), or `DISPATCH_IN_FLIGHT_TARGET` (9.2).
+
+   **The commands,** from the repository root, in a new PowerShell window:
+   ```powershell
+   Set-PSReadLineOption -HistorySaveStyle SaveNothing
+   $fly = "$env:USERPROFILE\.fly\bin\fly.exe"
+   $envFile = Join-Path (Get-Location) ".env"
+   function Get-DotEnv([string]$Name) {
+       $line = Get-Content -LiteralPath $envFile | Where-Object { $_ -like "$Name=*" } | Select-Object -First 1
+       if (-not $line) { throw "$Name is not in .env" }
+       return $line.Substring($Name.Length + 1).Trim().Trim('"')
+   }
+
+   # <vercel-host> from step 2 (not a secret).
+   $vercelHost = "<vercel-host>"
+   if ($vercelHost -notmatch '^[a-z0-9-]+\.vercel\.app$') { throw "the Vercel host doesn't look right" }
+   $origin = "https://$vercelHost"
+
+   # Staging checks: nothing below prints a secret.
+   $supabaseUrl = Get-DotEnv "SUPABASE_URL"
+   "SUPABASE_URL project ref: " + ([uri]$supabaseUrl).Host.Split('.')[0]
+   $serviceKey = Get-DotEnv "SUPABASE_SERVICE_ROLE_KEY"
+   try {
+       Invoke-RestMethod -Uri "$supabaseUrl/auth/v1/admin/users?per_page=1" -Headers @{ apikey = $serviceKey; Authorization = "Bearer $serviceKey" } | Out-Null
+       "SUPABASE_SERVICE_ROLE_KEY belongs to that project: yes"
+   } catch { throw "SUPABASE_SERVICE_ROLE_KEY does not open that project; stop" }
+   $stripeKey = Get-DotEnv "STRIPE_SECRET_KEY"
+   if (-not $stripeKey.StartsWith("sk_test_")) { throw "STRIPE_SECRET_KEY in .env is not a test-mode key; stop" }
+   "STRIPE_SECRET_KEY is a test-mode key: yes"
+   $alertEmail = Get-DotEnv "FOUNDER_ALERT_EMAIL"
+   $signing = (python -c "import secrets; print(secrets.token_urlsafe(48))").Trim()
+   if ($signing.Length -lt 60) { throw "the signing secret wasn't generated" }
+
+   & $fly secrets set --app docflow-api-staging --stage `
+       "CORS_ALLOWED_ORIGINS=$origin" "APP_BASE_URL=$origin" `
+       "DOCUMENT_URL_SIGNING_SECRET=$signing" "SUPABASE_SERVICE_ROLE_KEY=$serviceKey" `
+       "STRIPE_SECRET_KEY=$stripeKey" "FOUNDER_ALERT_EMAIL=$alertEmail"
+   & $fly secrets set --app docflow-worker-staging --stage "APP_BASE_URL=$origin"
+
+   Remove-Variable signing, serviceKey, stripeKey, alertEmail, supabaseUrl
+   & $fly secrets list --app docflow-api-staging
+   & $fly secrets list --app docflow-worker-staging
+   ```
+   **How each value is known to be staging's:**
+   - **The project ref** printed is the one on Supabase -> docflow-staging -> Project Settings -> General. It isn't a secret: it is in the API's public address.
+   - **The service role key** opened that project, in a read that is discarded. No production Supabase project exists yet.
+   - **The Stripe key** starts with `sk_test_`. Fly can't show a secret's value afterwards, so this check runs before it is set, and step 12 checks it again on the deployed API: the Console's Stripe link for the new tenant has `/test/` in it.
+   - **The signing secret** is new, so it is staging's alone. Changing it later only ends the viewer URLs in flight (9.7).
+   - **The two URLs** come from `<vercel-host>`.
+
+   **Check:** `fly secrets list` shows the six new names as staged on the API, and `APP_BASE_URL` staged on the worker.
+
+   **Rollback:** `fly secrets unset <NAME> --app <app> --stage`.
+5. **Grant: the API deploy.** Run the command in `apps/api/fly.toml`'s header (`--ha=false`) at the named commit. It applies step 4's staged secrets. The machine stops itself when idle, so it is started by hand before `fly proxy` is used.
+   - **Check, in `fly logs`:**
+     - no `DocFlow API refused to start` line, so the CORS check passed;
+     - `api_docs_off`;
+     - `model_ids: extraction=claude-sonnet-5 routing=claude-haiku-4-5` (D-239);
+     - no `document_signing_secret_unset` warning;
+     - no `login_startup_check` error.
+   - **Check:** `/healthz` over `fly proxy` (11.2) answers. It reads `"stale":true` until step 7, because no dispatcher runs yet. Nothing uploads before then.
+   - **Rollback:** `fly deploy --image` with the previous release's image, or stop the machine.
+6. **Grant: the API's public addresses.** `fly ips allocate-v4 --shared --app
    docflow-api-staging`, then `fly ips allocate-v6 --app docflow-api-staging`.
    Then, read-only:
    - `curl -s https://docflow-api-staging.fly.dev/healthz`: 200 and
@@ -3283,65 +3380,96 @@ name.
    - `curl -sI https://docflow-api-staging.fly.dev/healthz`: the four headers
      (`x-content-type-options`, `referrer-policy`,
      `content-security-policy`, `strict-transport-security`);
-   - the machine's startup log has the `api_docs_off` line, and
-     `model_ids: extraction=claude-sonnet-5 routing=claude-haiku-4-5` (D-239).
-5. **Founder: the Vercel environment variables**, Production scope only.
+   - `curl -sI -H "Origin: https://example.com" https://docflow-api-staging.fly.dev/healthz`: no `access-control-allow-origin`;
+   - `fly secrets list --app docflow-api-staging`: every step 4 name is deployed.
+
+   **Rollback:** `fly ips release` for both addresses. The API is private again.
+7. **Grant: the worker and beat.** The machines were destroyed on 2026-11-02.
+   - **Before:** read `worker_starts_last_hour` on `/healthz`.
+   - **The deploy:** the command in `apps/worker/fly.toml`'s header (`--no-public-ips --ha=false`). It applies the staged secrets.
+   - **Check:**
+     - `fly machine list`: exactly one `worker` machine and one `beat` machine;
+     - the launcher's lines, in this order: `run_workers: dispatch_in_flight_target=1`, then `run_workers: model_ids: extraction=claude-sonnet-5 routing=claude-haiku-4-5`, then `run_workers: login check passed as docflow_worker`;
+     - both Celery workers and the pages process are up;
+     - `/healthz`: `worker_starts_last_hour` is one more than before, and `"stale":false`;
+     - **founder:** the Healthchecks.io check shows a ping within about 5 minutes. It was paused when the worker stopped. A ping resumes it, unless the check is set to resume only by hand.
+   - **Any other count, or no ping:** stop and report (9.2).
+   - **Rollback:** `fly scale count 0 --process-group worker --process-group beat`.
+8. **Founder: the Vercel environment variables**, Production scope only.
    All three are public by design and compiled into the browser bundle, so a
    change needs a redeploy. No secret goes on Vercel.
 
    | Variable | Value | Where it comes from |
    |---|---|---|
-   | `NEXT_PUBLIC_API_BASE_URL` | `https://docflow-api-staging.fly.dev` | the API's Fly app name; it answers once step 4 is done |
+   | `NEXT_PUBLIC_API_BASE_URL` | `https://docflow-api-staging.fly.dev` | the API's Fly app name; it answers once step 6 is done |
    | `NEXT_PUBLIC_SUPABASE_URL` | `https://<project-ref>.supabase.co` | Supabase -> docflow-staging -> Project Settings -> Data API (the same value as `.env`'s) |
    | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | the anon (publishable) key | the same project -> Project Settings -> API Keys. Never the secret or service-role key |
 
-6. **Grant: the first Vercel production deploy**, of `main` at the commit the
-   Grant names. Two ways, both by hand:
-   - **A deploy hook for `main`** (Project Settings -> Git -> Deploy Hooks),
-     started with `curl -X POST <hook URL>`. The hook URL is a secret:
-     whoever holds it can start a build. Vercel's docs don't say whether a
-     hook still builds with `deploymentEnabled: false`, so the first use
-     checks it. If it doesn't build, use the CLI.
-   - **The Vercel CLI**, from a clean checkout of the named commit: `vercel
-     link` once to this project, then `vercel deploy --prod` from the
-     repository root, so the Root Directory setting applies.
+   **Rollback:** remove them.
+9. **The first Vercel production deploy** of `main` at the named commit. The founder starts it, or Claude under a Grant that names it. There is no Vercel CLI on Claude's machine, so the deploy hook is the way:
+   - **A deploy hook for `main`** (Project Settings -> Git -> Deploy Hooks), started with `curl -X POST <hook URL>`.
+   - The hook URL is a secret: whoever holds it can start a build.
+   - Vercel's docs don't say whether a hook still builds with `deploymentEnabled: false`, so the first use checks it. If it doesn't build, use the CLI from a clean checkout of the named commit: `vercel link` once, then `vercel deploy --prod` from the repository root.
 
-   Before starting, check that `main` is at the named commit. After, the
-   deployment's page shows the commit. Then, read-only:
-   - `curl -sI https://<vercel-host>/login`: `content-security-policy` with
-     a nonce and no `'unsafe-inline'`, plus the five headers of D-237 item 3;
-     `curl -sI https://<vercel-host>/admin` adds `x-robots-tag: noindex,
-     nofollow`;
-   - in a private window, `https://<vercel-host>/login` opens with no Vercel
-     sign-in;
-   - the browser console shows no CSP violation on sign-in, the review screen
-     with a page image, the original in its frame, and the Console;
-   - **the first page load time, cold and warm** (founder, 2026-11-12): the
-     time to the login page after about 15 idle minutes (cold), then again at
-     once (warm), from the browser's network panel, three of each. Reported
-     with the deploy, so the cost of rendering every page per request can be
-     judged.
-7. **Grant: Supabase Auth's URLs.** Supabase -> docflow-staging ->
-   Authentication -> URL Configuration:
-   - **Site URL:** `https://<vercel-host>` (founder, 2026-11-12). Nothing
-     local depends on the old value: invites carry their own `redirect_to`;
-     the seed scripts make users through the admin API with a password;
-     the API tests mock the link; CI's local stack has its own `site_url`
-     (`supabase/config.toml`). Only a recovery e-mail sent from the dashboard
-     lands on the Site URL.
-   - **Redirect URLs:** add exactly `https://<vercel-host>/auth/accept`. Keep
-     `http://localhost:3000/auth/accept`, which local invites use (D-105).
-   - **Sign-ups:** read only. "Allow new users to sign up" was read off on
-     2026-11-12 (`disable_signup: true` on the project's public settings,
-     e-mail the only provider), so there is nothing to change. If it reads on,
-     stop and tell the founder before going on.
-8. **Read-only:** `fly secrets list --app docflow-api-staging` lists
-   `CONSOLE_MFA_ENFORCED`, `CORS_ALLOWED_ORIGINS` and `APP_BASE_URL`.
-9. **Grant: one invite** to a fictional test user. Its link lands on
-   `https://<vercel-host>/auth/accept` and sets a password.
+   Before starting, check that `main` is at the named commit. Afterwards, the deployment's page shows the commit.
 
-The rest of task 7 follows D-235's order: parse and the worker, the
-backfill, and page images checked on the real hosts.
+   **Then, read-only:**
+   - `curl -sI https://<vercel-host>/login`: `content-security-policy` with a nonce and no `'unsafe-inline'`, plus the five headers of D-237 item 3;
+   - `curl -sI https://<vercel-host>/admin` adds `x-robots-tag: noindex, nofollow`;
+   - in a private window, `https://<vercel-host>/login` opens with no Vercel sign-in;
+   - the browser console shows no CSP violation on sign-in, the Console, the review screen with a page image, and the original in its frame (those last two from step 12 on).
+
+   **The first page load time, cold and warm** (founder, 2026-11-12), from the browser's network panel, three of each:
+   - **cold:** the login page after about 15 idle minutes;
+   - **warm:** the login page again at once;
+   - **the first API-backed page after idle:** timed too, because the API machine stops itself when idle and the first call wakes it.
+
+   They are reported with the deploy, so the cost of rendering every page per request can be judged.
+
+   **Rollback:** delete the deployment. Nothing else depends on it.
+10. **Founder: Supabase Auth's URLs.** Supabase -> docflow-staging -> Authentication -> URL Configuration.
+    - **Write the current Site URL down first;** it is the rollback.
+    - **Site URL:** `https://<vercel-host>` (founder, 2026-11-12).
+      - Nothing local depends on the old value: invites carry their own `redirect_to`, the seed scripts make users through the admin API with a password, and the API tests mock the link.
+      - CI's local stack has its own `site_url` (`supabase/config.toml`).
+      - Only a recovery e-mail sent from the dashboard lands on the Site URL.
+    - **Redirect URLs:** add exactly `https://<vercel-host>/auth/accept`. Keep `http://localhost:3000/auth/accept`, which local invites use (D-105).
+    - **Sign-ups:** read only. Claude re-reads the project's public auth settings: `disable_signup` must be `true`, as it was on 2026-11-12, with e-mail the only provider. If it reads otherwise, stop and tell the founder before going on.
+    - **Rollback:** the old Site URL back, and the new redirect URL removed.
+11. **The A6 backfill** (9.2, "The pages backfill"). Three Grants, each started on the worker machine through `fly ssh console`:
+    1. `python -m app.backfill_pages --dry-run`: the count per tenant ID and the total; nothing is queued.
+    2. `python -m app.backfill_pages --limit 5`.
+    3. `python -m app.backfill_pages`.
+
+    - **Check:** `pages_failed` lines; the Console's "Pages waiting" reaches 0; then `--dry-run` again.
+    - **Record** the dates, the totals before and after, and the `pages_failed` count in BUILD-STATUS.
+    - **Rollback:** none needed. It only adds page images, and stopping it is safe (9.2).
+12. **Grant: task 7's smoke test.** The founder does the browser parts; Claude does the reads and the record. It costs one model call, about $0.02.
+    1. **Founder, Console at `https://<vercel-host>`:** create a new fictional tenant, "Smoke Test Distributor", with a fictional owner address (`@example.test`).
+       - Check that the tenant page's Stripe link has `/test/` in it: the deployed `STRIPE_SECRET_KEY` is a test key.
+       - Don't take the tenant live. Billing isn't in the demo, and go-live would start a Stripe subscription.
+    2. **Send the owner's invite.** It is held in the Console Outbox, since no e-mail provider exists. Copy its link from there.
+       - In a private window, the link lands on `https://<vercel-host>/auth/accept` and sets a password.
+       - Sign in as that owner.
+    3. **Upload one fictional order:** `apps/parse/tests/fixtures/positive/po.pdf`, a PDF, so it has page images and an original to open.
+       - Within about 2 minutes it reaches `needs_review` (the dispatcher, the worker, parse over Flycast, one Anthropic call). Its cost is on the document.
+    4. **Review.** Check:
+       - the page images show, and the original opens in its frame;
+       - no CSP violation;
+       - edit one field, then approve, acknowledging any warning.
+    5. **Export CSV and XLSX,** and download each through its signed link.
+    6. **The tenant's dashboard, and the Console's health strip:** queue depth 0, a fresh heartbeat, and today's AI spend. `/healthz` reads `"stale":false`.
+    7. **Claude records** the tenant ID, the document ID, the times and the cost in BUILD-STATUS.
+
+    - **It proves:** the public web app, its headers and sign-in on the real host; invites through the held Outbox; upload, extraction, page images, the original, review, approval and export through every deployed app.
+    - **It can't prove, and these move:**
+      - **inbound e-mail intake** (D-210's test e-mail) moves to plan task 10, Postmark inbound end to end, since there is no Postmark account, domain or webhook credentials yet;
+      - **outbound e-mail delivery** waits for an e-mail provider;
+      - **Stripe webhooks** aren't in the demo;
+      - **E1 and E2a** join the demo smoke test once built (task 19; D-209 item 7, D-235 item 3).
+    - **Rollback:** none. The fictional tenant stays, for task 12 or for task 8's sweep (founder's choice).
+
+**Afterwards:** `fly secrets list --app docflow-api-staging` (read-only) shows every step 4 name deployed. Task 7's records go to BUILD-STATUS and this branch's PR.
 
 ### 13.3 Not set up: a polled check of `/healthz` (founder, 2026-11-12)
 
