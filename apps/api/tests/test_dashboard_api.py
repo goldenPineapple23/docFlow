@@ -397,7 +397,7 @@ def test_the_dashboard_reads_the_rollup_and_reports_its_freshness(client, queue)
             with platform_session() as session:
                 expected_stale = metrics.is_stale(metrics.last_run(session))
             assert body["rollup_is_stale"] is expected_stale
-            assert set(body["queues"]) == {"interactive", "bulk"}
+            assert set(body["queues"]) == {"interactive", "bulk", "pages"}
 
             queued = client.post("/admin/rollup/recompute", headers=console.headers(), json={"days": 3})
             assert queued.status_code == 202
@@ -455,3 +455,38 @@ def test_the_dashboard_routes_are_404_to_everyone_else(client):
     assert client.get("/admin/dashboard").status_code == 404
     assert client.post("/admin/rollup/recompute", json={"days": 2}).status_code == 404
     assert client.get(f"/admin/tenants/{UUID(int=1)}/metrics").status_code == 404
+
+
+# ── A6 (D-236): the strip shows the pages queue ─────────────────────────────
+
+
+def test_the_strip_reads_the_pages_queue_beside_the_two_document_lanes(monkeypatch):
+    """The page renders' own queue (D-232) is shown, read from the broker
+    the same way as the lanes; no database is needed for this."""
+    import redis
+
+    from app.routers import admin
+
+    lengths = {"interactive": 0, "bulk": 2, "pages": 7}
+    read: list[str] = []
+
+    class FakeRedis:
+        def llen(self, name):
+            read.append(name)
+            return lengths[name]
+
+    monkeypatch.setattr(redis.Redis, "from_url", classmethod(lambda cls, url, **kw: FakeRedis()))
+    assert admin._queue_depths() == {"interactive": 0, "bulk": 2, "pages": 7}
+    assert read == ["interactive", "bulk", "pages"]
+
+
+def test_a_broker_that_is_down_leaves_every_queue_unknown_including_pages(monkeypatch):
+    import redis
+
+    from app.routers import admin
+
+    def down(cls, url, **kw):
+        raise redis.ConnectionError("acme test: no broker")
+
+    monkeypatch.setattr(redis.Redis, "from_url", classmethod(down))
+    assert admin._queue_depths() == {"interactive": None, "bulk": None, "pages": None}

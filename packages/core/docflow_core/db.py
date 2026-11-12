@@ -502,10 +502,12 @@ def intake_refusal_session() -> Iterator[Session]:
 def pipeline_sweep_session() -> Iterator[Session]:
     """
     Used only by the stuck-document sweep (`docflow_core.stuck_documents`,
-    Section 7.9) to list the tenants it must look at (migration 0027's
-    `pipeline_sweep_read` policy). It can SELECT `tenants` and nothing else;
-    each tenant's documents are then read and changed in that tenant's own
-    tenant_session(). Not the Section 7.15.1 admin bypass.
+    Section 7.9) and the pages backfill (`apps/worker/app/backfill_pages.py`,
+    A6; founder, 2026-11-11; D-236) to list the tenants they must look at
+    (migration 0027's `pipeline_sweep_read` policy). It can SELECT `tenants`
+    and nothing else, and both read tenant ids only; each tenant's documents
+    are then read and changed in that tenant's own tenant_session(). Not the
+    Section 7.15.1 admin bypass.
     """
     session_factory = _session_factory("worker")
     session = session_factory()

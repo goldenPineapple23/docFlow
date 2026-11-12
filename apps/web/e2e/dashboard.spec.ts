@@ -119,7 +119,7 @@ async function stub(page: Page, over: { stale?: boolean } = {}) {
           : { id: "r1", started_at: "2026-09-19T03:15:00Z", finished_at: new Date().toISOString(), trigger: "nightly", tenants: 3, rows_written: 6, ok: true, error: null },
         rollup_stale_hours: 36,
         rollup_is_stale: Boolean(over.stale),
-        queues: { interactive: 0, bulk: 2 },
+        queues: { interactive: 0, bulk: 2, pages: over.stale ? null : 6 },
         worker: over.stale ? null : "celery@TESTPC",
       },
     }),
@@ -139,6 +139,9 @@ test("the home page answers healthy, who needs attention, and how business is do
   await expect(strip).toContainText("answering");
   await expect(strip).toContainText("2%"); // 1 failure in 50 calls
   await expect(strip).toContainText("$1.23");
+  // A6 (D-236): the page renders' own queue.
+  await expect(page.getByTestId("pages-waiting")).toContainText("Pages waiting");
+  await expect(page.getByTestId("pages-waiting")).toContainText("6");
   await expect(page.getByTestId("exports-not-finished")).toContainText("Exports stopped today");
   await expect(page.getByTestId("exports-not-finished")).toContainText("4");
   await expect(strip.getByRole("link", { name: "Sentry" })).toBeVisible();
@@ -185,6 +188,7 @@ test("a rollup that hasn't run says so, and recompute can be asked for", async (
 
   await expect(page.getByTestId("rollup-state")).toContainText("more than 36h ago");
   await expect(page.getByTestId("health-strip")).toContainText("silent"); // no worker answered
+  await expect(page.getByTestId("pages-waiting")).toContainText("—"); // the broker gave no number
   await page.getByTestId("recompute").click();
   await expect.poll(() => recomputed).toEqual({ days: 2 });
 });

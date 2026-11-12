@@ -754,7 +754,8 @@ export type Dashboard = {
   rollup_is_stale: boolean;
   // Stage 3d (gap 1): the heartbeat shows red past this many minutes.
   dispatcher_stale_min: number;
-  queues: { interactive: number | null; bulk: number | null };
+  // A6 (D-236): `pages` is the page renders' own queue (D-232).
+  queues: { interactive: number | null; bulk: number | null; pages: number | null };
   worker: string | null;
 };
 

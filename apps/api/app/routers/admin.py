@@ -54,6 +54,7 @@ from docflow_core.constants import (
     DAILY_TOKEN_CEILING,
     DISPATCHER_STALE_MIN,
     INVOICE_DAYS_UNTIL_DUE,
+    PAGES_QUEUE,
     ROLLUP_STALE_HOURS,
     TRIAL_PERIOD_DAYS,
 )
@@ -1619,16 +1620,21 @@ def put_example_prompting(
 # ── Dashboard (Section 7.15.3; slice 5.5, D-121) ────────────────────────────
 
 
+# The broker lists the strip shows: the two document lanes, and the page
+# renders (A6; D-236), which have their own queue and process (D-232).
+_STRIP_QUEUES = ("interactive", "bulk", PAGES_QUEUE)
+
+
 def _queue_depths() -> dict[str, int | None]:
-    """Queue depth by priority, straight from the broker. A broker that is
+    """Queue depth by queue, straight from the broker. A broker that is
     down is a number we don't have, not a page that fails."""
     try:
         import redis
 
         client = redis.Redis.from_url(get_settings().redis_url, socket_timeout=1)
-        return {name: int(cast(int, client.llen(name))) for name in ("interactive", "bulk")}
+        return {name: int(cast(int, client.llen(name))) for name in _STRIP_QUEUES}
     except Exception:  # noqa: BLE001 -- the strip degrades, the page does not
-        return {"interactive": None, "bulk": None}
+        return dict.fromkeys(_STRIP_QUEUES)
 
 
 def _worker_heartbeat() -> str | None:

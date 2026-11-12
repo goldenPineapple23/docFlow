@@ -100,6 +100,8 @@ export function HealthStrip({ data, onRecomputed }: { data: Dashboard; onRecompu
           tone={Number(health.oldest_waiting_minutes ?? 0) > 60 ? "warn" : undefined}
         />
         <Stat label="Queue (now / bulk)" value={`${queues.interactive ?? "—"} / ${queues.bulk ?? "—"}`} />
+        {/* A6 (D-236): page renders wait on their own queue (D-232). */}
+        <Stat label="Pages waiting" value={`${queues.pages ?? "—"}`} testId="pages-waiting" />
         <Stat label="Worker" value={data.worker ? "answering" : "silent"} tone={data.worker ? undefined : "bad"} />
         {/* Stage 3d (gap 1): red past DISPATCHER_STALE_MIN, whatever is waiting. */}
         <Stat

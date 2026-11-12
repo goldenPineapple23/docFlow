@@ -1869,7 +1869,7 @@ Refusing versus warning is decided after that, on the evidence.
 **Follow-up 2 (2026-09-26, before the founder applies 0027):**
 - **Who can switch on `pipeline_sweep_read`.** The policy opens `tenants` for reading when the transaction carries `app.pipeline_sweep = 'true'`. Postgres lets any connected role set a custom `app.*` setting, so the database does not decide who carries it. The same is true of the four older flags on `tenants` (`is_platform_admin`, `rollup`, `lifecycle`, `stripe_webhook`). What decides:
   - Only DocFlow's own server processes hold a database connection. A signed-in customer reaches the database only through the API, which opens `tenant_session()` for them. That session first clears every flag, then sets only their tenant.
-  - Only `db.pipeline_sweep_session()` sets the flag, and only `stuck_documents.py` uses it, which only the worker's beat task imports. No API route can reach it.
+  - Only `db.pipeline_sweep_session()` sets the flag, and only `stuck_documents.py` uses it, which only the worker's beat task imports. No API route can reach it. **Changed by D-236 item 2 (founder, 2026-11-11):** A6's pages backfill (`apps/worker/app/backfill_pages.py`) is the second user, listing tenant IDs only; `test_rls_flags.py` allows exactly these two.
   - Supabase's public API (the anon key, or a customer's own sign-in token) can't run SET, has no function exposed that sets a flag, and ignores a header of that name. Probed live on staging: `GET /rest/v1/tenants` → `[]`; `POST /rest/v1/rpc/set_config` → 404 `PGRST202`.
 - **Tests added.**
   - `packages/core/tests/test_rls_flags.py` (4): only `db.py` sets a flag; each narrow session is used only by its one module; the sweep is reachable only from the worker; no migration defines a function that sets a flag.
@@ -6216,3 +6216,42 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** 2026-11-11.
 
 **Related:** D-183, D-194, D-195, D-199, D-208, D-209, D-220, D-224, D-226, D-228, D-230, D-232, D-233, D-234; RUNBOOK 9.4; BUILD-STATUS's A6 items.
+
+---
+
+## D-236 — A6's code: the pages backfill, the pages queue on the Console, the in-flight target checked at start, and image_preview kept (founder, 2026-11-11)
+
+**Context:** plan task 4 in D-235 item 18, sized at 2 working days. The design is `docs/designs/a6.md`, approved on 2026-11-11 with three answers and three additions. The branch is `phase55/stage5-a6`, from `main` at `3073a30` (#96's merge). The deploys and the backfill's run are plan task 7.
+
+1. **The pages backfill** (`apps/worker/app/backfill_pages.py`).
+   - **What it does:** it queues the normal render, `docflow.render_pages` (D-232), on the `pages` queue, for every document with `page_count` NULL. There is no second pipeline: everything after the queue is A3's task as merged.
+   - **How it is started:** `python -m app.backfill_pages [--dry-run] [--batch N] [--limit N] [--max-wait S]`, on the worker machine with `fly ssh console`, under a Grant, at plan task 7 (RUNBOOK 9.2). It is not a Console action (a cross-tenant path, an `admin_actions` row and a screen, about a day more) and not a beat job (it would re-queue renders that fail for good, and stopping that needs a migration).
+   - **What it selects:** `page_count` NULL, not deleted, the tenant not `pending_deletion` or `deleted`, and status `needs_review`, `approved`, `exported` or `rejected`, oldest first. **It never selects `quarantined`, `failed` or `processing`** (founder), nor `pending` or `staged`.
+   - **Bounded:** at most `--batch` renders queued at once (default 3, at most 10). The next batch waits until the `pages` queue is empty, and a queue that doesn't empty within `--max-wait` seconds (default 1,800) stops the run with exit 1. Documents never wait on it: they have their own process (D-232 item 2).
+   - **Idempotent and resumable:** the database is its only state. A second run selects only what is still NULL, and a render whose list is already written stops. A document whose render fails is queued once per run.
+   - **What it prints:** tenant IDs, document IDs and counts only (Section 7.10). `--dry-run` gives the count per tenant and the total, and is run again once the queue is empty to count what is still not drawn.
+   - **Never in the 48 hours before a booked demo** (founder; D-235 item 3; RUNBOOK 9.2).
+2. **Listing tenants (founder: question 1, answer a).** The backfill lists tenant IDs through `pipeline_sweep_session` (migration 0027's `pipeline_sweep_read`), which can read `tenants` and nothing else. Every document read stays in that tenant's own `tenant_session()`, and each render carries the tenant ID from it (Section 7.5). `packages/core/tests/test_rls_flags.py` allows exactly two callers, the stuck sweep and the backfill (`test_the_tenant_listing_session_has_exactly_its_two_callers`). D-158 carries a note. No migration.
+3. **The Console's strip shows the pages queue.** `_queue_depths()` (`apps/api/app/routers/admin.py`) reads `pages` beside `interactive` and `bulk`, and a broker that is down gives `None` for all three. `HealthStrip.tsx` shows "Pages waiting". It is a list length: no tenant data, and the dashboard's one `admin_actions` row is unchanged.
+4. **The in-flight target (founder: question 2, answer b).** `app.run_workers` refuses to start unless `DISPATCH_IN_FLIGHT_TARGET` is a whole number of at least 1 equal to the setting's default, the value `test_ci_guards.py` holds against `PARSE_SLOTS` (D-232 item 2). The refusal names the value it got and the value it expected. It runs before every other start check, and a value that isn't a number is caught there rather than ending in a traceback. At every start the worker prints `run_workers: dispatch_in_flight_target=N`, which the deploy's check reads in `fly logs`. Before this, 0 would have started Celery with one process per CPU, and 2 or more would have oversubscribed the parse service's two slots unseen. More slots now means changing the default and `PARSE_SLOTS` together, in code (RUNBOOK 9.2). It is a setting, not a constant, so RUNBOOK 9.6's table is unchanged.
+5. **`image_preview` stays (founder).** Only the frame reads it, for a TIFF or HEIC with no drawn pages: a render that failed or was cut off, or a new document opened before its render finishes. It is decided after the demo, with the frame's removal (D-235 item 11). D-232 item 13 is answered: it does not retire at A6.
+6. **No migration, and no new catalog code.** The refusal and the backfill's lines are founder-facing, like the foreign-login refusal. A render that fails leaves the viewer's existing fallbacks.
+7. **Tests.**
+   - `apps/worker/tests/test_backfill_pages.py` (no database): the statuses; batches only after an empty queue; waiting on live renders; a queue that doesn't drain; the batch bounds; `--dry-run`; `--limit`; a broker that can't be read or refuses a send; argument bounds; and the task, queue and `retry=False` of each send.
+   - `apps/worker/tests/test_backfill_pages_db.py` (real database; first run in CI): the selection, including **a quarantined document with `page_count` NULL never queued** (founder); each document with its own tenant; a tenant being deleted left out; a second run queuing only what is still NULL.
+   - `apps/worker/tests/test_run_workers.py`: the start line; the refusal of `0`, `-1`, `2`, `two`, `1.5` and an empty value, each naming what it got and expected; a start at 1; the expected value read from the setting's default.
+   - `apps/api/tests/test_dashboard_api.py` and `apps/web/e2e/dashboard.spec.ts`: the pages queue, and "—" when the broker gives no number.
+   - `packages/core/tests/test_broad_except_guard.py`: the backfill's two broad handlers, both fail-closed.
+8. **Staging (founder: question 3, answer a; order set 2026-11-12).** In this order, each step after the one before it:
+   1. #97 (the Debian snapshot PR) merged first, as `cb064ef`.
+   2. `origin/main` merged into `phase55/stage5-a6`.
+   3. CI green on the final head of the branch.
+   4. The core, worker and API suites on staging, under a Grant, on that same final head. No exception to D-223. The suites need staging's database and Storage, not the Fly apps (D-232 item 16).
+   5. The founder merges A6. Then plan task 7.
+   A commit pushed after step 3 or step 4 makes the head a new one, and both steps run again on it.
+
+**Changes:** D-158 (a second user of the tenant-listing session, item 2); D-232 item 13 (answered, item 5); RUNBOOK 9.2; BUILD-STATUS's A6 items.
+
+**Founder approval:** 2026-11-11 (the design, its three answers and three additions).
+
+**Related:** D-158, D-223, D-228, D-232, D-233, D-235; `docs/designs/a6.md`, `apps/worker/app/backfill_pages.py`, `apps/worker/app/run_workers.py`.

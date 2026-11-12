@@ -139,7 +139,8 @@ def test_parse_slots_were_sized_for_one_document_slot_and_one_page_job():
     """D-232: PARSE_SLOTS = 2 is one document job plus one page job, and fits
     only while the worker has one document slot. Raising the target without
     revisiting PARSE_SLOTS fails here. It can't see a value set as a Fly
-    secret: that is read on the app at deploy (A6). It also fails if the
+    secret: the worker refuses to start with any value other than this
+    default and prints the one it got (app.run_workers; A6, D-236). It also fails if the
     pages worker stops being --concurrency=1, or gains a -c or an
     --autoscale; it can't see a second worker machine."""
     from docflow_core.config import Settings

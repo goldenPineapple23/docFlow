@@ -21,7 +21,9 @@ is passed to all, and this exits 0 once all have ended.
 Before any starts (Stage 3e): it refuses to start holding another
 service's database URL or connecting as the wrong login, and it records the
 start, raising `worker_restarting` at 3 starts in an hour
-(docflow_core.worker_starts).
+(docflow_core.worker_starts). Before those (A6; founder, 2026-11-11;
+D-236): it refuses a DISPATCH_IN_FLIGHT_TARGET other than the one the parse
+service's slots were sized for, and prints the value it starts with.
 
     python -m app.run_workers
 """
@@ -35,8 +37,9 @@ import time
 from collections.abc import Mapping, Sequence
 
 from docflow_core import db, worker_starts
-from docflow_core.config import get_settings
+from docflow_core.config import Settings, get_settings
 from docflow_core.constants import DISPATCH_QUEUE, PAGES_QUEUE
+from pydantic import ValidationError
 
 # How long a worker gets to finish after the other has died, before it is killed.
 PARTNER_STOP_SECONDS = 30
@@ -111,6 +114,33 @@ def supervise(cmds: Mapping[str, Sequence[str]]) -> int:
     return 0 if stopping else 1
 
 
+def in_flight_target_refusal() -> str | None:
+    """Why the worker must not start, or None (A6; founder, 2026-11-11;
+    D-236). DISPATCH_IN_FLIGHT_TARGET is the worker's document slots. The
+    parse service's PARSE_SLOTS = 2 was sized for the setting's default: one
+    document job plus one page job (D-232). The CI guard holds the two
+    together (test_ci_guards.py) but can't see a value set as a Fly secret,
+    so the worker checks the value it actually got: a whole number of at
+    least 1, equal to that default. Raising capacity means changing the
+    default and PARSE_SLOTS together (RUNBOOK 9.2)."""
+    expected = Settings.model_fields["dispatch_in_flight_target"].default
+    try:
+        got: object = get_settings().dispatch_in_flight_target
+    except ValidationError as exc:
+        bad = [error for error in exc.errors() if error.get("loc") == ("dispatch_in_flight_target",)]
+        if not bad:
+            raise
+        got = bad[0].get("input")
+    if type(got) is int and got >= 1 and got == expected:
+        return None
+    return (
+        f"DISPATCH_IN_FLIGHT_TARGET is {got!r}; expected {expected!r}. It must be a whole number of "
+        f"at least 1 and equal {expected!r}, the value the parse service's PARSE_SLOTS was sized "
+        "for (D-232). To change it, change the setting's default and PARSE_SLOTS together "
+        "(RUNBOOK 9.2)."
+    )
+
+
 def foreign_login_refusal() -> str | None:
     """Why the worker must not start, or None (Stage 3e, A4). The worker holds
     only its own login; the admin and Stripe logins live on the API, so either
@@ -136,6 +166,16 @@ def foreign_login_refusal() -> str | None:
 def main() -> int:
     """The worker machine's start: refuse a wrong configuration, record the
     start (3e, part B), then run the three workers."""
+    refusal = in_flight_target_refusal()
+    if refusal is not None:
+        print(f"run_workers refused to start: {refusal}", file=sys.stderr, flush=True)
+        return 1
+    # The deploy's check reads this line from `fly logs` (RUNBOOK 9.2).
+    print(
+        f"run_workers: dispatch_in_flight_target={get_settings().dispatch_in_flight_target}",
+        file=sys.stderr,
+        flush=True,
+    )
     refusal = foreign_login_refusal()
     if refusal is not None:
         print(f"run_workers refused to start: {refusal}", file=sys.stderr, flush=True)
