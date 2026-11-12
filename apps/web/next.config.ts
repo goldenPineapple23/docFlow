@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { NextConfig } from "next";
+import { ADMIN_HEADERS, SECURITY_HEADERS } from "./src/lib/csp";
+import { PUBLIC_ENV_NAMES, deployedBuildProblems } from "./src/lib/origins";
 
 /**
  * Read the repo-root `.env`, and expose only its `NEXT_PUBLIC_*` values.
@@ -18,7 +20,12 @@ import type { NextConfig } from "next";
  * The alternative was a second `.env` inside `apps/web`, which would mean
  * two files to keep in step and one more place for a stale value to hide.
  *
- * **Only `NEXT_PUBLIC_`-prefixed keys are read.** That prefix is Next's own
+ * **Only the three names in `src/lib/origins.ts` are read** (D-237): the API's
+ * URL, Supabase's URL and its anon key. Any other `NEXT_PUBLIC_` key is left
+ * out, so a value can't reach the browser by being given the prefix, and
+ * `npm run check:bundle` checks the built bundle for it.
+ *
+ * Within that, `NEXT_PUBLIC_` is Next's own
  * marker for "this is compiled into the browser bundle", so everything
  * selected here is public by definition — the Supabase anon key is designed
  * to ship to browsers. Nothing else in the root `.env` is touched, so a
@@ -45,7 +52,7 @@ function publicEnvFromRepoRoot(): Record<string, string> {
     const eq = trimmed.indexOf("=");
     if (eq === -1) continue;
     const key = trimmed.slice(0, eq).trim();
-    if (!key.startsWith("NEXT_PUBLIC_")) continue;
+    if (!isPublic(key)) continue;
     let value = trimmed.slice(eq + 1).trim();
     if (
       (value.startsWith('"') && value.endsWith('"')) ||
@@ -56,6 +63,15 @@ function publicEnvFromRepoRoot(): Record<string, string> {
     values[key] = value;
   }
   return values;
+}
+
+const publicEnv = { ...publicEnvFromRepoRoot(), ...pickPublic(process.env) };
+
+// A Vercel build without its real API and Supabase URLs would ship the
+// localhost fallbacks, and a CSP naming them. Stop it here (D-237).
+const buildProblems = deployedBuildProblems({ ...publicEnv, VERCEL_ENV: process.env.VERCEL_ENV });
+if (buildProblems.length > 0) {
+  throw new Error(`This Vercel build can't go out: ${buildProblems.join("; ")}. See RUNBOOK 13.`);
 }
 
 const nextConfig: NextConfig = {
@@ -69,7 +85,18 @@ const nextConfig: NextConfig = {
 
   // A real environment variable already set in the shell wins, so CI and a
   // deployment can override without editing a file.
-  env: { ...publicEnvFromRepoRoot(), ...pickPublic(process.env) },
+  env: publicEnv,
+
+  // The security headers on every response, built files included (D-237).
+  // The CSP isn't here: it carries a per-request nonce, so src/proxy.ts sets
+  // it on each page.
+  async headers() {
+    return [
+      { source: "/:path*", headers: SECURITY_HEADERS },
+      { source: "/admin", headers: ADMIN_HEADERS },
+      { source: "/admin/:path*", headers: ADMIN_HEADERS },
+    ];
+  },
 
   // Dev only. Next blocks requests for its own dev resources (HMR, the
   // client bundle) when the browser's origin is not the one the server
@@ -80,10 +107,14 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["localhost", "127.0.0.1"],
 };
 
+function isPublic(key: string): boolean {
+  return (PUBLIC_ENV_NAMES as readonly string[]).includes(key);
+}
+
 function pickPublic(source: NodeJS.ProcessEnv): Record<string, string> {
   const values: Record<string, string> = {};
   for (const [key, value] of Object.entries(source)) {
-    if (key.startsWith("NEXT_PUBLIC_") && typeof value === "string") {
+    if (isPublic(key) && typeof value === "string") {
       values[key] = value;
     }
   }

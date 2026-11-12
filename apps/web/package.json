@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:e2e:live": "playwright test --config=playwright.live.config.ts"
+    "test:e2e:live": "playwright test --config=playwright.live.config.ts",
+    "check:bundle": "node scripts/check-client-bundle.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",

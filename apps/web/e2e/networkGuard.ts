@@ -1,4 +1,5 @@
 import { test as base, expect } from "@playwright/test";
+import { watchCsp } from "./cspGuard";
 
 /**
  * Every e2e test runs against a stubbed API and must never reach a real
@@ -23,7 +24,17 @@ function leavesThisMachine(url: URL): boolean {
   return ["http:", "https:", "ws:", "wss:"].includes(url.protocol) && !LOOPBACK.has(url.hostname);
 }
 
-export const test = base.extend<{ networkGuard: void }>({
+export const test = base.extend<{ networkGuard: void; cspViolations: string[] }>({
+  // D-237: every stubbed test also fails on a CSP violation (e2e/cspGuard.ts).
+  // A test that breaks the policy on purpose reads this and empties it.
+  cspViolations: [
+    async ({ context }, use, testInfo) => {
+      const seen = await watchCsp(context, testInfo);
+      await use(seen);
+      expect(seen, "this test's page broke the web app's Content-Security-Policy").toEqual([]);
+    },
+    { auto: true },
+  ],
   networkGuard: [
     async ({ context }, use) => {
       const escaped: string[] = [];

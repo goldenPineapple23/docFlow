@@ -2027,8 +2027,8 @@ worker deploy (9.2): passing in CI and on staging.
 Healthchecks.io's free plan** (Q1; BUILD-STATUS "3e detailed design", part
 C). A polled check of `/healthz` is for a public API, chosen in Phase 6 (the
 notes further down). Staging's API is made public for the demo (founder,
-2026-11-11; D-235 item 2); a polled check of it is added if it fits in 0.25
-day, otherwise it is skipped and the founder is told.
+2026-11-11; D-235 item 2). **No polled check of it before the demo**
+(founder, 2026-11-12; D-237): the pre-demo routine covers it (13.3).
 
 **What it covers.** After a dispatch pass that succeeded, the dispatch
 process pings `HEARTBEAT_URL` (`docflow_core.heartbeat`). The pings stop when
@@ -2192,8 +2192,9 @@ spare, so with a request only every 3 minutes, assume both can happen:
 `min_machines_running = 1` regardless of the monitor, so that a customer is
 never the one who waits for a cold start.
 
-**The staging API is private.**
-`apps/api/fly.toml` gives it no public IP. It is reached over `fly proxy`
+**The staging API was private until the demo** (public from plan task 7;
+D-235 item 2, RUNBOOK 13). Until then
+`apps/api/fly.toml` gave it no public IP. It is reached over `fly proxy`
 or Flycast from other Fly apps (3c, N1/N2). Better Stack's probes are on the
 public internet, so as configured they can't reach `/healthz` at all.
 **3e chose the push heartbeat above** for the worker. Production's API will
@@ -3188,3 +3189,184 @@ that window would pass the suites' database guard and reach staging (the
 5. **After a delete:** the tenant is recorded by id only, never by name
    (D-224 item 9). Keep the backup folder until the end-of-build cleanup is
    done.
+
+## 13. Public staging: the API's public address, the web app on Vercel, and Supabase Auth's URLs (founder, 2026-11-12; D-237)
+
+Plan task 7 in D-235 item 18 makes staging public for the demo. This
+section is the order of its Grants and founder steps. The code is merged first
+(plan task 5, D-237). Nothing here is done before task 7, and every step
+marked **Grant** waits for a founder message that begins with "Grant" and
+names it (CLAUDE.md). No deploy and no staging suite in the 48 hours before a
+booked demo (D-235 item 3).
+
+`<vercel-host>` is the Vercel project's production domain, read in step 2.
+It isn't known before the project exists, so nothing in the repository names
+it. The API's public host is `docflow-api-staging.fly.dev`, from its Fly app
+name.
+
+### 13.1 What the code already holds
+
+- **The API on Fly** refuses to start unless `CORS_ALLOWED_ORIGINS` is set,
+  and every entry is an exact `https://` origin with no path, no `*` and no
+  loopback address. The refusal names the bad value. `/docs`, `/redoc` and
+  `/openapi.json` are always off on Fly, whatever `API_DOCS_ENABLED` says,
+  and the startup log says so (`api_docs_off`). `apps/api/fly.toml` has
+  `force_https = true`.
+- **The web app** sends its CSP (with a per-request nonce) and its security
+  headers itself (`src/proxy.ts`, `next.config.ts`), so Vercel needs no
+  header settings. `/admin` carries `X-Robots-Tag: noindex, nofollow`.
+- **`apps/web/vercel.json`** sets the build and turns off every automatic Git
+  deployment (`"git": {"deploymentEnabled": false}`): a push to `main`
+  deploys nothing.
+- **A Vercel build stops** if `NEXT_PUBLIC_API_BASE_URL` or
+  `NEXT_PUBLIC_SUPABASE_URL` is unset or not `https`, or the anon key is unset
+  (`next.config.ts`). A build started before step 5 fails there, which is
+  harmless.
+
+### 13.2 Task 7, in order
+
+1. **Founder: a monthly spend limit on the Anthropic workspace whose key
+   staging uses** (founder, 2026-11-12). Anthropic Console -> the workspace
+   that holds the worker's `ANTHROPIC_API_KEY` -> its limits -> set a monthly
+   spend limit. Write the amount and the date in BUILD-STATUS. Once the API is
+   public, DocFlow's own per-tenant cost breaker (Section 7.9) still applies;
+   this is the ceiling above it.
+2. **Founder: create the Vercel project, with no environment variables yet.**
+   Vercel (Pro team) -> Add New -> Project -> import
+   `goldenPineapple23/docFlow`.
+   - **Root Directory:** `apps/web`. Vercel then reads `apps/web/vercel.json`.
+   - **Framework preset:** Next.js. **Install:** `npm ci`. **Build:**
+     `npm run build`. **Output:** the default (`.next`). These are also in
+     `vercel.json`.
+   - **Node.js version** (Project Settings -> Build and Deployment): 22.x, as CI
+     uses.
+   - **Production branch:** `main`.
+   - Add **no** environment variables in the import screen. If the import
+     starts a first build anyway, it stops at the build check (13.1), which
+     is the intended result. Nothing deploys.
+   - Read `<vercel-host>`, the production domain on the project page (it has
+     the form `<project>.vercel.app`). It feeds steps 3, 6 and 7.
+   - **Settings -> Deployment Protection:** keep Vercel Authentication on for
+     previews. The production domain must open without a Vercel sign-in,
+     because prospects open it. Checked in step 6.
+   - **Previews are never pointed at staging's API** (founder, 2026-11-12):
+     no preview deployments are made, and the API's CORS list names only
+     `<vercel-host>`.
+3. **Grant: the API deploy**, from `main`, after RUNBOOK 11's three checks.
+   First, typed with history off and staged (`fly secrets set ... --stage`),
+   as for every secret (RUNBOOK 8):
+   - `CORS_ALLOWED_ORIGINS=https://<vercel-host>`. Without it the API refuses
+     to start (13.1).
+   - `APP_BASE_URL=https://<vercel-host>`. Invite links, billing return
+     pages, alert links and the review digest are built from it.
+   - The signing secret and the webhook credentials, as D-235 item 18 task 7
+     lists.
+   - Never `API_DOCS_ENABLED` and never `PARSE_SERVICE_TOKEN`.
+
+   Then the deploy command in `apps/api/fly.toml`. It is the API deploy in
+   D-235's task 7 list, not an extra one.
+4. **Grant: the public addresses.** `fly ips allocate-v4 --shared --app
+   docflow-api-staging`, then `fly ips allocate-v6 --app docflow-api-staging`.
+   Then, read-only:
+   - `curl -s https://docflow-api-staging.fly.dev/healthz`: 200 and
+     `"status":"ok"`;
+   - `curl -s -o /dev/null -w '%{http_code}'` on `/docs`, `/redoc` and
+     `/openapi.json`: 404 each;
+   - `curl -sI http://docflow-api-staging.fly.dev/healthz`: a redirect to
+     `https://`;
+   - `curl -sI https://docflow-api-staging.fly.dev/healthz`: the four headers
+     (`x-content-type-options`, `referrer-policy`,
+     `content-security-policy`, `strict-transport-security`);
+   - the machine's startup log has the `api_docs_off` line.
+5. **Founder: the Vercel environment variables**, Production scope only.
+   All three are public by design and compiled into the browser bundle, so a
+   change needs a redeploy. No secret goes on Vercel.
+
+   | Variable | Value | Where it comes from |
+   |---|---|---|
+   | `NEXT_PUBLIC_API_BASE_URL` | `https://docflow-api-staging.fly.dev` | the API's Fly app name; it answers once step 4 is done |
+   | `NEXT_PUBLIC_SUPABASE_URL` | `https://<project-ref>.supabase.co` | Supabase -> docflow-staging -> Project Settings -> Data API (the same value as `.env`'s) |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | the anon (publishable) key | the same project -> Project Settings -> API Keys. Never the secret or service-role key |
+
+6. **Grant: the first Vercel production deploy**, of `main` at the commit the
+   Grant names. Two ways, both by hand:
+   - **A deploy hook for `main`** (Project Settings -> Git -> Deploy Hooks),
+     started with `curl -X POST <hook URL>`. The hook URL is a secret:
+     whoever holds it can start a build. Vercel's docs don't say whether a
+     hook still builds with `deploymentEnabled: false`, so the first use
+     checks it. If it doesn't build, use the CLI.
+   - **The Vercel CLI**, from a clean checkout of the named commit: `vercel
+     link` once to this project, then `vercel deploy --prod` from the
+     repository root, so the Root Directory setting applies.
+
+   Before starting, check that `main` is at the named commit. After, the
+   deployment's page shows the commit. Then, read-only:
+   - `curl -sI https://<vercel-host>/login`: `content-security-policy` with
+     a nonce and no `'unsafe-inline'`, plus the five headers of D-237 item 3;
+     `curl -sI https://<vercel-host>/admin` adds `x-robots-tag: noindex,
+     nofollow`;
+   - in a private window, `https://<vercel-host>/login` opens with no Vercel
+     sign-in;
+   - the browser console shows no CSP violation on sign-in, the review screen
+     with a page image, the original in its frame, and the Console;
+   - **the first page load time, cold and warm** (founder, 2026-11-12): the
+     time to the login page after about 15 idle minutes (cold), then again at
+     once (warm), from the browser's network panel, three of each. Reported
+     with the deploy, so the cost of rendering every page per request can be
+     judged.
+7. **Grant: Supabase Auth's URLs.** Supabase -> docflow-staging ->
+   Authentication -> URL Configuration:
+   - **Site URL:** `https://<vercel-host>` (founder, 2026-11-12). Nothing
+     local depends on the old value: invites carry their own `redirect_to`;
+     the seed scripts make users through the admin API with a password;
+     the API tests mock the link; CI's local stack has its own `site_url`
+     (`supabase/config.toml`). Only a recovery e-mail sent from the dashboard
+     lands on the Site URL.
+   - **Redirect URLs:** add exactly `https://<vercel-host>/auth/accept`. Keep
+     `http://localhost:3000/auth/accept`, which local invites use (D-105).
+   - **Sign-ups:** read only. "Allow new users to sign up" was read off on
+     2026-11-12 (`disable_signup: true` on the project's public settings,
+     e-mail the only provider), so there is nothing to change. If it reads on,
+     stop and tell the founder before going on.
+8. **Read-only:** `fly secrets list --app docflow-api-staging` lists
+   `CONSOLE_MFA_ENFORCED`, `CORS_ALLOWED_ORIGINS` and `APP_BASE_URL`.
+9. **Grant: one invite** to a fictional test user. Its link lands on
+   `https://<vercel-host>/auth/accept` and sets a password.
+
+The rest of task 7 follows D-235's order: parse and the worker, the
+backfill, and page images checked on the real hosts.
+
+### 13.3 Not set up: a polled check of `/healthz` (founder, 2026-11-12)
+
+No uptime poll and no monitoring tool before the demo. The pre-demo routine
+covers the gap: the machines are started 30 minutes early and the smoke test
+runs (D-235 item 3), so a dead API is seen before a prospect sees it. The
+worker's push heartbeat (9.4) stays. A poll is chosen with production
+(Phase 6), with 9.4's notes.
+
+### 13.4 Known and accepted for the demo (D-237)
+
+- **The Console's pages are gated in the browser only.** Anyone can load the
+  `/admin` page shell and its scripts, which show "not found" once the API
+  answers. No data is reachable: every Console call is the API's 404. Moved
+  to Phase 6 (a server-side gate needs the session in a cookie).
+- **No HTTP request rate limit** on upload and intake, and the intake's
+  source-IP note can't see the real sender behind Fly's edge
+  (`Fly-Client-IP`). Both stay in Phase 6 (D-196). The abuse ceiling, the
+  quarantine and the cost breaker still apply, sign-ups are off, and the
+  Anthropic spend limit (13.2 step 1) caps the worst case.
+
+### 13.5 Plan task 9's hand checks in a real browser (founder, 2026-11-12; D-237)
+
+Plan task 9 is the Chrome and Safari pass, the real-iPhone checks and the
+partner walkthrough, on the deployed staging app. Hand checks that no CI
+browser can make:
+
+- **PDF download in Safari**, on a Mac and on a real iPhone: open an order
+  whose original is a PDF and press its download button. The file saves (or
+  iOS offers to save it), no new tab opens, and the frame never shows it.
+  Playwright's WebKit fires no download event for this, with the CSP on or
+  off, so CI runs it in Chromium only (D-237 item 3).
+- **The real-iPhone checks** listed in BUILD-STATUS (D-234 item 13): the safe
+  areas in portrait and landscape, focus zoom on the text fields, swipe and
+  pinch in iOS Safari, and the bottom bar with the on-screen keyboard open.

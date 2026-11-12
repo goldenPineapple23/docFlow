@@ -73,6 +73,11 @@ jobs:
       # fails with "Cannot find name 'LayoutProps'". This job had never
       # passed in CI for exactly that reason; see DECISIONS.md D-087.
       - run: npm run build
+      # D-237: what any visitor can download carries no secret, no private
+      # setting and no tenant data -- only the three NEXT_PUBLIC_ values in
+      # src/lib/origins.ts. Reads the build just made.
+      - name: The browser bundle carries no secret (check:bundle; D-237)
+        run: npm run check:bundle
       - run: npx tsc --noEmit
       # Component tests before the browser: they are seconds, and a failure
       # here explains an e2e failure that would otherwise take a browser to
@@ -82,8 +87,9 @@ jobs:
       # The review flow in a real browser (CLAUDE.md Section 6, Phase 3).
       # The API is stubbed at the network boundary -- its own behaviour is
       # proven against real Postgres in the api job below. WebKit runs the
-      # review screen's 375 px layout spec only (D-234); --with-deps
-      # installs each browser's Linux system libraries.
+      # review screen's 375 px layout spec (D-234), and the viewer and the
+      # security headers at desktop size (D-237); --with-deps installs each
+      # browser's Linux system libraries.
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium webkit
       - name: End-to-end tests (playwright)

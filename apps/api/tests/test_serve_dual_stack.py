@@ -20,6 +20,9 @@ import time
 from pathlib import Path
 
 _API_DIR = Path(__file__).resolve().parents[1]
+# On Fly the API also refuses to start without a good CORS allowlist (D-237),
+# so every Fly-mode start here carries one: the only fault is the one tested.
+_FLY_CORS = {"CORS_ALLOWED_ORIGINS": "https://app.example.test"}
 _START_SECONDS = 60
 _HANG_SECONDS = 300
 _LOGIN_URLS = ("DATABASE_URL", "API_DATABASE_URL", "ADMIN_DATABASE_URL", "STRIPE_DATABASE_URL")
@@ -117,7 +120,8 @@ def test_control_uvicorn_on_colons_is_refused_on_ipv4():
 def test_on_fly_the_launcher_exits_before_opening_its_port_when_it_holds_the_token():
     port = _free_port()
     proc = _start(
-        ["app.serve", str(port)], {"FLY_APP_NAME": "docflow-api-test", "PARSE_SERVICE_TOKEN": "a-token"}
+        ["app.serve", str(port)],
+        {"FLY_APP_NAME": "docflow-api-test", "PARSE_SERVICE_TOKEN": "a-token", **_FLY_CORS},
     )
     opened = False
     deadline = time.monotonic() + _START_SECONDS

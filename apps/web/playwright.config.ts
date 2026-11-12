@@ -39,6 +39,21 @@ export default defineConfig({
       use: { ...devices["Desktop Safari"], viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true },
       testMatch: /review-375\.spec\.ts/,
     },
+    // The viewer and the headers in WebKit at desktop size (founder,
+    // 2026-11-12; D-237): the page image, the sandboxed frame, the stored
+    // text and the CSP, each with the CSP guard on. Before this, WebKit ran
+    // only the 375 px layout, which loads neither a page image nor the frame.
+    //
+    // Not here: "a PDF is offered as a download". Playwright's WebKit fires no
+    // download event for that stubbed attachment, with the CSP switched off as
+    // much as on (measured 2026-11-12, D-237), so it is a test-harness gap,
+    // not the policy. Chromium runs it; a real Safari download is plan task 9.
+    {
+      name: "webkit",
+      use: { ...devices["Desktop Safari"] },
+      testMatch: /(review|headers)\.spec\.ts/,
+      grep: /headers:|sandboxed frame|original that can't be read|can't get a link|drawn pages|stored text/,
+    },
   ],
   webServer: {
     command: "npm run start -- --port 3100",

@@ -114,6 +114,33 @@ for (const [how, answer] of [
   });
 }
 
+test("an enrolment shows its QR code, a data: image the CSP allows (D-237)", async ({ page }) => {
+  // Supabase is stubbed, as above. Its answer is fictional: a plain square,
+  // and a key that opens nothing.
+  await page.route(/\/auth\/v1\/factors/, (route) =>
+    route.fulfill({
+      json: {
+        id: "00000000-0000-4000-8000-0000000000f1",
+        type: "totp",
+        friendly_name: "DocFlow",
+        totp: {
+          qr_code: '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>',
+          secret: "AAAABBBBCCCCDDDD",
+          uri: "otpauth://totp/DocFlow:founder@example.test?secret=AAAABBBBCCCCDDDD",
+        },
+      },
+    }),
+  );
+  await stubConsole(page, { enforced: true, aal: "aal1" });
+  await page.goto(`/admin/tenants/${T}/quarantine`);
+
+  await page.getByRole("button", { name: "Set up an authenticator" }).click();
+  const qr = page.getByTestId("mfa-qr");
+  await expect(qr).toBeVisible();
+  expect(await qr.getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
+  await expect.poll(() => qr.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+});
+
 test("a destructive action refused for want of a fresh code opens the code dialog; a wrong code is AUTH-008", async ({ page }) => {
   await stubConsole(page, { enforced: true, aal: "aal2" });
   let attempts = 0;

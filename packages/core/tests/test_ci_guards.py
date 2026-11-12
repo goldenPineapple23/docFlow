@@ -430,3 +430,21 @@ def test_the_api_image_is_built_only_when_buildx_was_set_up_and_the_skip_check_c
     assert setup < block.index("id: test\n") < build
     assert "if: (success() || failure()) && steps.buildx.outcome == 'success'" in block[build : build + 200]
     assert "buildx" in _check_skips().STEP_NAMES
+
+
+API_FLY_TOML = REPO / "apps" / "api" / "fly.toml"
+
+
+def test_the_public_staging_apis_fly_config_redirects_http_and_never_hides_its_address():
+    """Staging's API is public for the demo (D-235 item 2; D-237): http is
+    redirected to https, and the documented deploy no longer passes
+    --no-public-ips. Its addresses are allocated under a Grant, not here."""
+    import tomllib
+
+    text = API_FLY_TOML.read_text(encoding="utf-8")
+    config = tomllib.loads(text)
+    assert config["app"] == "docflow-api-staging"
+    assert config["http_service"]["force_https"] is True
+    assert config["env"]["DOCFLOW_ENV"] == "staging"
+    assert "fly deploy --config apps/api/fly.toml" in text
+    assert "--no-public-ips" not in text

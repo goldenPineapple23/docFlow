@@ -31,6 +31,9 @@ from tests.conftest import WORKER_HARNESS_PARSE_TOKEN, as_the_worker
 
 _TABLE = b"sku,description\nTEST-1001,Acme Test Widget\n"
 _API_DIR = Path(__file__).resolve().parents[1]
+# On Fly the API also refuses to start without a good CORS allowlist (D-237),
+# so every Fly-mode start here carries one: the only fault is the one tested.
+_FLY_CORS = {"CORS_ALLOWED_ORIGINS": "https://app.example.test"}
 
 
 def test_the_api_settings_carry_no_parse_token():
@@ -109,7 +112,9 @@ def _start_api(extra_env: dict[str, str]) -> tuple[subprocess.Popen, int]:
 
 
 def test_on_fly_the_api_exits_before_opening_its_port_when_it_holds_the_token():
-    proc, port = _start_api({"FLY_APP_NAME": "docflow-api-test", "PARSE_SERVICE_TOKEN": "a-token"})
+    proc, port = _start_api(
+        {"FLY_APP_NAME": "docflow-api-test", "PARSE_SERVICE_TOKEN": "a-token", **_FLY_CORS}
+    )
     opened = False
     deadline = time.monotonic() + 60
     while proc.poll() is None and time.monotonic() < deadline:
@@ -124,7 +129,7 @@ def test_on_fly_the_api_exits_before_opening_its_port_when_it_holds_the_token():
 
     # Control: the same start on Fly without the token opens its port, so the
     # refusal above was the token, not a server that couldn't start at all.
-    proc, port = _start_api({"FLY_APP_NAME": "docflow-api-test"})
+    proc, port = _start_api({"FLY_APP_NAME": "docflow-api-test", **_FLY_CORS})
     try:
         deadline = time.monotonic() + 60
         while proc.poll() is None and not _accepts(port) and time.monotonic() < deadline:

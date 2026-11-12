@@ -3,9 +3,10 @@ import sys
 import traceback
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 from docflow_core import db, worker_starts
-from docflow_core.config import get_settings
+from docflow_core.config import Settings, get_settings
 from docflow_core.dispatch import health as dispatcher_health
 from docflow_core.signed_urls import SigningKeyMissing
 from fastapi import Depends, FastAPI, Request
@@ -14,6 +15,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.deps import ConsoleRefused
 from app.errors import catalog_detail
@@ -77,7 +79,76 @@ def login_startup_check() -> list[str]:
         return []
 
 
-_refusal = parse_token_startup_refusal()
+_LOOPBACK_HOSTS = frozenset({"localhost", "::1"})
+
+
+def _origin_problem(origin: str) -> str | None:
+    """Why one CORS origin can't be a deployed API's, or None."""
+    if "*" in origin:
+        return "is a wildcard"
+    parts = urlsplit(origin)
+    if parts.scheme != "https":
+        return "is not https"
+    if parts.path not in ("", "/") or parts.query or parts.fragment or parts.username:
+        return "has a path"
+    host = parts.hostname
+    if not host:
+        return "is not an origin"
+    if host in _LOOPBACK_HOSTS or host.startswith("127."):
+        return "is a loopback address"
+    return None
+
+
+def cors_startup_refusal(settings: Settings | None = None) -> str | None:
+    """
+    Why a deployed API must not start with its CORS allowlist, or None
+    (founder, 2026-11-12; D-237). Off Fly nothing is checked: local
+    development and the tests use the loopback default. On Fly the list must
+    be set, and every entry an exact https origin that isn't loopback -- an
+    unset value would quietly allow only localhost (D-223 item 7), and a `*`
+    or a wrong value would let other pages call the API.
+    """
+    settings = settings or get_settings()
+    if not settings.fly_app_name:
+        return None
+    origins = [o.strip() for o in settings.cors_allowed_origins.split(",") if o.strip()]
+    if "cors_allowed_origins" not in settings.model_fields_set or not origins:
+        return (
+            "CORS_ALLOWED_ORIGINS is not set on this API machine, so it would allow only the "
+            "loopback default. Set it to the web app's https origin (RUNBOOK 13)."
+        )
+    for origin in origins:
+        problem = _origin_problem(origin)
+        if problem is not None:
+            return (
+                f"CORS_ALLOWED_ORIGINS holds {origin!r}, which {problem}. Each entry must be an "
+                "exact https origin with no path, such as https://app.example.com (RUNBOOK 13)."
+            )
+    return None
+
+
+def api_docs_enabled() -> bool:
+    """/docs, /redoc and /openapi.json: only when API_DOCS_ENABLED is true and
+    never on Fly (D-235 item 2; founder, 2026-11-12; D-237)."""
+    settings = get_settings()
+    return settings.api_docs_enabled and not settings.fly_app_name
+
+
+def api_docs_startup_check() -> bool:
+    """One startup line on Fly saying the docs are off. Returns whether they're on."""
+    settings = get_settings()
+    if settings.fly_app_name:
+        # A warning, not info: under uvicorn's log setup only a `docflow.api`
+        # warning is sure to reach the machine's log (D-220 item 11).
+        logger.warning(
+            "api_docs_off: /docs, /redoc and /openapi.json are off on Fly; API_DOCS_ENABLED "
+            "is ignored here (it is %s) -- D-237.",
+            "set" if settings.api_docs_enabled else "unset",
+        )
+    return api_docs_enabled()
+
+
+_refusal = parse_token_startup_refusal() or cors_startup_refusal()
 if _refusal is not None:
     print(f"DocFlow API refused to start: {_refusal}", file=sys.stderr, flush=True)
     raise SystemExit(1)
@@ -123,10 +194,21 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         raise SystemExit(1) from None
     console_mfa_startup_check()
     document_signing_startup_check()
+    api_docs_startup_check()
     yield
 
 
-app = FastAPI(title="DocFlow API", lifespan=_lifespan)
+# With openapi_url None FastAPI adds none of the four doc routes, the OAuth2
+# redirect included; `app.openapi()` still builds the schema for the tests
+# that walk the routes.
+_docs_on = api_docs_enabled()
+app = FastAPI(
+    title="DocFlow API",
+    lifespan=_lifespan,
+    docs_url="/docs" if _docs_on else None,
+    redoc_url="/redoc" if _docs_on else None,
+    openapi_url="/openapi.json" if _docs_on else None,
+)
 
 
 class _CatchUnexpected(BaseHTTPMiddleware):
@@ -194,6 +276,45 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
     max_age=600,
 )
+
+
+# Headers every API response carries unless its route set its own (D-237).
+# The viewer's original, a page image and a download set their own CSP and
+# keep it: the original's `frame-ancestors` names the web app, so no
+# X-Frame-Options here -- `DENY` would fight that frame. HSTS is ignored by
+# browsers over plain http, so local runs are unaffected.
+API_SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
+    (b"x-content-type-options", b"nosniff"),
+    (b"referrer-policy", b"no-referrer"),
+    (b"content-security-policy", b"default-src 'none'; frame-ancestors 'none'"),
+    (b"strict-transport-security", b"max-age=63072000; includeSubDomains"),
+)
+
+
+class _SecurityHeaders:
+    """Plain ASGI, outermost of DocFlow's middleware, so preflight answers and
+    SYS-001's 500 carry the headers too."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                present = {name.lower() for name, _ in headers}
+                headers.extend((n, v) for n, v in API_SECURITY_HEADERS if n not in present)
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
+app.add_middleware(_SecurityHeaders)
 
 
 @app.exception_handler(RequestValidationError)
