@@ -1851,7 +1851,11 @@ With one worker machine:
    `PARSE_SLOTS`; the refusal names the value it got and the one it expected.
    So more slots means changing the default and `PARSE_SLOTS` together, in
    code. At every start it prints `run_workers: dispatch_in_flight_target=N`;
-   the deploy's check reads that line in `fly logs`.
+   the deploy's check reads that line in `fly logs`. The next line is
+   `run_workers: model_ids: extraction=claude-sonnet-5 routing=claude-haiku-4-5`
+   (D-239): the deploy's check reads it too, and any other pair means a
+   `DOCFLOW_*_MODEL` secret is set on the app. A model that isn't in
+   `config.py`'s `MODEL_PRICES` for its role stops the worker in one line.
 2. Size the machine for three Celery main processes, the dispatch process,
    the pages process and one process per slot (each document process may reach
    `WORKER_MAX_MEMORY_PER_CHILD_KIB` before it is replaced). Measure it on
@@ -3277,7 +3281,8 @@ name.
    - `curl -sI https://docflow-api-staging.fly.dev/healthz`: the four headers
      (`x-content-type-options`, `referrer-policy`,
      `content-security-policy`, `strict-transport-security`);
-   - the machine's startup log has the `api_docs_off` line.
+   - the machine's startup log has the `api_docs_off` line, and
+     `model_ids: extraction=claude-sonnet-5 routing=claude-haiku-4-5` (D-239).
 5. **Founder: the Vercel environment variables**, Production scope only.
    All three are public by design and compiled into the browser bundle, so a
    change needs a redeploy. No secret goes on Vercel.

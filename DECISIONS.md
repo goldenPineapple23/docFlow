@@ -6434,41 +6434,60 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 
 ---
 
-## D-239 — M10: the model IDs and their prices read from config, and the seven other unread settings kept with comments (founder, 2026-11-12)
+## D-239 — M10: the model IDs and their prices read from config, each model held to its role, SESSION_SECRET removed, and the six other unread settings kept with comments (founder, 2026-11-12)
 
-**Context:** plan task 6 (D-235 item 18); review finding M10. Nine settings are never read, and the two model IDs are literals in `extraction.py`. The design is `docs/designs/m10.md`, branch `phase55/stage6-m10` from `main` at `2b95eef`. **Design only: no code until the founder's go.**
+**Context:** plan task 6 (D-235 item 18); review finding M10. Nine settings were never read, and the two model IDs were literals in `extraction.py`. The design is `docs/designs/m10.md`, branch `phase55/stage6-m10` from `main` at `2b95eef`.
 
 1. **The rule (D-235 item 4):** reading config must not change the model that runs or the ID that is logged.
    - The defaults are today's strings, `claude-sonnet-5` and `claude-haiku-4-5`. The routing default changes from `claude-haiku-4-5-20251001`.
    - No environment sets either setting: CI has no `.env`; the Fly images don't copy it; `fly.toml` sets neither; and the founder read both apps' Fly secrets on 2026-11-12.
    - The founder deleted both lines from the local root `.env` on 2026-11-12. Its routing line was the dated ID, which would have changed every local run once wired.
-2. **Wire the two model settings.** `config.py` holds the only model-ID literals: the two defaults and a price table keyed by model ID, holding exactly those two models at today's prices ($2.00/$10.00 and $1.00/$5.00 per million tokens). The prices are not environment variables.
-   - **The check runs when Settings loads:** a configured model not in the table is an error, in the apps, the scripts and the tests alike.
+2. **The two model settings are wired.** `config.py` holds the only model-ID literals in the product's code: the two defaults and `MODEL_PRICES`, keyed by model ID.
+   - **`MODEL_PRICES`** holds exactly those two models at today's prices ($2.00/$10.00 and $1.00/$5.00 per million tokens), with the roles each may fill: `claude-sonnet-5` extraction only, `claude-haiku-4-5` routing only (founder). The prices are not environment variables.
+   - **The check runs when Settings loads**, so it applies to the apps, the scripts and the tests alike. A configured model not in the table, or set for a role its entry doesn't allow, stops it with a one-line message naming the setting, the model and the role.
+   - **Settings errors no longer quote their input** (`hide_input_in_errors`), so a refused Settings can't print a secret into a traceback.
    - **`extraction.py`** keeps the names `EXTRACTION_MODEL` and `ROUTING_MODEL`, set from config at import, and prices from the table. Its price literals go.
-   - **Startup:** the API and the worker each print both model IDs at start, and refuse in one line on a bad model.
+   - **Startup:** the API (at warning level) and the worker each print `model_ids: extraction=claude-sonnet-5 routing=claude-haiku-4-5`. A refused model stops either one in one line, not a traceback. The API checks before importing its routers. RUNBOOK 9.2 and 13 read the line.
    - **`.env.example`:** the two lines are commented out, with a note to leave them unset.
-3. **The other seven settings stay** (founder), each with a one-line comment in `config.py`:
+3. **`SESSION_SECRET` is removed** from `config.py` and `.env.example`, with its "used to sign session cookies" text (founder).
+   - Settings ignores environment variables it doesn't know (`extra="ignore"`), so a leftover value doesn't stop loading; a test holds this. The founder's local `.env` still holds one.
+   - Parse's self-test check of the name (`selftest.py:71`) is unchanged.
+4. **The six other settings stay**, each with a one-line comment in `config.py`:
    - **Read now:** `SUPABASE_ANON_KEY`, by `seed_live_e2e.py` and `test_storage_bucket_live.py`.
    - **Phase 6 wires them:** `SENTRY_DSN`, `LLM_OBSERVABILITY_API_KEY`, `WORKER_EGRESS_ALLOWLIST`.
-   - **No reader:** `SESSION_SECRET`, `STRIPE_PUBLISHABLE_KEY`, `API_BASE_URL`.
-
-   The design pushes back on `SESSION_SECRET` and recommends removing it (question 1).
-4. **Tests:**
-   - the defaults equal the old literals;
-   - the table holds exactly the two models and prices, and the costs are unchanged;
-   - the load-time check refuses an unknown model;
-   - a guard fails on any model-ID literal outside `config.py` in product and tooling code;
-   - the startup lines are printed.
+   - **No reader planned:** `STRIPE_PUBLISHABLE_KEY`, `API_BASE_URL`.
+5. **Tests:**
+   - the defaults equal the old literals and load clean;
+   - the table holds exactly the two models, prices and roles;
+   - both models' cost functions are pinned at fixed token counts. Sonnet's is new; Haiku's routing cost was already pinned at `test_example_prompting.py:117`. This is the founder's condition for no staging suites;
+   - an unknown model is refused for each setting;
+   - the wrong role is refused for each setting;
+   - a Settings error doesn't quote its input;
+   - a leftover `SESSION_SECRET` is ignored;
+   - a guard fails on any model-ID literal outside `config.py` in product and tooling code, proven on a planted literal;
+   - the API's and the worker's start lines and one-line refusals.
 
    Tests keep their own literals; none sets a model setting.
-5. **No golden re-run and no `live_api` run:** the model IDs, prompts and schemas are unchanged (CLAUDE.md 7.1; D-235 item 4; D-148).
-6. **No staging suites before merge** (D-223 item 5, as applied in D-227 item 7, D-234 item 12 and D-237 item 12). No database, session, Storage or migration code changes, and `model_runs.py` is untouched. The cost functions in `extraction.py` return identical values, and CI's database tests exercise the write; this is a judgment for the founder.
-7. **`model_runs.py:188` (founder's question):** a lost call's extraction row is priced only if its model is the current extraction model; a routing row is priced at the routing price whatever its model.
-   - Today that is an inconsistency, not a wrong figure, since every real routing row is `claude-haiku-4-5`.
-   - The design proposes pricing each lost row by its own model through the table. It is not changed without the founder's answer.
-8. **Open questions:** `SESSION_SECRET`'s removal; a role on each table entry, so the extraction model can't be set to the routing model (Section 3); and the lost-call pricing fix, in this PR or after the demo.
+6. **No golden re-run and no `live_api` run:** the model IDs, prompts and schemas are unchanged (CLAUDE.md 7.1; D-235 item 4; D-148). The recorded golden replays pass.
+7. **No staging suites before merge** (founder; D-223 item 5, as applied in D-227 item 7, D-234 item 12 and D-237 item 12).
+   - No database, session, Storage or migration code changes, and `model_runs.py` is untouched.
+   - The cost functions return identical values, pinned by tests for both models.
+8. **A required follow-up, not in this PR (founder): price every lost row by its own model ID through `MODEL_PRICES`.** An ID not in the table gets tokens only. It must be done before, or with, any change to either model setting.
+   - **Today:** `model_runs.py:188`'s `close_lost_runs` prices a lost extraction row only if its model is the current extraction model, and a routing row at the routing price whatever its model.
+   - No figure is wrong today, because every real routing row is `claude-haiku-4-5`.
+   - It is on BUILD-STATUS's after-the-demo list.
 9. **Estimate:** about 0.75 day against the plan's 1.
 
-**Founder approval:** answers of 2026-11-12 (the `.env` lines deleted; the Fly secrets read; option (a) with a price table and a load-time check; the seven settings kept). The design itself awaits approval.
+**Changes:**
+- `packages/core/docflow_core/config.py`, `extraction.py`;
+- `apps/api/app/main.py`, `apps/worker/app/run_workers.py`;
+- `.env.example`;
+- tests: `packages/core/tests/test_model_config.py` (new), `apps/api/tests/test_model_ids_startup.py` (new), `apps/worker/tests/test_run_workers.py`;
+- RUNBOOK 9.2 and 13;
+- BUILD-STATUS.
+
+**Not changed:** `model_runs.py`; any prompt, schema, SQL or migration; the web app; parse's self-test.
+
+**Founder approval:** 2026-11-12. The `.env` lines were deleted and the Fly secrets read. Option (a), with a price table and a load-time check. The role check. `SESSION_SECRET` removed. The other six kept. No staging suites, on the condition that both models' costs are pinned. The lost-call pricing deferred, as a required follow-up.
 
 **Related:** D-141, D-148, D-163, D-195, D-223, D-227, D-234, D-235, D-237; review finding M10.

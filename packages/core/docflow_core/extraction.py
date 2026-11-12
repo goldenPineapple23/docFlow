@@ -33,14 +33,16 @@ import anthropic
 import httpx2
 
 from docflow_core import faults
+from docflow_core.config import MODEL_PRICES, get_settings
 from docflow_core.numbers import parse_document_number
 from docflow_core.provider_errors import ProviderError, classify
 
 logger = logging.getLogger(__name__)
 
-# Pinned per CLAUDE.md Section 3 -- verify against current Anthropic docs
-# before changing, and re-run the golden fixture (Section 8.3) if it does.
-EXTRACTION_MODEL = "claude-sonnet-5"
+# Pinned per CLAUDE.md Section 3, read from config once, at import (D-239):
+# config.py holds the ID, its price and the check that it may extract.
+# Change it there, never here, and re-run the golden fixture (Section 8.3).
+EXTRACTION_MODEL = get_settings().docflow_extraction_model
 SCHEMA_VERSION = "1.0.0"
 
 # The most the model may write for one order (review M1; D-158, D-161): the
@@ -75,8 +77,8 @@ COUNT_TOKENS_TIMEOUT_SECONDS = 15
 # classification/routing pass only -- this one never produces a value that is
 # shown to a reviewer or exported; it only decides whether past examples are
 # offered to EXTRACTION_MODEL. Verified against the Anthropic models table on
-# 2026-09-25 (D-141).
-ROUTING_MODEL = "claude-haiku-4-5"
+# 2026-09-25 (D-141). Read from config like EXTRACTION_MODEL (D-239).
+ROUTING_MODEL = get_settings().docflow_routing_model
 ROUTING_SCHEMA_VERSION = "routing-1.0.0"
 
 # Currency inferred from a symbol rather than explicitly stated must have its
@@ -84,13 +86,13 @@ ROUTING_SCHEMA_VERSION = "routing-1.0.0"
 # requested of the model, so it holds even if the model doesn't comply.
 CURRENCY_INFERRED_CONFIDENCE_CAP = 0.6
 
-# claude-sonnet-5 pricing (see the claude-api skill's cached model table):
-# $2.00 / 1M input tokens, $10.00 / 1M output tokens.
-_INPUT_COST_PER_TOKEN = Decimal("2.00") / Decimal("1000000")
-_OUTPUT_COST_PER_TOKEN = Decimal("10.00") / Decimal("1000000")
-# claude-haiku-4-5: $1.00 / 1M input, $5.00 / 1M output (same source).
-_ROUTING_INPUT_COST_PER_TOKEN = Decimal("1.00") / Decimal("1000000")
-_ROUTING_OUTPUT_COST_PER_TOKEN = Decimal("5.00") / Decimal("1000000")
+# Each model's price per token, from config's MODEL_PRICES (D-239). Settings
+# has already refused a model that isn't there, so the lookups can't miss.
+_MILLION = Decimal("1000000")
+_INPUT_COST_PER_TOKEN = MODEL_PRICES[EXTRACTION_MODEL].input_usd_per_million / _MILLION
+_OUTPUT_COST_PER_TOKEN = MODEL_PRICES[EXTRACTION_MODEL].output_usd_per_million / _MILLION
+_ROUTING_INPUT_COST_PER_TOKEN = MODEL_PRICES[ROUTING_MODEL].input_usd_per_million / _MILLION
+_ROUTING_OUTPUT_COST_PER_TOKEN = MODEL_PRICES[ROUTING_MODEL].output_usd_per_million / _MILLION
 
 _HEADER_FIELDS = [
     "po_number",
