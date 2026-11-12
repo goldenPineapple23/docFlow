@@ -6431,3 +6431,44 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** 2026-11-12 (the change as specified). **Founder rulings, 2026-11-12:** the four job limits above twice the longest run stay as set (item 3); slow installs failing is accepted (item 4); #95 is flake 12 and #97 is flake 13 (item 5).
 
 **Related:** D-199 (item 10), D-216, D-218, D-219, D-221, D-222, D-223, D-227, D-234, D-235.
+
+---
+
+## D-239 — M10: the model IDs and their prices read from config, and the seven other unread settings kept with comments (founder, 2026-11-12)
+
+**Context:** plan task 6 (D-235 item 18); review finding M10. Nine settings are never read, and the two model IDs are literals in `extraction.py`. The design is `docs/designs/m10.md`, branch `phase55/stage6-m10` from `main` at `2b95eef`. **Design only: no code until the founder's go.**
+
+1. **The rule (D-235 item 4):** reading config must not change the model that runs or the ID that is logged.
+   - The defaults are today's strings, `claude-sonnet-5` and `claude-haiku-4-5`. The routing default changes from `claude-haiku-4-5-20251001`.
+   - No environment sets either setting: CI has no `.env`; the Fly images don't copy it; `fly.toml` sets neither; and the founder read both apps' Fly secrets on 2026-11-12.
+   - The founder deleted both lines from the local root `.env` on 2026-11-12. Its routing line was the dated ID, which would have changed every local run once wired.
+2. **Wire the two model settings.** `config.py` holds the only model-ID literals: the two defaults and a price table keyed by model ID, holding exactly those two models at today's prices ($2.00/$10.00 and $1.00/$5.00 per million tokens). The prices are not environment variables.
+   - **The check runs when Settings loads:** a configured model not in the table is an error, in the apps, the scripts and the tests alike.
+   - **`extraction.py`** keeps the names `EXTRACTION_MODEL` and `ROUTING_MODEL`, set from config at import, and prices from the table. Its price literals go.
+   - **Startup:** the API and the worker each print both model IDs at start, and refuse in one line on a bad model.
+   - **`.env.example`:** the two lines are commented out, with a note to leave them unset.
+3. **The other seven settings stay** (founder), each with a one-line comment in `config.py`:
+   - **Read now:** `SUPABASE_ANON_KEY`, by `seed_live_e2e.py` and `test_storage_bucket_live.py`.
+   - **Phase 6 wires them:** `SENTRY_DSN`, `LLM_OBSERVABILITY_API_KEY`, `WORKER_EGRESS_ALLOWLIST`.
+   - **No reader:** `SESSION_SECRET`, `STRIPE_PUBLISHABLE_KEY`, `API_BASE_URL`.
+
+   The design pushes back on `SESSION_SECRET` and recommends removing it (question 1).
+4. **Tests:**
+   - the defaults equal the old literals;
+   - the table holds exactly the two models and prices, and the costs are unchanged;
+   - the load-time check refuses an unknown model;
+   - a guard fails on any model-ID literal outside `config.py` in product and tooling code;
+   - the startup lines are printed.
+
+   Tests keep their own literals; none sets a model setting.
+5. **No golden re-run and no `live_api` run:** the model IDs, prompts and schemas are unchanged (CLAUDE.md 7.1; D-235 item 4; D-148).
+6. **No staging suites before merge** (D-223 item 5, as applied in D-227 item 7, D-234 item 12 and D-237 item 12). No database, session, Storage or migration code changes, and `model_runs.py` is untouched. The cost functions in `extraction.py` return identical values, and CI's database tests exercise the write; this is a judgment for the founder.
+7. **`model_runs.py:188` (founder's question):** a lost call's extraction row is priced only if its model is the current extraction model; a routing row is priced at the routing price whatever its model.
+   - Today that is an inconsistency, not a wrong figure, since every real routing row is `claude-haiku-4-5`.
+   - The design proposes pricing each lost row by its own model through the table. It is not changed without the founder's answer.
+8. **Open questions:** `SESSION_SECRET`'s removal; a role on each table entry, so the extraction model can't be set to the routing model (Section 3); and the lost-call pricing fix, in this PR or after the demo.
+9. **Estimate:** about 0.75 day against the plan's 1.
+
+**Founder approval:** answers of 2026-11-12 (the `.env` lines deleted; the Fly secrets read; option (a) with a price table and a load-time check; the seven settings kept). The design itself awaits approval.
+
+**Related:** D-141, D-148, D-163, D-195, D-223, D-227, D-234, D-235, D-237; review finding M10.
