@@ -6491,3 +6491,67 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** 2026-11-12. The `.env` lines were deleted and the Fly secrets read. Option (a), with a price table and a load-time check. The role check. `SESSION_SECRET` removed. The other six kept. No staging suites, on the condition that both models' costs are pinned. The lost-call pricing deferred, as a required follow-up.
 
 **Related:** D-141, D-148, D-163, D-195, D-223, D-227, D-234, D-235, D-237; review finding M10.
+
+## D-240 — Task 7 done: the deploys, the pages backfill and the smoke test on public staging (founder, 2026-11-12 to 2026-11-15)
+
+**Context:** plan task 7 in D-235 item 18. RUNBOOK 13.2 is its order (D-237). Every deploy is of `a670eef`, M10's merge, each under its own Grant. This entry records what each step found and the founder's decisions from it.
+
+1. **Step 1, the Anthropic spend limit:** $100 a month, with an e-mail notification at $50 (founder, 2026-11-12; RUNBOOK 13.2 step 1).
+2. **Step 2: the Vercel project is on the founder's Hobby team, not Pro** (founder, 2026-11-13). It moves to Pro in place before task 9. After the move, the web app's headers and CSP are checked again, as in step 9.
+3. **Step 4, the secrets: RUNBOOK's script is replaced by the founder's corrected version, word for word** (founder, 2026-11-13; the text, 2026-11-15).
+   - **Why it changed** (founder): pasted line by line, a `throw` stopped only its own line, so a failed Stripe check would still have staged the key; `fly` and `python` failures don't throw; and Supabase rejects the `sb_secret_` key with PowerShell's browser-like User-Agent.
+   - **So:** `Set-PSReadLineOption -HistorySaveStyle SaveNothing` runs on its own first; the rest runs inside `& { }` with `$ErrorActionPreference = 'Stop'`; `$LASTEXITCODE` is checked after `python` and after each `fly secrets set`; a `Read-Host` prompt that wants `YES` follows the printed project ref; the service-key check sets `-UserAgent "docflow-secrets-check"`.
+   - **The User-Agent is the fix.** Staging's service key is a new-style `sb_secret_` key, and Supabase answers 401 "Forbidden use of secret API key in browser" to a browser-like User-Agent: PowerShell 5.1's default starts `Mozilla/5.0`.
+   - **No code change:** the API's own call (`external_services.py:1060-1066`) and three seed scripts send `apikey` and `Authorization: Bearer` under httpx's default User-Agent, and the founder's check of that answered 200.
+4. **Steps 3, 5, 6 and 7, the deploys** (2026-11-13):
+   - **parse** v7, image `deployment-01M7ASC0GHV67TDCX7N0PH066D`, private (one Flycast IPv6 address);
+   - **the API** v4, image `deployment-01M7B7T9TJRCMQEW26SEAY1W4W`, at `https://docflow-api-staging.fly.dev`: shared IPv4 `66.241.124.19` and dedicated IPv6 `2a09:8280:1::1a2:feb6:0`, allocated 20:17Z;
+   - **the worker and beat** v13, image `deployment-01M7B97291KHCY7RD9G4159831`, machines `899452b6479948` (worker) and `8d1777fedd7018` (beat), started about 20:23Z and left running (founder's choice). The founder confirmed the Healthchecks.io check active and pinging at step 7.
+5. **Steps 8 and 9, Vercel** (founder): the three public variables and the first production deploy, at `https://docflow-app-tau.vercel.app`. First page loads (founder, measured 2026-11-15):
+   - cold 149 ms; warm 128 ms and 118 ms. Static content from Vercel's edge, so no concern;
+   - the first API-backed page after idle, 1.41 s: the API machine waking from auto-stop. It isn't confirmed that the machine had been idle a full 8 minutes first.
+6. **Step 10, Supabase Auth's URLs** (founder, 2026-11-13):
+   - the old Site URL wasn't recorded; it was most likely `http://localhost:3000`;
+   - the Site URL is now `https://docflow-app-tau.vercel.app`. `https://docflow-app-tau.vercel.app/auth/accept` was added to the redirect URLs, and `http://localhost:3000/auth/accept` kept;
+   - Claude re-read the project's public auth settings at 21:08Z: `disable_signup` true, e-mail the only provider.
+7. **Step 11, the pages backfill** (2026-11-13, three Grants):
+   - the dry run (21:11Z): 636 documents in 13 tenants, 505 of them in one test tenant;
+   - `--limit 5` (21:21Z): five documents of one tenant, 0 `pages_failed`; the dry run after it, 631;
+   - the full run (21:29:24 to 21:48:33Z): exit 0, `done queued=631`; 86 page images in 16 documents; the bucket grew from 100.3 MB to 177.6 MB (16.5% of 1 GiB);
+   - the final dry run (22:12Z): **61 documents in 11 tenants**, against about 3 expected. The `pages_failed` lines had aged out of Fly's 100-line log buffer, and no live capture was running, so the work stopped there.
+   - **The diagnosis** (2026-11-15, read-only, under a Grant): still 61 in 11 tenants.
+     - 54 have a stored path the prefix rules refuse: 48 point at `tenants/{a word, not a tenant id}/{name}.txt`, and 6 sit in their own tenant's `seed/` folder. Tests and seed scripts write these shapes straight into the database.
+     - 7 have a well-formed `uploads/` path whose object is gone.
+     - None reaches the hash check, none was ever parsed, and none names another tenant, so no founder alert was raised.
+     - **None of these can come from a normal upload,** which stores the file before it writes the row. A real tenant's row can lose its original only in the Console's hard delete, whose files go before its rows (D-182), and only if its database step then fails.
+   - **The rule since** (founder, 2026-11-13 and 2026-11-15): a live `fly logs` capture starts before any long granted run, and a capture that stops is reported at once.
+8. **Step 12, the smoke test** (2026-11-15, under a Grant, with live captures of all three apps):
+   - **The tenant:** "Smoke Test Distributor", `1ec22993-868f-4917-9894-be803b021d1a`, created 21:03:51Z. Its Stripe customer, `cus_VdRTo8eIdeNsut`, shows Stripe's sandbox banner and has no subscription. The tenant page shows the customer ID only, with no link.
+   - **Three creates were refused first,** with 422 at 20:48:26Z, 20:48:32Z and 20:56:39Z. The owner address ended in `@example.test`, and `owner_email: EmailStr` (email-validator 2.3.0) refuses special-use names (`.test`, `.local`, `.localhost`, `.invalid`, `.onion`, `.arpa`). FastAPI's own 422 answered before the route ran, so nothing was created. The Console showed APP-000, "We couldn't reach DocFlow ... DocFlow has been alerted", though no alert was raised.
+   - **The invite** was sent at 21:07:41Z and opened in a normal tab.
+   - **The upload:** `po.pdf` at 21:12:32Z, document `fe19792f-20fa-429d-b946-3313fd166ff9`. Parsed at 21:12:38Z; its one page drawn at 21:12:39Z and stored as `tenants/{id}/derived/{document}/pages/0001` (1700 × 2200 PNG); `needs_review` at 21:12:50Z, about 18 s after the upload. One extraction call: `claude-sonnet-5`, 2,524 input and 897 output tokens, $0.0140.
+   - **The review:** the currency was blank, because `po.pdf` states none, and as a required header field it blocked approval (Section 7.1). The owner set it, edited at 21:15:32Z, and approved at 21:15:51Z with one warning acknowledged. CSV export `063c3953` (21:15:57Z) and XLSX export `4bd98ead` (21:16:11Z) were both built from the approved snapshot, both show the edit, and both downloaded. The browser's console was empty: no errors and no CSP violations.
+   - **The Console from 21:17:15Z:** every request answered 404, because the owner's sign-in in the normal tab had replaced the founder's (one Supabase session per site, shared by every normal tab). After the founder signed back in, the health strip was all fine: the worker answering, heartbeat 7 s, the model up, 0% errors, 1 read today, AI spend today $0.01. The attention panel stayed at 13, so the smoke test raised no alert; the founder acknowledged the resolved `rollup_stale` alert, and 12 remain. `/healthz` at 21:27:42Z: `"stale":false`. 0 `pages_failed` during the step.
+   - **RUNBOOK 13.2 step 12 now** uses `smoke-owner@example.com`, checks the Stripe sandbox banner instead of a `/test/` link (step 4's sentence too), and says to open the owner invite in a private window.
+9. **One small PR before the demo** (founder, 2026-11-15):
+   - the API's validation handler answers one catalog code that names the field, instead of FastAPI's own 422 body;
+   - the web app's fallback message stops saying "DocFlow has been alerted";
+   - page and export links stop putting their token in the API's access log: the 21:13:17Z line carried a page link's `?token=` in full.
+   - The token routes' 422 with no `?token=` (`/original/content`, `/pages/{i}`, `/exports/{id}/download`), found during task 7, is the same handler's case.
+   - No staging suites for this PR under D-223 item 5: it touches no database, Storage or migration, only API responses, logging and one web string (founder, 2026-11-15). Estimate 1 to 1.25 days plus the API redeploy under a Grant.
+10. **After the demo** (founder, 2026-11-15): Section 7.1 stands, and a blank currency stays blank. The demo POs state a currency. Whether to pre-fill a blank one from the tenant's primary currency, as "mapped" provenance, is decided with pilot POs.
+11. **For task 20, the demo routine** (founder, 2026-11-15): never show the Console's business panel in a prospect demo. On staging it shows test figures: MRR $747 from 2 live test tenants. The rest of task 20's list is in BUILD-STATUS.
+12. **Read, no change:**
+    - the daily cost circuit breaker adds up real usage: finished runs' tokens and cost (`usage.daily_ai_spend`). The pre-call token count prices only a call lost mid-flight, as a lower bound, because it doesn't count the output schema (1,103 counted against 2,524 used here);
+    - Outbox mail held before a sender exists is never sent. No sender exists, a provider key alone only makes new rows `queued`, and D-212 says held rows must never be sent. The Outbox has no discard action;
+    - after each clean shutdown on Fly's auto-stop, the API logs a `KeyboardInterrupt` traceback.
+13. **Localhost is staging** (D-089; founder, 2026-11-15). The local web app and API use staging's Auth, database and Storage, so the local app and the Vercel host share users, MFA factors and data. The founder's staging admin authenticator is the one enrolled on localhost; nothing about it was changed.
+    - **Decision:** the local web app and API are not run until a local Supabase through the CLI exists (after the demo).
+
+**Changes:** RUNBOOK 13.2 steps 4 and 12; BUILD-STATUS, with its earlier status paragraph moved to `docs/status-history.md`.
+
+**Not changed:** code, tests, migrations, and every Fly, Vercel, Supabase and Stripe setting.
+
+**Founder approval:** 2026-11-13 (the Hobby team, step 4's script, the backfill's stop) and 2026-11-15 (the diagnosis, the smoke test's RUNBOOK changes, step 4's script text, items 9, 10, 11 and 13).
+
+**Related:** D-089, D-182, D-212, D-232, D-235, D-236, D-237, D-239; RUNBOOK 13.2.
