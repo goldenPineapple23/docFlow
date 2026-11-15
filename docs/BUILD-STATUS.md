@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-12, with M10 merged and task 7 started:** Phase 5.5,
+**Status, as of 2026-11-15, with task 7 done:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -180,24 +180,36 @@ step limits need it (web 14, web-live 15, core 7, api 21, worker 13, parse 21). 
 upload-artifact step fails in 5 minutes and stays required. Evidence: #95's web install ran
 1 h 41 min on a DNS failure, and #97's uploads hung 11 to 13 minutes. The founder's rulings (D-238): the four job limits stay as set; slow installs failing is accepted, and the 5-minute limit is revisited if a 5-minute-plus install fails a run; #95 is flake 12 and #97 is flake 13, each run counted once, so the count in D-199 item 10 is now 13.
 **M10 is merged** (PR #101, `main` `a670eef`; D-239; design `docs/designs/m10.md`). The two model IDs are read from config, and `config.py` holds the only model-ID literals in the product's code: the defaults are the strings that run today (`claude-sonnet-5`, `claude-haiku-4-5`), and `MODEL_PRICES` holds exactly those two, with their prices and roles (Sonnet extraction only, Haiku routing only). A model not in the table, or set for a role it may not fill, stops Settings from loading in the apps, scripts and tests alike. The API and the worker print `model_ids: extraction=claude-sonnet-5 routing=claude-haiku-4-5` at start. `SESSION_SECRET` is removed; the other six unread settings stay, each with a comment. No golden re-run and no staging suites before merge.
-**Task 7 has started** (RUNBOOK 13.2): the Anthropic workspace staging uses has a monthly
-spend limit of $100, with an e-mail notification at $50 (founder, 2026-11-12; step 1).
-RUNBOOK 13.2 is now the one place with task 7's full order (parse, the secrets, the API, its
-addresses, the worker and beat, Vercel, Supabase Auth, the backfill, and task 7's own smoke
-test), with the secrets each app needs. The founder's reads of 2026-11-12: `REDIS_URL` and the
-four `STORAGE_S3_*` match between the API and the worker, and parse's `PARSE_SERVICE_TOKEN`
-matches the worker's. `STRIPE_SECRET_KEY` on staging is a test-mode key only;
-`STRIPE_WEBHOOK_SECRET` stays unset, since billing isn't in the demo. Inbound e-mail moves
-from task 7's smoke test to task 10 (Postmark). The deploys are of `a670eef`; this branch
-(`phase55/task7-deploys`) merges with task 7's records at the end.
-**Next, in order (D-235 item 18):** the rest of task 7, the
-deploys under Grants and the backfill. The Console's sweep, the Chrome and Safari pass, the
+**Task 7 is done** (RUNBOOK 13.2; D-240), 2026-11-12 to 2026-11-15, every deploy of `a670eef`.
+The Anthropic workspace staging uses has a monthly spend limit of $100, with an e-mail
+notification at $50 (step 1). Parse, the API and the worker with beat are deployed; the API
+answers at `https://docflow-api-staging.fly.dev`, and the web app at
+`https://docflow-app-tau.vercel.app`, on the founder's Vercel Hobby team until task 9, when it
+moves to Pro in place and its headers and CSP are checked again. First page loads
+(founder, 2026-11-15): cold 149 ms, warm 128 ms and 118 ms, from Vercel's edge; the first
+API-backed page after idle 1.41 s, the API machine waking from auto-stop. Supabase Auth's Site
+URL is the Vercel host; sign-ups stay off. The pages backfill queued 631 documents; 61 stay
+undrawn, all test or seed rows whose stored path is refused (54) or whose original is gone (7),
+none of them a document a normal upload could produce (D-240 item 7). The smoke test passed: a
+fresh upload of `po.pdf` reached `needs_review` in about 18 seconds with its page image stored,
+cost $0.0140, and was reviewed, approved and exported as CSV and XLSX; the Console's health
+strip was all fine and no alert was raised (D-240 item 8).
+Inbound e-mail moved from task 7's smoke test to task 10 (Postmark).
+**Next, in order (D-235 item 18):** the 422 and page-token PR (D-240 item 9), before the demo.
+The Console's sweep, the Chrome and Safari pass, the
 real-iPhone checks and the partner walkthrough. Postmark inbound end to end. Both PO sets on
 staging. E1, then E2a. B1's demo half, labelling with the routing model. The pricing-unit fix and
 the export preset, only if needed. One demo tenant. The final redeploy with the staging suites,
 D-209's smoke test (owed since the worker's deploy of 2026-11-01) and `demo-1`. The demo routine
-and two cold rehearsals. About 32 working days with contingency: demo-ready about 29 December
-2026. **After the demo:** pricing every lost call by its own model ID through `MODEL_PRICES` (an unknown ID gets tokens only), required before or with any change to either model setting (D-239 item 8). Blocker 3's background commit with the duplicate SKU index (0041). The
+(task 20; founder, 2026-11-15; D-240 item 11): never show the Console's business panel; stop
+the worker and beat only by the rule (skipping the 03:15Z rollup raises `rollup_stale` after 36
+h; pause the Healthchecks.io check while they're stopped); warm the API before the demo; check
+Anthropic spend against the $100 limit; screen hygiene (30 test tenants, 567 documents awaiting
+review, 12 alerts: clean the test tenants or don't show those pages); load a catalog for the
+demo tenant; the demo POs state a currency; admin and owner in separate windows (normal plus
+private, or separate Chrome profiles) at the demo; a normal tab shares one session. Then two cold
+rehearsals. About 32 working days with contingency: demo-ready about 29 December
+2026. **After the demo:** pricing every lost call by its own model ID through `MODEL_PRICES` (an unknown ID gets tokens only), required before or with any change to either model setting (D-239 item 8). Whether to pre-fill a blank currency from the tenant's primary currency, as "mapped" provenance, decided with pilot POs (D-240 item 10). From task 7 (founder, 2026-11-15): DOC-033's "Download the original" answers 404 when the original is gone; test clean-up deletes rows before files, or both in one transaction; a test for D-212's "held rows are never sent" when the sender is built; clean the test tenants so the backfill's dry run reads 0; the attention panel says "emailed to you" while mail is only held; a local Supabase through the CLI, before the local web app and API run again (D-240 item 13). Blocker 3's background commit with the duplicate SKU index (0041). The
 docs PR, which ends Stage 5 (it also takes `apps/web/AGENTS.md`, whose first heading `next dev`
 rewrote from `#` to `##` when it started on 2026-10-27: either commit that heading or stop `next
 dev` from rewriting the file; founder), CLAUDE.md naming the three staging apps, and RUNBOOK 1.4's
@@ -210,13 +222,16 @@ CI's "Install Playwright browser" step (web-live) took 9 to 11 minutes on PR run
 under 30 seconds on main's push run #490, likely a cache miss on PR runs, costing about 10 minutes
 per PR. On main's push run #498 (`d053cca`) it took 16 seconds. The 50,000-row cap and IMP-003's
 wording: one PR, before pilots, only if a pilot prospect has more than 50,000 SKUs. **Staging:** the
-database has 0040 (2026-11-04). `docflow-api-staging` runs v3, is stopped, and has no address: 66.241.124.71 was
-released at 15:40:14Z on 2026-11-02. `docflow-parse-staging` runs PR B's image (`b1af531`; Pillow
-13.0.0), is stopped, and stays private. `docflow-worker-staging` is on v12 with no machines: worker
-and beat were destroyed in the shutdown of 2026-11-02. Tenant `a7492bf7` still holds the 20,000 test
+database has 0040 (2026-11-04). `docflow-api-staging` runs v4 (`a670eef`), is public at
+`https://docflow-api-staging.fly.dev` (shared IPv4 66.241.124.19, dedicated IPv6
+2a09:8280:1::1a2:feb6:0, allocated 2026-11-13), and stops itself when idle. `docflow-parse-staging`
+runs v7 (`a670eef`), is private (Flycast only), and stops itself when idle.
+`docflow-worker-staging` runs v13 (`a670eef`), with its worker and beat machines running since
+2026-11-13 (founder's choice). The fictional smoke-test tenant "Smoke Test Distributor"
+(`1ec22993`) stays, for task 12 or task 8's sweep. Tenant `a7492bf7` still holds the 20,000 test
 items and import `96bc7e0c`. Four `tenant_ready_to_delete` alerts are open, and the leftover line's
 start is tenants 34, founder alerts 8, e-mails 34, scheduled jobs 35, admin rows 12, users with no
-tenant 15. The Healthchecks.io check is live while the worker runs, and paused when it stops.
+tenant 15 (last read 2026-11-05; task 7 added rows and didn't re-read them). The Healthchecks.io check is live while the worker runs, and paused when it stops.
 
 **That paragraph is the current state only** (founder, 2026-10-05; D-191). When it changes, the
 paragraph it replaces moves, word for word, to the top of `docs/status-history.md`, which is not

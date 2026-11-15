@@ -3308,51 +3308,60 @@ name.
    - **On the worker:** `ADMIN_DATABASE_URL`, `STRIPE_DATABASE_URL` or `API_DATABASE_URL` (it refuses to start).
    - **On either:** `DOCFLOW_EXTRACTION_MODEL` or `DOCFLOW_ROUTING_MODEL` (D-239; the defaults are the pinned models), or `DISPATCH_IN_FLIGHT_TARGET` (9.2).
 
-   **The commands,** from the repository root, in a new PowerShell window:
+   **The commands,** in a new PowerShell window.
+   Run `Set-PSReadLineOption -HistorySaveStyle SaveNothing` on its own first, from the repo root.
    ```powershell
-   Set-PSReadLineOption -HistorySaveStyle SaveNothing
+   & {
+   $ErrorActionPreference = 'Stop'
    $fly = "$env:USERPROFILE\.fly\bin\fly.exe"
    $envFile = Join-Path (Get-Location) ".env"
+   if (-not (Test-Path -LiteralPath $envFile)) { throw "no .env here; cd to the repo root" }
    function Get-DotEnv([string]$Name) {
        $line = Get-Content -LiteralPath $envFile | Where-Object { $_ -like "$Name=*" } | Select-Object -First 1
        if (-not $line) { throw "$Name is not in .env" }
        return $line.Substring($Name.Length + 1).Trim().Trim('"')
    }
 
-   # <vercel-host> from step 2 (not a secret).
-   $vercelHost = "<vercel-host>"
+   $vercelHost = "docflow-app-tau.vercel.app"
    if ($vercelHost -notmatch '^[a-z0-9-]+\.vercel\.app$') { throw "the Vercel host doesn't look right" }
    $origin = "https://$vercelHost"
 
-   # Staging checks: nothing below prints a secret.
    $supabaseUrl = Get-DotEnv "SUPABASE_URL"
    "SUPABASE_URL project ref: " + ([uri]$supabaseUrl).Host.Split('.')[0]
    $serviceKey = Get-DotEnv "SUPABASE_SERVICE_ROLE_KEY"
    try {
-       Invoke-RestMethod -Uri "$supabaseUrl/auth/v1/admin/users?per_page=1" -Headers @{ apikey = $serviceKey; Authorization = "Bearer $serviceKey" } | Out-Null
-       "SUPABASE_SERVICE_ROLE_KEY belongs to that project: yes"
+       Invoke-RestMethod -UseBasicParsing -UserAgent "docflow-secrets-check" -Uri "$supabaseUrl/auth/v1/admin/users?per_page=1" -Headers @{ apikey = $serviceKey } | Out-Null
    } catch { throw "SUPABASE_SERVICE_ROLE_KEY does not open that project; stop" }
+   "SUPABASE_SERVICE_ROLE_KEY belongs to that project: yes"
    $stripeKey = Get-DotEnv "STRIPE_SECRET_KEY"
    if (-not $stripeKey.StartsWith("sk_test_")) { throw "STRIPE_SECRET_KEY in .env is not a test-mode key; stop" }
    "STRIPE_SECRET_KEY is a test-mode key: yes"
    $alertEmail = Get-DotEnv "FOUNDER_ALERT_EMAIL"
-   $signing = (python -c "import secrets; print(secrets.token_urlsafe(48))").Trim()
+   $signing = (python -c "import secrets; print(secrets.token_urlsafe(48))")
+   if ($LASTEXITCODE -ne 0 -or -not $signing) { throw "python failed; the signing secret wasn't generated" }
+   $signing = $signing.Trim()
    if ($signing.Length -lt 60) { throw "the signing secret wasn't generated" }
+   "Signing secret generated: yes"
+
+   $answer = Read-Host "Is that the STAGING project ref? Type YES to stage the secrets"
+   if ($answer -cne 'YES') { throw "stopped; nothing was staged" }
 
    & $fly secrets set --app docflow-api-staging --stage `
        "CORS_ALLOWED_ORIGINS=$origin" "APP_BASE_URL=$origin" `
        "DOCUMENT_URL_SIGNING_SECRET=$signing" "SUPABASE_SERVICE_ROLE_KEY=$serviceKey" `
        "STRIPE_SECRET_KEY=$stripeKey" "FOUNDER_ALERT_EMAIL=$alertEmail"
+   if ($LASTEXITCODE -ne 0) { throw "API secrets were NOT staged; stop" }
    & $fly secrets set --app docflow-worker-staging --stage "APP_BASE_URL=$origin"
+   if ($LASTEXITCODE -ne 0) { throw "API secrets are staged but the worker's APP_BASE_URL is NOT; stop" }
 
-   Remove-Variable signing, serviceKey, stripeKey, alertEmail, supabaseUrl
    & $fly secrets list --app docflow-api-staging
    & $fly secrets list --app docflow-worker-staging
+   }
    ```
    **How each value is known to be staging's:**
    - **The project ref** printed is the one on Supabase -> docflow-staging -> Project Settings -> General. It isn't a secret: it is in the API's public address.
    - **The service role key** opened that project, in a read that is discarded. No production Supabase project exists yet.
-   - **The Stripe key** starts with `sk_test_`. Fly can't show a secret's value afterwards, so this check runs before it is set, and step 12 checks it again on the deployed API: the Console's Stripe link for the new tenant has `/test/` in it.
+   - **The Stripe key** starts with `sk_test_`. Fly can't show a secret's value afterwards, so this check runs before it is set, and step 12 checks it again on the deployed API: the new tenant's Stripe customer shows Stripe's sandbox banner.
    - **The signing secret** is new, so it is staging's alone. Changing it later only ends the viewer URLs in flight (9.7).
    - **The two URLs** come from `<vercel-host>`.
 
@@ -3445,10 +3454,11 @@ name.
     - **Record** the dates, the totals before and after, and the `pages_failed` count in BUILD-STATUS.
     - **Rollback:** none needed. It only adds page images, and stopping it is safe (9.2).
 12. **Grant: task 7's smoke test.** The founder does the browser parts; Claude does the reads and the record. It costs one model call, about $0.02.
-    1. **Founder, Console at `https://<vercel-host>`:** create a new fictional tenant, "Smoke Test Distributor", with a fictional owner address (`@example.test`).
-       - Check that the tenant page's Stripe link has `/test/` in it: the deployed `STRIPE_SECRET_KEY` is a test key.
+    1. **Founder, Console at `https://<vercel-host>`:** create a new fictional tenant, "Smoke Test Distributor", with the fictional owner address `smoke-owner@example.com`. Not `@example.test`: the API refuses `.test`, `.local` and the other special-use names as e-mail domains (2026-11-15; D-240 item 8).
+       - Check that the new Stripe customer shows Stripe's sandbox banner: the deployed `STRIPE_SECRET_KEY` is a test key. The tenant page shows the customer ID only, with no link.
        - Don't take the tenant live. Billing isn't in the demo, and go-live would start a Stripe subscription.
     2. **Send the owner's invite.** It is held in the Console Outbox, since no e-mail provider exists. Copy its link from there.
+       - Open the owner invite in a private window; a normal tab replaces the admin session.
        - In a private window, the link lands on `https://<vercel-host>/auth/accept` and sets a password.
        - Sign in as that owner.
     3. **Upload one fictional order:** `apps/parse/tests/fixtures/positive/po.pdf`, a PDF, so it has page images and an original to open.
