@@ -995,6 +995,51 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="high",
         audience="both",
     ),
+    # ── REQ-0xx · a request DocFlow refused before acting on it (D-241) ───────
+    # The API's validation handler answers these instead of FastAPI's own 422
+    # body. The route never ran, so "didn't save anything" is certain. The
+    # failing fields go in detail.fields; never the value or the library's text.
+    "REQ-001": ErrorCatalogEntry(
+        code="REQ-001",
+        title="DocFlow couldn't accept one of the values",
+        message="One or more values aren't in a form DocFlow accepts, so DocFlow didn't save anything.",
+        action="Check the field named above and try again.",
+        severity="info",
+        audience="both",
+    ),
+    # Every failing field is an e-mail address (the owner's invite, an intake
+    # contact): email-validator refuses special-use domains such as .test.
+    "REQ-002": ErrorCatalogEntry(
+        code="REQ-002",
+        title="This e-mail address can't receive mail",
+        message="This address can't receive e-mail, so DocFlow didn't save anything.",
+        action="Check the part after the @ and try again.",
+        severity="info",
+        audience="both",
+    ),
+    # ── APP-0xx · the browser got no answer it can show (D-241) ──────────────
+    # Rendered by the web app, which mirrors them word for word in
+    # apps/web/src/lib/catalogMirror.ts. Neither claims an alert was raised or
+    # that nothing changed: the page can't know either.
+    "APP-000": ErrorCatalogEntry(
+        code="APP-000",
+        title="DocFlow didn't confirm this",
+        message=(
+            "This page didn't get an answer it can show. If you just made a change, it may or "
+            "may not have been saved."
+        ),
+        action="Reload the page and check before trying again.",
+        severity="info",
+        audience="both",
+    ),
+    "APP-001": ErrorCatalogEntry(
+        code="APP-001",
+        title="DocFlow didn't confirm the upload",
+        message="This page didn't get an answer it can show, so it can't tell whether the file was stored.",
+        action="Reload the page and check the list before uploading again.",
+        severity="info",
+        audience="both",
+    ),
     # ── TEAM-0xx · the people on an account (slice 5.8d, D-132) ──────────────
     "TEAM-001": ErrorCatalogEntry(
         code="TEAM-001",

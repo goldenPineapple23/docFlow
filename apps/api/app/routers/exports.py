@@ -206,7 +206,8 @@ def _download_filename(snapshot: dict[str, Any] | None, fmt: str) -> str:
 
 
 @router.get("/exports/{export_id}/download")
-def download_export(export_id: UUID, token: str = Query(min_length=1)) -> Response:
+# A missing token is a bad link like any other: EXP-003, never FastAPI's 422 (D-241).
+def download_export(export_id: UUID, token: str = Query(default="")) -> Response:
     """
     Serve the file against a token from `export_status`. The tenant comes out
     of the token, whose signature covers it and the export id and the

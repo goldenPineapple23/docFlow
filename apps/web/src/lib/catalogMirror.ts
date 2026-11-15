@@ -9,6 +9,27 @@ import type { CatalogError } from "./review";
  * differ, so a wording change is made in the catalog and copied here.
  */
 
+/**
+ * The fallback for any answer that isn't a catalog entry: no answer at all, a
+ * proxy's error page, a body that isn't JSON (D-241). The page can't know
+ * whether the request reached DocFlow, so the entry claims neither an alert
+ * nor that nothing changed.
+ */
+export const APP_000: CatalogError = {
+  code: "APP-000",
+  title: "DocFlow didn't confirm this",
+  message: "This page didn't get an answer it can show. If you just made a change, it may or may not have been saved.",
+  action: "Reload the page and check before trying again.",
+};
+
+/** The same, for a file upload (D-241). */
+export const APP_001: CatalogError = {
+  code: "APP-001",
+  title: "DocFlow didn't confirm the upload",
+  message: "This page didn't get an answer it can show, so it can't tell whether the file was stored.",
+  action: "Reload the page and check the list before uploading again.",
+};
+
 /** A wrong or expired authenticator code: Supabase refused it in the browser. */
 export const AUTH_008: CatalogError = {
   code: "AUTH-008",

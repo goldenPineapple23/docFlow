@@ -31,7 +31,9 @@ SOURCE_DIRECTORIES = (
     REPO_ROOT / "apps" / "worker" / "app",
 )
 
-CODE_PATTERN = re.compile(r"\b(?:DOC|INT|AUTH|LIM|QUA|EXP|VAL|REV|CON|IMP|CAT|BUY|TEAM|SYS|BIL)-\d{3}\b")
+CODE_PATTERN = re.compile(
+    r"\b(?:DOC|INT|AUTH|LIM|QUA|EXP|VAL|REV|CON|IMP|CAT|BUY|TEAM|SYS|BIL|REQ|APP)-\d{3}\b"
+)
 
 
 def _render_catalog() -> str:
@@ -121,8 +123,12 @@ def test_the_web_apps_mirrored_entries_are_word_for_word_the_catalogs():
     changed in the catalog and copied, never edited in one place only.
     """
     mirror = (REPO_ROOT / "apps" / "web" / "src" / "lib" / "catalogMirror.ts").read_text(encoding="utf-8")
-    blocks = re.findall(r"export const (AUTH_\d{3}): CatalogError = \{(.*?)\n\};", mirror, re.DOTALL)
+    blocks = re.findall(r"export const ((?:AUTH|APP)_\d{3}): CatalogError = \{(.*?)\n\};", mirror, re.DOTALL)
     assert blocks, "no mirrored entries found in catalogMirror.ts"
+    # The web app's fallbacks (D-241) are rendered only from this copy, so
+    # their absence would mean the page shows a string outside the catalog.
+    mirrored = {name for name, _ in blocks}
+    assert {"AUTH_008", "AUTH_009", "APP_000", "APP_001"} <= mirrored, mirrored
     for name, body in blocks:
         fields = {
             key: re.sub(r'"\s*\+\s*"', "", value)

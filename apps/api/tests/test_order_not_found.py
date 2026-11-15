@@ -40,7 +40,10 @@ def test_a_missing_a_foreign_and_a_malformed_order_all_read_the_same(client):
 
 @requires_database
 def test_other_validation_errors_keep_their_own_answer(client):
+    # Their own catalog answer since D-241: REQ-001 naming the field, never
+    # REV-006 and never FastAPI's own body.
     with _Tenant("Acme Test Not Found Other") as t:
         response = client.get("/activity?limit=0", headers=t.headers())
         assert response.status_code == 422
-        assert isinstance(response.json()["detail"], list)
+        detail = response.json()["detail"]
+        assert (detail["code"], detail["detail"]) == ("REQ-001", {"fields": ["limit"]})
