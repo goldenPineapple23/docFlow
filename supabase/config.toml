@@ -87,3 +87,14 @@ enable_signup = false
 # live end-to-end suite (D-166) is the first thing here that signs in the
 # way a person does, and it found this on its first run.
 enabled = true
+
+[auth.mfa.totp]
+# The Console's authenticator codes (D-151, D-177), for the live suite's
+# platform admin, who enrols and passes a real challenge on this stack
+# (D-241). The CLI's own default is off: Supabase CLI 2.118.0's template,
+# which `supabase start` merges in first, has `enroll_enabled = false` and
+# `verify_enabled = false` (apps/cli-go/pkg/config/templates/config.toml).
+# This file configures the local and CI stacks only; staging's TOTP is set in
+# its own Auth settings, where the founder enrolled.
+enroll_enabled = true
+verify_enabled = true
