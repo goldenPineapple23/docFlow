@@ -156,7 +156,14 @@ def test_a_stranger_sending_a_bad_body_to_the_console_gets_the_404(client):
 NOT_JSON = {"content": b"{not json", "headers": {"Content-Type": "application/json"}}
 
 
-CONSOLE_POSTS = ["/admin/tenants/new", "/admin/intakes", f"/admin/tenants/{uuid4()}/act/review/x"]
+# Each a POST route that reads a JSON body, the last on the acting-as mount, so
+# the body is parsed and refused before any gate (a path no route has would
+# 404 before the handler ran, and prove nothing).
+CONSOLE_POSTS = [
+    "/admin/tenants/new",
+    "/admin/intakes",
+    f"/admin/tenants/{uuid4()}/act/review/documents/{uuid4()}/exports",
+]
 
 
 @pytest.mark.parametrize("path", CONSOLE_POSTS)

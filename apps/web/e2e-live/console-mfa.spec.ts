@@ -25,7 +25,9 @@ import { aStepAfter, totpCode } from "./totp";
  */
 
 type ConsoleAdmin = { email: string; password: string; totp_secret: string; totp_step_used: number };
-const seed: { console_admin: ConsoleAdmin | null } = JSON.parse(readFileSync(SEED_FILE, "utf8"));
+const seed: { tenant_name: string; console_admin: ConsoleAdmin | null } = JSON.parse(
+  readFileSync(SEED_FILE, "utf8"),
+);
 const admin = seed.console_admin;
 
 function required(name: string): string {
@@ -113,6 +115,8 @@ test("the admin passes a real authenticator challenge, and a refused owner addre
   const token = await sessionToken(page);
   expect(claims(token).aal).toBe("aal2");
   const before = await consoleTenantNames(request, token);
+  // The list does carry names, or "not created" below would prove nothing.
+  expect(before).toContain(seed.tenant_name);
 
   const name = `Acme Test Live Console ${who.totp_step_used}`;
   await page.getByTestId("tenant-name").fill(name);
