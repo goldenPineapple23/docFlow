@@ -6585,3 +6585,13 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** 2026-11-16 (a lock-only PR as #85, merged before the API redeploy).
 
 **Related:** D-216, D-219, D-223, D-241; RUNBOOK 11.1.
+
+## D-241 — The pre-demo PR: refused requests in the catalog's words, a fallback that claims nothing, no query string in the access log, and Console MFA on by default (founder, 2026-11-15)
+
+D-240 item 9's PR, built from `main` at `c0db23a` (#102's merge).
+
+1. **Console MFA is on unless set false** (founder, 2026-11-15; changes D-177 item 3, which shipped it off so the founder could enrol first).
+   - `console_mfa_enforced` defaults to `True` in `packages/core/docflow_core/config.py`, and `.env.example` says `true`. An API started without `CONSOLE_MFA_ENFORCED` now refuses a password-only Console session with AUTH-006: it fails closed. Until now an unset value failed open.
+   - Staging's API was already on. The secret `CONSOLE_MFA_ENFORCED` is set, and the API's start at 2026-11-15 21:34:35Z logged no `console_mfa_enforcement_off` line, although that check runs before the two startup lines that did print (read with `fly secrets list` and `fly logs`, 2026-11-15 23:19Z).
+   - The API's tests still switch it off for every test (`apps/api/tests/conftest.py`) and on where they test it. A new test checks the default with both the variable and the env file absent.
+   - Unchanged: while it is set false, the startup warning, the Console banner and the founder alert all fire. RUNBOOK 4 says it is on by default, and 4.1 now covers a Supabase project where nobody has enrolled yet.

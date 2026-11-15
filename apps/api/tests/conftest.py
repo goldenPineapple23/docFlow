@@ -409,7 +409,9 @@ def _console_mfa_off_unless_a_test_asks(monkeypatch):
     .env says; the tests about enforcement turn it on themselves (the
     `enforced` fixture in test_console_mfa.py, which runs after this). With it
     read from .env, switching it on locally (RUNBOOK 4.1) failed 134 Console
-    tests with AUTH-006 while CI, which doesn't set it, stayed green.
+    tests with AUTH-006 while CI, which didn't set it, stayed green. Since
+    D-241 the default is on, so without this every Console test would fail;
+    test_console_mfa.py checks that default with the variable removed.
     """
     monkeypatch.setenv("CONSOLE_MFA_ENFORCED", "false")
     get_settings.cache_clear()

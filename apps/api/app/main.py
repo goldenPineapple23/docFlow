@@ -177,10 +177,10 @@ def model_ids_startup_line() -> str:
 
 def console_mfa_startup_check() -> bool:
     """
-    Warn at startup while the Console's MFA enforcement is off (D-177; the
-    founder's condition for shipping CONSOLE_MFA_ENFORCED off by default).
-    Returns whether it is on. docflow-prod is never deployed with it off after
-    the founder has enrolled (RUNBOOK section 4).
+    Warn at startup while the Console's MFA enforcement is off (D-177). It is
+    on unless CONSOLE_MFA_ENFORCED is set false (D-241), so this fires only
+    when someone chose that. Returns whether it is on. docflow-prod is never
+    deployed with it off after the founder has enrolled (RUNBOOK section 4).
     """
     if get_settings().console_mfa_enforced:
         return True

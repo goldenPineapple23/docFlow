@@ -159,12 +159,13 @@ class Settings(BaseSettings):
     # blank (ONB-018) rather than send an email with no way to cancel.
     support_email: str = ""
     # D-151 / D-177: the Console requires an aal2 (TOTP-verified) session, and
-    # destructive actions a challenge under MFA_STEP_UP_MAX_AGE_SECONDS old --
-    # but only once this is true. Off by default so the founder can enrol
-    # before it can lock anyone out; while it is off the API logs a warning at
-    # startup, the Console shows a banner and a founder alert is raised.
-    # RUNBOOK: docflow-prod is never deployed with this off after enrolment.
-    console_mfa_enforced: bool = False
+    # destructive actions a challenge under MFA_STEP_UP_MAX_AGE_SECONDS old.
+    # On unless set false (D-241): an API started without the setting fails
+    # closed. D-177 shipped it off so the founder could enrol first; that is
+    # done. While it is set false the API logs a warning at startup, the
+    # Console shows a banner and a founder alert is raised. RUNBOOK 4:
+    # docflow-prod is never deployed with this off after enrolment.
+    console_mfa_enforced: bool = True
     # FastAPI's /docs, /redoc and /openapi.json (D-235 item 2; D-237). Off
     # unless set true, for local development only. On Fly (FLY_APP_NAME set)
     # it is ignored: the routes stay off and the API says so at startup.
