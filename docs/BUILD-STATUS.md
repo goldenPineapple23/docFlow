@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-16, with task 7 done and the dnspython lock PR open:** Phase 5.5,
+**Status, as of 2026-11-16, with dnspython 2.9.2 merged and the pre-demo PR open:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -195,10 +195,22 @@ fresh upload of `po.pdf` reached `needs_review` in about 18 seconds with its pag
 cost $0.0140, and was reviewed, approved and exported as CSV and XLSX; the Console's health
 strip was all fine and no alert was raised (D-240 item 8).
 Inbound e-mail moved from task 7's smoke test to task 10 (Postmark).
-**The dnspython lock PR is open** (branch `phase55/dnspython-2.9.2` from `c0db23a`; D-242): the API's
-lock moves dnspython 2.9.0 to 2.9.2 for GHSA-vvf4-9x63-8xvv, which has failed main's daily audit
-since 2026-11-14. DocFlow never reaches it. It merges before the pre-demo PR's API redeploy.
-**Next, in order (D-235 item 18):** the 422 and page-token PR (D-240 item 9), before the demo.
+**dnspython 2.9.2 is merged** (PR #103, `main` `0607c75`; D-242): the API's lock moved dnspython
+2.9.0 to 2.9.2 for GHSA-vvf4-9x63-8xvv, which had failed main's daily audit since 2026-11-14.
+DocFlow never reaches it. **The pre-demo PR is built** (branch `phase55/pre-demo-fixes`, rebased onto `0607c75`; D-241;
+D-240 item 9). A request refused before its route runs answers 422 REQ-002 when
+every failing field is an e-mail address, REQ-001 otherwise, naming the fields and never the value
+or the library's text; the Console's error box puts the field's label first ("Owner email: This
+e-mail address can't receive mail"). The web app's fallback is the catalog's APP-000, and APP-001
+for uploads; neither says DocFlow was alerted or that nothing changed. A signed link without its
+token answers 404 or EXP-003, never 422. No query string reaches the API's access log. A
+stranger's body that isn't JSON on `/admin` gets the 404, in the gate's own order (D-241 item
+6). `CONSOLE_MFA_ENFORCED` is on unless set false. web-live's CI-only platform admin enrols a
+real authenticator on CI's stack and passes a real challenge, and the API refuses its
+password-only session with AUTH-006. No staging suites (D-223 item 5).
+**Next, in order (D-235 item 18):** the pre-demo PR's CI, review and merge; then the API's
+redeploy under a Grant, its startup log read for no `console_mfa_enforcement_off` line, and the
+web app's Vercel redeploy (D-241 item 11).
 The Console's sweep, the Chrome and Safari pass, the
 real-iPhone checks and the partner walkthrough. Postmark inbound end to end. Both PO sets on
 staging. E1, then E2a. B1's demo half, labelling with the routing model. The pricing-unit fix and
@@ -212,7 +224,7 @@ review, 12 alerts: clean the test tenants or don't show those pages); load a cat
 demo tenant; the demo POs state a currency; admin and owner in separate windows (normal plus
 private, or separate Chrome profiles) at the demo; a normal tab shares one session. Then two cold
 rehearsals. About 32 working days with contingency: demo-ready about 29 December
-2026. **After the demo:** pricing every lost call by its own model ID through `MODEL_PRICES` (an unknown ID gets tokens only), required before or with any change to either model setting (D-239 item 8). Whether to pre-fill a blank currency from the tenant's primary currency, as "mapped" provenance, decided with pilot POs (D-240 item 10). From task 7 (founder, 2026-11-15): DOC-033's "Download the original" answers 404 when the original is gone; test clean-up deletes rows before files, or both in one transaction; a test for D-212's "held rows are never sent" when the sender is built; clean the test tenants so the backfill's dry run reads 0; the attention panel says "emailed to you" while mail is only held; a local Supabase through the CLI, before the local web app and API run again (D-240 item 13). Blocker 3's background commit with the duplicate SKU index (0041). The
+2026. **After the demo:** pricing every lost call by its own model ID through `MODEL_PRICES` (an unknown ID gets tokens only), required before or with any change to either model setting (D-239 item 8). Whether to pre-fill a blank currency from the tenant's primary currency, as "mapped" provenance, decided with pilot POs (D-240 item 10). From task 7 (founder, 2026-11-15): DOC-033's "Download the original" answers 404 when the original is gone; test clean-up deletes rows before files, or both in one transaction; a test for D-212's "held rows are never sent" when the sender is built; clean the test tenants so the backfill's dry run reads 0; the attention panel says "emailed to you" while mail is only held; a local Supabase through the CLI, before the local web app and API run again (D-240 item 13). Inline highlighting of a refused field (D-241 item 3). When Phase 6 wires Sentry, query strings are scrubbed from its events, breadcrumbs and transactions, with a test (D-241 item 9). Blocker 3's background commit with the duplicate SKU index (0041). The
 docs PR, which ends Stage 5 (it also takes `apps/web/AGENTS.md`, whose first heading `next dev`
 rewrote from `#` to `##` when it started on 2026-10-27: either commit that heading or stop `next
 dev` from rewriting the file; founder), CLAUDE.md naming the three staging apps, and RUNBOOK 1.4's

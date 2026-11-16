@@ -6556,39 +6556,9 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 
 **Related:** D-089, D-182, D-212, D-232, D-235, D-236, D-237, D-239; RUNBOOK 13.2.
 
-## D-242 — dnspython 2.9.2 in the API's lock (GHSA-vvf4-9x63-8xvv); before the pre-demo PR's API redeploy (founder, 2026-11-16)
-
-**Context:** CI run #557 (the pre-demo branch's first push, 2026-11-16) failed only at the API's dependency audit, which blocks on a branch's first push because there is no earlier commit to compare (`scripts/ci/deps_changed.sh`):
-```
-::error title=api: known vulnerability in a runtime dependency::dnspython 2.9.0: CVE-2026-128089 (GHSA-vvf4-9x63-8xvv), fixed in 2.9.2
-```
-- Main's daily audit has failed on the same finding since 2026-11-14 (scheduled runs #20 and #21, at `a670eef`; #19 on 2026-11-13 passed). The advisory was published 2026-11-13 20:19Z. GitHub's failed-run email was sent for both runs (2026-11-14 and 2026-11-15) but not seen: it landed unread in Gmail's Updates tab, and the founder is fixing the filter, so no post-demo item (founder, 2026-11-16). D-219's rule, a fix PR the next working day after the daily audit finds a production advisory, was therefore not met; the failure was found at run #557.
-- Run #554 (task 7's records, 2026-11-15) audited the same finding as a warning, because its push changed no API dependency file (D-219).
-- The pre-demo PR's API redeploy would stop at RUNBOOK 11's audit check, so this merges before it (founder, 2026-11-16).
-
-1. **The advisory.** High. dnspython's `from_text()` parser doesn't check that a WKS record's service number is at most 65535, so crafted zone-file text can make it allocate huge memory and burn CPU. Only a program that reads attacker-controlled zone-file text is exposed. Fixed in 2.9.2.
-2. **DocFlow never reaches it.** dnspython is in the API's lock only because email-validator 2.3.0 requires it, and the only way into email-validator is pydantic's `EmailStr` (`owner_email`, `contact_email` in `apps/api/app/routers/admin.py`), which calls `validate_email(..., check_deliverability=False)`. No DocFlow code imports `dns`, and importing the whole API loads no `dns` module (checked 2026-11-16). It blocks anyway: D-219 has no exceptions.
-3. **The change: the API's lock only, dnspython 2.9.0 -> 2.9.2** (RUNBOOK 11.1).
-   - dnspython 2.9.2: on PyPI since 2026-11-03 (wheel and sdist), not yanked, Python >=3.11, no runtime dependencies.
-   - A throwaway Python 3.13 environment outside the repository; the lock installed with `--no-deps`; `dnspython==2.9.2` with `--no-deps`; `pip check`: `No broken requirements found.`; `pip freeze` before and after, 63 packages each, differing only in dnspython. The lock written from the second freeze, its BOM and line endings kept. The diff is that one line.
-   - `bash scripts/ci/predeploy_audit.sh api`: `63 packages audited, 0 with a known vulnerability; blocking: yes`, exit 0.
-   - No other dependency file pins dnspython. The only other mention is a recorded audit result that `pip_audit.py`'s tests read (`packages/core/tests/fixtures/pip_audit/api_2026-10-26.json`), not a pin.
-   - **Every file the daily audit checks is clean on this branch** (founder's check, 2026-11-16): the daily audit's own commands, pip-audit 2.10.1, each exit 0. API lock 63 packages and dev file 15, worker 55 and 12, parse 17 and 4, all with 0 known vulnerabilities. Both failed daily runs had the same 8 annotations: those six counts, the dnspython finding, and the step's exit code; dnspython was the only finding.
-4. **The readers of `apps/api/requirements.lock.txt` (D-216 item 6):** CI's `api` job installs and audits it (blocking, because it changed); CI's `web-live` job installs it to run the API; the daily audit audits it; `apps/api/Dockerfile` installs it with `--no-deps`; `scripts/ci/predeploy_audit.sh api` audits it.
-5. **No staging suites** (D-223): no suite runs code that imports dnspython.
-6. **Order with the pre-demo PR (D-241):** both append to DECISIONS.md and change BUILD-STATUS's status paragraph, so whichever merges second is rebased onto the new `main` first, with its status move redone.
-
-**Changes:** `apps/api/requirements.lock.txt` (one line); BUILD-STATUS, with its earlier status paragraph moved to `docs/status-history.md`.
-
-**Not changed:** code, tests, CI, other locks, and staging.
-
-**Founder approval:** 2026-11-16 (a lock-only PR as #85, merged before the API redeploy).
-
-**Related:** D-216, D-219, D-223, D-241; RUNBOOK 11.1.
-
 ## D-241 — The pre-demo PR: refused requests in the catalog's words, a fallback that claims nothing, no query string in the access log, and Console MFA on by default (founder, 2026-11-15)
 
-D-240 item 9's PR, built from `main` at `c0db23a` (#102's merge).
+D-240 item 9's PR, built from `main` at `c0db23a` (#102's merge), and rebased onto `0607c75` (#103's merge) after the dnspython PR merged first (2026-11-16).
 
 1. **Console MFA is on unless set false** (founder, 2026-11-15; changes D-177 item 3, which shipped it off so the founder could enrol first).
    - `console_mfa_enforced` defaults to `True` in `packages/core/docflow_core/config.py`, and `.env.example` says `true`. An API started without `CONSOLE_MFA_ENFORCED` now refuses a password-only Console session with AUTH-006: it fails closed. Until now an unset value failed open.
@@ -6627,3 +6597,33 @@ D-240 item 9's PR, built from `main` at `c0db23a` (#102's merge).
 **Founder approval:** 2026-11-15 (the plan with changes; the wording; APP-000 into the catalog and APP-001; Sentry; option (a) for MFA and the TOTP section; the default flip in its own commit; the AUTH-006 check). Item 6 kept, in the gate's order, and REQ-001's action changed (founder, 2026-11-15).
 
 **Related:** D-151, D-166, D-177, D-178, D-223, D-239, D-240; RUNBOOK 4.
+
+## D-242 — dnspython 2.9.2 in the API's lock (GHSA-vvf4-9x63-8xvv); before the pre-demo PR's API redeploy (founder, 2026-11-16)
+
+**Context:** CI run #557 (the pre-demo branch's first push, 2026-11-16) failed only at the API's dependency audit, which blocks on a branch's first push because there is no earlier commit to compare (`scripts/ci/deps_changed.sh`):
+```
+::error title=api: known vulnerability in a runtime dependency::dnspython 2.9.0: CVE-2026-128089 (GHSA-vvf4-9x63-8xvv), fixed in 2.9.2
+```
+- Main's daily audit has failed on the same finding since 2026-11-14 (scheduled runs #20 and #21, at `a670eef`; #19 on 2026-11-13 passed). The advisory was published 2026-11-13 20:19Z. GitHub's failed-run email was sent for both runs (2026-11-14 and 2026-11-15) but not seen: it landed unread in Gmail's Updates tab, and the founder is fixing the filter, so no post-demo item (founder, 2026-11-16). D-219's rule, a fix PR the next working day after the daily audit finds a production advisory, was therefore not met; the failure was found at run #557.
+- Run #554 (task 7's records, 2026-11-15) audited the same finding as a warning, because its push changed no API dependency file (D-219).
+- The pre-demo PR's API redeploy would stop at RUNBOOK 11's audit check, so this merges before it (founder, 2026-11-16).
+
+1. **The advisory.** High. dnspython's `from_text()` parser doesn't check that a WKS record's service number is at most 65535, so crafted zone-file text can make it allocate huge memory and burn CPU. Only a program that reads attacker-controlled zone-file text is exposed. Fixed in 2.9.2.
+2. **DocFlow never reaches it.** dnspython is in the API's lock only because email-validator 2.3.0 requires it, and the only way into email-validator is pydantic's `EmailStr` (`owner_email`, `contact_email` in `apps/api/app/routers/admin.py`), which calls `validate_email(..., check_deliverability=False)`. No DocFlow code imports `dns`, and importing the whole API loads no `dns` module (checked 2026-11-16). It blocks anyway: D-219 has no exceptions.
+3. **The change: the API's lock only, dnspython 2.9.0 -> 2.9.2** (RUNBOOK 11.1).
+   - dnspython 2.9.2: on PyPI since 2026-11-03 (wheel and sdist), not yanked, Python >=3.11, no runtime dependencies.
+   - A throwaway Python 3.13 environment outside the repository; the lock installed with `--no-deps`; `dnspython==2.9.2` with `--no-deps`; `pip check`: `No broken requirements found.`; `pip freeze` before and after, 63 packages each, differing only in dnspython. The lock written from the second freeze, its BOM and line endings kept. The diff is that one line.
+   - `bash scripts/ci/predeploy_audit.sh api`: `63 packages audited, 0 with a known vulnerability; blocking: yes`, exit 0.
+   - No other dependency file pins dnspython. The only other mention is a recorded audit result that `pip_audit.py`'s tests read (`packages/core/tests/fixtures/pip_audit/api_2026-10-26.json`), not a pin.
+   - **Every file the daily audit checks is clean on this branch** (founder's check, 2026-11-16): the daily audit's own commands, pip-audit 2.10.1, each exit 0. API lock 63 packages and dev file 15, worker 55 and 12, parse 17 and 4, all with 0 known vulnerabilities. Both failed daily runs had the same 8 annotations: those six counts, the dnspython finding, and the step's exit code; dnspython was the only finding.
+4. **The readers of `apps/api/requirements.lock.txt` (D-216 item 6):** CI's `api` job installs and audits it (blocking, because it changed); CI's `web-live` job installs it to run the API; the daily audit audits it; `apps/api/Dockerfile` installs it with `--no-deps`; `scripts/ci/predeploy_audit.sh api` audits it.
+5. **No staging suites** (D-223): no suite runs code that imports dnspython.
+6. **Order with the pre-demo PR (D-241):** both append to DECISIONS.md and change BUILD-STATUS's status paragraph, so whichever merges second is rebased onto the new `main` first, with its status move redone.
+
+**Changes:** `apps/api/requirements.lock.txt` (one line); BUILD-STATUS, with its earlier status paragraph moved to `docs/status-history.md`.
+
+**Not changed:** code, tests, CI, other locks, and staging.
+
+**Founder approval:** 2026-11-16 (a lock-only PR as #85, merged before the API redeploy).
+
+**Related:** D-216, D-219, D-223, D-241; RUNBOOK 11.1.
