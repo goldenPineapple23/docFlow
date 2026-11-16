@@ -2357,7 +2357,8 @@ here is built.
     pilot-blocker subset", under Phase 6.)*
   - **Blocker 3's background commit**, with a committing status and
     progress columns, plus the duplicate SKU index (founder, 2026-11-02;
-    D-228 item 7).
+    D-228 item 7). **Its migration is 0042** (founder, 2026-11-16): 0041 is
+    B1's.
   - **A real Firefox pass of the viewer.** Firefox in CI waits until after
     the demo (D-235 item 11; D-228 item 10 had it at A6). WebKit runs the review screen's 375 px layout spec in CI
     from A5 (D-234 item 9).
@@ -2372,6 +2373,15 @@ here is built.
     errors only reach a log line: no alert, no error tracker
     (main.py:134-143). Fix the wording before the first pilot; step h's
     monitoring covers error tracking (founder, 2026-11-02).
+  - **B1's demo half is being built in six slices** (founder's go,
+    2026-11-16; `docs/designs/b1.md`), on local branches, nothing pushed.
+    - **Slice 1, built, not pushed** (`phase55/b1-s1-store-body`):
+      migration 0041 with its reverse and CI round trip (RUNBOOK 1.13); the
+      webhook reads the e-mail's text and stores it as sent; each
+      attachment's document carries its e-mail. No decision changes: text
+      with no attachment is still INT-001. **0041 is not applied to
+      staging**, and the tests against a database have not run anywhere
+      yet: they run in CI on the first push.
   - **What B1 defers past the demo** (founder, 2026-11-03; D-230 item 11):
     - labels on attachments;
     - item 4's rule for attachments (D-230 item 4);

@@ -77,6 +77,15 @@ _OUTSIDE_LINKS: dict[tuple[str, str], str] = {
 }
 
 
+# Links the purge order leaves out, by constraint name, because each closes a
+# loop with a link that stays in. Migration 0041: a document points at its
+# e-mail and the e-mail points back at the one document made from its text,
+# both ON DELETE SET NULL. The order keeps "documents before raw_emails";
+# deleting the documents first blanks raw_emails.body_document_id, which no
+# CHECK ties to another column, and the e-mail rows go next.
+_LOOP_LINKS: frozenset[str] = frozenset({"raw_emails_body_document_id_fkey"})
+
+
 def register_test_tenant(tenant_id: Any) -> None:
     """Called by a helper at the moment it creates a tenant."""
     _registered.add(str(UUID(str(tenant_id))))
@@ -117,8 +126,10 @@ def _foreign_keys(session: Session) -> list[tuple[str, str, str, str]]:
                 JOIN pg_class parent ON parent.oid = c.confrelid
                 JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
                 WHERE c.contype = 'f' AND c.connamespace = 'public'::regnamespace
+                  AND c.conname <> ALL(CAST(:loop_links AS text[]))
                 """
-            )
+            ),
+            {"loop_links": sorted(_LOOP_LINKS)},
         )
     ]
 

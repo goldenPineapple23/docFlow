@@ -401,6 +401,14 @@ jobs:
       - name: Migration 0040 forward -> reverse -> forward
         id: roundtrip_0040
         run: python "${{ github.workspace }}/scripts/ci/migration_0040_roundtrip.py"
+      # B1's demo half (D-230; docs/designs/b1.md section 4): 0041's reverse, the
+      # same way, over the four tables it touches. After the reverse everything
+      # it added is gone, the two value lists and extraction_runs.document_id read
+      # as before it, and nothing else on the four tables differs; after forward
+      # again the state is the first, its own columns allowed at the end.
+      - name: Migration 0041 forward -> reverse -> forward
+        id: roundtrip_0041
+        run: python "${{ github.workspace }}/scripts/ci/migration_0041_roundtrip.py"
       - name: Turn on the four logins (migration 0036 creates them), as RUNBOOK 10.2 does
         id: app_role
         run: python "${{ github.workspace }}/scripts/ci/create_logins.py"

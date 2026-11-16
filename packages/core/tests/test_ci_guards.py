@@ -115,6 +115,19 @@ def test_the_core_job_runs_the_0040_round_trip_after_0038s_and_the_skip_check_ca
     assert "roundtrip_0040" in _check_skips().STEP_NAMES
 
 
+def test_the_core_job_runs_the_0041_round_trip_after_0040s_and_the_skip_check_can_name_it():
+    """B1 (D-230): 0041's reverse is tested the same way, after the earlier
+    round trips and before the suite, and a run where it failed says so by name."""
+    block = _job_block(WORKFLOW.read_text(encoding="utf-8"), "core")
+    assert (
+        block.index("scripts/ci/migration_0040_roundtrip.py")
+        < block.index("scripts/ci/migration_0041_roundtrip.py")
+        < block.index("id: test\n")
+    )
+    assert "id: roundtrip_0041\n" in block
+    assert "roundtrip_0041" in _check_skips().STEP_NAMES
+
+
 PARSE_CONFIG = REPO / "apps" / "parse" / "parse_service" / "config.py"
 WORKER_FLY_TOML = REPO / "apps" / "worker" / "fly.toml"
 RUN_WORKERS = REPO / "apps" / "worker" / "app" / "run_workers.py"
