@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-15, with task 7 done:** Phase 5.5,
+**Status, as of 2026-11-16, with task 7 done and the dnspython lock PR open:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -195,6 +195,9 @@ fresh upload of `po.pdf` reached `needs_review` in about 18 seconds with its pag
 cost $0.0140, and was reviewed, approved and exported as CSV and XLSX; the Console's health
 strip was all fine and no alert was raised (D-240 item 8).
 Inbound e-mail moved from task 7's smoke test to task 10 (Postmark).
+**The dnspython lock PR is open** (branch `phase55/dnspython-2.9.2` from `c0db23a`; D-242): the API's
+lock moves dnspython 2.9.0 to 2.9.2 for GHSA-vvf4-9x63-8xvv, which has failed main's daily audit
+since 2026-11-14. DocFlow never reaches it. It merges before the pre-demo PR's API redeploy.
 **Next, in order (D-235 item 18):** the 422 and page-token PR (D-240 item 9), before the demo.
 The Console's sweep, the Chrome and Safari pass, the
 real-iPhone checks and the partner walkthrough. Postmark inbound end to end. Both PO sets on
