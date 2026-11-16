@@ -255,3 +255,27 @@ def test_past_the_cap_the_reader_raises_the_damaged_file_code():
 def test_a_number_is_never_rewritten():
     markup = "<table><tr><td>1,000.50</td><td>0047</td><td>12.</td><td>1 000,5</td><td>-3</td></tr></table>"
     assert html_to_text(markup) == "1,000.50, 0047, 12., 1 000,5, -3"
+
+
+SCRIPT_PAGE = (
+    "<html><body><script>window.__ran = true</script>"
+    "<p>4 x TEST-100</p>"
+    "<p>&lt;script&gt;window.__ran = true&lt;/script&gt;&lt;img src=x onerror=alert(1)&gt;</p>"
+    "</body></html>"
+)
+
+
+def test_a_script_is_dropped_and_markup_written_as_entities_comes_out_as_plain_characters():
+    """The reader's answer is plain text and nothing else. A real <script>
+    is gone with its contents. Markup the sender wrote as entities is text
+    on their page, so it is text here: the characters themselves, which the
+    worker stores as a text/plain preview and the review screen shows
+    escaped (founder, 2026-11-16; the worker's and the web app's tests hold
+    those two steps)."""
+    answer = answer_for("document", SCRIPT_PAGE.encode("utf-8"), "order.html")
+
+    assert answer["file_type"] == "html"
+    assert [part["type"] for part in answer["parts"]] == ["text"]
+    assert _text(answer) == (
+        "4 x TEST-100\n<script>window.__ran = true</script><img src=x onerror=alert(1)>"
+    )
