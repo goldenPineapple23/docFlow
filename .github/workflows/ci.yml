@@ -30,13 +30,13 @@ on:
 # exists only inside the CI runner.
 env:
   SUPABASE_CLI_VERSION: "2.118.0"
-  SUPERUSER_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+  SUPERUSER_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:25322/postgres
   APP_ROLE_PASSWORD: ci-local-only
-  DATABASE_URL: postgresql://docflow_api:ci-local-only@127.0.0.1:54322/postgres
-  API_DATABASE_URL: postgresql://docflow_api:ci-local-only@127.0.0.1:54322/postgres
-  WORKER_DATABASE_URL: postgresql://docflow_worker:ci-local-only@127.0.0.1:54322/postgres
-  ADMIN_DATABASE_URL: postgresql://docflow_admin:ci-local-only@127.0.0.1:54322/postgres
-  STRIPE_DATABASE_URL: postgresql://docflow_stripe:ci-local-only@127.0.0.1:54322/postgres
+  DATABASE_URL: postgresql://docflow_api:ci-local-only@127.0.0.1:25322/postgres
+  API_DATABASE_URL: postgresql://docflow_api:ci-local-only@127.0.0.1:25322/postgres
+  WORKER_DATABASE_URL: postgresql://docflow_worker:ci-local-only@127.0.0.1:25322/postgres
+  ADMIN_DATABASE_URL: postgresql://docflow_admin:ci-local-only@127.0.0.1:25322/postgres
+  STRIPE_DATABASE_URL: postgresql://docflow_stripe:ci-local-only@127.0.0.1:25322/postgres
   REDIS_URL: redis://127.0.0.1:6379/0
   SUPABASE_JWT_SECRET: ci-local-only-jwt-secret-not-used-anywhere-else
   DOCUMENT_URL_SIGNING_SECRET: ci-local-only-signing-secret
@@ -125,15 +125,6 @@ jobs:
     # D-238: twice its longest green run on main (4.2 min) is 9; its install step alone may take 11.
     timeout-minutes: 15
     steps:
-      - name: Keep the stack's ports 54320 to 54327 out of automatic assignment (D-229 item 7; D-231)
-        id: reserve_ports
-        # Before checkout: a socket that takes one of these as its automatic
-        # port before this step still holds it. An explicit bind is never
-        # refused (flakes 10 and 11; D-231).
-        working-directory: ${{ github.workspace }}
-        run: |
-          sudo sysctl -w net.ipv4.ip_local_reserved_ports=54320-54327
-          sysctl net.ipv4.ip_local_reserved_ports
       - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v2.1.2
         # Normally under 10 s; hung 70 min on 2026-10-26 (run #469), cause
@@ -141,16 +132,16 @@ jobs:
         timeout-minutes: 5
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
-      - name: Show what is listening on ports 54320 to 54327 before the stack starts, and the runner image (read-only; D-199 flake 3; D-231)
+      - name: Show what is listening on ports 25320 to 25329 before the stack starts, and the runner image (read-only; D-199 flake 3; D-231; D-243)
         continue-on-error: true
-        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" before
+        run: bash "${{ github.workspace }}/scripts/ci/show_stack_ports.sh" before
       - name: Start the local Supabase stack (applies supabase/migrations/)
         id: supabase
         run: supabase start
-      - name: Show what is listening on ports 54320 to 54327 after the stack failed to start, and every container (read-only; D-199 flake 3; D-231)
+      - name: Show what is listening on ports 25320 to 25329 after the stack failed to start, and every container (read-only; D-199 flake 3; D-231; D-243)
         if: failure() && steps.supabase.outcome == 'failure'
         continue-on-error: true
-        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" after
+        run: bash "${{ github.workspace }}/scripts/ci/show_stack_ports.sh" after
       - name: Point Storage at this runner's own bucket (Stage 3b)
         working-directory: ${{ github.workspace }}
         run: python3 scripts/ci/local_storage_env.py
@@ -314,15 +305,6 @@ jobs:
       run:
         working-directory: packages/core
     steps:
-      - name: Keep the stack's ports 54320 to 54327 out of automatic assignment (D-229 item 7; D-231)
-        id: reserve_ports
-        # Before checkout: a socket that takes one of these as its automatic
-        # port before this step still holds it. An explicit bind is never
-        # refused (flakes 10 and 11; D-231).
-        working-directory: ${{ github.workspace }}
-        run: |
-          sudo sysctl -w net.ipv4.ip_local_reserved_ports=54320-54327
-          sysctl net.ipv4.ip_local_reserved_ports
       - uses: actions/checkout@v7
         # Two commits: the dependency audit compares a pull request's merge
         # commit with its first parent (scripts/ci/deps_changed.sh; D-219).
@@ -334,17 +316,17 @@ jobs:
         timeout-minutes: 5
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
-      - name: Show what is listening on ports 54320 to 54327 before the stack starts, and the runner image (read-only; D-199 flake 3; D-231)
+      - name: Show what is listening on ports 25320 to 25329 before the stack starts, and the runner image (read-only; D-199 flake 3; D-231; D-243)
         continue-on-error: true
-        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" before
+        run: bash "${{ github.workspace }}/scripts/ci/show_stack_ports.sh" before
       - name: Start the local Supabase stack (applies supabase/migrations/)
         id: supabase
         working-directory: ${{ github.workspace }}
         run: supabase start
-      - name: Show what is listening on ports 54320 to 54327 after the stack failed to start, and every container (read-only; D-199 flake 3; D-231)
+      - name: Show what is listening on ports 25320 to 25329 after the stack failed to start, and every container (read-only; D-199 flake 3; D-231; D-243)
         if: failure() && steps.supabase.outcome == 'failure'
         continue-on-error: true
-        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" after
+        run: bash "${{ github.workspace }}/scripts/ci/show_stack_ports.sh" after
       - name: Point Storage at this runner's own bucket (Stage 3b)
         working-directory: ${{ github.workspace }}
         run: python3 scripts/ci/local_storage_env.py
@@ -473,15 +455,6 @@ jobs:
       run:
         working-directory: apps/api
     steps:
-      - name: Keep the stack's ports 54320 to 54327 out of automatic assignment (D-229 item 7; D-231)
-        id: reserve_ports
-        # Before checkout: a socket that takes one of these as its automatic
-        # port before this step still holds it. An explicit bind is never
-        # refused (flakes 10 and 11; D-231).
-        working-directory: ${{ github.workspace }}
-        run: |
-          sudo sysctl -w net.ipv4.ip_local_reserved_ports=54320-54327
-          sysctl net.ipv4.ip_local_reserved_ports
       - uses: actions/checkout@v7
         # Two commits: the dependency audit compares a pull request's merge
         # commit with its first parent (scripts/ci/deps_changed.sh; D-219).
@@ -493,17 +466,17 @@ jobs:
         timeout-minutes: 5
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
-      - name: Show what is listening on ports 54320 to 54327 before the stack starts, and the runner image (read-only; D-199 flake 3; D-231)
+      - name: Show what is listening on ports 25320 to 25329 before the stack starts, and the runner image (read-only; D-199 flake 3; D-231; D-243)
         continue-on-error: true
-        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" before
+        run: bash "${{ github.workspace }}/scripts/ci/show_stack_ports.sh" before
       - name: Start the local Supabase stack (applies supabase/migrations/)
         id: supabase
         working-directory: ${{ github.workspace }}
         run: supabase start
-      - name: Show what is listening on ports 54320 to 54327 after the stack failed to start, and every container (read-only; D-199 flake 3; D-231)
+      - name: Show what is listening on ports 25320 to 25329 after the stack failed to start, and every container (read-only; D-199 flake 3; D-231; D-243)
         if: failure() && steps.supabase.outcome == 'failure'
         continue-on-error: true
-        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" after
+        run: bash "${{ github.workspace }}/scripts/ci/show_stack_ports.sh" after
       - name: Point Storage at this runner's own bucket (Stage 3b)
         working-directory: ${{ github.workspace }}
         run: python3 scripts/ci/local_storage_env.py
@@ -624,17 +597,8 @@ jobs:
     # The worker's own login (Stage 3e): its tenant sessions run as
     # docflow_worker, as on Fly.
     env:
-      DATABASE_URL: postgresql://docflow_worker:ci-local-only@127.0.0.1:54322/postgres
+      DATABASE_URL: postgresql://docflow_worker:ci-local-only@127.0.0.1:25322/postgres
     steps:
-      - name: Keep the stack's ports 54320 to 54327 out of automatic assignment (D-229 item 7; D-231)
-        id: reserve_ports
-        # Before checkout: a socket that takes one of these as its automatic
-        # port before this step still holds it. An explicit bind is never
-        # refused (flakes 10 and 11; D-231).
-        working-directory: ${{ github.workspace }}
-        run: |
-          sudo sysctl -w net.ipv4.ip_local_reserved_ports=54320-54327
-          sysctl net.ipv4.ip_local_reserved_ports
       - uses: actions/checkout@v7
         # Two commits: the dependency audit compares a pull request's merge
         # commit with its first parent (scripts/ci/deps_changed.sh; D-219).
@@ -646,17 +610,17 @@ jobs:
         timeout-minutes: 5
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
-      - name: Show what is listening on ports 54320 to 54327 before the stack starts, and the runner image (read-only; D-199 flake 3; D-231)
+      - name: Show what is listening on ports 25320 to 25329 before the stack starts, and the runner image (read-only; D-199 flake 3; D-231; D-243)
         continue-on-error: true
-        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" before
+        run: bash "${{ github.workspace }}/scripts/ci/show_stack_ports.sh" before
       - name: Start the local Supabase stack (applies supabase/migrations/)
         id: supabase
         working-directory: ${{ github.workspace }}
         run: supabase start
-      - name: Show what is listening on ports 54320 to 54327 after the stack failed to start, and every container (read-only; D-199 flake 3; D-231)
+      - name: Show what is listening on ports 25320 to 25329 after the stack failed to start, and every container (read-only; D-199 flake 3; D-231; D-243)
         if: failure() && steps.supabase.outcome == 'failure'
         continue-on-error: true
-        run: bash "${{ github.workspace }}/scripts/ci/show_port_54322.sh" after
+        run: bash "${{ github.workspace }}/scripts/ci/show_stack_ports.sh" after
       - name: Point Storage at this runner's own bucket (Stage 3b)
         working-directory: ${{ github.workspace }}
         run: python3 scripts/ci/local_storage_env.py
