@@ -1003,7 +1003,7 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         code="REQ-001",
         title="DocFlow couldn't accept one of the values",
         message="One or more values aren't in a form DocFlow accepts, so DocFlow didn't save anything.",
-        action="Check the field named above and try again.",
+        action="Check the values you entered and try again.",
         severity="info",
         audience="both",
     ),

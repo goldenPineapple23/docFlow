@@ -9,10 +9,10 @@ from docflow_core import db, worker_starts
 from docflow_core.config import Settings, get_settings, model_ids_line, settings_refusal
 from docflow_core.dispatch import health as dispatcher_health
 from docflow_core.signed_urls import SigningKeyMissing
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -26,7 +26,7 @@ if _settings_refused is not None:
     raise SystemExit(1)
 
 from app import access_log  # noqa: E402 -- after the settings check above
-from app.deps import ConsoleRefused, _resolve_identity  # noqa: E402 -- after the settings check above
+from app.deps import ConsoleRefused, require_platform_admin  # noqa: E402 -- after the settings check above
 from app.errors import catalog_detail, validation_refusal  # noqa: E402
 from app.routers import (  # noqa: E402
     activity,
@@ -340,7 +340,7 @@ app.add_middleware(_SecurityHeaders)
 
 
 @app.exception_handler(RequestValidationError)
-async def _malformed_document_id(request: Request, exc: RequestValidationError) -> JSONResponse:
+async def _malformed_document_id(request: Request, exc: RequestValidationError) -> Response:
     """An order address with something that is not an order id in it -- a
     mistyped link, or `/review/team` -- is "not found", in the same words as
     an order that does not exist or belongs to another account (REV-006). It
@@ -353,14 +353,21 @@ async def _malformed_document_id(request: Request, exc: RequestValidationError) 
     the value that was sent, never goes out: the Console showed it as "We
     couldn't reach DocFlow" (D-240 item 9).
 
-    On the Console's routes a non-admin gets the bare 404 (7.15.1). The admin
-    gate runs before FastAPI checks the fields, but a body that isn't JSON at
-    all is refused before any gate runs, so it is checked again here: without
-    this, a stranger's broken body told them the route exists (D-241).
+    On the Console's routes the gate's own order holds (7.15.1; D-241 item
+    6): anyone but a platform admin gets the bare 404, a platform admin
+    without an authenticator code gets AUTH-006 while enforcement is on
+    (recorded as the gate records it, D-178), and only then REQ-001 or
+    REQ-002. The gate runs before FastAPI checks the fields, but a body that
+    isn't JSON at all is refused before any gate runs, so the gate itself,
+    `require_platform_admin`, is called here: without this, a stranger's
+    broken body told them the route exists.
     """
     if request.url.path.startswith("/admin"):
-        identity = await run_in_threadpool(_resolve_identity, request.headers.get("authorization"))
-        if identity is None or not identity.is_platform_admin:
+        try:
+            await run_in_threadpool(require_platform_admin, request.headers.get("authorization"))
+        except ConsoleRefused as refused:
+            return await admin.console_refused_handler(request, refused)
+        except HTTPException:
             return JSONResponse(status_code=404, content={"detail": "Not Found"})
     errors = exc.errors()
     if errors and all(tuple(e.get("loc", ())) == ("path", "document_id") for e in errors):

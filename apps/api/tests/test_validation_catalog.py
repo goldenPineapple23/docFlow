@@ -42,6 +42,7 @@ from app.errors import EMAIL_FIELDS, validation_refusal
 from app.routers import __path__ as routers_path
 from tests.conftest import requires_console_schema, requires_database
 from tests.test_console_api import _Console, _environment, _scalar, stripe  # noqa: F401
+from tests.test_console_mfa import _headers, enforced  # noqa: F401
 from tests.test_quarantine_api import _Tenant
 from tests.test_serve_dual_stack import _API_DIR, _env, _free_port, _wait_for
 
@@ -118,7 +119,7 @@ def test_a_bad_path_parameter_is_req_001_naming_it(client):
             "message": (
                 "One or more values aren't in a form DocFlow accepts, so DocFlow didn't save anything."
             ),
-            "action": "Check the field named above and try again.",
+            "action": "Check the values you entered and try again.",
             "detail": {"fields": ["index"]},
         }
     }
@@ -232,6 +233,37 @@ def test_a_tenant_user_sending_a_bad_body_to_the_console_gets_the_404(client):
         for response in (bad, broken):
             assert response.status_code == 404
             assert response.json() == {"detail": "Not Found"}
+
+
+@requires_console_schema
+def test_an_admin_without_a_code_gets_auth_006_before_any_field_is_judged(client, enforced, stripe):
+    # The gate's own order (D-241 item 6): with enforcement on, a password-only
+    # session is refused as the gate refuses it, and recorded as it records it.
+    with _Console() as console:
+        aal1 = {**_headers(console.auth_user_id, aal="aal1"), **NOT_JSON["headers"]}
+        broken = client.post("/admin/tenants/new", headers=aal1, content=NOT_JSON["content"])
+        bad = client.post("/admin/tenants/new", headers=_headers(console.auth_user_id, aal="aal1"),
+                          json={"owner_email": "owner@example.test"})
+        for response in (broken, bad):
+            assert response.status_code == 403, response.text
+            assert response.json()["detail"]["code"] == "AUTH-006"
+        refusals = _scalar(
+            "SELECT count(*) FROM admin_actions "
+            "WHERE platform_admin_user_id = :u AND action = 'console_refused'",
+            u=str(console.user_id),
+        )
+        assert refusals == 2
+        assert stripe.created == []
+
+
+@requires_console_schema
+def test_an_admin_with_a_code_gets_req_001_for_a_body_that_isnt_json(client, enforced, stripe):
+    with _Console() as console:
+        aal2 = {**_headers(console.auth_user_id, aal="aal2", totp_age=5), **NOT_JSON["headers"]}
+        response = client.post("/admin/tenants/new", headers=aal2, content=NOT_JSON["content"])
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"]["code"] == "REQ-001"
+        assert stripe.created == []
 
 
 @requires_console_schema

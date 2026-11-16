@@ -580,7 +580,7 @@ QUA-005 [warning/founder] That approved-sender list can't be saved
 
 REQ-001 [info/both] DocFlow couldn't accept one of the values
   what+why: One or more values aren't in a form DocFlow accepts, so DocFlow didn't save anything.
-  next:     Check the field named above and try again.
+  next:     Check the values you entered and try again.
 
 REQ-002 [info/both] This e-mail address can't receive mail
   what+why: This address can't receive e-mail, so DocFlow didn't save anything.
