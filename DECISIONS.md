@@ -6555,3 +6555,32 @@ Before any delete, every file is read back against its SHA-256. The rows in `row
 **Founder approval:** 2026-11-13 (the Hobby team, step 4's script, the backfill's stop) and 2026-11-15 (the diagnosis, the smoke test's RUNBOOK changes, step 4's script text, items 9, 10, 11 and 13).
 
 **Related:** D-089, D-182, D-212, D-232, D-235, D-236, D-237, D-239; RUNBOOK 13.2.
+
+## D-242 — dnspython 2.9.2 in the API's lock (GHSA-vvf4-9x63-8xvv); before the pre-demo PR's API redeploy (founder, 2026-11-16)
+
+**Context:** CI run #557 (the pre-demo branch's first push, 2026-11-16) failed only at the API's dependency audit, which blocks on a branch's first push because there is no earlier commit to compare (`scripts/ci/deps_changed.sh`):
+```
+::error title=api: known vulnerability in a runtime dependency::dnspython 2.9.0: CVE-2026-128089 (GHSA-vvf4-9x63-8xvv), fixed in 2.9.2
+```
+- Main's daily audit has failed on the same finding since 2026-11-14 (scheduled runs #20 and #21, at `a670eef`; #19 on 2026-11-13 passed). The advisory was published 2026-11-13 20:19Z. D-219's rule, a fix PR the next working day after the daily audit finds a production advisory, was not met: nobody acted on the failure until run #557.
+- Run #554 (task 7's records, 2026-11-15) audited the same finding as a warning, because its push changed no API dependency file (D-219).
+- The pre-demo PR's API redeploy would stop at RUNBOOK 11's audit check, so this merges before it (founder, 2026-11-16).
+
+1. **The advisory.** High. dnspython's `from_text()` parser doesn't check that a WKS record's service number is at most 65535, so crafted zone-file text can make it allocate huge memory and burn CPU. Only a program that reads attacker-controlled zone-file text is exposed. Fixed in 2.9.2.
+2. **DocFlow never reaches it.** dnspython is in the API's lock only because email-validator 2.3.0 requires it, and the only way into email-validator is pydantic's `EmailStr` (`owner_email`, `contact_email` in `apps/api/app/routers/admin.py`), which calls `validate_email(..., check_deliverability=False)`. No DocFlow code imports `dns`, and importing the whole API loads no `dns` module (checked 2026-11-16). It blocks anyway: D-219 has no exceptions.
+3. **The change: the API's lock only, dnspython 2.9.0 -> 2.9.2** (RUNBOOK 11.1).
+   - dnspython 2.9.2: on PyPI since 2026-11-03 (wheel and sdist), not yanked, Python >=3.11, no runtime dependencies.
+   - A throwaway Python 3.13 environment outside the repository; the lock installed with `--no-deps`; `dnspython==2.9.2` with `--no-deps`; `pip check`: `No broken requirements found.`; `pip freeze` before and after, 63 packages each, differing only in dnspython. The lock written from the second freeze, its BOM and line endings kept. The diff is that one line.
+   - `bash scripts/ci/predeploy_audit.sh api`: `63 packages audited, 0 with a known vulnerability; blocking: yes`, exit 0.
+   - No other lock pins dnspython (worker, parse).
+4. **The readers of `apps/api/requirements.lock.txt` (D-216 item 6):** CI's `api` job installs and audits it (blocking, because it changed); CI's `web-live` job installs it to run the API; the daily audit audits it; `apps/api/Dockerfile` installs it with `--no-deps`; `scripts/ci/predeploy_audit.sh api` audits it.
+5. **No staging suites** (D-223): no suite runs code that imports dnspython.
+6. **Order with the pre-demo PR (D-241):** both append to DECISIONS.md and change BUILD-STATUS's status paragraph, so whichever merges second is rebased onto the new `main` first, with its status move redone.
+
+**Changes:** `apps/api/requirements.lock.txt` (one line); BUILD-STATUS, with its earlier status paragraph moved to `docs/status-history.md`.
+
+**Not changed:** code, tests, CI, other locks, and staging.
+
+**Founder approval:** 2026-11-16 (a lock-only PR as #85, merged before the API redeploy).
+
+**Related:** D-216, D-219, D-223, D-241; RUNBOOK 11.1.
