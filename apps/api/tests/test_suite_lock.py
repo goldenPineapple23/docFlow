@@ -33,8 +33,8 @@ def test_the_transaction_pooler_becomes_its_session_mode():
 
 
 def test_any_other_database_is_used_as_it_is():
-    url = suite_lock.session_mode_url("postgresql+psycopg://postgres:postgres@127.0.0.1:54322/postgres")
-    assert url == "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+    url = suite_lock.session_mode_url("postgresql+psycopg://postgres:postgres@127.0.0.1:25322/postgres")
+    assert url == "postgresql://postgres:postgres@127.0.0.1:25322/postgres"
 
 
 @pytest.mark.parametrize(("value", "parallel"), [("1", True), ("", False), ("true", False), ("0", False)])

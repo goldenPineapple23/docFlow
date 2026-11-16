@@ -12,21 +12,31 @@
 
 project_id = "docflow-ci"
 
+# Every port this stack publishes is set here, in 25320 to 25329: the CLI's own
+# defaults with 29000 taken off. The defaults, 54320 to 54329, sit inside Linux's
+# automatic range (32768 to 60999), where any outgoing connection on the runner
+# can be given one as its local port before the stack binds it. That failed
+# `supabase start` three times (CI flakes 10, 11 and 14; D-243). A port below
+# the range is never handed out automatically. The sections that are switched
+# off have their ports set too, so turning one on later doesn't bring a default
+# back.
+
 [api]
 enabled = true
-port = 54321
+port = 25321
 schemas = ["public", "graphql_public"]
 extra_search_path = ["public", "extensions"]
 max_rows = 1000
 
 [db]
-port = 54322
-shadow_port = 54320
+port = 25322
+shadow_port = 25320
 # docflow-staging runs PostgreSQL 17 (verified 2026-09-25: 17.6).
 major_version = 17
 
 [db.pooler]
 enabled = false
+port = 25329
 
 [db.migrations]
 enabled = true
@@ -39,6 +49,7 @@ enabled = false
 
 [studio]
 enabled = false
+port = 25323
 
 [local_smtp]
 # The local mail catcher. On so the auth stack is complete, since GoTrue's
@@ -48,6 +59,7 @@ enabled = false
 # and reset flows will want it. Nothing reads the mailbox: the suites
 # assert on the `email_outbox` table, not on delivered mail.
 enabled = true
+port = 25324
 
 [storage]
 # On since Stage 3b: DocFlow's files live in Supabase Storage (bucket
@@ -61,6 +73,7 @@ enabled = false
 
 [analytics]
 enabled = false
+port = 25327
 
 [auth]
 enabled = true

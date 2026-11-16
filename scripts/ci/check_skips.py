@@ -130,7 +130,6 @@ def annotate_failures(suite: str, failures: list[tuple[str, str]]) -> None:
 # The ids given to the steps before the skip check in ci.yml, in job order,
 # and the names they show in the run's step list.
 STEP_NAMES = {
-    "reserve_ports": "Keep the stack's ports 54320 to 54327 out of automatic assignment",
     "supabase": "Start the local Supabase stack",
     "deps": "pip install -r requirements.lock.txt",
     "core": "pip install packages/core",

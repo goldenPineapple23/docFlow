@@ -22,7 +22,7 @@ STAGING = (
     "postgresql://docflow_admin.abcdefghij:not-a-real-password@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
 )
 POOLER = "aws-0-us-east-1.pooler.supabase.com"
-LOCAL = "postgresql://docflow_api:ci-local-only@127.0.0.1:54322/postgres"
+LOCAL = "postgresql://docflow_api:ci-local-only@127.0.0.1:25322/postgres"
 BLOCKED = "postgresql://nobody:nothing@db.invalid:5432/none"
 
 

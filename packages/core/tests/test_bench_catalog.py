@@ -129,9 +129,9 @@ def test_a_mix_that_cannot_be_read_is_refused(bad):
 @pytest.mark.parametrize(
     "url",
     [
-        "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
-        "postgresql://postgres:postgres@localhost:54322/postgres",
-        "postgresql+psycopg://postgres:postgres@127.0.0.1:54322/postgres",
+        "postgresql://postgres:postgres@127.0.0.1:25322/postgres",
+        "postgresql://postgres:postgres@localhost:25322/postgres",
+        "postgresql+psycopg://postgres:postgres@127.0.0.1:25322/postgres",
     ],
 )
 def test_a_database_on_this_machine_is_accepted(url):

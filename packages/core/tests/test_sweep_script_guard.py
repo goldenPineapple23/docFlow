@@ -78,8 +78,8 @@ def test_each_missing_or_wrong_flag_is_refused(environ, expected):
     [
         "",
         "postgresql://nobody:nothing@db.invalid:5432/none",
-        "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
-        "postgresql://postgres:postgres@localhost:54322/postgres",
+        "postgresql://postgres:postgres@127.0.0.1:25322/postgres",
+        "postgresql://postgres:postgres@localhost:25322/postgres",
         # Another Supabase project, through the same pooler and directly.
         "postgresql://docflow_admin.abcdefghijklmnopqrst:x@aws-0-us-east-1.pooler.supabase.com:6543/postgres",
         "postgresql://docflow_admin:x@db.abcdefghijklmnopqrst.supabase.co:5432/postgres",
@@ -98,7 +98,7 @@ def test_any_database_but_stagings_is_refused(url):
     "endpoint",
     [
         "",
-        "http://127.0.0.1:54321/storage/v1/s3",
+        "http://127.0.0.1:25321/storage/v1/s3",
         "https://abcdefghijklmnopqrst.storage.supabase.co/storage/v1/s3",
         f"https://storage.example.test/{REF}/s3",
     ],

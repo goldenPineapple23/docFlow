@@ -148,7 +148,7 @@ def test_a_committed_start_appears_in_the_count_healthz_reads(monkeypatch):
 
 
 def test_only_ci_with_its_own_database_may_commit_a_start(monkeypatch):
-    ci_database = "postgresql://docflow_worker:acme-test@127.0.0.1:54322/postgres"
+    ci_database = "postgresql://docflow_worker:acme-test@127.0.0.1:25322/postgres"
     hosted = "postgresql://docflow_worker.acmetestref:acme-test@pooler.acme-test.example:6543/postgres"
     assert is_throwaway_ci_database("true", ci_database) is True
     assert is_throwaway_ci_database("true", hosted) is False  # CI's flag alone is not enough
