@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-16, with dnspython 2.9.2 merged and the pre-demo PR open:** Phase 5.5,
+**Status, as of 2026-11-16, with the pre-demo PR merged and the CI ports PR open:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -67,7 +67,7 @@ tenant named in lower case is never listed or swept (D-224 item 14). **The warni
 tests run on a fake clock, and a new test checks that a slow busy answer uses up the patience
 (D-212 item 8). A PR that changes only tests runs the staging suites only if the staging
 environment can change those tests' results in a way CI can't show (D-223 item 5). **The CI infrastructure flake
-count is 13** (D-199 item 10; flake 12 is #95's run #526 and flake 13 is #97's run #533, each counted once, D-238 item 5; flakes 5 to 9 are parse's LibreOffice install timing out at 15 min on
+count is 14** (D-199 item 10; flake 14 is the pre-demo branch's push run #563 on `80ee3b5`, web-live's stack start, port 54322 held by the runner's own agent as an outgoing connection's local port, D-243 item 1; flake 12 is #95's run #526 and flake 13 is #97's run #533, each counted once, D-238 item 5; flakes 5 to 9 are parse's LibreOffice install timing out at 15 min on
 2026-10-26, D-219 items 8 and 9, D-222 items 8 and 9; flake 10 is main's push run #510 on `91d4962`,
 where Inbucket's host port 54324 was already in use at the api job's stack start, D-229 item 7; flake 11 is
 A2's branch push run #511 on `1a04530`, the same port at the same step, holder not identified, D-231
@@ -76,7 +76,7 @@ green; D-231): each job
 that starts the Supabase stack first keeps 54320 to 54327 out of automatic port assignment, and the
 steps around the stack's start print every socket on those ports with its process, and the runner
 image; "Build the API's image" now runs only when buildx was set up, so a failed stack start no longer
-turns it red too. **A standing rule (D-213 item 6, tightened
+turns it red too. The reservation is replaced by D-243. **A standing rule (D-213 item 6, tightened
 in D-214): a staging suite, a Fly action or any write to staging starts only after a message from
 the founder that begins with "Grant" and names the step.** Any change to a granted command, a flag
 such as `--app` included, is told to the founder before it runs (founder, 2026-10-27). **Two new
@@ -197,7 +197,7 @@ strip was all fine and no alert was raised (D-240 item 8).
 Inbound e-mail moved from task 7's smoke test to task 10 (Postmark).
 **dnspython 2.9.2 is merged** (PR #103, `main` `0607c75`; D-242): the API's lock moved dnspython
 2.9.0 to 2.9.2 for GHSA-vvf4-9x63-8xvv, which had failed main's daily audit since 2026-11-14.
-DocFlow never reaches it. **The pre-demo PR is built** (branch `phase55/pre-demo-fixes`, rebased onto `0607c75`; D-241;
+DocFlow never reaches it. **The pre-demo PR is merged** (PR #104, `main` `c57013e`; main's push run #565 green; D-241;
 D-240 item 9). A request refused before its route runs answers 422 REQ-002 when
 every failing field is an e-mail address, REQ-001 otherwise, naming the fields and never the value
 or the library's text; the Console's error box puts the field's label first ("Owner email: This
@@ -208,9 +208,13 @@ stranger's body that isn't JSON on `/admin` gets the 404, in the gate's own orde
 6). `CONSOLE_MFA_ENFORCED` is on unless set false. web-live's CI-only platform admin enrols a
 real authenticator on CI's stack and passes a real challenge, and the API refuses its
 password-only session with AUTH-006. No staging suites (D-223 item 5).
-**Next, in order (D-235 item 18):** the pre-demo PR's CI, review and merge; then the API's
-redeploy under a Grant, its startup log read for no `console_mfa_enforcement_off` line, and the
-web app's Vercel redeploy (D-241 item 11).
+**The CI ports PR is open** (branch `phase55/ci-stack-ports` from `c57013e`; D-243): the CI
+stack's ports move from 54320-54329 to 25320-25329, below the range Linux assigns automatically;
+the five reservation steps are removed; the port printout stays, on the new block, as
+`scripts/ci/show_stack_ports.sh`.
+**Next, in order (D-235 item 18):** the API's redeploy under a Grant, its startup log read for no
+`console_mfa_enforcement_off` line, and the web app's Vercel redeploy (D-241 item 11); the CI
+ports PR's review and merge.
 The Console's sweep, the Chrome and Safari pass, the
 real-iPhone checks and the partner walkthrough. Postmark inbound end to end. Both PO sets on
 staging. E1, then E2a. B1's demo half, labelling with the routing model. The pricing-unit fix and
@@ -1989,12 +1993,9 @@ here is built.
 
 ## Known open items (across phases)
 
-- If the port printout names a program binding 54320 to 54327 itself, move the mail catcher's port
-  or turn it off in CI (not proposed until a program is named; D-231).
-
-- **For the next CI PR (founder, 2026-11-03; D-232 item 18):** the before step's "Containers
-  publishing 54322:" line still checks only 54322. Its runner image line is `$ImageVersion`, which
-  can differ from "Set up job"'s Runner Image in the same job (#515).
+- **For a later CI PR (founder, 2026-11-03; D-232 item 18):** the port printout's runner image
+  line is `$ImageVersion`, which can differ from "Set up job"'s Runner Image in the same job
+  (#515). Its "Containers publishing" line covers the whole block since D-243.
 
 - **For A6 (D-232; D-235 item 11; the code is D-236):** deploy the parse service (A2's `/v1/pages`) and the worker (A3's `pages`
   process), each under its own Grant; size the worker machine from D-232 item 15's memory figures;
