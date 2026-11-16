@@ -69,10 +69,14 @@ async function sessionToken(page: Page): Promise<string> {
   });
 }
 
-async function consoleTenantNames(request: APIRequestContext, token: string): Promise<string[]> {
-  const response = await request.get(`${required("NEXT_PUBLIC_API_BASE_URL")}/admin/tenants`, {
+function tenantList(request: APIRequestContext, token: string) {
+  return request.get(`${required("NEXT_PUBLIC_API_BASE_URL")}/admin/tenants`, {
     headers: { Authorization: `Bearer ${token}` },
   });
+}
+
+async function consoleTenantNames(request: APIRequestContext, token: string): Promise<string[]> {
+  const response = await tenantList(request, token);
   expect(response.status(), await response.text()).toBe(200);
   return ((await response.json()) as { name: string }[]).map((t) => t.name);
 }
@@ -100,16 +104,24 @@ test("the admin passes a real authenticator challenge, and a refused owner addre
   await page.locator("#password").fill(who.password);
   await page.getByRole("button", { name: /sign in/i }).click();
 
-  // The password alone gets the code screen, not the Console.
+  // The password alone gets the code screen, not the Console, and this very
+  // session's tenant-list request is refused by the API with AUTH-006.
   await expect(page.getByTestId("console-mfa-gate")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId("tenant-name")).toHaveCount(0);
+  const passwordOnly = await sessionToken(page);
+  expect(claims(passwordOnly).aal).toBe("aal1");
+  const refused = await tenantList(request, passwordOnly);
+  expect(refused.status()).toBe(403);
+  expect((await refused.json()).detail.code).toBe("AUTH-006");
 
   const step = await aStepAfter(who.totp_step_used);
   await page.getByTestId("mfa-code").fill(totpCode(who.totp_secret, step));
   await page.getByRole("button", { name: "Confirm" }).click();
 
-  // The page reloads with the upgraded session. The form's tiers and presets
-  // come from the API, so the preset being ticked means the API took aal2.
+  // The page reloads with the upgraded session, and the same tenant-list
+  // request now gets 200: this is the proof of aal2 at the API. The refused
+  // create below shows it too: at aal1 the gate answers that same body with
+  // AUTH-006 before any field is judged (test_validation_catalog.py).
   await expect(page.getByTestId("tenant-name")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("deal-preset-standard")).toBeChecked();
   const token = await sessionToken(page);
