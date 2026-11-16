@@ -1184,7 +1184,7 @@ list is the checks that sit around them. Phase 6 completes it.
 
 ## 4. Console MFA (D-151, D-177)
 
-The Console needs a code from an authenticator app as well as a password, once
+The Console needs a code from an authenticator app as well as a password while
 `CONSOLE_MFA_ENFORCED` is on. With it on:
 
 - every `/admin` page needs a sign-in confirmed with a code (an `aal2` session);
@@ -1194,14 +1194,20 @@ The Console needs a code from an authenticator app as well as a password, once
   (`MFA_STEP_UP_MAX_AGE_SECONDS`, 300 s, plus `MFA_CLOCK_TOLERANCE_SECONDS`,
   30 s, for Supabase's clock). The Console asks for one and then carries on.
 
-It ships **off**, so you can enrol before it can lock anyone out. While it is
-off, three things say so: a warning in the API's startup log, an amber banner
-on every Console page, and a high-severity founder alert ("Console MFA
-enforcement is off") raised on the first Console request after each API start.
+It is **on unless `CONSOLE_MFA_ENFORCED` is set to `false`** (D-241). An API
+started without the setting refuses a Console sign-in that has no code, with
+AUTH-006. It shipped off under D-177 so you could enrol first; you have
+enrolled on staging. While it is set false, three things say so: a warning in
+the API's startup log, an amber banner on every Console page, and a
+high-severity founder alert ("Console MFA enforcement is off") raised on the
+first Console request after each API start.
 
 ### 4.1 Switching it on, the first time
 
-Do these in order. Don't turn it on before step 3 is confirmed.
+This is for a Supabase project where you have not enrolled yet: there, set
+`CONSOLE_MFA_ENFORCED=false` until step 3 is confirmed, or the Console shows
+only the authenticator screen, which is where step 1 enrols anyway. Do these
+in order. Don't turn it on before step 3 is confirmed.
 
 1. **Enrol.** Sign in to the Console, open **/admin/security** (the banner
    links to it), choose **Set up an authenticator**, scan the QR code with an
@@ -1215,9 +1221,10 @@ Do these in order. Don't turn it on before step 3 is confirmed.
 3. **Confirm.** Tell Claude (or check in the Supabase dashboard under
    Authentication → Users → your user) that your account shows at least one
    **verified** TOTP factor.
-4. **Turn it on.** Set `CONSOLE_MFA_ENFORCED=true` in the environment the API
-   runs with (the root `.env` locally; the host's environment settings when
-   deployed) and restart the API. The startup warning and the banner stop.
+4. **Turn it on.** Set `CONSOLE_MFA_ENFORCED=true`, or remove the `false`, in
+   the environment the API runs with (the root `.env` locally; the host's
+   environment settings when deployed) and restart the API. The startup
+   warning and the banner stop.
 5. **Check it.** Sign out and in again: the Console should ask for a code
    before showing anything. Enter it. Then, more than five minutes later, try
    a destructive action (e.g. rotate a test tenant's intake address): it

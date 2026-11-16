@@ -1,4 +1,5 @@
 import { API_BASE_URL, apiFetch } from "./api";
+import { APP_000 } from "./catalogMirror";
 import { reviewApiBase } from "./reviewScope";
 
 /**
@@ -199,12 +200,8 @@ export class ReviewApiError extends Error {
   }
 }
 
-export const UNEXPECTED: CatalogError = {
-  code: "APP-000",
-  title: "We couldn't reach DocFlow",
-  message: "The request didn't get through, so nothing was changed.",
-  action: "Check your connection and try again. If it keeps happening, DocFlow has been alerted.",
-};
+// APP-000, from the catalog's word-for-word copy (D-241).
+export const UNEXPECTED: CatalogError = APP_000;
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;

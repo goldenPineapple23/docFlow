@@ -1,5 +1,6 @@
 import { apiFetch } from "./api";
 import type { AuditOutcome, OutcomeState } from "./auditOutcome";
+import { APP_001 } from "./catalogMirror";
 import { ReviewApiError, UNEXPECTED, request, type CatalogError } from "./review";
 
 /**
@@ -213,12 +214,7 @@ export async function uploadIntakeFile(intakeId: string, file: File): Promise<{ 
   form.append("file", file);
   const response = await apiFetch(`/admin/intakes/${intakeId}/files`, { method: "POST", body: form });
   if (!response.ok) {
-    let catalog: CatalogError = {
-      code: "APP-000",
-      title: "We couldn't reach DocFlow",
-      message: "The upload didn't get through, so nothing was stored.",
-      action: "Check your connection and try again.",
-    };
+    let catalog: CatalogError = APP_001;
     try {
       const detail = (await response.json())?.detail;
       if (detail?.code && detail?.title && detail?.action) catalog = detail;
@@ -361,12 +357,7 @@ export async function uploadImport(tenantId: string, kind: ImportKind, file: Fil
   form.append("file", file);
   const response = await apiFetch(importsBase(tenantId), { method: "POST", body: form });
   if (!response.ok) {
-    let catalog: CatalogError = {
-      code: "APP-000",
-      title: "We couldn't reach DocFlow",
-      message: "The upload didn't get through, so nothing was stored.",
-      action: "Check your connection and try again.",
-    };
+    let catalog: CatalogError = APP_001;
     try {
       const detail = (await response.json())?.detail;
       if (detail?.code && detail?.title && detail?.action) catalog = detail;

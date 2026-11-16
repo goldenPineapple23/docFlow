@@ -27,12 +27,16 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import hmac
 import json
 import os
 import secrets
+import struct
 import sys
+import time
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import httpx
@@ -189,6 +193,108 @@ def _check_password_sign_in(email: str, password: str) -> None:
 def _delete_auth_user(auth_user_id: str) -> None:
     url, headers = _auth_admin()
     httpx.delete(f"{url}/{auth_user_id}", headers=headers, timeout=30)
+
+
+# ── The Console's platform admin, with a real authenticator (D-241) ─────────
+#
+# The Console spec signs in with a password, passes a real TOTP challenge and
+# acts at aal2. Nothing here bypasses MFA: the factor is enrolled and verified
+# through Supabase Auth's own API, as the Console's /admin/security page does,
+# and Supabase generates the secret. It is recorded in the seed file so the
+# spec can compute codes from it; it lives as long as this run's account.
+#
+# Only on a stack on this machine. The live suite can also run against
+# staging (RUNBOOK 1.5), and a platform admin there is the founder alone
+# (Section 7.15.1), so there the account is never made and the spec skips.
+
+TOTP_PERIOD_SECONDS = 30
+
+
+def totp_code(secret: str, step: int) -> str:
+    """RFC 6238 as Supabase Auth checks it: SHA-1, six digits, 30-second steps.
+    The standard library's, so no TOTP package joins either lockfile."""
+    key = base64.b32decode(secret.upper() + "=" * (-len(secret) % 8))
+    digest = hmac.new(key, struct.pack(">Q", step), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    number = struct.unpack(">I", digest[offset : offset + 4])[0] & 0x7FFFFFFF
+    return f"{number % 1_000_000:06d}"
+
+
+def _on_this_machine(url: str) -> bool:
+    return urlsplit(url).hostname in ("127.0.0.1", "localhost")
+
+
+def _auth_call(method: str, path: str, *, token: str | None = None, body: dict | None = None) -> dict:
+    """One call to Supabase Auth's public API. A refusal exits with Auth's
+    own answer, so the CI log says why rather than "seeding failed"."""
+    settings = get_settings()
+    headers = {"apikey": settings.supabase_anon_key}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    response = httpx.request(method, f"{settings.supabase_url}/auth/v1{path}", headers=headers,
+                             json=body, timeout=30)
+    if response.status_code >= 300:
+        # The path names the step; the body is Auth's error, never a secret.
+        sys.exit(f"Supabase Auth refused {method} {path.split('?')[0]}: {response.status_code} "
+                 f"{response.text[:400]}")
+    return response.json() if response.content else {}
+
+
+def _seed_console_admin(run: str, admin: dict) -> None:
+    """Fills `admin` as it goes, so a failure part way is cleaned up whole."""
+    email = f"live-e2e-console-{run}@example.com"
+    password = "DocFlow-live-e2e-" + secrets.token_urlsafe(12)
+    admin.update(email=email, password=password)
+    admin["auth_user_id"] = _create_auth_user(email, password)
+    admin["user_id"] = str(uuid4())
+    with platform_session() as session:
+        # As scripts/seed_platform_admin.py does: a users row in no tenant,
+        # then the platform_admins row (no API can write either; 7.15.1).
+        session.execute(
+            text(
+                "INSERT INTO users (id, tenant_id, email, role, is_active, auth_user_id) "
+                "VALUES (:id, NULL, :email, 'owner', true, :auth_user_id)"
+            ),
+            {"id": admin["user_id"], "email": email, "auth_user_id": admin["auth_user_id"]},
+        )
+        session.execute(
+            text("INSERT INTO platform_admins (user_id, granted_by) VALUES (:id, :id)"),
+            {"id": admin["user_id"]},
+        )
+
+    signed_in = _auth_call("POST", "/token?grant_type=password", body={"email": email, "password": password})
+    factor = _auth_call(
+        "POST", "/factors", token=signed_in["access_token"],
+        body={"factor_type": "totp", "friendly_name": f"DocFlow live e2e {run}"},
+    )
+    admin["totp_secret"] = factor["totp"]["secret"]
+    challenge = _auth_call("POST", f"/factors/{factor['id']}/challenge", token=signed_in["access_token"])
+    step = int(time.time()) // TOTP_PERIOD_SECONDS
+    _auth_call(
+        "POST", f"/factors/{factor['id']}/verify", token=signed_in["access_token"],
+        body={"challenge_id": challenge["id"], "code": totp_code(admin["totp_secret"], step)},
+    )
+    # The spec waits for a later step before it enters a code, so it never
+    # depends on whether Auth accepts one code twice.
+    admin["totp_step_used"] = step
+    print(f"  Console admin {email}: authenticator enrolled and verified on this stack.")
+
+
+def _remove_console_admin(admin: dict | None) -> None:
+    """The admin, its audit rows (a refused request writes one, D-178) and its
+    sign-in. Safe on a half-built admin and on none."""
+    if not admin:
+        return
+    if admin.get("user_id"):
+        with platform_session() as session:
+            for statement in (
+                "DELETE FROM admin_actions WHERE platform_admin_user_id = :u",
+                "DELETE FROM platform_admins WHERE user_id = :u",
+                "DELETE FROM users WHERE id = :u AND tenant_id IS NULL",
+            ):
+                session.execute(text(statement), {"u": admin["user_id"]})
+    if admin.get("auth_user_id"):
+        _delete_auth_user(admin["auth_user_id"])
 
 
 # ── Rows ────────────────────────────────────────────────────────────────────
@@ -405,13 +511,16 @@ def setup(out: Path) -> None:
     password = "DocFlow-live-e2e-" + secrets.token_urlsafe(12)
 
     auth_user_id = _create_auth_user(email, password)
+    # Filled as the Console's admin is built; None where it isn't (staging).
+    admin: dict | None = {} if _on_this_machine(get_settings().supabase_url) else None
     # From here on the run owns rows. Anything that goes wrong takes them
     # with it rather than leaving a half-built tenant on staging.
     try:
-        _seed_rows(out, run, tenant_id, user_id, name, email, password, auth_user_id)
+        _seed_rows(out, run, tenant_id, user_id, name, email, password, auth_user_id, admin)
     except BaseException:
         print("Seeding failed; removing what had been created.")
         _remove(tenant_id, auth_user_id)
+        _remove_console_admin(admin)
         out.unlink(missing_ok=True)
         raise
 
@@ -425,7 +534,14 @@ def _seed_rows(
     email: str,
     password: str,
     auth_user_id: str,
+    admin: dict | None,
 ) -> None:
+    if admin is not None:
+        _seed_console_admin(run, admin)
+    elif os.environ.get("GITHUB_ACTIONS"):
+        sys.exit("In CI the stack is this runner's own, so the Console's admin must be seeded.")
+    else:
+        print("  Not a stack on this machine: no Console admin, so the Console spec skips.")
     with platform_session() as session:
         session.execute(
             text(
@@ -552,6 +668,9 @@ def _seed_rows(
                 "ack_document_id": str(ack_id),
                 "pdf_document_id": str(pdf_id),
                 "viewer_documents": viewer_documents,
+                # Its password and authenticator secret, for this run's spec
+                # only; the account is deleted at teardown.
+                "console_admin": admin,
             },
             indent=2,
         ),
@@ -573,6 +692,7 @@ def teardown(out: Path) -> None:
         return
     seed = json.loads(out.read_text(encoding="utf-8"))
     _remove(UUID(seed["tenant_id"]), seed["auth_user_id"])
+    _remove_console_admin(seed.get("console_admin"))
     out.unlink()
     print(f"Removed {seed['tenant_name']}.")
 

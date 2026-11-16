@@ -12,7 +12,8 @@ With CONSOLE_MFA_ENFORCED on:
   future passes, 31 s does not;
 - the challenge's age is recorded in the action's admin_actions payload.
 
-With it off (the default): nothing is refused, and the founder is told three
+On unless set false (D-241; it shipped off under D-177, so the founder could
+enrol first). Set false: nothing is refused, and the founder is told three
 ways -- a startup warning, the /auth/me flag the Console banner reads, and one
 founder alert per process.
 
@@ -32,7 +33,7 @@ from uuid import uuid4
 
 import jwt
 import pytest
-from docflow_core.config import get_settings
+from docflow_core.config import Settings, get_settings
 from docflow_core.constants import MFA_CLOCK_TOLERANCE_SECONDS, MFA_STEP_UP_MAX_AGE_SECONDS
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -227,7 +228,18 @@ def test_a_destructive_action_with_a_fresh_code_runs_and_records_the_codes_age(
     assert age == 10
 
 
-# ── Enforcement off (the default) ─────────────────────────────────────────────
+# ── The default: on when the setting is absent (D-241) ──────────────────────
+
+
+def test_enforcement_is_on_when_nothing_sets_it(monkeypatch):
+    # Neither the environment nor an env file: an API started without the
+    # setting fails closed. Every other test here sets it, as conftest does.
+    monkeypatch.delenv("CONSOLE_MFA_ENFORCED", raising=False)
+    assert Settings.model_fields["console_mfa_enforced"].default is True
+    assert Settings(_env_file=None).console_mfa_enforced is True
+
+
+# ── Enforcement set false (RUNBOOK 4's emergency lever) ─────────────────────
 
 
 def test_while_off_nothing_is_refused(client, not_enforced, _environment):

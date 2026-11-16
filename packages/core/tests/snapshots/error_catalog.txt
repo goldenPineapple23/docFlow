@@ -1,3 +1,11 @@
+APP-000 [info/both] DocFlow didn't confirm this
+  what+why: This page didn't get an answer it can show. If you just made a change, it may or may not have been saved.
+  next:     Reload the page and check before trying again.
+
+APP-001 [info/both] DocFlow didn't confirm the upload
+  what+why: This page didn't get an answer it can show, so it can't tell whether the file was stored.
+  next:     Reload the page and check the list before uploading again.
+
 AUTH-001 [warning/tenant] This link has expired
   what+why: Your invite link is no longer valid.
   next:     Ask your account owner to resend the invite.
@@ -569,6 +577,14 @@ QUA-004 [warning/founder] This address can't be replaced
 QUA-005 [warning/founder] That approved-sender list can't be saved
   what+why: An entry isn't a valid email address or domain, or the list is empty while the approved-sender rule is on, which would hold every order.
   next:     Enter full addresses (buyer@example.com) or bare domains (example.com), at least one.
+
+REQ-001 [info/both] DocFlow couldn't accept one of the values
+  what+why: One or more values aren't in a form DocFlow accepts, so DocFlow didn't save anything.
+  next:     Check the values you entered and try again.
+
+REQ-002 [info/both] This e-mail address can't receive mail
+  what+why: This address can't receive e-mail, so DocFlow didn't save anything.
+  next:     Check the part after the @ and try again.
 
 REV-001 [warning/tenant] Some warnings still need a look
   what+why: This order has warnings nobody has acknowledged yet. DocFlow doesn't approve an order while something on it is still unexplained.

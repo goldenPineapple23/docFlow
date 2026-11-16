@@ -1026,7 +1026,8 @@ def _extension(filename: str | None) -> str:
 @router.get("/documents/{document_id}/original/content")
 def original_document_content(
     document_id: UUID,
-    token: str = Query(min_length=1),
+    # A missing token is a bad link like any other: 404, never FastAPI's 422 (D-241).
+    token: str = Query(default=""),
     download: bool = Query(default=False),
 ) -> Response:
     """
@@ -1107,7 +1108,8 @@ def original_document_content(
 def page_image(
     document_id: UUID,
     index: int,
-    token: str = Query(min_length=1),
+    # A missing token is a bad link like any other: 404, never FastAPI's 422 (D-241).
+    token: str = Query(default=""),
 ) -> Response:
     """
     One page image, drawn by the parse job and stored by the worker (A2, A3):
