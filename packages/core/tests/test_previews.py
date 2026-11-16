@@ -36,4 +36,23 @@ def test_no_file_the_detector_reads_as_text_ever_gets_a_preview():
         for extension in spec.extensions:
             detected = file_types.detect_file_type(b"PO Number: BCH-2291\nQty 4\n", extension)
             assert detected is not None, extension
+            if spec.name == FileTypeName.HTML:
+                continue  # the next test
             assert not previews.needs_preview(detected.name), (extension, detected.name)
+
+
+def test_an_html_file_is_the_one_text_file_with_a_preview_and_the_preview_is_its_text():
+    """
+    B1, slice 2 (D-235 item 13): a file named `.html` or `.htm` is detected
+    as HTML, the parse service sends the model its text and never its markup,
+    and the worker stores that same text as the preview. So the route's first
+    rule, "a stored text preview first", shows an HTML file exactly what the
+    model read, and its second rule never applies to one: HTML is not among
+    the files whose `extracted_text_path` the route shows.
+    """
+    for extension in (".html", ".htm"):
+        detected = file_types.detect_file_type(b"<p>PO Number: BCH-2291</p>", extension)
+        assert detected is not None and detected.name == FileTypeName.HTML, extension
+    assert previews.needs_preview(FileTypeName.HTML) and not previews.is_image_like(FileTypeName.HTML)
+    preview = previews.text_preview("PO Number: BCH-2291")
+    assert preview is not None and preview.kind == "extracted_text"

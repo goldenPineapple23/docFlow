@@ -224,6 +224,7 @@ _EXTENSIONS_BY_TYPE: dict[FileTypeName, set[str]] = {
 
 _TEXT_LIKE = {FileTypeName.TXT, FileTypeName.CSV, FileTypeName.MD, FileTypeName.HTML}
 _TEXT_LIKE_EXTENSIONS = {".txt", ".csv", ".md", ".html", ".htm"}
+_HTML_EXTENSIONS = {".html", ".htm"}
 
 
 # ── Tier 3: rejected, each with its own catalog code ───────────────────────
@@ -623,9 +624,14 @@ def detect_file_type(content: bytes, claimed_extension: str = "") -> FileType | 
     if _looks_like_text(content):
         if _looks_like_edi(content):
             raise FileRejection(ERR_CAD_EDI, "File is an EDI interchange payload.")
-        # Magic bytes can't distinguish txt/csv/md/html from each other;
-        # the caller's claimed extension (validated separately) picks among
-        # them. Default to TXT as the generic text FileType.
+        # Magic bytes can't distinguish txt/csv/md/html from each other.
+        # A file named `.html` or `.htm` is read as HTML, so the parse
+        # service turns its markup into text before anything reads it (B1;
+        # D-235 item 13). Every other text file is TXT, the generic text
+        # FileType. The name can only choose among text formats here: the
+        # bytes have already been found to be text.
+        if claimed_extension in _HTML_EXTENSIONS:
+            return ALL_TYPES[FileTypeName.HTML]
         return ALL_TYPES[FileTypeName.TXT]
 
     return None
