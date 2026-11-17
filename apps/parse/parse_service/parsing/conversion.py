@@ -700,6 +700,18 @@ def unwrap_eml(content: bytes, lost: list[Lost]) -> list[tuple[bytes, str, bool]
         body_part = message.get_body(preferencelist=("plain", "html"))
         if body_part is not None:
             body = body_part.get_content()
+            if body_part.get_content_type() == "text/html":
+                # An HTML-only message: its text, never its markup (D-235
+                # item 13). Imported here: html_text imports this module.
+                from parse_service.parsing.html_text import html_to_text
+
+                try:
+                    body = html_to_text(str(body))
+                except ConversionError:
+                    # Nested past the reader's cap: the body is lost and
+                    # said so (VAL-018); the attachments are still read.
+                    body = ""
+                    lost.append(Lost(LOST_BODY))
     except fault_origin.catchable(content_errors) as exc:
         if not fault_origin.from_input(exc, content_errors):
             raise  # ours: the job answers `error` (DOC-030)

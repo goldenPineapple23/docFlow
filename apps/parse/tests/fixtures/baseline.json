@@ -106,11 +106,11 @@
     },
     "positive/po.html": {
       "outcome": "ok",
-      "file_type": "txt",
+      "file_type": "html",
       "parts": [
         {
           "type": "text",
-          "text": "<html><body><pre>PURCHASE ORDER\nPO Number: BCH-2291\nOrder Date: 2026-03-14\nBuyer: Acme's Test Coffee House\nContact: orders@acmetestcoffee.example\nPayment Terms: Net 30\n\nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.50, 570.00\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62.00, 372.00\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198.00\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54.00, 216.00\n\nOrder Total: 1356.00\n</pre></body></html>"
+          "text": "PURCHASE ORDER\nPO Number: BCH-2291\nOrder Date: 2026-03-14\nBuyer: Acme's Test Coffee House\nContact: orders@acmetestcoffee.example\nPayment Terms: Net 30\nSKU, Description, Qty, Unit, Unit Price, Line Total\nCF-1001, Colombian Whole Bean 5lb, 12, CS, 47.50, 570.00\nCF-2210, Ethiopian Yirgacheffe 5lb, 6, CS, 62.00, 372.00\nSY-0045, Vanilla Syrup 750ml, 24, EA, 8.25, 198.00\nCUP-12, 12oz Paper Cups (1000ct), 4, BOX, 54.00, 216.00\nOrder Total: 1356.00"
         }
       ],
       "image_preview": null

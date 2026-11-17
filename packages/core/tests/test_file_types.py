@@ -117,6 +117,39 @@ def test_detects_html_as_text_like():
     assert result.ok
 
 
+@pytest.mark.parametrize("name", ["po.html", "po.htm", "PO.HTML", "E-mail text.html"])
+def test_a_file_named_html_is_the_html_type_so_its_markup_is_read_as_text(name):
+    """B1, slice 2 (D-235 item 13): the name chooses among the text formats,
+    which is the rule `detect_file_type` states."""
+    result = validate_upload(b"<html><body>Purchase Order</body></html>", name)
+    assert result.ok and result.file_type is not None
+    assert result.file_type.name == FileTypeName.HTML
+
+
+@pytest.mark.parametrize("name", ["po.txt", "po.csv", "po.md", "po"])
+def test_every_other_text_file_is_still_the_generic_text_type(name):
+    result = validate_upload(b"<html><body>Purchase Order</body></html>", name)
+    assert result.ok and result.file_type is not None
+    assert result.file_type.name == FileTypeName.TXT
+
+
+@pytest.mark.parametrize(
+    ("content", "code"),
+    [
+        (b"%PDF-1.4\n%binary\n", None),  # a PDF's bytes named .html: the bytes win
+        (b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xff\x00\x00", "DOC-014"),
+        (b"PK\x03\x04" + b"\x00" * 26, None),
+    ],
+    ids=["pdf", "executable", "zip"],
+)
+def test_the_html_name_never_promotes_bytes_that_are_not_text(content, code):
+    result = validate_upload(content, "po.html")
+    assert result.file_type is None or result.file_type.name != FileTypeName.HTML
+    assert not result.ok
+    if code is not None:
+        assert result.error_code == code
+
+
 def test_detects_docx():
     result = validate_upload(_minimal_docx_bytes(), "po.docx")
     assert result.ok

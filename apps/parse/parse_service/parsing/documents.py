@@ -36,6 +36,7 @@ from parse_service.parsing.conversion import (
     xml_errors,
     zip_errors,
 )
+from parse_service.parsing.html_text import html_to_text
 
 # Below this many extracted characters, a PDF is treated as scanned/
 # image-only and sent to the model visually instead (mirrors docs/parse_pos.py).
@@ -56,7 +57,6 @@ _PLAIN_TEXT_LIKE = {
     file_types.FileTypeName.TXT,
     file_types.FileTypeName.CSV,
     file_types.FileTypeName.MD,
-    file_types.FileTypeName.HTML,
 }
 
 _IMAGE_LIKE = {file_types.FileTypeName.TIFF, file_types.FileTypeName.HEIC}
@@ -239,6 +239,11 @@ def inner_blocks(file_type: file_types.FileType, content: bytes) -> list[dict]:
 
     if name in _PLAIN_TEXT_LIKE:
         return [{"type": "text", "text": content.decode("utf-8", errors="replace")}]
+
+    if name == file_types.FileTypeName.HTML:
+        # Never the markup itself (D-235 item 13): the text a reader of the
+        # page would see, and the reviewer is shown the same text.
+        return [{"type": "text", "text": html_to_text(content.decode("utf-8", errors="replace"))}]
 
     if name == file_types.FileTypeName.RTF:
         return [{"type": "text", "text": _extract_rtf_text(content)}]

@@ -1191,3 +1191,23 @@ def test_when_the_wait_itself_cannot_be_written_the_claim_is_left_for_the_stuck_
     monkeypatch.setattr(mod.document_status, "to_waiting", lost)
     session, _, fault_alerts = _drive_outage(monkeypatch, broken="match_document_lines")
     assert not _to(session, "failed") and not _to(session, "needs_review") and fault_alerts == []
+
+
+def test_an_html_files_preview_is_plain_text_and_never_markup_to_render():
+    """
+    B1 slice 2 (founder, 2026-11-16): an HTML file is the one text file with
+    a preview, and that preview is always the reader's plain text, stored as
+    text/plain and marked `extracted_text`, which the review screen shows
+    escaped. A real <script> is gone; markup the sender wrote as entities is
+    kept as the characters it is, never as an element.
+    """
+    page = (
+        b"<html><body><script>window.__ran = true</script><p>4 x TEST-100</p>"
+        b"<p>&lt;script&gt;window.__ran = true&lt;/script&gt;&lt;b&gt;bold&lt;/b&gt;</p></body></html>"
+    )
+    preview = _preview_for("order.html", page)
+
+    assert preview is not None
+    assert preview.kind == "extracted_text"
+    assert preview.media_type == "text/plain; charset=utf-8"
+    assert preview.content == b"4 x TEST-100\n<script>window.__ran = true</script><b>bold</b>"
