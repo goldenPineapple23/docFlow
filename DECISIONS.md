@@ -6673,3 +6673,23 @@ D-240 item 9's PR, built from `main` at `c0db23a` (#102's merge), and rebased on
 **Founder approval:** 2026-11-16 (slice 2 accepted with the two conditions in item 3; this entry approved as drafted).
 
 **Related:** D-228 item 5, D-230, D-233 item 5, D-235 item 13; `docs/designs/b1.md`.
+
+## D-245 — B1 slice 3: the email text's label and decision in core, four new catalog entries, and the catalog spells it "email" (founder, 2026-11-16 and 2026-11-17)
+
+**Context:** B1's slice 3 (`docs/designs/b1.md`, the slice table) builds the labelling call and the decision in core, and the catalog entries B1 needs. Nothing calls any of it until slice 4 wires the labelling task.
+
+1. **The label and the decision** (`docflow_core/mail_labels.py`): the labelling call to the routing model (`label_mail_body`, structured output, the email's text inside delimiters as data), `decide_body`, `needs_ignored_mail_row`, the forwarded-block detector `has_forwarded_block`, and `mail_text`. Two constants in `constants.py` and RUNBOOK 2.6: `MAIL_LABEL_REVIEW_THRESHOLD` (0.80) and `MAIL_LABEL_TEXT_CHAR_BUDGET` (12,000). The prompt carries the founder's rule "If a message places an order and also does something else, label it order." (2026-11-16). A test holds that no spelling of a delimiter in an email's text reaches the call. `pyproject.toml` exempts `mail_labels.py` from E501, as it does `extraction.py`, because the prompt's bytes are hashed onto every labelling run.
+2. **Four new entries, with the final wordings of `docs/designs/b1.md` section 12** (founder, 2026-11-17):
+   - INT-012 (info, tenant): the ignored-mail row for a labelled email that made no document.
+   - VAL-019 (warning, tenant): a document made from an email's text that holds a forwarded or quoted block. One warning per document.
+   - VAL-020 (info, tenant): the email panel, when the email's text couldn't be shown. It is never a warning on a document: a test holds that no path that writes document warnings names it. Slice 4 or 5 adds a database check that no document has one.
+   - VAL-021 (high, tenant): on a document made from an email's text when one of its attachments also became a document. Only the body document carries it.
+   - **No code writes any of the four yet.** INT-012's, VAL-019's and VAL-021's writers, VAL-021's acknowledgement at approval and their tests come with slice 4, which makes documents from an email's text. The catalog has no "acknowledge at approval" attribute: every open warning on a document must be acknowledged at approval (Section 7.3), so VAL-021 needs none.
+3. **The catalog spells it "email"** (founder, 2026-11-17). REQ-002's title and message and INT-011's title, message and action change from "e-mail" to "email". Their readers change with them: the catalog snapshot, `apps/api/tests/test_validation_catalog.py`, `apps/web/src/components/admin/CatalogErrorBox.test.tsx`, `apps/web/e2e-live/console-mfa.spec.ts`, and a comment in `apps/web/src/lib/fieldLabels.ts`. A test holds that no entry's title, message or action contains "e-mail", ignoring case. It reads the catalog only: screen text outside it, such as the E-mail panel's name, changes with slice 5. Earlier records that quote the old wording (D-210, D-241, `docs/status-history.md`) are not edited.
+4. **Not in this slice:** INT-001's new wording (slice 4) and the on-screen "email" wording (slice 5).
+
+**Not changed:** migrations, the API, the worker's code, Fly, Vercel, Supabase and staging. No staging suites (`docs/designs/b1.md` section 12, answer 9).
+
+**Founder approval:** approved 2026-11-17, after reading the catalog lines, the tests and this entry in chat; VAL-021's severity set to high.
+
+**Related:** D-210, D-230 items 4 and 9, D-241, D-244; `docs/designs/b1.md` sections 5 and 12; RUNBOOK 2.6.

@@ -753,6 +753,43 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         severity="high",
         audience="tenant",
     ),
+    # B1 (D-230; D-245). Founder's wordings, final 2026-11-17
+    # (docs/designs/b1.md section 12). No code raises any of the three yet.
+    #
+    # VAL-019: one warning on a document made from an email's text that holds
+    # a forwarded or quoted block (`mail_labels.has_forwarded_block`). Its
+    # writer comes with slice 4, which makes those documents.
+    "VAL-019": ErrorCatalogEntry(
+        code="VAL-019",
+        title="This email includes a forwarded or quoted message",
+        message="The order's details may be spread across the new message and the earlier one.",
+        action="Check that every line belongs to this order and that nothing was left out before approving.",
+        severity="warning",
+        audience="tenant",
+    ),
+    # VAL-020: shown in the email panel only, when the email's text couldn't be
+    # turned into something readable. Never written as a warning on a document
+    # (test_errors.py holds that no path that writes document warnings names it).
+    "VAL-020": ErrorCatalogEntry(
+        code="VAL-020",
+        title="This email's text couldn't be shown",
+        message="DocFlow kept the email but couldn't turn its text into something readable.",
+        action="Download the original email text to read it.",
+        severity="info",
+        audience="tenant",
+    ),
+    # VAL-021: on the document made from an email's text when one of its
+    # attachments also became a document; only the body document carries it,
+    # acknowledged at approval like any open warning. Its writer and its tests
+    # come with slice 4.
+    "VAL-021": ErrorCatalogEntry(
+        code="VAL-021",
+        title="The email's text may repeat its attachment's order",
+        message="DocFlow read both the email's text and its attachment.",
+        action="Open the attachment's document and approve only one of them if they are the same order.",
+        severity="high",
+        audience="tenant",
+    ),
     "AUTH-002": ErrorCatalogEntry(
         code="AUTH-002",
         title="Your account can view this, not change it",
@@ -1011,8 +1048,8 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
     # contact): email-validator refuses special-use domains such as .test.
     "REQ-002": ErrorCatalogEntry(
         code="REQ-002",
-        title="This e-mail address can't receive mail",
-        message="This address can't receive e-mail, so DocFlow didn't save anything.",
+        title="This email address can't receive mail",
+        message="This address can't receive email, so DocFlow didn't save anything.",
         action="Check the part after the @ and try again.",
         severity="info",
         audience="both",
@@ -1979,13 +2016,13 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
     # /messages/inbound/{messageid}/retry; read 2026-10-19).
     "INT-011": ErrorCatalogEntry(
         code="INT-011",
-        title="An e-mail couldn't be received",
+        title="An email couldn't be received",
         message=(
-            "A fault in DocFlow stopped an incoming e-mail from being taken in. Nothing from it"
+            "A fault in DocFlow stopped an incoming email from being taken in. Nothing from it"
             " was saved. Postmark will keep resending it for about 10 hours."
         ),
         action=(
-            "Fix the fault named in this alert. If the resends run out first, the e-mail shows as"
+            "Fix the fault named in this alert. If the resends run out first, the email shows as"
             " Inbound Error on Postmark's Inbound page. Retry it through Postmark's API"
             " (PUT /messages/inbound/{messageid}/retry) once the fix is deployed."
         ),
@@ -1995,6 +2032,21 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         # (Stage 5, M7; D-214). RUNBOOK 2.5 has the call in full.
         severity="warning",
         audience="founder",
+    ),
+    # B1 (D-230; D-245): an email whose text was labelled and made no document.
+    # It is the ignored-mail row's code and carries the label. Written by
+    # slice 4's labelling task; nothing writes it yet. Founder's wording,
+    # final 2026-11-17 (docs/designs/b1.md section 12).
+    "INT-012": ErrorCatalogEntry(
+        code="INT-012",
+        title="No order found in this email",
+        message="DocFlow didn't find an order in this email's text, so no document was made from the text.",
+        action=(
+            "Open it to read the message. If it is an order, ask the sender to send the items "
+            "and quantities in the message or as an attachment."
+        ),
+        severity="info",
+        audience="tenant",
     ),
     # ── LIFE-0xx · tenant lifecycle actions (Section 7.14 / 7.15.4, slice 5.6) ─
     # Founder-audience, like every other Console refusal (CON-0xx, ONB-0xx).

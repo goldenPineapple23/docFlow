@@ -2390,11 +2390,19 @@ here is built.
       failed 3 because a staging Fly worker left running took the suite's
       documents; after stopping it, the worker suite alone passed (348
       passed, 8 skipped) with the six counts +0.
-    - **Slice 2, built, not pushed** (`phase55/b1-s2-html-reader`;
+    - **Slice 2, merged (#107)** (`phase55/b1-s2-html-reader`;
       D-244). A file named `.html` or `.htm` is read as HTML, and the parse
       service sends the model its text, never its markup; an HTML-only `.eml`
       likewise. An HTML file's preview is that same text, shown escaped. Carry
       item 38 is closed by it.
+    - **Slice 3, built, not pushed** (`phase55/b1-s3-label-core`; D-245).
+      Core only: the labelling call for an email's text, the decision on
+      whether it becomes a document, and the forwarded-block detector, with
+      nothing calling them yet. Four new catalog entries: INT-012, VAL-019,
+      VAL-020 and VAL-021. None has a writer in this slice: INT-012's,
+      VAL-019's and VAL-021's writers, VAL-021's acknowledgement at approval
+      and their tests come with slice 4. VAL-020 is never a document
+      warning. The catalog spells it "email" (REQ-002 and INT-011 changed).
   - **What B1 defers past the demo** (founder, 2026-11-03; D-230 item 11):
     - labels on attachments;
     - item 4's rule for attachments (D-230 item 4);

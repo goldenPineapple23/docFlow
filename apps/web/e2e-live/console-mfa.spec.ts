@@ -136,8 +136,8 @@ test("the admin passes a real authenticator challenge, and a refused owner addre
   await page.getByTestId("tenant-create").click();
 
   const box = page.getByTestId("catalog-error");
-  await expect(box.locator("p").first()).toHaveText("Owner email: This e-mail address can't receive mail");
-  await expect(box).toContainText("This address can't receive e-mail, so DocFlow didn't save anything.");
+  await expect(box.locator("p").first()).toHaveText("Owner email: This email address can't receive mail");
+  await expect(box).toContainText("This address can't receive email, so DocFlow didn't save anything.");
   await expect(box).toContainText("Check the part after the @ and try again.");
   await expect(box).not.toContainText("couldn't reach DocFlow");
   await expect(page).toHaveURL(/\/admin\/tenants\/new$/);

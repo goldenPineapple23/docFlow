@@ -13,8 +13,8 @@ import { ReviewApiError, UNEXPECTED, request } from "@/lib/review";
 
 const REQ_002 = {
   code: "REQ-002",
-  title: "This e-mail address can't receive mail",
-  message: "This address can't receive e-mail, so DocFlow didn't save anything.",
+  title: "This email address can't receive mail",
+  message: "This address can't receive email, so DocFlow didn't save anything.",
   action: "Check the part after the @ and try again.",
 };
 
@@ -22,7 +22,7 @@ describe("the catalog error box (D-241)", () => {
   it("puts the refused field's label in front of the title", () => {
     render(<CatalogErrorBox error={{ ...REQ_002, detail: { fields: ["owner_email"] } }} />);
     const box = screen.getByTestId("catalog-error");
-    expect(box.querySelector("p")?.textContent).toBe("Owner email: This e-mail address can't receive mail");
+    expect(box.querySelector("p")?.textContent).toBe("Owner email: This email address can't receive mail");
     expect(box.textContent).toContain(REQ_002.message);
     expect(box.textContent).toContain(REQ_002.action);
   });
@@ -30,7 +30,7 @@ describe("the catalog error box (D-241)", () => {
   it("names every refused field, in the order the API gave", () => {
     render(<CatalogErrorBox error={{ ...REQ_002, detail: { fields: ["owner_email", "contact_email"] } }} />);
     expect(screen.getByTestId("catalog-error").querySelector("p")?.textContent).toBe(
-      "Owner email, Contact email: This e-mail address can't receive mail",
+      "Owner email, Contact email: This email address can't receive mail",
     );
   });
 
