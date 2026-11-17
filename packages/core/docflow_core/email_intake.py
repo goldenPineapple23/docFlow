@@ -626,15 +626,17 @@ def _link_documents_to_email(
     (B1): the review screen shows the e-mail beside the document through it."""
     if not document_ids:
         return
+    # The IDs go as one comma-joined string, as quarantine.py's do: db.py
+    # sends every Python list as jsonb, which Postgres can't cast to uuid[].
     session.execute(
         text(
             "UPDATE documents SET raw_email_id = :raw_email_id, email_part = 'attachment' "
-            "WHERE tenant_id = :tenant_id AND id = ANY(CAST(:ids AS uuid[]))"
+            "WHERE tenant_id = :tenant_id AND id = ANY(CAST(string_to_array(:ids, ',') AS uuid[]))"
         ),
         {
             "raw_email_id": str(raw_email_id),
             "tenant_id": str(tenant_id),
-            "ids": [str(d) for d in document_ids],
+            "ids": ",".join(str(d) for d in document_ids),
         },
     )
 

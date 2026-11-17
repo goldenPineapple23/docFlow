@@ -394,8 +394,8 @@ def test_the_index_leaves_attachments_other_emails_and_unlinked_body_documents_a
             # Deleting both e-mails blanks their documents' links, which leaves
             # four unlinked body documents and still no conflict.
             session.execute(
-                text("DELETE FROM raw_emails WHERE id = ANY(CAST(:ids AS uuid[]))"),
-                {"ids": [str(one), str(two)]},
+                text("DELETE FROM raw_emails WHERE id = ANY(CAST(string_to_array(:ids, ',') AS uuid[]))"),
+                {"ids": f"{one},{two}"},
             )
             assert (
                 session.execute(
