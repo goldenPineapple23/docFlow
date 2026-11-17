@@ -91,6 +91,33 @@ class ParsedEmail:
     message_id: str | None
     headers: list[dict]
     attachments: list[ParsedAttachment] = field(default_factory=list)
+    # The e-mail's own text, as the sender wrote it (B1; D-230). Kept as
+    # strings and never parsed here: this module runs in the web process
+    # (Section 7.11). `date` is the sender's Date line, untrusted text.
+    text_body: str = ""
+    html_body: str = ""
+    date: str | None = None
+
+
+@dataclass(frozen=True)
+class EmailBody:
+    """The part of an e-mail's text DocFlow reads, and the HTML part kept
+    beside it when the e-mail carried both. Bytes exactly as sent, UTF-8."""
+
+    kind: str  # "text" | "html"
+    content: bytes
+    html_also: bytes | None
+
+
+@dataclass(frozen=True)
+class StoredBody:
+    """Where an e-mail's text was stored: what goes on its `raw_emails` row."""
+
+    storage_path: str
+    kind: str
+    sha256: str
+    size: int
+    html_path: str | None
 
 
 @dataclass(frozen=True)
@@ -190,7 +217,69 @@ def parse_postmark_payload(payload: dict) -> ParsedEmail:
         message_id=payload.get("MessageID"),
         headers=headers_raw,
         attachments=attachments,
+        text_body=_body_part(payload, "TextBody"),
+        html_body=_body_part(payload, "HtmlBody"),
+        date=_date_line(payload.get("Date")),
     )
+
+
+# A Date line is a few dozen characters. Anything longer is cut: it is the
+# sender's text and is only ever shown and put inside the document delimiters.
+MAX_DATE_HEADER_CHARS = 200
+
+
+def _date_line(value: object) -> str | None:
+    """The payload's `Date` as one short line, or None. No NUL (Postgres
+    refuses one in text) and no line break."""
+    if not isinstance(value, str):
+        return None
+    line = " ".join(value.replace("\x00", "").split())
+    return line[:MAX_DATE_HEADER_CHARS] or None
+
+
+def _body_part(payload: dict, key: str) -> str:
+    """`TextBody` or `HtmlBody` as a string. Absent or null is no text; any
+    other type is a payload this pipeline can't read."""
+    value = payload.get(key)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise MalformedPayloadError(f"{key} must be text.")
+    return value
+
+
+# The names an e-mail's text is stored under. Only the extension reaches the
+# storage path (storage._safe_extension); the name is what a download shows.
+BODY_FILENAMES = {"text": "E-mail text.txt", "html": "E-mail text.html"}
+
+
+def choose_body(text_body: str, html_body: str) -> EmailBody | None:
+    """
+    Which part is "the body" at the webhook (docs/designs/b1.md 2.1): the text
+    part when it has any non-blank character, otherwise the HTML part. None
+    when both are blank. When both exist the HTML part is kept beside the text
+    part, so the raw e-mail is complete (Section 7.2).
+
+    Nothing is parsed or cleaned here: an HTML part counts as non-blank by
+    its characters, markup included, and is turned into text only in a
+    parse-service job (Section 7.11).
+    """
+    has_text, has_html = bool(text_body.strip()), bool(html_body.strip())
+    if has_text:
+        return EmailBody(
+            kind="text",
+            content=_as_bytes(text_body),
+            html_also=_as_bytes(html_body) if has_html else None,
+        )
+    if has_html:
+        return EmailBody(kind="html", content=_as_bytes(html_body), html_also=None)
+    return None
+
+
+def _as_bytes(value: str) -> bytes:
+    # JSON text can carry a lone surrogate, which strict UTF-8 refuses. It is
+    # stored as "?" rather than failing the whole e-mail.
+    return value.encode("utf-8", errors="replace")
 
 
 def sender_domain_of(email: str) -> str:
@@ -449,6 +538,7 @@ def _insert_raw_email(
     *,
     outcome: str,
     attachment_count: int,
+    body: StoredBody | None = None,
 ) -> UUID:
     raw_email_id = uuid4()
     session.execute(
@@ -457,14 +547,24 @@ def _insert_raw_email(
             INSERT INTO raw_emails
                 (id, tenant_id, message_id, sender_email, sender_domain, subject,
                  spf_result, dkim_result, dmarc_result, raw_headers, attachment_count,
-                 outcome, created_at)
+                 outcome, date_header, body_storage_path, body_kind, body_sha256, body_bytes,
+                 body_html_path, created_at)
             VALUES
                 (:id, :tenant_id, :message_id, :sender_email, :sender_domain, :subject,
                  :spf_result, :dkim_result, :dmarc_result, :raw_headers, :attachment_count,
-                 :outcome, now())
+                 :outcome, :date_header, :body_storage_path, :body_kind, :body_sha256, :body_bytes,
+                 :body_html_path, now())
             """
         ),
         {
+            # `body_state` keeps its default, 'none': nothing waits for a
+            # label. The labelling task is what marks a body 'pending'.
+            "date_header": parsed.date,
+            "body_storage_path": body.storage_path if body else None,
+            "body_kind": body.kind if body else None,
+            "body_sha256": body.sha256 if body else None,
+            "body_bytes": body.size if body else None,
+            "body_html_path": body.html_path if body else None,
             "id": str(raw_email_id),
             "tenant_id": str(tenant_id),
             "message_id": parsed.message_id,
@@ -480,6 +580,65 @@ def _insert_raw_email(
         },
     )
     return raw_email_id
+
+
+def _store_body(session: Session, tenant_id: UUID, parsed: ParsedEmail) -> StoredBody | None:
+    """
+    Store the e-mail's text under the tenant's prefix, as the sender wrote
+    it, and return what goes on its `raw_emails` row (docs/designs/b1.md 2.1).
+    None when the e-mail has no text.
+
+    A part over the size cap every received file has is not stored: it is
+    refused with the existing size code as an ignored-mail row, and the rest
+    of the e-mail is handled as if it had no text. Nothing here opens the
+    text (Section 7.11), and none of it is logged (Section 7.10).
+    """
+    body = choose_body(parsed.text_body, parsed.html_body)
+    if body is None:
+        return None
+    if len(body.content) > file_types.MAX_FILE_SIZE_BYTES:
+        _insert_intake_rejection(
+            session,
+            tenant_id,
+            parsed,
+            original_filename=BODY_FILENAMES[body.kind],
+            detected_type=None,
+            error_code="DOC-002",
+        )
+        return None
+    storage_path = save_file(tenant_id, BODY_FILENAMES[body.kind], body.content)
+    html_path = None
+    if body.html_also is not None and len(body.html_also) <= file_types.MAX_FILE_SIZE_BYTES:
+        html_path = save_file(tenant_id, BODY_FILENAMES["html"], body.html_also)
+    return StoredBody(
+        storage_path=storage_path,
+        kind=body.kind,
+        sha256=hashlib.sha256(body.content).hexdigest(),
+        size=len(body.content),
+        html_path=html_path,
+    )
+
+
+def _link_documents_to_email(
+    session: Session, tenant_id: UUID, raw_email_id: UUID, document_ids: list[UUID]
+) -> None:
+    """Each document an e-mail's attachments made carries the e-mail's row
+    (B1): the review screen shows the e-mail beside the document through it."""
+    if not document_ids:
+        return
+    # The IDs go as one comma-joined string, as quarantine.py's do: db.py
+    # sends every Python list as jsonb, which Postgres can't cast to uuid[].
+    session.execute(
+        text(
+            "UPDATE documents SET raw_email_id = :raw_email_id, email_part = 'attachment' "
+            "WHERE tenant_id = :tenant_id AND id = ANY(CAST(string_to_array(:ids, ',') AS uuid[]))"
+        ),
+        {
+            "raw_email_id": str(raw_email_id),
+            "tenant_id": str(tenant_id),
+            "ids": ",".join(str(d) for d in document_ids),
+        },
+    )
 
 
 def _insert_intake_rejection(
@@ -824,12 +983,19 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
 
         num_attachments = len(parsed.attachments)
 
+        # B1 (D-230): the e-mail's own text is kept from here on, for every
+        # e-mail this address accepts, whatever is decided below. Storing it
+        # changes no decision: an e-mail with text and no attachment is still
+        # INT-001 until the labelling task exists.
+        body = _store_body(session, tenant_id, parsed)
+
         if num_attachments == 0:
             _insert_intake_rejection(
                 session, tenant_id, parsed, original_filename=None, detected_type=None, error_code="INT-001"
             )
             raw_email_id = _insert_raw_email(
-                session, tenant_id, parsed, auth, sender_domain, outcome="rejected", attachment_count=0
+                session, tenant_id, parsed, auth, sender_domain,
+                outcome="rejected", attachment_count=0, body=body,
             )
             return ProcessResult(outcome="rejected", raw_email_id=raw_email_id, attachments=[])
 
@@ -904,6 +1070,13 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
             sender_domain,
             outcome=result_outcome,
             attachment_count=num_attachments,
+            body=body,
+        )
+        _link_documents_to_email(
+            session,
+            tenant_id,
+            raw_email_id,
+            [o.document_id for o in attachment_outcomes if o.document_id is not None],
         )
 
     # Stage 3d: the documents wait as `pending` (interactive lane, the column's

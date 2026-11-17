@@ -845,6 +845,61 @@ changes no row, policy or grant.
   deleted. CI runs reverse and forward on every push
   (`scripts/ci/migration_0040_roundtrip.py`).
 
+### 1.13 Migration 0041: an e-mail's own text (B1's demo half; D-230)
+
+`supabase/migrations/0041_mail_body.sql` adds columns to four tables, and
+changes no existing value, policy or grant:
+
+- `raw_emails`: where the e-mail's text is stored (`body_storage_path`,
+  `body_kind`, `body_sha256`, `body_bytes`, `body_html_path`,
+  `body_text_path`), what was decided about it (`body_state`, `body_label`
+  and the labelling call's other answers), and `date_header`. `outcome`
+  may also be `received`.
+- `documents`: `raw_email_id` and `email_part`, with two indexes: one to
+  find an e-mail's documents, and a partial unique index allowing at most
+  one document made from an e-mail's text
+  (`idx_documents_one_body_per_email`).
+- `intake_rejections`: `raw_email_id` and `mail_label`.
+- `extraction_runs`: `raw_email_id` with one index; `document_id` may be
+  NULL when `raw_email_id` is set; `run_kind` may also be `mail_label`.
+
+It deletes nothing. `body_state` is the one new column with a default
+(`'none'`), a constant, which Postgres records without rewriting the table.
+
+- **The order is the migration first, then the code.** The code that comes
+  with it writes the new `raw_emails` and `documents` columns on every
+  inbound e-mail. Code from before 0041 reads and writes none of them.
+- **CI first:** the commit, the push on the founder's word, and a green PR
+  run come before any staging step. No commit follows the suites.
+- **Staging, in this order. Only step 5 needs a Grant:**
+  1. Claude checks your SQL read-only first: each backup `SELECT` and 1.2's
+     counts are `PREPARE`d, and the DDL is reported as not checkable, with
+     the CI run that covers it.
+  2. You: the standard backup (1.1) of `raw_emails`, `documents`,
+     `intake_rejections` and `extraction_runs` into `backup_0041`, RLS on
+     each, then 1.2's row-count check for all four.
+  3. Claude: the six leftover counts, read-only.
+  4. You: apply 0041 in the SQL Editor. Then Claude reads the four tables'
+     columns, checks, foreign keys and indexes, read-only.
+  5. **Grant: the staging suites** (1.4): no VPN connection, the AC sleep
+     timeout at least 120 minutes, Memurai's PONG and uptime, the dev parse
+     service on 8100 for the API suite (the worker suite starts its own),
+     the UTC clock read, and a worker suite started by 22:30Z. Core, worker
+     and API through the runner; the VPN check again after.
+  6. Claude: the six counts again, read-only, expecting `+0`.
+
+  Then the PR merges. No Fly action: the API is deployed with the rest of
+  B1, under its own Grant.
+- **Going back** is `supabase/reverse/0041_reverse.sql`, run only with the
+  code from before 0041 deployed. It deletes and rewrites no row, so it
+  stops and changes nothing while any `raw_emails` row has the outcome
+  `received`, or any `extraction_runs` row has the kind `mail_label` or no
+  document: a person decides what happens to those rows first. What is lost
+  is where each e-mail's text is stored, how it was labelled, and which
+  e-mail each document came from; the stored text stays in Storage until the
+  tenant is deleted. CI runs reverse and forward on every push
+  (`scripts/ci/migration_0041_roundtrip.py`).
+
 ## 2. Inbound email (Postmark)
 
 The inbound webhook answers two separate questions, and it is worth keeping them
