@@ -95,6 +95,59 @@ def test_every_code_referenced_in_source_exists_in_the_catalog():
     assert not missing, f"codes raised in source but absent from the catalog: {missing}"
 
 
+def test_no_entry_spells_email_with_a_hyphen():
+    """
+    The catalog spells it "email" (founder, 2026-11-17; docs/designs/b1.md
+    section 12; D-245). Checked in every entry's title, message and action,
+    ignoring case, so "E-mail" fails too. Only the catalog: screen text
+    outside it changes with B1's slice 5.
+    """
+    offenders = [
+        f"{entry.code}.{part}"
+        for entry in CATALOG.values()
+        for part, value in (("title", entry.title), ("message", entry.message), ("action", entry.action))
+        if "e-mail" in value.lower()
+    ]
+    assert not offenders, f'catalog text spelling "e-mail": {offenders}'
+
+
+# Matches an optional schema and quoted names: document_warnings,
+# public.document_warnings, "document_warnings", "public"."document_warnings".
+WARNING_INSERT = re.compile(
+    r'INSERT\s+INTO\s+(?:"?\w+"?\s*\.\s*)?"?document_warnings"?(?![\w"])', re.IGNORECASE
+)
+
+
+def test_no_path_that_writes_document_warnings_names_val_020():
+    """
+    VAL-020 is shown in the email panel only and is never a warning row on a
+    document (founder, 2026-11-17; docs/designs/b1.md section 12; D-245).
+
+    Every module that inserts into document_warnings is found by its SQL, so
+    a new writer anywhere in core, the API or the worker is caught here and
+    must be read before this list grows. Today that is validation.py alone,
+    which writes only the codes in _ALL_CODES (its rules) and PARSE_STEP_CODES
+    (the parse step's). B1's slice 4 or 5 adds a database check that no
+    document has a VAL-020 warning.
+    """
+    from docflow_core import validation
+
+    writers = sorted(
+        str(path.relative_to(REPO_ROOT)).replace("\\", "/")
+        for directory in SOURCE_DIRECTORIES
+        for path in directory.rglob("*.py")
+        if WARNING_INSERT.search(path.read_text(encoding="utf-8"))
+    )
+    assert writers == ["packages/core/docflow_core/validation.py"], (
+        f"modules that write document warnings changed: {writers}; "
+        "check each for VAL-020, then update this test"
+    )
+    for writer in writers:
+        assert "VAL-020" not in (REPO_ROOT / writer).read_text(encoding="utf-8"), writer
+    assert "VAL-020" not in validation._ALL_CODES
+    assert "VAL-020" not in validation.PARSE_STEP_CODES
+
+
 def test_unknown_code_is_a_loud_failure_not_a_silent_default():
     with pytest.raises(KeyError):
         get_error("DOC-999")

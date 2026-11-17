@@ -159,6 +159,19 @@ ROUTING_TEXT_CHAR_BUDGET = 3000
 # review threshold (Section 3: confidence threshold default 0.80).
 ROUTING_MIN_CONFIDENCE = 0.80
 
+# ── Labelling an e-mail's own text (B1; D-230 item 4) ───────────────────────
+# The text of an e-mail becomes a document when the labelling call says it
+# holds order lines, or when the call's confidence in that answer is below
+# this. Fail toward review: it is applied to a confidence the model reports
+# about itself, which isn't calibrated, so the value is checked against the
+# demo content's labels once that content exists. Read by one function,
+# `docflow_core.mail_labels.decide_body`, and nowhere else.
+MAIL_LABEL_REVIEW_THRESHOLD = 0.80
+# The labelling call reads at most this many characters of the e-mail's text
+# (about 3,000 tokens). A text that was cut counts as below the threshold:
+# order lines may be past the cut.
+MAIL_LABEL_TEXT_CHAR_BUDGET = 12_000
+
 # ── Billing (slice 5.3, D-113; trial delay D-125) ───────────────────────────
 # Stripe invoices go to the customer with this many days to pay (Net 15).
 # Not named by the build prompt; a founder decision, kept here with the rest.

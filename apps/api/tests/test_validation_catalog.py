@@ -187,7 +187,7 @@ def test_a_test_domain_owner_is_req_002_and_nothing_is_created(client, stripe):
         assert response.status_code == 422, response.text
         detail = response.json()["detail"]
         assert detail["code"] == "REQ-002"
-        assert detail["title"] == "This e-mail address can't receive mail"
+        assert detail["title"] == "This email address can't receive mail"
         assert detail["detail"] == {"fields": ["owner_email"]}
         assert "example.test" not in response.text
         for words in LIBRARY_WORDS:

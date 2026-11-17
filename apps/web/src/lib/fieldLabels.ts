@@ -2,7 +2,7 @@
  * The fields a REQ-001 or REQ-002 answer names (D-241), as the form calls
  * them. The API sends only each field's name, never its value or the
  * library's wording; the page puts the label in front of the catalog title,
- * for example "Owner email: This e-mail address can't receive mail".
+ * for example "Owner email: This email address can't receive mail".
  */
 
 const LABELS: Record<string, string> = {

@@ -1180,6 +1180,17 @@ from it was saved.
 6. **Confirm it arrived:** the order is in the tenant's documents in the
    Console, or a new INT-011 alert says why it wasn't.
 
+### 2.6 An e-mail's own text: the label's constants (B1; D-230 item 4)
+
+An e-mail's text is labelled by one small call to the routing model, and the
+label only decides whether the text becomes a document. Both constants are
+in `packages/core/docflow_core/constants.py`.
+
+| Constant | Value | What it does |
+|---|---|---|
+| `MAIL_LABEL_REVIEW_THRESHOLD` | 0.80 | The text becomes a document when the call says it holds order lines, or when the call's confidence in that answer is below this. A failed call, an answer that doesn't validate, a text that was cut and `injection_suspected` all count as below it. Read by one function, `mail_labels.decide_body`. It is applied to a confidence the model reports about itself, so it is checked against the demo content's labels once that content has run. |
+| `MAIL_LABEL_TEXT_CHAR_BUDGET` | 12,000 | The most characters of an e-mail's text the labelling call reads. A text past it becomes a document. |
+
 ---
 
 ## 3. Onboarding a new tenant — checklist

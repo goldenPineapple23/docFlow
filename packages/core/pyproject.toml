@@ -87,6 +87,9 @@ select = ["E", "F", "I"]
 # golden fixture on any change (CLAUDE.md Section 7.1), so wrapping it is a
 # real edit to review, not a mechanical lint fix.
 "docflow_core/extraction.py" = ["E501"]
+# The same for MAIL_LABEL_SYSTEM_PROMPT (B1; D-230): prose whose bytes are
+# hashed onto every labelling run.
+"docflow_core/mail_labels.py" = ["E501"]
 
 # Type-checked in CI since Phase 5.5 Stage 0 (review H7: CI never ran mypy on
 # core, which had 24 errors).
