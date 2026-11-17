@@ -258,6 +258,20 @@ data can fail another suite's test. This happened on 2026-09-26: the API
 suite's `deal7` case failed while the worker suite was running (DECISIONS.md
 D-160).
 
+**Before every staging suite run** (founder, 2026-11-17): a worker or beat
+machine left started on `docflow-worker-staging` takes the suite's documents
+and can raise alerts and make model calls against them (13 Nov to 17 Nov,
+found in #106's staging run). Read `flyctl machine list -a
+docflow-worker-staging` just before the start: no machine in `started`, or
+the suite does not start. Stop them with `fly scale count worker=0 beat=0
+--app docflow-worker-staging --yes` (9.7), under its own Grant. Start a live
+`flyctl logs -a docflow-worker-staging` capture to a file outside the
+repository first (`--no-tail` holds only 100 lines), and keep it running
+until the suite ends. The worker suite's own check, which counts worker
+starts in the last 60 minutes, does not replace this read. A re-run of one
+suite uses the runner's own command and environment for that suite, run
+serially; the runner itself always starts all three.
+
 **Core, worker and API together, through the runner (D-211; the proof run
 passed on 2026-10-19, D-212 item 6).** Serial runs
 stay allowed and unchanged. From the repository root, in the same
@@ -833,8 +847,10 @@ changes no row, policy or grant.
   5. **Grant: the staging suites** (1.4): no VPN connection, the AC sleep
      timeout at least 120 minutes, Memurai's PONG and uptime, the dev parse
      service on 8100 for the API suite (the worker suite starts its own),
-     the UTC clock read, and a worker suite started by 22:30Z. Core, worker
-     and API through the runner; the VPN check again after.
+     the UTC clock read, a worker suite started by 22:30Z, and the 1.4
+     "Before every staging suite run" checks, read just before the start;
+     the machine list and the end of the capture are read again after. Core,
+     worker and API through the runner; the VPN check again after.
   6. Claude: the six counts again, read-only, expecting `+0`.
 
   Then the PR merges. No Fly action: the parse service and the worker are
@@ -884,8 +900,10 @@ It deletes nothing. `body_state` is the one new column with a default
   5. **Grant: the staging suites** (1.4): no VPN connection, the AC sleep
      timeout at least 120 minutes, Memurai's PONG and uptime, the dev parse
      service on 8100 for the API suite (the worker suite starts its own),
-     the UTC clock read, and a worker suite started by 22:30Z. Core, worker
-     and API through the runner; the VPN check again after.
+     the UTC clock read, a worker suite started by 22:30Z, and the 1.4
+     "Before every staging suite run" checks, read just before the start;
+     the machine list and the end of the capture are read again after. Core,
+     worker and API through the runner; the VPN check again after.
   6. Claude: the six counts again, read-only, expecting `+0`.
 
   Then the PR merges. No Fly action: the API is deployed with the rest of

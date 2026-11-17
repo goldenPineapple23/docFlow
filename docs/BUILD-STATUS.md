@@ -1993,6 +1993,11 @@ here is built.
 
 ## Known open items (across phases)
 
+- **Parked (founder, 2026-11-17):** one PR makes seed scripts and suites refuse an unsafe target:
+  the "refuse non-local host" check (2026-11-13), plus the worker suite refusing to start if any
+  worker heartbeat on the target database is fresh. Until then, RUNBOOK 1.4's "Before every staging
+  suite run" read covers it. Not in B1's slices.
+
 - **For a later CI PR (founder, 2026-11-03; D-232 item 18):** the port printout's runner image
   line is `$ImageVersion`, which can differ from "Set up job"'s Runner Image in the same job
   (#515). Its "Containers publishing" line covers the whole block since D-243.
@@ -2374,19 +2379,17 @@ here is built.
     (main.py:134-143). Fix the wording before the first pilot; step h's
     monitoring covers error tracking (founder, 2026-11-02).
   - **B1's demo half is being built in six slices** (founder's go,
-    2026-11-16). Slice 1 is pushed for review; slices 2 to 6 are on local
-    branches. The design, `docs/designs/b1.md`, comes in on slice 1's
-    branch and has one copy: later edits go into the slice branch that
+    2026-11-16). Slice 1 is merged (#106). Slices 2 to 6 are on their own
+    branches and go up for review in order; each slice's own bullet says
+    where it stands. The design, `docs/designs/b1.md`, comes in on slice
+    1's branch and has one copy: later edits go into the slice branch that
     needs them, and `phase55/b1-design` is frozen at `31767bd` (founder,
     2026-11-17).
-    - **Slice 1, pushed for review** (`phase55/b1-s1-store-body`):
-      migration 0041 with its reverse and CI round trip (RUNBOOK 1.13),
-      with a partial unique index allowing one document made from an
-      e-mail's text; the webhook reads the e-mail's text and stores it as
-      sent; each attachment's document carries its e-mail. No decision
-      changes: text with no attachment is still INT-001. **0041 is not
-      applied to staging.** The tests against a database first run in CI
-      on this branch.
+    - Slice 1 merged as #106 (a86a0d0), 2026-11-17. 0041 applied to
+      staging the same day. Staging suites: core and API passed; worker
+      failed 3 because a staging Fly worker left running took the suite's
+      documents; after stopping it, the worker suite alone passed (348
+      passed, 8 skipped) with the six counts +0.
     - **Slice 2, built, not pushed** (`phase55/b1-s2-html-reader`;
       D-244). A file named `.html` or `.htm` is read as HTML, and the parse
       service sends the model its text, never its markup; an HTML-only `.eml`
