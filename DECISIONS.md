@@ -6659,3 +6659,17 @@ D-240 item 9's PR, built from `main` at `c0db23a` (#102's merge), and rebased on
 **Founder approval:** 2026-11-16 (move the stack to 25320 to 25329; remove the five reservation steps; keep the after-failure printout pointed at the new block; update every mention in scripts and docs).
 
 **Related:** D-199 item 10, D-214 item 13, D-218, D-229 item 7, D-231, D-232 item 18, D-241; `supabase/config.toml`, `.github/workflows/ci.yml`, `.github/workflows/catalog-sizing.yml`, `scripts/ci/show_stack_ports.sh`, `scripts/ci/check_skips.py`.
+
+## D-244 — B1 slice 2: an HTML file is read as its text, and D-233 item 5's test changes for it (founder, 2026-11-16)
+
+**Context:** raw HTML reached extraction (carry item 38): every text-like file was detected as TXT, and an HTML-only `.eml` sent its markup. D-235 item 13 rules that no raw markup reaches extraction on any path.
+
+1. A file named `.html` or `.htm` is detected as HTML. The parse service turns its markup into plain text before anything reads it (`html_text.py`; the rules are in `docs/designs/b1.md` section 3). Text hidden by a style is kept.
+2. **D-233 item 5's test changes.** It held that no file the detector reads as text ever gets a preview. An HTML file now gets one. The preview is the reader's plain text, the same text the model read, so the viewer's first rule still shows what the model read. TXT, CSV and MD are unchanged.
+3. **The founder's two conditions (2026-11-16):** the HTML preview is always escaped plain text, never rendered, with tests using a `<script>` body in parse, the worker and the web app; and this entry records the change.
+4. Accepted as built: a catalog import of an `.html` file is refused as IMP-001; text with no tag in an `.html` file is kept unchanged; an `.html` document stored before this shows the download panel.
+5. The parity baseline is re-recorded for `po.html` only.
+
+**Founder approval:** 2026-11-16 (slice 2 accepted with the two conditions in item 3; this entry approved as drafted).
+
+**Related:** D-228 item 5, D-230, D-233 item 5, D-235 item 13; `docs/designs/b1.md`.

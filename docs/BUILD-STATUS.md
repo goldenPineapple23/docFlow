@@ -2387,6 +2387,11 @@ here is built.
       changes: text with no attachment is still INT-001. **0041 is not
       applied to staging.** The tests against a database first run in CI
       on this branch.
+    - **Slice 2, built, not pushed** (`phase55/b1-s2-html-reader`;
+      D-244). A file named `.html` or `.htm` is read as HTML, and the parse
+      service sends the model its text, never its markup; an HTML-only `.eml`
+      likewise. An HTML file's preview is that same text, shown escaped. Carry
+      item 38 is closed by it.
   - **What B1 defers past the demo** (founder, 2026-11-03; D-230 item 11):
     - labels on attachments;
     - item 4's rule for attachments (D-230 item 4);
