@@ -19,7 +19,6 @@
 --        body_contains_order_lines, body_order_lines_confidence,
 --        body_injection_suspected, body_labelled_at: the labelling call's
 --        answer.
---      - body_document_id: the document made from the text, if one was.
 --      - date_header: the e-mail's Date line as the sender's system wrote
 --        it. Untrusted text.
 --      - outcome gains 'received': an e-mail with text and no attachment,
@@ -28,6 +27,11 @@
 --   2. documents: raw_email_id (the e-mail a document came from) with an
 --      index, and email_part ('attachment' | 'body'). Both NULL for an
 --      upload and for every existing row.
+--      - A partial unique index: at most one body document per e-mail, so
+--        the labelling task and the stuck sweep can never both make one.
+--        The document made from an e-mail's text is the one row with that
+--        raw_email_id and email_part 'body'; nothing on raw_emails points
+--        back at it (founder, 2026-11-17).
 --
 --   3. intake_rejections: raw_email_id and mail_label (the same six words).
 --
@@ -75,8 +79,6 @@ alter table public.raw_emails
         check (body_order_lines_confidence is null or body_order_lines_confidence between 0 and 1),
     add column body_injection_suspected boolean,
     add column body_labelled_at timestamptz,
-    add column body_document_id uuid
-        constraint raw_emails_body_document_id_fkey references public.documents(id) on delete set null,
     add column date_header text,
     add constraint raw_emails_body_stored_together check (
         (body_storage_path is null) = (body_kind is null)
@@ -96,6 +98,9 @@ alter table public.documents
         constraint documents_email_part_check check (email_part in ('attachment', 'body'));
 
 create index idx_documents_raw_email on public.documents(raw_email_id) where raw_email_id is not null;
+
+create unique index idx_documents_one_body_per_email
+    on public.documents(raw_email_id) where email_part = 'body';
 
 alter table public.intake_rejections
     add column raw_email_id uuid

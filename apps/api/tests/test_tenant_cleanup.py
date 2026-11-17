@@ -183,14 +183,7 @@ def test_the_purge_order_agrees_with_every_foreign_key_in_the_live_schema():
         ).all()
     assert sorted(order) == sorted(tables), "every table with a tenant_id is purged, once"
     position = {table: i for i, table in enumerate(order)}
-    # A link that closes a loop is left out by name, and must still exist
-    # (tenant_cleanup._LOOP_LINKS; migration 0041).
-    assert tenant_cleanup._LOOP_LINKS <= {name for _child, _parent, name in links}
-    between = [
-        link
-        for link in links
-        if link[0] in position and link[1] in position and link[2] not in tenant_cleanup._LOOP_LINKS
-    ]
+    between = [link for link in links if link[0] in position and link[1] in position]
     assert between, "no links found -- the query is broken, not the order"
     wrong = [
         f"{child} -> {parent} ({name})"

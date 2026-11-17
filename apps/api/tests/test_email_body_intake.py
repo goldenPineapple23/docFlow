@@ -56,7 +56,7 @@ def _raw_email(tenant) -> dict:
                     "SELECT id, outcome, date_header, body_storage_path, body_kind, body_sha256, body_bytes, "
                     "body_html_path, body_text_path, body_state, body_label, body_label_confidence, "
                     "body_contains_order_lines, body_order_lines_confidence, body_injection_suspected, "
-                    "body_labelled_at, body_document_id FROM raw_emails WHERE tenant_id = :t"
+                    "body_labelled_at FROM raw_emails WHERE tenant_id = :t"
                 ),
                 {"t": str(tenant.tenant_id)},
             )
@@ -124,7 +124,6 @@ def test_a_text_body_beside_an_attachment_is_stored_and_the_document_carries_its
             "body_order_lines_confidence",
             "body_injection_suspected",
             "body_labelled_at",
-            "body_document_id",
         ):
             assert raw[column] is None, column
 
@@ -297,21 +296,17 @@ def test_a_label_run_needs_no_document_and_goes_with_its_email():
         with platform_session() as session:
             raw_email_id = _insert_email(session, tenant.tenant_id)
             document_id = _insert_document(session, tenant.tenant_id, raw_email_id, "body")
-            session.execute(
-                text("UPDATE raw_emails SET body_document_id = :d WHERE id = :e"),
-                {"d": str(document_id), "e": str(raw_email_id)},
-            )
             run_id = _insert_run(session, tenant.tenant_id, raw_email_id=raw_email_id)
 
         with platform_session() as session:
             # The document goes first, as in the tenant's hard delete: the
-            # e-mail stays and no longer names it.
+            # e-mail and its label run stay.
             session.execute(text("DELETE FROM documents WHERE id = :d"), {"d": str(document_id)})
             assert (
                 session.execute(
-                    text("SELECT body_document_id FROM raw_emails WHERE id = :e"), {"e": str(raw_email_id)}
+                    text("SELECT count(*) FROM raw_emails WHERE id = :e"), {"e": str(raw_email_id)}
                 ).scalar_one()
-                is None
+                == 1
             )
             assert (
                 session.execute(
@@ -326,6 +321,91 @@ def test_a_label_run_needs_no_document_and_goes_with_its_email():
                     text("SELECT count(*) FROM extraction_runs WHERE id = :r"), {"r": str(run_id)}
                 ).scalar_one()
                 == 0
+            )
+
+
+def _body_documents(session, raw_email_id: UUID) -> int:
+    return session.execute(
+        text("SELECT count(*) FROM documents WHERE raw_email_id = :e AND email_part = 'body'"),
+        {"e": str(raw_email_id)},
+    ).scalar_one()
+
+
+def test_a_second_body_document_for_the_same_email_is_refused():
+    """Decision 5 (founder, 2026-11-17): the partial unique index allows at
+    most one document made from an e-mail's text."""
+    with _TestIntakeTenant("Acme Test Distributor") as tenant:
+        with platform_session() as session:
+            raw_email_id = _insert_email(session, tenant.tenant_id)
+            _insert_document(session, tenant.tenant_id, raw_email_id, "body")
+        with (
+            pytest.raises(IntegrityError, match="idx_documents_one_body_per_email"),
+            platform_session() as session,
+        ):
+            _insert_document(session, tenant.tenant_id, raw_email_id, "body")
+        with platform_session() as session:
+            assert _body_documents(session, raw_email_id) == 1
+
+
+def test_the_slice_4_insert_with_on_conflict_do_nothing_leaves_one_body_document_and_raises_nothing():
+    """The recipe slice 4's labelling task and the stuck sweep both use
+    (founder, 2026-11-17): ON CONFLICT (raw_email_id) WHERE email_part =
+    'body' DO NOTHING, then read the existing row. Proved here against the
+    real index: if the conflict target didn't match it, Postgres would refuse
+    the statement ("no unique or exclusion constraint matching")."""
+    with _TestIntakeTenant("Acme Test Distributor") as tenant:
+        with platform_session() as session:
+            raw_email_id = _insert_email(session, tenant.tenant_id)
+            first = _insert_document(session, tenant.tenant_id, raw_email_id, "body")
+        with platform_session() as session:
+            inserted = session.execute(
+                text(
+                    "INSERT INTO documents (id, tenant_id, original_filename, storage_path, source, status, "
+                    "content_sha256, raw_email_id, email_part) VALUES (:id, :t, 'seed.txt', "
+                    "'tenants/seed/seed.txt', 'email', 'pending', :sha, :e, 'body') "
+                    "ON CONFLICT (raw_email_id) WHERE email_part = 'body' DO NOTHING RETURNING id"
+                ),
+                {"id": str(uuid4()), "t": str(tenant.tenant_id), "sha": uuid4().hex, "e": str(raw_email_id)},
+            ).first()
+            assert inserted is None
+            existing = session.execute(
+                text("SELECT id FROM documents WHERE raw_email_id = :e AND email_part = 'body'"),
+                {"e": str(raw_email_id)},
+            ).scalar_one()
+        assert UUID(str(existing)) == first
+
+
+def test_the_index_leaves_attachments_other_emails_and_unlinked_body_documents_alone():
+    with _TestIntakeTenant("Acme Test Distributor") as tenant:
+        with platform_session() as session:
+            one, two = _insert_email(session, tenant.tenant_id), _insert_email(session, tenant.tenant_id)
+            # Several attachments' documents on one e-mail, beside its body document.
+            _insert_document(session, tenant.tenant_id, one, "attachment")
+            _insert_document(session, tenant.tenant_id, one, "attachment")
+            _insert_document(session, tenant.tenant_id, one, "body")
+            # A body document on another e-mail.
+            _insert_document(session, tenant.tenant_id, two, "body")
+            # Body documents whose e-mail is gone (raw_email_id NULL) are not
+            # one e-mail's: NULLs never conflict.
+            _insert_document(session, tenant.tenant_id, None, "body")
+            _insert_document(session, tenant.tenant_id, None, "body")
+            assert (_body_documents(session, one), _body_documents(session, two)) == (1, 1)
+        with platform_session() as session:
+            # Deleting both e-mails blanks their documents' links, which leaves
+            # four unlinked body documents and still no conflict.
+            session.execute(
+                text("DELETE FROM raw_emails WHERE id = ANY(CAST(:ids AS uuid[]))"),
+                {"ids": [str(one), str(two)]},
+            )
+            assert (
+                session.execute(
+                    text(
+                        "SELECT count(*) FROM documents WHERE tenant_id = :t AND raw_email_id IS NULL "
+                        "AND email_part = 'body'"
+                    ),
+                    {"t": str(tenant.tenant_id)},
+                ).scalar_one()
+                == 4
             )
 
 

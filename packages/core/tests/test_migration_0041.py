@@ -52,9 +52,11 @@ def roundtrip():
 
 def test_0041_touches_only_its_four_tables_and_adds_or_loosens_only():
     statements = _statements(MIGRATION)
-    assert len(statements) == 11
+    assert len(statements) == 12
     for statement in statements:
-        assert statement.startswith(("alter table public.", "create index ")), statement
+        assert statement.startswith(("alter table public.", "create index ", "create unique index ")), (
+            statement
+        )
         table = re.search(r"public\.(\w+)", statement)
         assert table and table.group(1) in ("raw_emails", "documents", "intake_rejections", "extraction_runs")
         for word in (
@@ -108,12 +110,27 @@ def test_every_new_foreign_key_lets_the_tenants_hard_delete_through():
     text = " ".join(_statements(MIGRATION))
     references = re.findall(r"references public\.(\w+)\(id\) on delete (set null|cascade)", text)
     assert references == [
-        ("documents", "set null"),
         ("raw_emails", "set null"),
         ("raw_emails", "set null"),
         ("raw_emails", "cascade"),
     ]
-    assert text.count("references ") == 4
+    assert text.count("references ") == 3
+    # Nothing on raw_emails points back at a document (founder, 2026-11-17):
+    # the e-mail's body document is found through documents.raw_email_id.
+    assert "references public.documents" not in text and "body_document_id" not in text
+
+
+def test_at_most_one_body_document_per_email_is_a_partial_unique_index():
+    """Decision 5 (founder, 2026-11-17): unique on raw_email_id among the
+    body documents only, so an e-mail's attachments are unaffected and the
+    insert in slice 4 can name it: ON CONFLICT (raw_email_id) WHERE
+    email_part = 'body' DO NOTHING."""
+    statements = _statements(MIGRATION)
+    assert (
+        "create unique index idx_documents_one_body_per_email on public.documents(raw_email_id) "
+        "where email_part = 'body'"
+    ) in statements
+    assert sum(s.startswith("create unique index") for s in statements) == 1
 
 
 def test_the_six_labels_are_the_same_wherever_0041_lists_them():
@@ -138,6 +155,7 @@ def test_the_reverse_removes_what_0041_adds_and_deletes_or_rewrites_no_row():
         "check (run_kind in ('extraction', 'buyer_routing'))"
     ) in statements
     assert "drop index public.idx_documents_raw_email" in statements
+    assert "drop index public.idx_documents_one_body_per_email" in statements
     assert "drop index public.idx_extraction_runs_raw_email" in statements
     assert "'received'" not in text and "'mail_label'" not in text
 
@@ -147,7 +165,7 @@ def test_the_round_trip_expects_what_the_migration_declares(roundtrip):
     reverse = " ".join(_statements(REVERSE))
     added = re.findall(r"add column (\w+)", forward)
     assert [column for _table, column in roundtrip.EXPECTED_COLUMNS] == added
-    assert len(added) == 20
+    assert len(added) == 19
     for _table, column in roundtrip.EXPECTED_COLUMNS:
         assert f"drop column {column}" in reverse, column
     for name in (*roundtrip.EXPECTED_CHECKS, *roundtrip.CHANGED_CHECKS, *roundtrip.EXPECTED_FOREIGN_KEYS):
@@ -155,9 +173,12 @@ def test_the_round_trip_expects_what_the_migration_declares(roundtrip):
     assert len(re.findall(r"constraint \w+ (?:check|references)", forward)) == (
         len(roundtrip.EXPECTED_CHECKS) + len(roundtrip.CHANGED_CHECKS) + len(roundtrip.EXPECTED_FOREIGN_KEYS)
     )
-    for name in roundtrip.EXPECTED_INDEXES:
-        assert f"create index {name} on " in forward and f"drop index public.{name}" in reverse
-    assert forward.count("create index") == len(roundtrip.EXPECTED_INDEXES)
+    for name, (_table, _columns, _predicate, unique) in roundtrip.EXPECTED_INDEXES.items():
+        create = "create unique index" if unique else "create index"
+        assert f"{create} {name} on " in forward and f"drop index public.{name}" in reverse
+    assert forward.count("create index") + forward.count("create unique index") == len(
+        roundtrip.EXPECTED_INDEXES
+    )
     assert set(roundtrip.TABLES) == {table for table, _column in roundtrip.EXPECTED_COLUMNS}
 
 
@@ -200,10 +221,10 @@ def _forward(roundtrip) -> dict:
             "columns": ["id"],
         },
     }
-    for name, (table, index_columns, predicate) in roundtrip.EXPECTED_INDEXES.items():
+    for name, (table, index_columns, predicate, unique) in roundtrip.EXPECTED_INDEXES.items():
         indexes[name] = {
             "table": table,
-            "unique": False,
+            "unique": unique,
             "method": "btree",
             "predicate": f"({predicate})",
             "columns": index_columns,
@@ -341,6 +362,20 @@ def _set_column(state, table, name, **changes):
             "forward: index idx_extraction_runs_raw_email reads",
         ),
         (
+            lambda s: s["indexes"]["idx_documents_one_body_per_email"].update(unique=False),
+            "forward: index idx_documents_one_body_per_email reads",
+        ),
+        (
+            lambda s: s["indexes"]["idx_documents_one_body_per_email"].update(
+                predicate="(raw_email_id IS NOT NULL)"
+            ),
+            "forward: index idx_documents_one_body_per_email reads",
+        ),
+        (
+            lambda s: s["indexes"]["idx_documents_raw_email"].update(unique=True),
+            "forward: index idx_documents_raw_email reads",
+        ),
+        (
             lambda s: _set_column(s, "extraction_runs", "document_id", is_nullable="NO"),
             "forward: extraction_runs.document_id must be nullable",
         ),
@@ -356,6 +391,9 @@ def _set_column(state, table, name, **changes):
         "foreign key missing",
         "index missing",
         "index not partial",
+        "body index not unique",
+        "body index over every e-mail document",
+        "lookup index made unique",
         "document_id still required",
     ],
 )
@@ -398,6 +436,12 @@ def test_a_forward_state_that_is_not_what_0041_declares_fails(roundtrip, capsys,
             "reverse: index idx_documents_raw_email is still there",
         ),
         (
+            lambda r, f: r["indexes"].update(
+                {"idx_documents_one_body_per_email": f["indexes"]["idx_documents_one_body_per_email"]}
+            ),
+            "reverse: index idx_documents_one_body_per_email is still there",
+        ),
+        (
             lambda r, f: r["checks"].update(
                 {"raw_emails.raw_emails_outcome_check": f["checks"]["raw_emails.raw_emails_outcome_check"]}
             ),
@@ -417,6 +461,7 @@ def test_a_forward_state_that_is_not_what_0041_declares_fails(roundtrip, capsys,
         "check left",
         "foreign key left",
         "index left",
+        "body index left",
         "value list still wide",
         "value list gone",
         "document_id still nullable",

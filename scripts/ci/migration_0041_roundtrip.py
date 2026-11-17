@@ -63,7 +63,6 @@ EXPECTED_COLUMNS: dict[tuple[str, str], tuple[str, str, str, str | None]] = {
     ("raw_emails", "body_order_lines_confidence"): _CONFIDENCE,
     ("raw_emails", "body_injection_suspected"): _BOOL,
     ("raw_emails", "body_labelled_at"): ("timestamp with time zone", "timestamptz", "YES", None),
-    ("raw_emails", "body_document_id"): _UUID,
     ("raw_emails", "date_header"): _TEXT,
     ("documents", "raw_email_id"): _UUID,
     ("documents", "email_part"): _TEXT,
@@ -104,16 +103,17 @@ CHANGED_CHECKS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 # Each foreign key 0041 adds: (table, the column, the table it points at, what
 # a delete of that row does).
 EXPECTED_FOREIGN_KEYS: dict[str, tuple[str, str, str, str]] = {
-    "raw_emails_body_document_id_fkey": ("raw_emails", "body_document_id", "documents", "SET NULL"),
     "documents_raw_email_id_fkey": ("documents", "raw_email_id", "raw_emails", "SET NULL"),
     "intake_rejections_raw_email_id_fkey": ("intake_rejections", "raw_email_id", "raw_emails", "SET NULL"),
     "extraction_runs_raw_email_id_fkey": ("extraction_runs", "raw_email_id", "raw_emails", "CASCADE"),
 }
 
-# Each index 0041 adds: (table, columns, predicate words).
-EXPECTED_INDEXES: dict[str, tuple[str, list[str], str]] = {
-    "idx_documents_raw_email": ("documents", ["raw_email_id"], "raw_email_id IS NOT NULL"),
-    "idx_extraction_runs_raw_email": ("extraction_runs", ["raw_email_id"], "raw_email_id IS NOT NULL"),
+# Each index 0041 adds: (table, columns, predicate words, unique).
+EXPECTED_INDEXES: dict[str, tuple[str, list[str], str, bool]] = {
+    "idx_documents_raw_email": ("documents", ["raw_email_id"], "raw_email_id IS NOT NULL", False),
+    # At most one body document per e-mail (founder, 2026-11-17).
+    "idx_documents_one_body_per_email": ("documents", ["raw_email_id"], "email_part = 'body'", True),
+    "idx_extraction_runs_raw_email": ("extraction_runs", ["raw_email_id"], "raw_email_id IS NOT NULL", False),
 }
 
 # The one existing column 0041 changes: nullable after it, NOT NULL before.
@@ -233,14 +233,14 @@ def check_forward(state: dict[str, Any]) -> list[str]:
             problems.append(f"forward: foreign key {name} is missing")
         elif found["table"] != table or any(word not in found["definition"] for word in wanted):
             problems.append(f"forward: foreign key {name} on {found['table']} reads {found['definition']!r}")
-    for name, (table, index_columns, predicate) in EXPECTED_INDEXES.items():
+    for name, (table, index_columns, predicate, unique) in EXPECTED_INDEXES.items():
         index = state["indexes"].get(name)
         if index is None:
             problems.append(f"forward: index {name} is missing")
         elif (
             index["table"] != table
             or index["columns"] != index_columns
-            or index["unique"]
+            or index["unique"] is not unique
             or predicate not in (index["predicate"] or "")
         ):
             problems.append(f"forward: index {name} reads {index!r}")

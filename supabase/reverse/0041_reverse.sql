@@ -2,11 +2,12 @@
 -- D-230; docs/designs/b1.md section 4).
 --
 -- Puts the database back as 0040 left it: none of 0041's columns on
--- raw_emails, documents, intake_rejections and extraction_runs, neither of
--- its indexes, and the two value lists as they were.
+-- raw_emails, documents, intake_rejections and extraction_runs, none of
+-- its three indexes, and the two value lists as they were.
 --
 -- What is lost: for every e-mail, where its text is stored and how it was
--- labelled; for every document, which e-mail it came from. The stored text
+-- labelled; for every document, which e-mail it came from and whether it
+-- was made from the e-mail's text. The stored text
 -- itself stays in Storage under the tenant's prefix until the tenant is
 -- deleted; nothing here touches Storage.
 --
@@ -35,6 +36,7 @@ alter table public.extraction_runs alter column document_id set not null;
 alter table public.intake_rejections drop column mail_label;
 alter table public.intake_rejections drop column raw_email_id;
 
+drop index public.idx_documents_one_body_per_email;
 drop index public.idx_documents_raw_email;
 alter table public.documents drop column email_part;
 alter table public.documents drop column raw_email_id;
@@ -45,7 +47,6 @@ alter table public.raw_emails
 alter table public.raw_emails drop constraint raw_emails_body_stored_together;
 alter table public.raw_emails
     drop column date_header,
-    drop column body_document_id,
     drop column body_labelled_at,
     drop column body_injection_suspected,
     drop column body_order_lines_confidence,

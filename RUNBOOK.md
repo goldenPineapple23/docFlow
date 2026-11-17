@@ -853,9 +853,12 @@ changes no existing value, policy or grant:
 - `raw_emails`: where the e-mail's text is stored (`body_storage_path`,
   `body_kind`, `body_sha256`, `body_bytes`, `body_html_path`,
   `body_text_path`), what was decided about it (`body_state`, `body_label`
-  and the labelling call's other answers, `body_document_id`), and
-  `date_header`. `outcome` may also be `received`.
-- `documents`: `raw_email_id` and `email_part`, with one index.
+  and the labelling call's other answers), and `date_header`. `outcome`
+  may also be `received`.
+- `documents`: `raw_email_id` and `email_part`, with two indexes: one to
+  find an e-mail's documents, and a partial unique index allowing at most
+  one document made from an e-mail's text
+  (`idx_documents_one_body_per_email`).
 - `intake_rejections`: `raw_email_id` and `mail_label`.
 - `extraction_runs`: `raw_email_id` with one index; `document_id` may be
   NULL when `raw_email_id` is set; `run_kind` may also be `mail_label`.
