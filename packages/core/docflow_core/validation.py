@@ -181,7 +181,17 @@ CODE_PIPELINE_STEP_FAILED = "VAL-016"
 # here: what an .eml or .msg unwrap couldn't read (D-207, PR 1b-ii).
 CODE_ATTACHMENT_UNREAD = "VAL-017"
 CODE_BODY_UNREAD = "VAL-018"
-PARSE_STEP_CODES: frozenset[str] = frozenset({CODE_ATTACHMENT_UNREAD, CODE_BODY_UNREAD})
+# B1 (D-246): a text document whose text holds a forwarded or quoted block
+# (`mail_labels.has_forwarded_block`), found by the parse step from the text
+# it read -- a re-run of validation can't recompute it, so it is written once
+# with the extraction and left alone after (founder, 2026-11-18, gap 4).
+CODE_FORWARDED_MESSAGE = "VAL-019"
+PARSE_STEP_CODES: frozenset[str] = frozenset(
+    {CODE_ATTACHMENT_UNREAD, CODE_BODY_UNREAD, CODE_FORWARDED_MESSAGE}
+)
+# B1 (D-246): on a text document when one of its email's attachments is a
+# document too. Only the text document carries it.
+CODE_TEXT_BESIDE_ATTACHMENT = "VAL-021"
 
 # The document number fields, as a field name and where it lives.
 NUMERIC_HEADER_FIELDS = ("order_total",)
@@ -536,6 +546,9 @@ class DocumentSnapshot:
     # Post-processing steps that didn't finish (documents.pipeline_issues,
     # H1/D-158): "buyer_identification", "matching", "duplicate_detection".
     pipeline_issues: tuple[str, ...] = ()
+    # B1: a document made from an email's text one of whose attachments is a
+    # (live) document too (VAL-021).
+    text_beside_attachment: bool = False
 
 
 # ── The whole-document evaluation (pure) ────────────────────────────────────
@@ -710,6 +723,18 @@ def _document_warnings(snapshot: DocumentSnapshot) -> list[DocumentWarning]:
                 code=CODE_POSSIBLE_CHANGE_ORDER,
                 severity=_catalog_severity(CODE_POSSIBLE_CHANGE_ORDER),
                 detail={"change_order_of_document_id": str(snapshot.change_order_of_document_id)},
+            )
+        )
+
+    # B1 (D-246): the email's text and its attachment may be one order read
+    # twice. VAL-013 is never raised between the two (duplicates.py); this is.
+    if snapshot.text_beside_attachment:
+        warnings.append(
+            DocumentWarning(
+                code=CODE_TEXT_BESIDE_ATTACHMENT,
+                severity=_catalog_severity(CODE_TEXT_BESIDE_ATTACHMENT),
+                # `part`: a key the review screen never shows (WarningsPanel).
+                detail={"part": "email_text"},
             )
         )
 
@@ -909,7 +934,12 @@ def load_snapshot(session: Session, document_id: UUID) -> DocumentSnapshot | Non
                    d.is_possible_change_order, d.change_order_of_document_id,
                    h.po_number, h.order_date, h.requested_delivery_date, h.buyer_name,
                    h.buyer_contact_email, h.ship_to_address, h.payment_terms,
-                   h.order_total, h.currency, h.notes, h.header_confidence, h.currency_inferred
+                   h.order_total, h.currency, h.notes, h.header_confidence, h.currency_inferred,
+                   (d.email_part = 'body' AND EXISTS (
+                        SELECT 1 FROM documents a
+                         WHERE a.raw_email_id = d.raw_email_id AND a.email_part = 'attachment'
+                           AND a.deleted_at IS NULL
+                   )) AS text_beside_attachment
             FROM documents d
             LEFT JOIN document_headers h
                    ON h.document_id = d.id AND h.deleted_at IS NULL
@@ -986,6 +1016,7 @@ def load_snapshot(session: Session, document_id: UUID) -> DocumentSnapshot | Non
         ),
         unreadable_numbers=_unreadable_numbers(row, line_rows),
         pipeline_issues=tuple(str(step) for step in (_json_value(row["pipeline_issues"]) or [])),
+        text_beside_attachment=bool(row["text_beside_attachment"]),
     )
 
 
@@ -1159,6 +1190,9 @@ def parse_step_warnings(lost: list[dict[str, Any]]) -> list[DocumentWarning]:
         if item["code"] == CODE_ATTACHMENT_UNREAD:
             position += 1
             detail = {"filename": item["filename"], "position": str(position)}
+        elif item["code"] == CODE_FORWARDED_MESSAGE:
+            # One per document (b1.md question 10), found in the email's text.
+            detail = {"part": "email_text"}
         else:
             detail = {"part": "body"}
         warnings.append(
@@ -1297,6 +1331,7 @@ _ALL_CODES = (
     CODE_UNREADABLE_NUMBER,
     CODE_UNUSUAL_PRECISION,
     CODE_PIPELINE_STEP_FAILED,
+    CODE_TEXT_BESIDE_ATTACHMENT,
 )
 for _code in (*_ALL_CODES, *PARSE_STEP_CODES):
     get_error(_code)

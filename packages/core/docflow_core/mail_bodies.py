@@ -64,6 +64,7 @@ from docflow_core.mail_labels import (
     label_content,
     label_mail_body,
     mail_label_input_cost,
+    mail_text,
     needs_ignored_mail_row,
 )
 
@@ -109,6 +110,63 @@ def choose_read_text(text_part: str | None, html_part: str | None) -> tuple[str,
     if 2 * visible_characters(text_part) < visible_characters(html_part):
         return "html", html_part
     return "text", text_part
+
+
+def parsed_text(parts: list[dict[str, Any]]) -> str:
+    """One stored part's text from the parse service's answer, as the
+    labelling task and the parse step both read it."""
+    return "\n\n".join(part["text"] for part in parts if part.get("type") == "text")
+
+
+def needs_read_choice(email: EmailText, storage_path: str) -> bool:
+    """
+    Whether the parse step must still choose which part a text document
+    reads (founder, 2026-11-18, answer 2): the document is the email's text
+    part, the email also has an HTML part, and no labelling task read the
+    text (a held text document, the stuck sweep's, an unreadable one). A task
+    that read it already chose, and its document is the part it chose.
+    """
+    return (
+        email.kind == "text"
+        and email.html_path is not None
+        and email.text_path is None
+        and storage_path == email.storage_path
+    )
+
+
+def full_text(email: EmailText, body_text: str) -> str:
+    """The whole text of a text document as the model reads it and the
+    reviewer is shown it: the email's Subject / From / Date lines, then the
+    chosen part's text (b1.md 2.2 step 3 and 2.3). One helper for the label
+    call and for extraction."""
+    return mail_text(
+        subject=email.subject, sender=email.sender_email, date=email.date_header, body_text=body_text
+    )
+
+
+def read_part_chosen(session: Session, document_id: UUID, part: DocumentPart) -> bool:
+    """The parse step chose the email's HTML part over its text part (answer
+    2): the text document's stored path, hash and filename become the HTML
+    part's, while it is still the parse step's (`processing`). The document
+    then always reads the part it was read from. True when written."""
+    moved = session.execute(
+        text(
+            """
+            UPDATE documents
+               SET storage_path = :storage_path, content_sha256 = :sha256,
+                   original_filename = :original_filename
+             WHERE id = :id AND email_part = 'body' AND status = 'processing'
+            RETURNING id
+            """
+        ),
+        {
+            "id": str(document_id),
+            "storage_path": part.storage_path,
+            "sha256": part.sha256,
+            "original_filename": TEXT_DOCUMENT_FILENAMES[part.kind],
+        },
+    ).first()
+    return moved is not None
 
 
 # ── The call ────────────────────────────────────────────────────────────────
@@ -179,6 +237,9 @@ class EmailText:
     kind: str | None
     sha256: str | None
     html_path: str | None
+    # The stored text as the labelling task read it (header lines and the
+    # chosen part); None when no task read it (held, swept, unreadable).
+    text_path: str | None
     subject: str | None
     sender_email: str | None
     date_header: str | None
@@ -192,7 +253,8 @@ def load_email_text(session: Session, raw_email_id: UUID, *, lock: bool = False)
         text(
             f"""
             SELECT r.id, r.body_state, r.body_storage_path, r.body_kind, r.body_sha256,
-                   r.body_html_path, r.subject, r.sender_email, r.date_header, r.message_id,
+                   r.body_html_path, r.body_text_path, r.subject, r.sender_email, r.date_header,
+                   r.message_id,
                    EXISTS (SELECT 1 FROM documents d
                             WHERE d.raw_email_id = r.id AND d.email_part = 'attachment'
                               AND d.deleted_at IS NULL) AS has_attachment_document
@@ -211,6 +273,7 @@ def load_email_text(session: Session, raw_email_id: UUID, *, lock: bool = False)
         kind=row["body_kind"],
         sha256=row["body_sha256"],
         html_path=row["body_html_path"],
+        text_path=row["body_text_path"],
         subject=row["subject"],
         sender_email=row["sender_email"],
         date_header=row["date_header"],

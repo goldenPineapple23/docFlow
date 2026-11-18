@@ -450,6 +450,14 @@ def test_duplicate_and_change_order_flags_become_warnings():
     assert change[0].severity == "high"
 
 
+def test_a_text_document_beside_its_emails_attachment_gets_one_val_021():
+    """B1 (D-246): the email's text and its attachment may be one order read
+    twice. One warning, on the text document only, high as the catalog says."""
+    beside = [w for w in evaluate_document(_snapshot(text_beside_attachment=True)) if w.code == "VAL-021"]
+    assert len(beside) == 1 and beside[0].severity == "high"
+    assert [w for w in evaluate_document(_snapshot()) if w.code == "VAL-021"] == []
+
+
 def test_a_flag_with_no_pointer_produces_no_warning():
     """A boolean nobody can act on is noise; the reviewer needs the link."""
     assert evaluate_document(_snapshot(is_possible_duplicate=True)) == []

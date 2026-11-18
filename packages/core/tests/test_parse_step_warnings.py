@@ -67,5 +67,16 @@ def test_the_acknowledgement_records_the_name_as_the_reviewer_read_it():
 
 
 def test_the_parse_step_codes_are_not_validations_own():
-    assert validation.PARSE_STEP_CODES == {"VAL-017", "VAL-018"}
+    # VAL-019 joins them (B1; founder, 2026-11-18, gap 4): found in the text
+    # the parse step read, which a re-run of validation can't see.
+    assert validation.PARSE_STEP_CODES == {"VAL-017", "VAL-018", "VAL-019"}
     assert not validation.PARSE_STEP_CODES & set(validation._ALL_CODES)
+    # VAL-021 is validation's own: recomputed from the documents each run.
+    assert "VAL-021" in validation._ALL_CODES
+
+
+def test_a_forwarded_message_is_one_warning_on_the_email_text():
+    [warning] = parse_step_warnings([{"code": "VAL-019", "filename": None}])
+    assert warning.code == "VAL-019" and warning.detail == {"part": "email_text"}
+    assert warning.severity == CATALOG["VAL-019"].severity
+    assert warning_entry("VAL-019", warning.detail) == CATALOG["VAL-019"]

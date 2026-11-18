@@ -180,6 +180,8 @@ def find_earlier_same_po_document(
     content_sha256: str,
     buyer_id: UUID | None,
     created_at: datetime,
+    raw_email_id: UUID | None = None,
+    email_part: str | None = None,
 ) -> UUID | None:
     """
     The earliest other document for this tenant carrying the same PO number
@@ -188,6 +190,14 @@ def find_earlier_same_po_document(
     The buyer predicate implements `relationship_to`'s rule in SQL so the
     filtering happens in one indexed pass: a candidate qualifies when either
     side's buyer is unknown, or both are known and equal.
+
+    B1 (D-246): an email's text document and an attachment of the same email
+    are never a change order of each other -- VAL-021 says what they are.
+    The sibling is excluded here, as a candidate, not filtered from the
+    finished warning: a filter afterwards would hide a real change order
+    whenever the sibling happened to be the earliest match (founder,
+    2026-11-18, item f). Two attachments of one email still compare as
+    before, and so does every document from another email.
     """
     if not po_key:
         return None
@@ -209,6 +219,15 @@ def find_earlier_same_po_document(
                  OR h.buyer_id = CAST(:buyer_id AS uuid)
               )
               AND (d.created_at, d.id) < (:created_at, CAST(:document_id AS uuid))
+              -- Every term is true or false, never NULL: an upload has no
+              -- email and no part, and must still find (and be found by)
+              -- every earlier document.
+              AND NOT (
+                    CAST(:raw_email_id AS uuid) IS NOT NULL
+                AND d.raw_email_id IS NOT DISTINCT FROM CAST(:raw_email_id AS uuid)
+                AND (coalesce(d.email_part, '') = 'body'
+                     OR coalesce(CAST(:email_part AS text), '') = 'body')
+              )
             ORDER BY d.created_at ASC, d.id ASC
             LIMIT 1
             """
@@ -220,6 +239,8 @@ def find_earlier_same_po_document(
             "buyer_id": str(buyer_id) if buyer_id else None,
             "created_at": created_at,
             "document_id": str(document_id),
+            "raw_email_id": str(raw_email_id) if raw_email_id else None,
+            "email_part": email_part,
         },
     ).mappings().first()
     return UUID(str(row["id"])) if row else None
@@ -245,7 +266,7 @@ def detect_document_relationships(
     row = session.execute(
         text(
             """
-            SELECT d.content_sha256, d.created_at, h.po_number, h.buyer_id
+            SELECT d.content_sha256, d.created_at, d.raw_email_id, d.email_part, h.po_number, h.buyer_id
             FROM documents d
             LEFT JOIN document_headers h
                    ON h.document_id = d.id AND h.deleted_at IS NULL
@@ -276,6 +297,8 @@ def detect_document_relationships(
             content_sha256=row["content_sha256"],
             buyer_id=buyer_id,
             created_at=row["created_at"],
+            raw_email_id=UUID(str(row["raw_email_id"])) if row["raw_email_id"] else None,
+            email_part=row["email_part"],
         )
 
     result = DocumentRelationships(

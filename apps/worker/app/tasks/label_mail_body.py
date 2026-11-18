@@ -44,7 +44,7 @@ from docflow_core.config import get_settings
 from docflow_core.constants import MAIL_LABEL_TASK_TIME_LIMIT_SECONDS
 from docflow_core.db import tenant_session
 from docflow_core.mail_bodies import DocumentPart
-from docflow_core.mail_labels import MailLabelResult, decide_body, mail_text
+from docflow_core.mail_labels import MailLabelResult, decide_body
 from docflow_core.storage import (
     StorageObjectMissingError,
     StorageUnavailableError,
@@ -121,11 +121,9 @@ def label_email_text(tid: UUID, rid: UUID) -> None:
     chosen_kind, body_text = chosen
     part = html_part if (chosen_kind == "html" and email.kind == "text" and html_part) else stored
 
-    full_text = mail_text(
-        subject=email.subject, sender=email.sender_email, date=email.date_header, body_text=body_text
-    )
+    read_text = mail_bodies.full_text(email, body_text)
     try:
-        text_path = save_file(tid, READ_TEXT_FILENAME, full_text.encode("utf-8"))
+        text_path = save_file(tid, READ_TEXT_FILENAME, read_text.encode("utf-8"))
     except (StorageUnavailableError, UnsafeStoragePathError) as exc:
         logger.error("mail_label_read_text_not_stored raw_email_id=%s error_type=%s", rid, type(exc).__name__)
         _settle_without_call(tid, rid, part, mail_bodies.NO_LABEL_TEXT_UNREADABLE)
@@ -134,7 +132,7 @@ def label_email_text(tid: UUID, rid: UUID) -> None:
     settings = get_settings()
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=LABEL_CLIENT_MAX_RETRIES)
     outcome = mail_bodies.call_and_decide(
-        client, full_text, has_attachment=email.has_attachment_document, claim=_claim(tid, rid)
+        client, read_text, has_attachment=email.has_attachment_document, claim=_claim(tid, rid)
     )
     if not outcome.claimed:
         logger.info("mail_label_claimed_elsewhere raw_email_id=%s", rid)
@@ -217,7 +215,7 @@ def _parse_text(content: bytes, kind: str, rid: UUID) -> str | None:
     if answer.outcome != "ok":
         logger.error("mail_label_parse_outcome raw_email_id=%s outcome=%s", rid, answer.outcome)
         return None
-    return "\n\n".join(part["text"] for part in answer.parts if part.get("type") == "text")
+    return mail_bodies.parsed_text(answer.parts)
 
 
 def _settle_without_call(tid: UUID, rid: UUID, part: DocumentPart, reason: str) -> None:

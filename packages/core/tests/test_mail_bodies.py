@@ -231,6 +231,57 @@ def test_a_from_line_with_angle_brackets_reaches_the_label_request_unchanged():
     assert _sent_text(client) == "Subject: PO TEST-PO-7\nFrom: Ann <ann@example.com>\n\n4 x TEST-100"
 
 
+# ── the parse step's read of a text document (commit 5; answer 2) ───────────
+
+
+def _email_text(**overrides) -> mail_bodies.EmailText:
+    values = {
+        "raw_email_id": uuid4(),
+        "body_state": "labelled",
+        "storage_path": "tenants/t/uploads/text",
+        "kind": "text",
+        "sha256": "0" * 64,
+        "html_path": "tenants/t/uploads/html",
+        "text_path": None,
+        "subject": "PO TEST-PO-7",
+        "sender_email": "buyer@acmetest.example",
+        "date_header": "Mon, 16 Nov 2026 09:30:00 -0500",
+        "message_id": "<m@mail.example.test>",
+        "has_attachment_document": False,
+    }
+    values.update(overrides)
+    return mail_bodies.EmailText(**values)
+
+
+def test_the_parse_step_chooses_only_for_an_unread_text_part_beside_an_html_part():
+    email = _email_text()
+    assert mail_bodies.needs_read_choice(email, email.storage_path)
+    # A labelling task read it already, and its document is the part it chose.
+    read_already = _email_text(text_path="tenants/t/uploads/read")
+    assert not mail_bodies.needs_read_choice(read_already, email.storage_path)
+    # No HTML part, or an HTML-only email: nothing to choose.
+    assert not mail_bodies.needs_read_choice(_email_text(html_path=None), email.storage_path)
+    assert not mail_bodies.needs_read_choice(_email_text(kind="html", html_path=None), email.storage_path)
+    # The document already reads the HTML part (an earlier attempt chose it).
+    assert not mail_bodies.needs_read_choice(email, "tenants/t/uploads/html")
+
+
+def test_a_text_documents_whole_text_is_the_label_calls_own():
+    email = _email_text()
+    assert mail_bodies.full_text(email, "4 x TEST-100") == mail_text(
+        subject="PO TEST-PO-7",
+        sender="buyer@acmetest.example",
+        date="Mon, 16 Nov 2026 09:30:00 -0500",
+        body_text="4 x TEST-100",
+    )
+
+
+def test_a_parse_answers_text_is_its_text_parts_joined():
+    parts = [{"type": "text", "text": "a"}, {"type": "image", "data": "x"}, {"type": "text", "text": "b"}]
+    assert mail_bodies.parsed_text(parts) == "a\n\nb"
+    assert mail_bodies.parsed_text([]) == ""
+
+
 # ── the names the database half and the log lines use ───────────────────────
 
 
