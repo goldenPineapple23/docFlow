@@ -43,6 +43,19 @@ logger = logging.getLogger(__name__)
 # approved_at - review_started_at <= 120 s".
 REVIEW_TARGET_SECONDS = 120
 
+# Label calls about an email's text that made no text document (cover notes,
+# quote requests): AI spend and gross margin only. A text document's own label
+# call is in its est_cost_usd already, so it is never counted twice (B1;
+# D-246; founder, 2026-11-18, answers 3 and 4). One predicate over
+# `extraction_runs r`, read by the rollup below and by the Console's tenant
+# list (admin_data_access.list_tenants), so the two can never disagree.
+LABEL_ONLY_RUNS = """
+    r.run_kind = 'mail_label' AND r.run_state = 'finished' AND r.document_id IS NULL
+    AND NOT EXISTS (SELECT 1 FROM documents body_document
+                     WHERE body_document.raw_email_id = r.raw_email_id
+                       AND body_document.email_part = 'body')
+"""
+
 
 @dataclass(frozen=True)
 class DayResult:
@@ -59,7 +72,7 @@ def compute_day(session: Session, tenant_id: UUID, day: date) -> DayResult:
     """
     row = session.execute(
         text(
-            """
+            f"""
             WITH tz AS (
                 SELECT coalesce(nullif(timezone, ''), 'UTC') AS name FROM tenants WHERE id = :t
             ),
@@ -80,18 +93,12 @@ def compute_day(session: Session, tenant_id: UUID, day: date) -> DayResult:
                   AND d.approved_at IS NOT NULL
                   AND (d.approved_at AT TIME ZONE tz.name)::date = :day
             ),
-            -- Label calls about an email's text that made no text document
-            -- (cover notes, quote requests): AI spend and gross margin only,
-            -- by the day of the call. A text document's own label call is in
-            -- its est_cost_usd already, so it is never counted twice (B1;
-            -- D-246; founder, 2026-11-18, answer 3).
+            -- Label calls that made no text document (LABEL_ONLY_RUNS), by
+            -- the day of the call.
             label_only AS (
                 SELECT r.est_cost_usd
                 FROM extraction_runs r CROSS JOIN tz
-                WHERE r.tenant_id = :t AND r.run_kind = 'mail_label' AND r.run_state = 'finished'
-                  AND r.document_id IS NULL
-                  AND NOT EXISTS (SELECT 1 FROM documents d
-                                   WHERE d.raw_email_id = r.raw_email_id AND d.email_part = 'body')
+                WHERE r.tenant_id = :t AND {LABEL_ONLY_RUNS}
                   AND (r.created_at AT TIME ZONE tz.name)::date = :day
             ),
             lines AS (

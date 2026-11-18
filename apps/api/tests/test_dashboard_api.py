@@ -475,6 +475,38 @@ def test_the_tenant_list_carries_the_dashboard_columns(client):
 @requires_metrics_schema
 @requires_console_schema
 @requires_review_schema
+@requires_mail_body_schema
+def test_the_tenant_lists_month_cost_is_the_sum_of_its_daily_costs_with_a_label_only_call(client):
+    """Founder, 2026-11-18, answer 4: the list's "AI cost this month" adds the
+    label calls that made no text document, by the rollup's own rule."""
+    with _Console() as console, _ReviewTenant("Acme Test Distributor -- month cost") as tenant:
+        try:
+            _seed_order(tenant, cost="0.11")
+            _seed_order(tenant, approved_minutes=10, review_seconds=30, cost="0.09")
+            _seed_label_only_call(tenant, cost="0.0020")
+            _roll(tenant.tenant_id)
+            with platform_session() as session:
+                daily = session.execute(
+                    text(
+                        "SELECT coalesce(sum(m.est_cost_usd), 0) FROM tenant_daily_metrics m "
+                        "JOIN tenants t ON t.id = m.tenant_id WHERE m.tenant_id = :t "
+                        "AND m.day >= date_trunc('month', now() AT TIME ZONE "
+                        "coalesce(nullif(t.timezone, ''), 'UTC'))::date"
+                    ),
+                    {"t": str(tenant.tenant_id)},
+                ).scalar_one()
+
+            rows = client.get("/admin/tenants", headers=console.headers()).json()
+            row = next(r for r in rows if r["id"] == str(tenant.tenant_id))
+            assert Decimal(row["ai_cost_this_month"]) == Decimal(daily)
+            assert Decimal(daily) == Decimal("0.2020")  # the label-only call is in both
+        finally:
+            _cleanup(tenant.tenant_id)
+
+
+@requires_metrics_schema
+@requires_console_schema
+@requires_review_schema
 def test_a_tenants_own_metrics_are_readable_from_the_console(client):
     with _Console() as console, _ReviewTenant("Acme Test Distributor -- per tenant") as tenant:
         try:

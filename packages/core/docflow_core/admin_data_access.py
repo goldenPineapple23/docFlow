@@ -389,6 +389,8 @@ def list_tenants(*, platform_admin_user_id: UUID, filters: dict[str, Any] | None
     admin_actions row for the whole request, with the filter recorded in the
     payload -- not one row per tenant returned (Section 7.15.1 granularity rule).
     """
+    from docflow_core.metrics import LABEL_ONLY_RUNS
+
     with platform_session() as session:
         _record_admin_action(
             session,
@@ -399,7 +401,7 @@ def list_tenants(*, platform_admin_user_id: UUID, filters: dict[str, Any] | None
         )
         rows = session.execute(
             text(
-                """
+                f"""
                 WITH month_usage AS (
                     -- A linked duplicate counts once (7.16.1), but its AI cost was still
                     -- spent, so only the COUNT excludes it (docflow_core.usage).
@@ -413,6 +415,17 @@ def list_tenants(*, platform_admin_user_id: UUID, filters: dict[str, Any] | None
                       AND (d.created_at AT TIME ZONE coalesce(nullif(t.timezone, ''), 'UTC'))
                           >= date_trunc('month', now() AT TIME ZONE coalesce(nullif(t.timezone, ''), 'UTC'))
                     GROUP BY d.tenant_id
+                ), label_only_month AS (
+                    -- Label calls that made no text document, by the month of
+                    -- the call: the rollup's rule, read from the same predicate
+                    -- (metrics.LABEL_ONLY_RUNS; B1; D-246; founder, 2026-11-18,
+                    -- answer 4).
+                    SELECT r.tenant_id, coalesce(sum(r.est_cost_usd), 0) AS ai_cost_month
+                    FROM extraction_runs r JOIN tenants t ON t.id = r.tenant_id
+                    WHERE {LABEL_ONLY_RUNS}
+                      AND (r.created_at AT TIME ZONE coalesce(nullif(t.timezone, ''), 'UTC'))
+                          >= date_trunc('month', now() AT TIME ZONE coalesce(nullif(t.timezone, ''), 'UTC'))
+                    GROUP BY r.tenant_id
                 ), review_queue AS (
                     SELECT tenant_id, count(*) AS needs_review,
                            extract(epoch FROM (now() - min(created_at))) / 86400 AS oldest_days
@@ -442,7 +455,7 @@ def list_tenants(*, platform_admin_user_id: UUID, filters: dict[str, Any] | None
                        tr.document_allowance AS tier_document_allowance,
                        coalesce(u.used, 0) AS documents_this_month,
                        u.last_document_at,
-                       coalesce(u.ai_cost_month, 0) AS ai_cost_this_month,
+                       coalesce(u.ai_cost_month, 0) + coalesce(l.ai_cost_month, 0) AS ai_cost_this_month,
                        coalesce(q.needs_review, 0) AS needs_review,
                        q.oldest_days AS needs_review_oldest_days,
                        CASE WHEN c.count_30 > 0 THEN round(c.sum_30 / c.count_30, 4) END
@@ -452,6 +465,7 @@ def list_tenants(*, platform_admin_user_id: UUID, filters: dict[str, Any] | None
                 FROM tenants t
                 LEFT JOIN tiers tr ON tr.id = t.tier_id
                 LEFT JOIN month_usage u ON u.tenant_id = t.id
+                LEFT JOIN label_only_month l ON l.tenant_id = t.id
                 LEFT JOIN review_queue q ON q.tenant_id = t.id
                 LEFT JOIN confidence c ON c.tenant_id = t.id
                 WHERE t.deleted_at IS NULL
