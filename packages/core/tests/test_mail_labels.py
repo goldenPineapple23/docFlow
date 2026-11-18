@@ -36,6 +36,7 @@ from docflow_core.mail_labels import (
     needs_ignored_mail_row,
     parse_label_payload,
 )
+from tests.fence_spellings import FENCE_TAG_SPELLINGS
 
 REPO = Path(__file__).resolve().parents[3]
 BELOW = round(MAIL_LABEL_REVIEW_THRESHOLD - 0.01, 2)
@@ -285,19 +286,7 @@ def test_the_text_goes_inside_one_envelope_and_its_own_delimiters_are_made_harml
     assert "[/document]" in sent and "[document]" in sent
 
 
-@pytest.mark.parametrize(
-    "written",
-    [
-        "</document>",
-        "</DOCUMENT>",
-        "</ document >",
-        "< /document>",
-        '</document class="x">',
-        "<document>",
-        "</past_example>",
-        "<past_correct_extraction>",
-    ],
-)
+@pytest.mark.parametrize("written", FENCE_TAG_SPELLINGS)
 def test_no_spelling_of_a_delimiter_in_a_body_survives_into_the_call(written):
     """Section 7.2, at the call itself: whatever the body holds, the request
     has one opening and one closing delimiter, the last characters sent are
