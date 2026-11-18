@@ -21,14 +21,14 @@ from uuid import UUID, uuid4
 import anthropic
 import httpx
 import pytest
-from docflow_core import mail_bodies, parse_client, storage, usage
+from docflow_core import mail_bodies, metrics, parse_client, storage, usage
 from docflow_core.constants import MAIL_LABEL_TEXT_CHAR_BUDGET
 from docflow_core.db import platform_session, tenant_session
 from sqlalchemy import text
 
 import app.tasks.label_mail_body as task_module
 from tests.conftest import requires_documents_schema, requires_mail_body_schema
-from tests.db_helpers import FakeAnthropic, WorkerTestTenant, run_extraction
+from tests.db_helpers import FakeAnthropic, WorkerTestTenant, model_payload, run_extraction
 
 pytestmark = [requires_documents_schema, requires_mail_body_schema]
 
@@ -475,6 +475,73 @@ def test_a_failed_final_write_keeps_the_paid_call_on_the_record_and_leaves_the_t
         assert [r["run_state"] for r in _label_runs(email)] == ["started", "finished"]
         assert _email_row(email)["body_state"] == "pending"  # the stuck sweep's to decide
         assert _text_documents(email) == []
+
+
+# ── cost (commit 3b; founder, 2026-11-18, answer 3) ─────────────────────────
+
+
+def _document_cost(document_id) -> Decimal | None:
+    return _row("SELECT est_cost_usd FROM documents WHERE id = :d", d=str(document_id))["est_cost_usd"]
+
+
+def _document_runs_cost(document_id) -> Decimal:
+    return _row(
+        "SELECT coalesce(sum(est_cost_usd), 0) AS c FROM extraction_runs "
+        "WHERE document_id = :d AND run_state = 'finished'",
+        d=str(document_id),
+    )["c"]
+
+
+def test_a_text_documents_cost_carries_its_label_call_once_and_keeps_it_through_extraction(monkeypatch):
+    with WorkerTestTenant("Acme Test Labels") as tenant:
+        email = _email(tenant, ORDER_TEXT)
+        _run(monkeypatch, tenant, email, StubLabelClient(ORDER))
+        [document] = _text_documents(email)
+        [_, label_run] = _label_runs(email)
+        label_cost = label_run["est_cost_usd"]
+        assert label_cost > 0 and label_run["document_id"] is None
+        # From the start: the label call, once.
+        assert _document_cost(document["id"]) == label_cost
+
+        # Extraction on the text document (a re-run of the cost record).
+        run_extraction(monkeypatch, tenant, UUID(str(document["id"])), model_payload())
+        extraction_cost = _document_runs_cost(document["id"])
+        assert extraction_cost > 0
+        assert _document_cost(document["id"]) == label_cost + extraction_cost
+
+        # The breaker sums the runs themselves: each call once, unchanged by 3b.
+        with tenant_session(tenant.tenant_id) as session:
+            spend, _ = usage.daily_ai_spend(session, tenant.tenant_id)
+        assert spend == label_cost + extraction_cost
+
+
+def test_the_rollup_counts_a_label_only_call_in_ai_spend_and_a_text_documents_call_once(monkeypatch):
+    with WorkerTestTenant("Acme Test Labels") as tenant:
+        quote = _email(tenant, "Could you quote 40 x TEST-100?\n")
+        _run(monkeypatch, tenant, quote, StubLabelClient(QUOTE_REQUEST))
+        order = _email(tenant, ORDER_TEXT)
+        _run(monkeypatch, tenant, order, StubLabelClient(ORDER))
+        [_, quote_run] = _label_runs(quote)
+        [document] = _text_documents(order)
+        document_cost = _document_cost(document["id"])
+        day = _row(
+            "SELECT (created_at AT TIME ZONE 'UTC')::date AS d FROM documents WHERE id = :d",
+            d=str(document["id"]),
+        )["d"]
+
+        with tenant_session(tenant.tenant_id) as session:
+            metrics.compute_day(session, tenant.tenant_id, day)
+        stored = _row(
+            "SELECT * FROM tenant_daily_metrics WHERE tenant_id = :t AND day = :day",
+            t=str(tenant.tenant_id),
+            day=day,
+        )
+        # AI spend (and gross margin, which reads this column): the label-only
+        # call plus the text document, whose own label call is counted once.
+        assert stored["est_cost_usd"] == quote_run["est_cost_usd"] + document_cost
+        # Cost per document: the text document only; a label-only call is no document.
+        summary = metrics.summarise([stored])
+        assert summary["mean_cost_per_document"] == document_cost.quantize(Decimal("0.0001"))
 
 
 @pytest.mark.parametrize("payload", [ORDER, COVER_NOTE, QUOTE_REQUEST, INJECTION])

@@ -50,7 +50,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from docflow_core import allowance
+from docflow_core import allowance, model_runs
 from docflow_core.duplicates import find_content_duplicate_at_ingest
 from docflow_core.extraction import ROUTING_MODEL, _defang, count_request_tokens
 from docflow_core.mail_labels import (
@@ -436,6 +436,9 @@ def settle_body(
         document_id = _insert_text_document(
             session, tenant_id, email, part, injection_suspected=decision.injection_suspected
         )
+        # The label call's cost is on the text document from the start
+        # (answer 3); the outcome row is already written in this transaction.
+        model_runs.set_document_cost(session, document_id)
         session.execute(
             text(
                 "UPDATE raw_emails SET outcome = 'processed' "

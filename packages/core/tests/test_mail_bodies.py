@@ -220,6 +220,17 @@ def test_a_fence_tag_straddling_the_cut_leaves_one_envelope_and_nothing_that_rea
     assert len(inner) <= MAIL_LABEL_TEXT_CHAR_BUDGET
 
 
+def test_a_from_line_with_angle_brackets_reaches_the_label_request_unchanged():
+    """Founder, 2026-11-18: rewriting only touches the fences' own tag names,
+    so an address in angle brackets is sent as written."""
+    full = mail_text(
+        subject="PO TEST-PO-7", sender="Ann <ann@example.com>", date=None, body_text="4 x TEST-100"
+    )
+    client = StubLabelClient(ORDER)
+    call_and_decide(client, full, has_attachment=False, claim=_claims(uuid4())[0])
+    assert _sent_text(client) == "Subject: PO TEST-PO-7\nFrom: Ann <ann@example.com>\n\n4 x TEST-100"
+
+
 # ── the names the database half and the log lines use ───────────────────────
 
 

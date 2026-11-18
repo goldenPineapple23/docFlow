@@ -80,6 +80,20 @@ def compute_day(session: Session, tenant_id: UUID, day: date) -> DayResult:
                   AND d.approved_at IS NOT NULL
                   AND (d.approved_at AT TIME ZONE tz.name)::date = :day
             ),
+            -- Label calls about an email's text that made no text document
+            -- (cover notes, quote requests): AI spend and gross margin only,
+            -- by the day of the call. A text document's own label call is in
+            -- its est_cost_usd already, so it is never counted twice (B1;
+            -- D-246; founder, 2026-11-18, answer 3).
+            label_only AS (
+                SELECT r.est_cost_usd
+                FROM extraction_runs r CROSS JOIN tz
+                WHERE r.tenant_id = :t AND r.run_kind = 'mail_label' AND r.run_state = 'finished'
+                  AND r.document_id IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM documents d
+                                   WHERE d.raw_email_id = r.raw_email_id AND d.email_part = 'body')
+                  AND (r.created_at AT TIME ZONE tz.name)::date = :day
+            ),
             lines AS (
                 SELECT l.id, l.match_method
                 FROM document_lines l JOIN received r ON r.id = l.document_id
@@ -124,7 +138,8 @@ def compute_day(session: Session, tenant_id: UUID, day: date) -> DayResult:
                  )), '[]'::jsonb) FROM approved) AS approval_hours,
                 (SELECT coalesce(jsonb_agg(est_cost_usd), '[]'::jsonb) FROM received
                   WHERE est_cost_usd IS NOT NULL) AS document_costs,
-                (SELECT coalesce(sum(est_cost_usd), 0) FROM received) AS est_cost_usd,
+                (SELECT coalesce(sum(est_cost_usd), 0) FROM received)
+                  + (SELECT coalesce(sum(est_cost_usd), 0) FROM label_only) AS est_cost_usd,
                 (SELECT coalesce(sum(input_tokens), 0) FROM received) AS input_tokens,
                 (SELECT coalesce(sum(output_tokens), 0) FROM received) AS output_tokens
             """

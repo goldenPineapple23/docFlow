@@ -104,14 +104,25 @@ def set_document_cost(session: Session, document_id: UUID) -> None:
     Called in the transaction that writes an outcome row, so the figure the
     Console, the rollup and cost per document read can never drop a paid call
     -- a lost one, a failed one, an earlier try's. Never set it any other way.
+
+    A document made from an email's text (`email_part = 'body'`) also carries
+    its email's label call (B1; D-246; founder, 2026-11-18, answer 3). The
+    label run keeps a null `document_id` (it belongs to the email), so it is
+    found by the email and counted once, here, on every recompute -- an
+    extraction re-run keeps it.
     """
     session.execute(
         text(
             """
-            UPDATE documents
-               SET est_cost_usd = (SELECT sum(r.est_cost_usd) FROM extraction_runs r
-                                    WHERE r.document_id = :id AND r.run_state = 'finished')
-             WHERE id = :id
+            UPDATE documents d
+               SET est_cost_usd = (
+                       SELECT sum(r.est_cost_usd) FROM extraction_runs r
+                        WHERE r.run_state = 'finished'
+                          AND (r.document_id = d.id
+                               OR (d.email_part = 'body' AND d.raw_email_id IS NOT NULL
+                                   AND r.document_id IS NULL AND r.run_kind = 'mail_label'
+                                   AND r.raw_email_id = d.raw_email_id)))
+             WHERE d.id = :id
             """
         ),
         {"id": str(document_id)},
