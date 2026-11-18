@@ -63,6 +63,7 @@ from docflow_core.mail_labels import (
     decide_body,
     label_content,
     label_mail_body,
+    mail_label_input_cost,
     needs_ignored_mail_row,
 )
 
@@ -323,6 +324,115 @@ def record_label_outcome(
         },
     ).first()
     return inserted is not None
+
+
+def close_lost_label_runs(session: Session, tenant_id: UUID, raw_email_id: UUID) -> int:
+    """
+    Outcome rows for this email's label calls that were started and never
+    finished: the worker died during the call (D-163, as `model_runs.
+    close_lost_runs` does for a document's). Not succeeded, the counted input
+    priced as a lower bound, `cost_complete: false`. One outcome per start
+    (0034's unique index): a late task's own outcome row then writes nothing,
+    so the call is counted once. Returns how many were closed.
+    """
+    rows = session.execute(
+        text(
+            """
+            SELECT s.id, s.model_id, s.counted_input_tokens
+              FROM extraction_runs s
+             WHERE s.raw_email_id = :raw_email_id AND s.run_kind = :kind AND s.run_state = 'started'
+               AND NOT EXISTS (SELECT 1 FROM extraction_runs o WHERE o.started_run_id = s.id)
+            """
+        ),
+        {"raw_email_id": str(raw_email_id), "kind": MAIL_LABEL_RUN_KIND},
+    ).mappings().all()
+    closed = 0
+    for row in rows:
+        counted = row["counted_input_tokens"]
+        cost = mail_label_input_cost(int(counted)) if counted is not None else None
+        inserted = session.execute(
+            text(
+                """
+                INSERT INTO extraction_runs
+                    (id, tenant_id, document_id, raw_email_id, run_kind, model_id, raw_response,
+                     input_tokens, est_cost_usd, succeeded, error_code, started_run_id, created_at)
+                VALUES (:id, :tenant_id, NULL, :raw_email_id, :kind, :model_id, CAST(:raw AS jsonb),
+                        :input_tokens, :cost, false, :code, :started, clock_timestamp())
+                ON CONFLICT (started_run_id) WHERE started_run_id IS NOT NULL DO NOTHING
+                RETURNING id
+                """
+            ),
+            {
+                "id": str(uuid4()),
+                "tenant_id": str(tenant_id),
+                "raw_email_id": str(raw_email_id),
+                "kind": MAIL_LABEL_RUN_KIND,
+                "model_id": row["model_id"],
+                "raw": json.dumps({"lost": True, "cost_complete": False}),
+                "input_tokens": counted,
+                "cost": _money(cost),
+                "code": model_runs.LOST_CALL_CODE,
+                "started": str(row["id"]),
+            },
+        ).first()
+        closed += inserted is not None
+    return closed
+
+
+def stuck_texts(session: Session, *, timeout_min: int) -> list[UUID]:
+    """
+    Texts still `pending` past the timeout (b1.md 2.2 step 9). Aged from the
+    label call's started row when there is one -- so a call still running is
+    never taken (its task's limit is shorter than the timeout) -- otherwise
+    from the email's arrival (founder, 2026-11-18, answer 2). During a
+    backlog a text that was never claimed can be taken before its label runs
+    (accepted for the demo half). `session` is tenant-scoped.
+    """
+    return [
+        UUID(str(row[0]))
+        for row in session.execute(
+            text(
+                """
+                SELECT r.id FROM raw_emails r
+                 WHERE r.body_state = 'pending'
+                   AND coalesce(
+                         (SELECT max(s.created_at) FROM extraction_runs s
+                           WHERE s.raw_email_id = r.id AND s.run_kind = :kind AND s.run_state = 'started'),
+                         r.created_at
+                       ) < now() - make_interval(mins => :t)
+                 ORDER BY r.created_at, r.id
+                """
+            ),
+            {"kind": MAIL_LABEL_RUN_KIND, "t": timeout_min},
+        )
+    ]
+
+
+def settle_stuck_text(session: Session, tenant_id: UUID, raw_email_id: UUID) -> Settled:
+    """
+    The stuck sweep's decision for one text (b1.md 2.2 step 9): a lost label
+    call goes on the cost record first, then the text becomes a document with
+    no call, `labelled` with no label, made from the part the webhook stored.
+    Through `settle_body`, so a task that finishes later finds the text
+    decided and writes nothing.
+    """
+    email = load_email_text(session, raw_email_id, lock=True)
+    if email is None or email.body_state != "pending":
+        return Settled(settled=False)
+    if email.storage_path is None or email.kind is None or email.sha256 is None:
+        logger.error("mail_body_stuck_without_stored_text raw_email_id=%s", raw_email_id)
+        return Settled(settled=False)
+    close_lost_label_runs(session, tenant_id, raw_email_id)
+    return settle_body(
+        session,
+        tenant_id,
+        raw_email_id,
+        decision=BodyDecision(make_document=True, reason=NO_LABEL_STUCK_SWEEP),
+        label=None,
+        part=DocumentPart(storage_path=email.storage_path, kind=email.kind, sha256=email.sha256),
+        text_path=None,
+        no_label_reason=NO_LABEL_STUCK_SWEEP,
+    )
 
 
 # ── The decision, written ───────────────────────────────────────────────────

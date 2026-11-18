@@ -29,6 +29,9 @@ sure there IS a later job, and that trying stops somewhere:
     document is never claimed to reach that limit itself.
   A document merely *waiting* never alerts on its own. `sweep_all` instead
   checks the dispatcher's heartbeat (`dispatch.check_stopped`).
+* B1 (D-246): an email's text still `pending` past the timeout -- aged from
+  its label call's started row, or from the email's arrival before any claim
+  -- becomes a document with no label call (`mail_bodies.settle_stuck_text`).
 * Exports still `pending`, and imports still `parsing`, STUCK_PROCESSING_
   TIMEOUT_MIN after they were created are failed: EXP-009 / IMP-009 (Stage
   3a). Their jobs are short (5-minute hard limits), so by then the job was
@@ -52,7 +55,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from docflow_core import dispatch, document_status, founder_alerts, model_runs
+from docflow_core import dispatch, document_status, founder_alerts, mail_bodies, model_runs
 from docflow_core.constants import (
     EXPORTS_NOT_FINISHED_ALERT_PER_DAY,
     MAX_PROCESSING_ATTEMPTS,
@@ -90,6 +93,9 @@ class SweepResult:
     wait_limit_failed: list[UUID] = field(default_factory=list)
     exports_failed: list[UUID] = field(default_factory=list)
     imports_failed: list[UUID] = field(default_factory=list)
+    # B1: emails whose text was still `pending` past the timeout, made a
+    # document with no label call (b1.md 2.2 step 9).
+    texts_made_documents: list[UUID] = field(default_factory=list)
 
 
 def sweep_tenant(
@@ -171,6 +177,8 @@ def sweep_tenant(
 
         _fail_unfinished_exports_and_imports(session, tenant_id, result, timeout_min)
 
+        _decide_stuck_texts(session, tenant_id, result, timeout_min)
+
     # After the commit: a job must never run against a state it can't see.
     # Only `processing` retries: they are already counted in flight, so the
     # dispatcher's cap and target still hold (BUILD-STATUS 3d, settled while
@@ -185,10 +193,11 @@ def sweep_tenant(
         or result.wait_limit_failed
         or result.exports_failed
         or result.imports_failed
+        or result.texts_made_documents
     ):
         logger.info(
             "stuck_sweep tenant_id=%s requeued=%d failed=%d lost_jobs=%d wait_limit_failed=%d "
-            "exports_failed=%d imports_failed=%d",
+            "exports_failed=%d imports_failed=%d texts_made_documents=%d",
             tenant_id,
             len(result.requeued),
             len(result.failed),
@@ -196,8 +205,19 @@ def sweep_tenant(
             len(result.wait_limit_failed),
             len(result.exports_failed),
             len(result.imports_failed),
+            len(result.texts_made_documents),
         )
     return result
+
+
+def _decide_stuck_texts(session: Session, tenant_id: UUID, result: SweepResult, timeout_min: int) -> None:
+    """B1 (b1.md 2.2 step 9; D-246): an email's text still `pending` past the
+    timeout becomes a document with no label call. Nothing waits unseen. The
+    document is `pending`: the dispatcher's own pass sends it. A text in any
+    other state -- `none`, `held`, `labelled`, `released` -- is never touched."""
+    for raw_email_id in mail_bodies.stuck_texts(session, timeout_min=timeout_min):
+        if mail_bodies.settle_stuck_text(session, tenant_id, raw_email_id).document_id is not None:
+            result.texts_made_documents.append(raw_email_id)
 
 
 def _return_to_waiting(session: Session, document_id: UUID) -> bool:
