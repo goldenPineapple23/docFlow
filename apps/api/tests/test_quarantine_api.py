@@ -664,6 +664,10 @@ def test_strict_allowlist_is_off_by_default_and_holds_rather_than_rejects(client
         # It is the tenant's own call, so the owner can release it.
         r = client.post("/held/release", headers=t.headers(), json={"document_ids": [str(held[0]["id"])]})
         assert r.status_code == 200
+        # Releasing an attachment's document changes no email's outcome.
+        outcomes = t.rows("SELECT outcome FROM raw_emails WHERE tenant_id = :t AND sender_email = :s",
+                          s="stranger2@example.test")
+        assert [o["outcome"] for o in outcomes] == ["quarantined"]
 
 
 @requires_database
@@ -713,8 +717,11 @@ def test_held_text_with_no_attachment_gets_one_held_document_and_release_sends_i
         assert r.status_code == 200 and r.json()["released"] == [str(held["id"])]
         [released] = t.rows("SELECT status FROM documents WHERE tenant_id = :t")
         assert released["status"] == "pending"  # the dispatcher sends it to extraction
-        [after] = t.rows("SELECT body_state FROM raw_emails WHERE tenant_id = :t")
+        [after] = t.rows("SELECT body_state, outcome FROM raw_emails WHERE tenant_id = :t")
         assert after["body_state"] == "released"
+        # Release changes no email's outcome, for a text document as for an
+        # attachment's (founder, 2026-11-18, answer 2).
+        assert after["outcome"] == "quarantined"
         assert all(task["name"] != "docflow.label_mail_body" for task in celery.sent)
 
 

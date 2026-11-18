@@ -139,6 +139,11 @@ LISTED: dict[tuple[str, str, int], tuple[str, str]] = {
         "the document must still end failed; a lost cost record raises cost_record_lost (Q11)",
     ),
     (_TASK, "_alert_lost_cost_record", 1): (BEST_EFFORT, _NOT_RAISED),
+    (f"{_WORKER}/tasks/label_mail_body.py", "_record_outcome_alone", 1): (
+        BEST_EFFORT,
+        "the task's own failure goes on; a lost label-run cost record is logged with the email's id "
+        "and raises no founder alert (D-246)",
+    ),
     (_TASK, "_parse_alert", 1): (BEST_EFFORT, _NOT_RAISED),
     (_TASK, "_alert_failure", 1): (BEST_EFFORT, _NOT_RAISED),
     (_TASK, "_fail_parse_ours", 1): (BEST_EFFORT, _NOT_RAISED),

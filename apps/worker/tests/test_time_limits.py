@@ -42,7 +42,51 @@ EXPECTED_LIMITS = {
     "docflow.sweep_stuck_documents": constants.STUCK_SWEEP_TASK_TIME_LIMIT_SECONDS,
     "docflow.dispatch": constants.DISPATCH_TASK_TIME_LIMIT_SECONDS,
     "docflow.render_pages": constants.PAGES_TASK_TIME_LIMIT_SECONDS,
+    "docflow.label_mail_body": constants.MAIL_LABEL_TASK_TIME_LIMIT_SECONDS,
 }
+
+
+# ── The labelling task's limit (B1; D-246; founder, 2026-11-18) ─────────────
+
+
+def _labelling_tasks_slowest_clean_failure() -> float:
+    """Two parse calls (the text and the HTML part), each up to the client's
+    connect patience plus one try's connect and read timeouts plus its last
+    sleep; the token count; the label call with the SDK's retries and the
+    longest wait between them."""
+    from anthropic._constants import MAX_RETRY_DELAY
+    from docflow_core import parse_client
+    from docflow_core.extraction import COUNT_TOKENS_TIMEOUT_SECONDS, ROUTING_TIMEOUT_SECONDS
+
+    from app.tasks.label_mail_body import LABEL_CLIENT_MAX_RETRIES
+
+    one_parse = (
+        parse_client.PARSE_CONNECT_PATIENCE_SECONDS
+        + parse_client.CONNECT_TIMEOUT_SECONDS
+        + parse_client.READ_TIMEOUT_SECONDS
+        + 10  # the parse client's longest sleep between tries
+    )
+    model = (
+        COUNT_TOKENS_TIMEOUT_SECONDS
+        + (LABEL_CLIENT_MAX_RETRIES + 1) * ROUTING_TIMEOUT_SECONDS
+        + LABEL_CLIENT_MAX_RETRIES * MAX_RETRY_DELAY
+    )
+    return 2 * one_parse + model
+
+
+def test_the_labelling_tasks_limit_is_above_its_slowest_clean_failure():
+    """So the clean failure paths (the text becomes a document) always run
+    before the hard limit kills the task."""
+    assert constants.MAIL_LABEL_TASK_TIME_LIMIT_SECONDS > _labelling_tasks_slowest_clean_failure()
+
+
+def test_the_labelling_task_is_shorter_than_the_document_task():
+    """It shares the worker's one slot with documents."""
+    assert constants.MAIL_LABEL_TASK_TIME_LIMIT_SECONDS < constants.DOCUMENT_TASK_TIME_LIMIT_SECONDS
+
+
+def test_the_sweep_never_takes_a_text_whose_task_could_still_be_running():
+    assert constants.STUCK_PROCESSING_TIMEOUT_MIN * 60 > constants.MAIL_LABEL_TASK_TIME_LIMIT_SECONDS
 
 
 def _finalized_tasks():

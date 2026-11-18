@@ -255,6 +255,16 @@ PAGES_QUEUE = "pages"
 # took one answer and 7.3 s. A document cut off here keeps page_count NULL:
 # the viewer falls back, and A6's backfill finds it.
 PAGES_TASK_TIME_LIMIT_SECONDS = 15 * 60
+# The labelling task's own hard limit (B1; D-246; founder, 2026-11-18). It
+# shares the worker's one slot with documents, so it is shorter than the
+# document task's, and above its slowest clean failure so that path always
+# runs first: two parse calls (the text and the HTML part, each up to
+# parse_client's connect patience + connect + read timeouts, about 270 s),
+# the token count (15 s), and the label call with the SDK's two retries
+# (3 x 30 s + 2 x 8 s), about 661 s in all. Below STUCK_PROCESSING_TIMEOUT_MIN,
+# so the sweep never takes a text whose task could still be running. Tests
+# in apps/worker/tests/test_time_limits.py hold all three.
+MAIL_LABEL_TASK_TIME_LIMIT_SECONDS = 15 * 60
 # The waits before each retry of a render the parse service or Storage
 # couldn't serve. After the last, the task gives up and cleans up.
 PAGES_RETRY_COUNTDOWNS_SECONDS = (60, 300, 900)

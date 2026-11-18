@@ -58,6 +58,7 @@ celery_app = Celery(
     # an unregistered task and sits in `pending` forever (DECISIONS.md D-095).
     include=[
         "app.tasks.parse_and_extract",
+        "app.tasks.label_mail_body",
         "app.tasks.generate_export",
         "app.tasks.parse_import",
         "app.tasks.daily_rollup",

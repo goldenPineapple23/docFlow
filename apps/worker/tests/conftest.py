@@ -207,6 +207,29 @@ requires_pages_schema = pytest.mark.skipif(
 )
 
 
+def mail_body_schema_available() -> bool:
+    """True once supabase/migrations/0041_mail_body.sql has been applied (an
+    email's text, B1). CI applies 0041 itself, so these tests never skip there."""
+    if not database_available():
+        return False
+    from docflow_core.db import engine_for
+    from sqlalchemy import text
+
+    try:
+        with engine_for("worker").connect() as conn:
+            conn.execute(text("SELECT body_state, body_label FROM raw_emails LIMIT 0"))
+            conn.execute(text("SELECT raw_email_id, email_part FROM documents LIMIT 0"))
+        return True
+    except Exception:
+        return False
+
+
+requires_mail_body_schema = pytest.mark.skipif(
+    not mail_body_schema_available(),
+    reason="supabase/migrations/0041_mail_body.sql has not been applied to this database yet.",
+)
+
+
 @pytest.fixture(autouse=True)
 def _no_real_dispatch_or_provider_state(request, monkeypatch):
     """

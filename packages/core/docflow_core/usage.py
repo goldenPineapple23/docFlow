@@ -117,17 +117,21 @@ def allowance_for(session: Session, tenant_id: UUID) -> Allowance:
 def daily_ai_spend(session: Session, tenant_id: UUID) -> tuple[Decimal, int]:
     """(estimated dollars, tokens) the model has used for this tenant today
     (UTC day), across every extraction run, excluding test-batch documents.
-    Example-prompt overhead is included because it is inside input_tokens."""
+    Example-prompt overhead is included because it is inside input_tokens.
+
+    A left join (B1; D-246): a label call about an email's text belongs to the
+    email, not a document (`document_id` NULL), and still counts. The tenant
+    is the run's own column, so such a row is never dropped."""
     row = (
         session.execute(
             text(
                 """
             SELECT coalesce(sum(r.est_cost_usd), 0) AS cost,
                    coalesce(sum(coalesce(r.input_tokens, 0) + coalesce(r.output_tokens, 0)), 0) AS tokens
-            FROM extraction_runs r JOIN documents d ON d.id = r.document_id
+            FROM extraction_runs r LEFT JOIN documents d ON d.id = r.document_id
             WHERE r.tenant_id = :tenant_id
               AND r.run_state = 'finished'  -- outcome rows only (D-163, 0034)
-              AND NOT d.is_test_batch
+              AND (d.id IS NULL OR NOT d.is_test_batch)
               AND (r.created_at AT TIME ZONE 'UTC')::date = (now() AT TIME ZONE 'UTC')::date
             """
             ),
