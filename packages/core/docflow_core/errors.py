@@ -474,10 +474,13 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         code="INT-001",
         title="No attachment to process",
         message=(
-            "This email didn't include an attachment DocFlow recognizes as a document, "
-            "so nothing was processed."
+            "This email had no attachment DocFlow recognizes as a document and no text "
+            "DocFlow could read, so nothing was processed."
         ),
-        action="Resend with the purchase order attached as a PDF, Word, or Excel file.",
+        action=(
+            "Ask the sender to send the purchase order as an attachment (PDF, Word or Excel), "
+            "or with the items and quantities typed in the message."
+        ),
         severity="warning",
         audience="tenant",
     ),

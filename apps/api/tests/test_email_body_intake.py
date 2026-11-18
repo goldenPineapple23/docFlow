@@ -4,8 +4,10 @@ database and Storage (B1's demo half, slice 1; DECISIONS.md D-230;
 docs/designs/b1.md 2.1 and section 4).
 
 Slice 1 stores the text and links each attachment's document to its e-mail.
-It changes no decision: an e-mail with text and no attachment is still
-INT-001, nothing is sent for labelling, and `body_state` stays 'none'.
+Slice 4 (D-246) adds the decision at the webhook: text that was not held is
+`pending` and one labelling task is sent after the commit; held text is
+`held` and nothing is sent; an e-mail with text and no attachment is read,
+not refused, and INT-001 is left for an e-mail with neither.
 
 Also here: what migration 0041's new links and checks do in the database
 itself, since the round trip in CI's core job compares definitions only.
@@ -14,6 +16,8 @@ itself, since the round trip in CI's core job compares definitions only.
 from __future__ import annotations
 
 import hashlib
+import zipfile
+from io import BytesIO
 from uuid import UUID, uuid4
 
 import pytest
@@ -78,6 +82,15 @@ def _document_links(tenant) -> list[tuple]:
         ]
 
 
+def _label_task(tenant, raw) -> dict:
+    """The one labelling task the webhook sends for an email's text (D-246)."""
+    return {
+        "name": "docflow.label_mail_body",
+        "args": [str(tenant.tenant_id), str(raw["id"])],
+        "queue": "interactive",
+    }
+
+
 @pytest.fixture()
 def celery(monkeypatch):
     fake = _FakeCeleryClient()
@@ -114,8 +127,8 @@ def test_a_text_body_beside_an_attachment_is_stored_and_the_document_carries_its
         with pytest.raises(CrossTenantStoragePathError):
             storage.read_file(other.tenant_id, raw["body_storage_path"])
 
-        # Nothing was decided about the text: no label, nothing waiting.
-        assert raw["body_state"] == "none"
+        # The text waits for its label; nothing about it is decided yet.
+        assert raw["body_state"] == "pending"
         for column in (
             "body_text_path",
             "body_label",
@@ -128,20 +141,80 @@ def test_a_text_body_beside_an_attachment_is_stored_and_the_document_carries_its
             assert raw[column] is None, column
 
         assert _document_links(tenant) == [(raw["id"], "attachment", "pending")]
-        # The same single nudge as before; no other task.
-        assert celery.sent == [{"name": "docflow.dispatch", "args": None, "queue": "dispatch"}]
+        # The dispatcher's nudge for the attachment, then one labelling task.
+        assert celery.sent == [
+            {"name": "docflow.dispatch", "args": None, "queue": "dispatch"},
+            _label_task(tenant, raw),
+        ]
 
 
-def test_an_email_with_text_and_no_attachment_is_still_int_001_and_its_text_is_kept(client, celery):
+def test_an_email_with_text_and_no_attachment_is_received_and_sent_for_labelling(client, celery):
     with _TestIntakeTenant("Acme Test Distributor") as tenant:
-        assert _post(client, tenant, text_body=ORDER_TEXT) == "rejected"
+        assert _post(client, tenant, text_body=ORDER_TEXT) == "received"
+
+        # No document yet and nothing refused: the label decides (b1.md 2.2).
+        assert tenant.documents() == []
+        assert tenant.intake_rejections() == []
+        raw = _raw_email(tenant)
+        assert raw["outcome"] == "received"
+        assert raw["body_kind"] == "text" and raw["body_state"] == "pending"
+        assert storage.read_file(tenant.tenant_id, raw["body_storage_path"]) == ORDER_TEXT.encode("utf-8")
+        assert celery.sent == [_label_task(tenant, raw)]
+
+
+def test_an_email_with_no_attachment_and_a_blank_text_is_int_001_and_sends_nothing(client, celery):
+    with _TestIntakeTenant("Acme Test Distributor") as tenant:
+        assert _post(client, tenant, text_body=" \r\n", html_body="") == "rejected"
 
         assert tenant.documents() == []
         assert [row["error_code"] for row in tenant.intake_rejections()] == ["INT-001"]
         raw = _raw_email(tenant)
-        assert raw["outcome"] == "rejected"
-        assert raw["body_kind"] == "text" and raw["body_state"] == "none"
-        assert storage.read_file(tenant.tenant_id, raw["body_storage_path"]) == ORDER_TEXT.encode("utf-8")
+        assert raw["outcome"] == "rejected" and raw["body_state"] == "none"
+        assert raw["body_storage_path"] is None
+        assert celery.sent == []
+
+
+def test_text_beside_attachments_that_were_all_refused_still_waits_for_its_label(client, celery):
+    """'received' is for text with no attachment (0041); an email whose
+    attachments were all refused keeps 'rejected', and its text is still
+    labelled."""
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("purchase_order.txt", b"PO Number: TEST-0008\n")
+    with _TestIntakeTenant("Acme Test Distributor") as tenant:
+        refused = [_pm_attachment("orders.zip", buf.getvalue(), "application/zip")]
+        assert _post(client, tenant, text_body=ORDER_TEXT, attachments=refused) == "rejected"
+
+        raw = _raw_email(tenant)
+        assert raw["outcome"] == "rejected" and raw["body_state"] == "pending"
+        assert tenant.documents() == []
+        # The archive's own refusal (Tier 3), and nothing for the text.
+        assert [row["error_code"] for row in tenant.intake_rejections()] == ["DOC-010"]
+        assert celery.sent == [_label_task(tenant, raw)]
+
+
+def test_held_text_with_no_attachment_for_a_failed_authentication_alerts_with_its_document(client, celery):
+    with _TestIntakeTenant("Acme Test Distributor") as tenant:
+        payload_headers = [{"Name": "Authentication-Results", "Value": "spf=fail dkim=fail dmarc=fail"}]
+        assert _post(client, tenant, text_body=ORDER_TEXT, headers=payload_headers) == "quarantined"
+
+        raw = _raw_email(tenant)
+        assert raw["body_state"] == "held"
+        [held] = tenant.documents()
+        assert held["status"] == "quarantined" and held["quarantine_reason"] == "auth_fail"
+        with platform_session() as session:
+            alerts = (
+                session.execute(
+                    text(
+                        "SELECT payload FROM founder_alerts "
+                        "WHERE tenant_id = :t AND type = 'unverified_sender_held'"
+                    ),
+                    {"t": str(tenant.tenant_id)},
+                )
+                .mappings()
+                .all()
+            )
+        assert [a["payload"]["first_document_id"] for a in alerts] == [str(held["id"])]
         assert celery.sent == []
 
 
@@ -184,23 +257,27 @@ def test_a_blank_body_leaves_every_body_column_empty(client, celery):
         assert raw["body_state"] == "none"
         for column in ("body_storage_path", "body_kind", "body_sha256", "body_bytes", "body_html_path"):
             assert raw[column] is None, column
-        # The document still carries its e-mail.
+        # The document still carries its e-mail, and there is no text to label.
         assert _document_links(tenant) == [(raw["id"], "attachment", "pending")]
+        assert celery.sent == [{"name": "docflow.dispatch", "args": None, "queue": "dispatch"}]
 
 
 def test_a_held_emails_text_is_stored_and_every_held_document_carries_the_email(client, celery):
-    """The attachment cap counts attachments only: 11 quarantines all 11, the
-    text is kept, and it is not sent anywhere."""
+    """The attachment cap counts attachments only: 11 quarantines all 11 and
+    nothing else. The text is kept and `held`; it gets no document of its own
+    (its attachments' documents are in the Held list) and is not sent
+    anywhere (b1.md section 6)."""
     with _TestIntakeTenant("Acme Test Distributor") as tenant:
         attachments = [_pm_attachment(f"po-{i}.txt", f"PO number {i}".encode()) for i in range(11)]
         assert _post(client, tenant, text_body=ORDER_TEXT, attachments=attachments) == "quarantined"
 
         raw = _raw_email(tenant)
         assert raw["outcome"] == "quarantined"
-        assert raw["body_kind"] == "text" and raw["body_state"] == "none"
+        assert raw["body_kind"] == "text" and raw["body_state"] == "held"
         links = _document_links(tenant)
         assert len(links) == 11
         assert set(links) == {(raw["id"], "attachment", "quarantined")}
+        assert tenant.intake_rejections() == []
         assert celery.sent == []
 
 

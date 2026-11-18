@@ -32,7 +32,7 @@ from docflow_core import intake_admin, usage
 from docflow_core.db import platform_session, tenant_session
 from sqlalchemy import text
 
-from tests.conftest import intake_webhook_headers, requires_database
+from tests.conftest import intake_webhook_headers, requires_database, requires_mail_body_schema
 from tests.tenant_cleanup import purge_test_tenant, register_test_tenant
 from tests.test_console_api import JWT_SECRET, _Console, _environment, stripe  # noqa: F401
 from tests.test_email_intake import _pm_attachment, _pm_payload
@@ -664,6 +664,58 @@ def test_strict_allowlist_is_off_by_default_and_holds_rather_than_rejects(client
         # It is the tenant's own call, so the owner can release it.
         r = client.post("/held/release", headers=t.headers(), json={"document_ids": [str(held[0]["id"])]})
         assert r.status_code == 200
+
+
+@requires_database
+@requires_quarantine_schema
+@requires_mail_body_schema
+def test_held_text_with_no_attachment_gets_one_held_document_and_release_sends_it_to_extraction(
+    client, celery
+):
+    """B1 (docs/designs/b1.md section 6; D-246): strict mode holds an unlisted
+    sender's text-only email as one quarantined text document -- the stored
+    text itself -- so it is in the Held list. Nothing goes to the model and
+    no ignored-mail row is written. Released, it goes straight to the
+    pipeline with no label call, and its email's text is `released`."""
+    with _Tenant() as t:
+        with platform_session() as session:
+            session.execute(
+                text(
+                    "UPDATE tenants SET strict_sender_mode = true, "
+                    "sender_allowlist = '{allowed.example.test}' WHERE id = :t"
+                ),
+                {"t": str(t.tenant_id)},
+            )
+        payload = _pm_payload("stranger@example.test", attachments=[])
+        payload["TextBody"] = "Please ship 4 x TEST-100. PO TEST-PO-9"
+        response = client.post(f"/intake/email/{t.token}", json=payload, headers=intake_webhook_headers())
+        assert response.status_code == 200 and response.json()["outcome"] == "quarantined"
+
+        [email] = t.rows(
+            "SELECT id, outcome, body_state, body_storage_path, body_sha256 "
+            "FROM raw_emails WHERE tenant_id = :t"
+        )
+        assert email["outcome"] == "quarantined" and email["body_state"] == "held"
+        [held] = t.rows(
+            "SELECT id, status, quarantine_reason, raw_email_id, email_part, storage_path, content_sha256, "
+            "original_filename FROM documents WHERE tenant_id = :t"
+        )
+        assert held["status"] == "quarantined" and held["quarantine_reason"] == "sender_not_allowed"
+        assert (held["raw_email_id"], held["email_part"]) == (email["id"], "body")
+        assert held["storage_path"] == email["body_storage_path"]
+        assert held["content_sha256"] == email["body_sha256"]
+        assert held["original_filename"] == "E-mail text.txt"
+        assert t.rows("SELECT id FROM intake_rejections WHERE tenant_id = :t") == []
+        assert all(task["name"] != "docflow.label_mail_body" for task in celery.sent)
+        assert t.rows("SELECT id FROM extraction_runs WHERE tenant_id = :t") == []
+
+        r = client.post("/held/release", headers=t.headers(), json={"document_ids": [str(held["id"])]})
+        assert r.status_code == 200 and r.json()["released"] == [str(held["id"])]
+        [released] = t.rows("SELECT status FROM documents WHERE tenant_id = :t")
+        assert released["status"] == "pending"  # the dispatcher sends it to extraction
+        [after] = t.rows("SELECT body_state FROM raw_emails WHERE tenant_id = :t")
+        assert after["body_state"] == "released"
+        assert all(task["name"] != "docflow.label_mail_body" for task in celery.sent)
 
 
 @requires_database

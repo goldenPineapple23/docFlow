@@ -399,8 +399,8 @@ IMP-011 [warning/founder] Reading this file failed on our side
   next:     Don't change the file. Once the fix is deployed, start the import again from the same file.
 
 INT-001 [warning/tenant] No attachment to process
-  what+why: This email didn't include an attachment DocFlow recognizes as a document, so nothing was processed.
-  next:     Resend with the purchase order attached as a PDF, Word, or Excel file.
+  what+why: This email had no attachment DocFlow recognizes as a document and no text DocFlow could read, so nothing was processed.
+  next:     Ask the sender to send the purchase order as an attachment (PDF, Word or Excel), or with the items and quantities typed in the message.
 
 INT-002 [warning/tenant] Held: too many attachments
   what+why: This email had more attachments than DocFlow allows in one message, so we're holding all of them until someone confirms they're real.
