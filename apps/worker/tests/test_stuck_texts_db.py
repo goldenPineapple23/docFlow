@@ -192,6 +192,37 @@ def test_a_text_the_sweep_takes_after_a_failed_final_write_carries_that_call_onc
         assert _spend(tenant) == written_alone["est_cost_usd"]
 
 
+def test_a_text_that_cannot_be_decided_never_stops_the_rest_of_the_tenants_sweep(monkeypatch):
+    with WorkerTestTenant("Acme Test Sweep") as tenant:
+        broken = _email(tenant, ORDER_TEXT)
+        fine = _email(tenant, COVER_TEXT)
+        _age_email(broken, PAST + 5)  # older: taken first
+        _age_email(fine, PAST)
+        stuck = tenant.create_pending_document()
+        with platform_session() as session:
+            session.execute(
+                text(
+                    "UPDATE documents SET status = 'processing', processing_attempts = 1, "
+                    "processing_started_at = now() - make_interval(mins => :m) WHERE id = :d"
+                ),
+                {"m": PAST, "d": str(stuck)},
+            )
+        real = mail_bodies.settle_stuck_text
+
+        def settle_or_fail(session, tenant_id, raw_email_id):
+            if raw_email_id == broken:
+                raise RuntimeError("cannot settle")
+            return real(session, tenant_id, raw_email_id)
+
+        monkeypatch.setattr(mail_bodies, "settle_stuck_text", settle_or_fail)
+        enqueued: list = []
+        result = stuck_documents.sweep_tenant(tenant.tenant_id, lambda tid, did: enqueued.append(did))
+
+        assert result.requeued == [stuck] and enqueued == [stuck]  # the document still goes on
+        assert result.texts_made_documents == [fine]
+        assert _email_row(broken)["body_state"] == "pending" and _text_documents(broken) == []
+
+
 @pytest.mark.parametrize("path", ["call_failed", "hash_mismatch", "text_unreadable"])
 def test_a_text_decided_with_no_label_is_never_picked_up_again(monkeypatch, path):
     """Founder, 2026-11-18, answer 1: each no-label path ends `labelled`

@@ -55,7 +55,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from docflow_core import dispatch, document_status, founder_alerts, mail_bodies, model_runs
+from docflow_core import dispatch, document_status, faults, founder_alerts, mail_bodies, model_runs
 from docflow_core.constants import (
     EXPORTS_NOT_FINISHED_ALERT_PER_DAY,
     MAX_PROCESSING_ATTEMPTS,
@@ -214,9 +214,26 @@ def _decide_stuck_texts(session: Session, tenant_id: UUID, result: SweepResult, 
     """B1 (b1.md 2.2 step 9; D-246): an email's text still `pending` past the
     timeout becomes a document with no label call. Nothing waits unseen. The
     document is `pending`: the dispatcher's own pass sends it. A text in any
-    other state -- `none`, `held`, `labelled`, `released` -- is never touched."""
+    other state -- `none`, `held`, `labelled`, `released` -- is never touched.
+
+    Each text in its own savepoint: one that can't be decided is logged and
+    left `pending` for the next pass, and never rolls back the rest of this
+    tenant's sweep -- its stuck documents still go on (Section 7.9)."""
     for raw_email_id in mail_bodies.stuck_texts(session, timeout_min=timeout_min):
-        if mail_bodies.settle_stuck_text(session, tenant_id, raw_email_id).document_id is not None:
+        savepoint = session.begin_nested()
+        try:
+            settled = mail_bodies.settle_stuck_text(session, tenant_id, raw_email_id)
+            savepoint.commit()
+        except Exception as exc:  # noqa: BLE001 -- see the docstring
+            savepoint.rollback()
+            logger.error(
+                "stuck_text_not_decided tenant_id=%s raw_email_id=%s %s",
+                tenant_id,
+                raw_email_id,
+                faults.for_log(exc),
+            )
+            continue
+        if settled.document_id is not None:
             result.texts_made_documents.append(raw_email_id)
 
 
