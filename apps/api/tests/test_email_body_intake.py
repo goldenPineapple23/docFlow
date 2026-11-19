@@ -21,8 +21,8 @@ from io import BytesIO
 from uuid import UUID, uuid4
 
 import pytest
-from docflow_core import storage
-from docflow_core.db import platform_session
+from docflow_core import email_intake, storage
+from docflow_core.db import platform_session, tenant_session
 from docflow_core.storage import CrossTenantStoragePathError
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -96,6 +96,145 @@ def celery(monkeypatch):
     fake = _FakeCeleryClient()
     monkeypatch.setattr("docflow_core.email_intake.celery_client", fake)
     return fake
+
+
+# ── the velocity rule counts e-mails, not texts on top of documents (4b) ─────
+
+
+COVER_NOTE = "Hello, please see attached. Thanks."
+
+
+def _post_from(client, tenant, sender: str, *, text_body: str, attachments=None) -> str:
+    payload = _pm_payload(sender, attachments=attachments or [])
+    payload.update({"TextBody": text_body, "HtmlBody": "", "Date": DATE_LINE})
+    response = client.post(f"/intake/email/{tenant.token}", json=payload, headers=intake_webhook_headers())
+    assert response.status_code == 200
+    return response.json()["outcome"]
+
+
+def _velocity_count(tenant) -> int:
+    with tenant_session(tenant.tenant_id) as session:
+        return email_intake.count_unknown_sender_mail_last_hour(session, tenant.tenant_id)
+
+
+def _cover_note_email(client, tenant, i: int) -> str:
+    return _post_from(
+        client,
+        tenant,
+        f"sender{i}@unknown{i}.example.test",
+        text_body=COVER_NOTE,
+        attachments=[_pm_attachment(f"po-{i}.txt", f"PO TEST-{i}".encode())],
+    )
+
+
+def test_20_unknown_senders_with_an_attachment_and_a_cover_note_count_20_and_the_21st_is_held(
+    client, celery
+):
+    """D-248 item 3. Each of the 20 emails is one document and one text sent to
+    labelling; the count is 20, not 40, because an email with a document is
+    counted as its documents only. So the 21st is the one that is held, the
+    same as before labelling existed. (The attachments are .txt: the suite's
+    usual valid file; the count does not depend on the type.)"""
+    with _TestIntakeTenant("Acme Test Distributor") as tenant:
+        for i in range(20):
+            assert _cover_note_email(client, tenant, i) == "processed", i
+        assert _velocity_count(tenant) == 20
+        assert _cover_note_email(client, tenant, 20) == "quarantined"
+        with platform_session() as session:
+            held = session.execute(
+                text(
+                    "SELECT quarantine_reason, email_part FROM documents "
+                    "WHERE tenant_id = :t AND status = 'quarantined'"
+                ),
+                {"t": str(tenant.tenant_id)},
+            ).all()
+        assert [tuple(r) for r in held] == [("unknown_sender_velocity", "attachment")]
+
+
+def test_twenty_unknown_senders_text_only_emails_count_twenty_before_and_after_their_text_becomes_a_document(
+    client, celery
+):
+    """A text-only email has no document while its label is pending, so it is
+    counted as an email; once its text is a document it is counted as that
+    document and no longer as an email: once either way. The 21st is held."""
+    with _TestIntakeTenant("Acme Test Distributor") as tenant:
+        for i in range(20):
+            sender = f"textonly{i}@unknown{i}.example.test"
+            body = f"Please ship 4 x TEST-100. PO TEST-{i}"
+            assert _post_from(client, tenant, sender, text_body=body) == "received"
+        assert _velocity_count(tenant) == 20
+
+        # Each text becomes a document (what an order label does, in the
+        # worker): the count stays 20.
+        with platform_session() as session:
+            session.execute(
+                text(
+                    "INSERT INTO documents (id, tenant_id, original_filename, storage_path, source, status, "
+                    "content_sha256, sender_email, raw_email_id, email_part, created_at) "
+                    "SELECT gen_random_uuid(), r.tenant_id, 'E-mail text.txt', r.body_storage_path, 'email', "
+                    "'pending', r.body_sha256, r.sender_email, r.id, 'body', now() "
+                    "FROM raw_emails r WHERE r.tenant_id = :t"
+                ),
+                {"t": str(tenant.tenant_id)},
+            )
+            session.execute(
+                text("UPDATE raw_emails SET body_state = 'labelled' WHERE tenant_id = :t"),
+                {"t": str(tenant.tenant_id)},
+            )
+        assert _velocity_count(tenant) == 20
+        last = _post_from(client, tenant, "textonly20@unknown20.example.test", text_body="PO TEST-20")
+        assert last == "quarantined"
+
+
+def test_a_labelled_text_with_no_document_still_counts_once_and_a_known_sender_is_never_held(client, celery):
+    with _TestIntakeTenant("Acme Test Distributor") as tenant:
+        tenant.seed_document("known-buyer@example.test", status="pending")
+        for i in range(20):
+            sender = f"cover{i}@unknown{i}.example.test"
+            assert _post_from(client, tenant, sender, text_body="Thanks!") == "received"
+        # Their texts are labelled "not an order": no document, still counted.
+        with platform_session() as session:
+            session.execute(
+                text(
+                    "UPDATE raw_emails SET body_state = 'labelled', outcome = 'rejected' WHERE tenant_id = :t"
+                ),
+                {"t": str(tenant.tenant_id)},
+            )
+        # The seeded document (the known sender's first, so counted as a
+        # document, as before) plus the 20 label-only emails.
+        assert _velocity_count(tenant) == 21
+
+        outcome = _post_from(
+            client,
+            tenant,
+            "known-buyer@example.test",
+            text_body=COVER_NOTE,
+            attachments=[_pm_attachment("known.txt", b"known sender PO")],
+        )
+        assert outcome == "processed"  # known senders are never affected by the rule
+        last = _post_from(client, tenant, "cover20@unknown20.example.test", text_body="Thanks!")
+        assert last == "quarantined"
+
+
+def test_an_email_that_arrived_over_an_hour_ago_or_whose_text_was_held_is_not_counted(client, celery):
+    with _TestIntakeTenant("Acme Test Distributor") as tenant:
+        sender = "old@unknown.example.test"
+        assert _post_from(client, tenant, sender, text_body="Please ship 4 x TEST-100") == "received"
+        assert _velocity_count(tenant) == 1
+        with platform_session() as session:
+            session.execute(
+                text("UPDATE raw_emails SET created_at = now() - interval '61 minutes' WHERE tenant_id = :t"),
+                {"t": str(tenant.tenant_id)},
+            )
+        assert _velocity_count(tenant) == 0
+        with platform_session() as session:
+            session.execute(
+                text(
+                    "UPDATE raw_emails SET created_at = now(), body_state = 'held' WHERE tenant_id = :t"
+                ),
+                {"t": str(tenant.tenant_id)},
+            )
+        assert _velocity_count(tenant) == 0  # held: never sent to labelling, so not a label to count
 
 
 # ── the text is stored, as sent ──────────────────────────────────────────────
