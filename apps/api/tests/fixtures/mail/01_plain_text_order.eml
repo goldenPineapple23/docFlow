@@ -1,0 +1,21 @@
+From: Pat Buyer <pat.buyer@acmetest.example>
+To: orders@intake.docflow.example
+Subject: Order for this week
+Date: Mon, 16 Nov 2026 09:30:00 -0500
+Message-ID: <01_plain_text_order@mail.acmetest.example>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Hi team,
+
+Please ship the following on PO TEST-PO-101:
+
+4 x TEST-100 hex bolt M8
+2 x TEST-200 flat washer M8
+
+Deliver to the usual dock.
+
+Thanks,
+Pat Buyer
+Acme Test Distributor

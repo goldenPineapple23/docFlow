@@ -1,0 +1,14 @@
+From: Pat Buyer <pat.buyer@acmetest.example>
+To: orders@intake.docflow.example
+Subject: PO TEST-PO-102
+Date: Mon, 16 Nov 2026 09:30:00 -0500
+Message-ID: <02_html_only_order@mail.acmetest.example>
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Hello,</p><p>Please supply the items below for PO TEST-PO-102.=
+</p><table border=3D"1"><tr><th>Qty</th><th>Item</th><th>Description</th></tr=
+><tr><td>6</td><td>TEST-110</td><td>Hex nut M10</td></tr><tr><td>3</td><td>TE=
+ST-210</td><td>Spring washer M10</td></tr></table><p>Regards,<br>Pat Buyer</p=
+></body></html>

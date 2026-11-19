@@ -50,6 +50,10 @@ from docflow_core.storage import save_file
 
 logger = logging.getLogger(__name__)
 
+# The labelling task (B1; docs/designs/b1.md 2.2) and the queue it is sent on.
+LABEL_MAIL_BODY_TASK = "docflow.label_mail_body"
+LABEL_MAIL_BODY_QUEUE = "interactive"
+
 # An attachment whose check failed on our side, not the file's (D-203, PR 1b-i).
 INTAKE_OURS_CODE = "DOC-030"
 
@@ -129,7 +133,10 @@ class AuthResult:
 
 @dataclass(frozen=True)
 class EmailDecision:
-    """Pure decision output of `evaluate_email` -- no DB, no I/O."""
+    """Pure decision output of `evaluate_email` -- no DB, no I/O.
+
+    `reject_no_attachment` is INT-001: no attachment and no text to read
+    (B1: an email with text and no attachment is read, not refused)."""
 
     reject_no_attachment: bool
     quarantine_reason: str | None
@@ -146,7 +153,7 @@ class AttachmentOutcome:
 
 @dataclass(frozen=True)
 class ProcessResult:
-    outcome: str  # "processed" | "quarantined" | "rejected" | "duplicate"
+    outcome: str  # "processed" | "quarantined" | "rejected" | "received" | "duplicate"
     raw_email_id: UUID | None
     attachments: list[AttachmentOutcome]
 
@@ -432,13 +439,19 @@ def evaluate_email(
     unknown_sender_count_last_hour: int,
     ceiling_hold: str | None = None,
     sender_allowed: bool = True,
+    has_body: bool = False,
 ) -> EmailDecision:
     """
     Pure decision function -- no DB access -- so the abuse-defense ordering
     from CLAUDE.md Section 7.16.3 (attachment cap, then auth, then unknown-
     sender velocity) is independently unit-testable without a database.
+
+    B1 (docs/designs/b1.md 2.1 step 4): "has a body" is the one new input.
+    An email with neither an attachment nor text is INT-001; one with text
+    and no attachment goes through every hold below, as an email with
+    attachments does. The attachment cap counts attachments only.
     """
-    if num_attachments == 0:
+    if num_attachments == 0 and not has_body:
         return EmailDecision(reject_no_attachment=True, quarantine_reason=None)
     # The abuse ceilings come first: they pause the whole tenant, and only the
     # founder can lift them (7.16.2).
@@ -557,8 +570,8 @@ def _insert_raw_email(
             """
         ),
         {
-            # `body_state` keeps its default, 'none': nothing waits for a
-            # label. The labelling task is what marks a body 'pending'.
+            # `body_state` starts at its default, 'none'; the caller sets
+            # 'pending' or 'held' once the email's decision is made.
             "date_header": parsed.date,
             "body_storage_path": body.storage_path if body else None,
             "body_kind": body.kind if body else None,
@@ -768,6 +781,58 @@ def _insert_quarantined_document(
     return document_id
 
 
+def _insert_quarantined_body_document(
+    session: Session,
+    tenant_id: UUID,
+    parsed: ParsedEmail,
+    body: StoredBody,
+    raw_email_id: UUID,
+    *,
+    quarantine_reason: str,
+) -> UUID:
+    """
+    The one held document for a held email with text and no attachment
+    (docs/designs/b1.md section 6), so it appears in the Held list and the
+    Console's quarantine list and can be released or cleared there. It is
+    the stored text itself: nothing is copied and nothing is opened. The
+    partial unique index allows one per email (0041).
+    """
+    document_id = uuid4()
+    session.execute(
+        text(
+            """
+            INSERT INTO documents
+                (id, tenant_id, original_filename, storage_path, source, status,
+                 content_sha256, sender_email, message_id, quarantine_reason, quarantined_at,
+                 raw_email_id, email_part, created_at)
+            VALUES
+                (:id, :tenant_id, :original_filename, :storage_path, 'email', 'quarantined',
+                 :content_sha256, :sender_email, :message_id, :quarantine_reason, now(),
+                 :raw_email_id, 'body', now())
+            """
+        ),
+        {
+            "id": str(document_id),
+            "tenant_id": str(tenant_id),
+            "original_filename": BODY_FILENAMES[body.kind],
+            "storage_path": body.storage_path,
+            "content_sha256": body.sha256,
+            "sender_email": parsed.sender_email,
+            "message_id": parsed.message_id,
+            "quarantine_reason": quarantine_reason,
+            "raw_email_id": str(raw_email_id),
+        },
+    )
+    return document_id
+
+
+def _set_body_state(session: Session, tenant_id: UUID, raw_email_id: UUID, state: str) -> None:
+    session.execute(
+        text("UPDATE raw_emails SET body_state = :state WHERE tenant_id = :tenant_id AND id = :id"),
+        {"state": state, "tenant_id": str(tenant_id), "id": str(raw_email_id)},
+    )
+
+
 def _accept_attachment(
     session: Session,
     tenant_id: UUID,
@@ -931,6 +996,8 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
     sender_domain = sender_domain_of(parsed.sender_email)
 
     pending_enqueues: list[UUID] = []
+    label_body = False
+    held_text_document_id: UUID | None = None
     result_outcome: str
     raw_email_id: UUID
     attachment_outcomes: list[AttachmentOutcome] = []
@@ -984,12 +1051,11 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
         num_attachments = len(parsed.attachments)
 
         # B1 (D-230): the e-mail's own text is kept from here on, for every
-        # e-mail this address accepts, whatever is decided below. Storing it
-        # changes no decision: an e-mail with text and no attachment is still
-        # INT-001 until the labelling task exists.
+        # e-mail this address accepts, whatever is decided below.
         body = _store_body(session, tenant_id, parsed)
 
-        if num_attachments == 0:
+        if num_attachments == 0 and body is None:
+            # Nothing to read: no attachment and no text (INT-001).
             _insert_intake_rejection(
                 session, tenant_id, parsed, original_filename=None, detected_type=None, error_code="INT-001"
             )
@@ -1011,7 +1077,13 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
             and sender_is_allowed(parsed.sender_email, list(tenant["sender_allowlist"] or []))
         )
         decision = evaluate_email(
-            num_attachments, auth, sender_known, unknown_sender_count, ceiling_hold, sender_allowed
+            num_attachments,
+            auth,
+            sender_known,
+            unknown_sender_count,
+            ceiling_hold,
+            sender_allowed,
+            has_body=body is not None,
         )
 
         if decision.quarantine_reason:
@@ -1029,13 +1101,6 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
                     )
                 )
             result_outcome = "quarantined"
-            if decision.quarantine_reason == "auth_fail":
-                # INT-004 says DocFlow has been alerted; only the founder can
-                # release these (7.16.4), so the founder must hear of them (D-145).
-                founder_alerts.raise_for_failure(
-                    session, tenant_id=tenant_id, error_code="INT-004",
-                    document_id=attachment_outcomes[0].document_id if attachment_outcomes else None,
-                )
             if decision.quarantine_reason in ("abuse_ceiling", "cost_breaker"):
                 # "The intake address auto-replies 'received and held'" (7.16.2).
                 # The rejection row is what limits this to one reply a day per
@@ -1061,6 +1126,10 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
             result_outcome = "processed" if any_accepted else "rejected"
             if any_accepted:
                 allowance.record_thresholds(session, tenant_id)
+            if body is not None and num_attachments == 0:
+                # Text and no attachment: nothing is decided yet. The text
+                # waits for its label (b1.md 2.1 step 6; 0041's 'received').
+                result_outcome = "received"
 
         raw_email_id = _insert_raw_email(
             session,
@@ -1078,6 +1147,35 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
             raw_email_id,
             [o.document_id for o in attachment_outcomes if o.document_id is not None],
         )
+        if body is not None:
+            if decision.quarantine_reason:
+                # A held email's text is never sent to the model (7.16.3): it
+                # waits, `held`, for a person to release the email (b1.md 6).
+                _set_body_state(session, tenant_id, raw_email_id, "held")
+                if num_attachments == 0:
+                    held_text_document_id = _insert_quarantined_body_document(
+                        session,
+                        tenant_id,
+                        parsed,
+                        body,
+                        raw_email_id,
+                        quarantine_reason=decision.quarantine_reason,
+                    )
+            else:
+                _set_body_state(session, tenant_id, raw_email_id, "pending")
+                label_body = True
+        if decision.quarantine_reason == "auth_fail":
+            # INT-004 says DocFlow has been alerted; only the founder can
+            # release these (7.16.4), so the founder must hear of them (D-145).
+            # Raised after every held document exists, so a held text-only
+            # email's alert names its text document (B1).
+            held_ids = [o.document_id for o in attachment_outcomes if o.document_id is not None]
+            if held_text_document_id is not None:
+                held_ids.append(held_text_document_id)
+            founder_alerts.raise_for_failure(
+                session, tenant_id=tenant_id, error_code="INT-004",
+                document_id=held_ids[0] if held_ids else None,
+            )
 
     # Stage 3d: the documents wait as `pending` (interactive lane, the column's
     # default) and only the dispatcher puts them on the queue, taking turns
@@ -1086,5 +1184,13 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
     # apps/api/app/routers/documents.py's upload endpoint.
     if pending_enqueues:
         celery_client.send_task("docflow.dispatch", queue=DISPATCH_QUEUE)
+    if label_body:
+        # One labelling task per email, after the commit, so the task finds
+        # the body `pending` (b1.md 2.1 step 6). On the worker's document
+        # queue: its one slot runs a document or a label, never both at once,
+        # so a label's parse job never competes with a document's.
+        celery_client.send_task(
+            LABEL_MAIL_BODY_TASK, args=[str(tenant_id), str(raw_email_id)], queue=LABEL_MAIL_BODY_QUEUE
+        )
 
     return ProcessResult(outcome=result_outcome, raw_email_id=raw_email_id, attachments=attachment_outcomes)

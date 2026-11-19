@@ -1,0 +1,16 @@
+{
+  "fixture": "15_change_text_only",
+  "model_id": "claude-haiku-4-5",
+  "prompt_hash": "2abc610c19072a981bd48c6785a424192bc8bfce80061b8fd0fcbb3d23f36b25",
+  "schema_version": "mail-label-1.0.0",
+  "sent_text_sha256": "53e009a5a6db13d58be4b96dbc5b9430a09cf459a855209b81d7e62b8650f74f",
+  "input_tokens": 882,
+  "output_tokens": 47,
+  "response": {
+    "label": "change",
+    "label_confidence": 0.98,
+    "contains_order_lines": true,
+    "order_lines_confidence": 0.95,
+    "injection_suspected": false
+  }
+}

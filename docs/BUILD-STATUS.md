@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-16, with the pre-demo PR merged and the CI ports PR open:** Phase 5.5,
+**Status, as of 2026-11-19, with B1 slices 1 to 3 and the Playwright install split merged, and B1 slice 4a on its branch:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -179,7 +179,7 @@ time limit, about twice its longest of the last 10 green runs on `main`, or more
 step limits need it (web 14, web-live 15, core 7, api 21, worker 13, parse 21). Every
 upload-artifact step fails in 5 minutes and stays required. Evidence: #95's web install ran
 1 h 41 min on a DNS failure, and #97's uploads hung 11 to 13 minutes. The founder's rulings (D-238): the four job limits stay as set; slow installs failing is accepted, and the 5-minute limit is revisited if a 5-minute-plus install fails a run; #95 is flake 12 and #97 is flake 13, each run counted once, so the count in D-199 item 10 is now 13.
-**The Playwright install split is on its branch** (`ci/playwright-apt-hardening` from `a3aa843`; D-247; CI only; not pushed). apt's own limits are written first (3 retries, 30 s timeouts, 180 s for a held dpkg lock); then the system packages, as root through the local binary under root's own HOME, and the browser, cached by Playwright's version, run as two steps, each with its own limit and one retry; the retry kills what a failed apt attempt left running and waits for the dpkg lock. A root-owned file under `~/.npm` or `node_modules` fails the job. Each packages attempt prints the runner's apt mirror list, and a retry after attempt 1 stopped at its limit runs without the first-priority mirror (#582, D-247 item 8). One proof commit (attempt 1 stalled to its limit, then a held lock) and its removal stay in the PR. This supersedes D-238's single-step install.
+**The Playwright install split is merged** (PR #109, `main` is `91e242a`; D-247; main's push run #587 green). apt's own limits are written first (3 retries, 30 s timeouts, 180 s for a held dpkg lock); then the system packages, as root through the local binary under root's own HOME, and the browser, cached by Playwright's version, run as two steps, each with its own limit and one retry; the retry kills what a failed apt attempt left running and waits for the dpkg lock. A root-owned file under `~/.npm` or `node_modules` fails the job. Each packages attempt prints the runner's apt mirror list, and a retry after attempt 1 stopped at its limit runs without the first-priority mirror (#582, D-247 item 8). One proof commit (attempt 1 stalled to its limit, then a held lock) and its removal stay in the PR. This supersedes D-238's single-step install.
 **M10 is merged** (PR #101, `main` `a670eef`; D-239; design `docs/designs/m10.md`). The two model IDs are read from config, and `config.py` holds the only model-ID literals in the product's code: the defaults are the strings that run today (`claude-sonnet-5`, `claude-haiku-4-5`), and `MODEL_PRICES` holds exactly those two, with their prices and roles (Sonnet extraction only, Haiku routing only). A model not in the table, or set for a role it may not fill, stops Settings from loading in the apps, scripts and tests alike. The API and the worker print `model_ids: extraction=claude-sonnet-5 routing=claude-haiku-4-5` at start. `SESSION_SECRET` is removed; the other six unread settings stay, each with a comment. No golden re-run and no staging suites before merge.
 **Task 7 is done** (RUNBOOK 13.2; D-240), 2026-11-12 to 2026-11-15, every deploy of `a670eef`.
 The Anthropic workspace staging uses has a monthly spend limit of $100, with an e-mail
@@ -209,13 +209,16 @@ stranger's body that isn't JSON on `/admin` gets the 404, in the gate's own orde
 6). `CONSOLE_MFA_ENFORCED` is on unless set false. web-live's CI-only platform admin enrols a
 real authenticator on CI's stack and passes a real challenge, and the API refuses its
 password-only session with AUTH-006. No staging suites (D-223 item 5).
-**The CI ports PR is open** (branch `phase55/ci-stack-ports` from `c57013e`; D-243): the CI
-stack's ports move from 54320-54329 to 25320-25329, below the range Linux assigns automatically;
+**The CI ports PR is merged** (PR #105, `main` `0804ec2`; D-243): the CI
+stack's ports moved from 54320-54329 to 25320-25329, below the range Linux assigns automatically;
 the five reservation steps are removed; the port printout stays, on the new block, as
 `scripts/ci/show_stack_ports.sh`.
+**B1's demo half** (D-230): slices 1 to 3 are merged (#106, `a86a0d0`, with migration 0041
+applied to staging on 2026-11-17; #107, `1124945`, D-244; #108, `a3aa843`, D-245). Slice 4a is on
+its branch (D-246), with `main` merged in after #109; 4b is next, and the staging suites run once
+on 4b's head. Each slice's state is in the B1 list below.
 **Next, in order (D-235 item 18):** the API's redeploy under a Grant, its startup log read for no
-`console_mfa_enforcement_off` line, and the web app's Vercel redeploy (D-241 item 11); the CI
-ports PR's review and merge.
+`console_mfa_enforcement_off` line, and the web app's Vercel redeploy (D-241 item 11).
 The Console's sweep, the Chrome and Safari pass, the
 real-iPhone checks and the partner walkthrough. Postmark inbound end to end. Both PO sets on
 staging. E1, then E2a. B1's demo half, labelling with the routing model. The pricing-unit fix and
@@ -242,16 +245,16 @@ CI's "Install Playwright browser" step (web-live) took 9 to 11 minutes on PR run
 under 30 seconds on main's push run #490, likely a cache miss on PR runs, costing about 10 minutes
 per PR. On main's push run #498 (`d053cca`) it took 16 seconds. The 50,000-row cap and IMP-003's
 wording: one PR, before pilots, only if a pilot prospect has more than 50,000 SKUs. **Staging:** the
-database has 0040 (2026-11-04). `docflow-api-staging` runs v4 (`a670eef`), is public at
+database has 0041 (2026-11-17; 0040 on 2026-11-04). `docflow-api-staging` runs v4 (`a670eef`), is public at
 `https://docflow-api-staging.fly.dev` (shared IPv4 66.241.124.19, dedicated IPv6
 2a09:8280:1::1a2:feb6:0, allocated 2026-11-13), and stops itself when idle. `docflow-parse-staging`
 runs v7 (`a670eef`), is private (Flycast only), and stops itself when idle.
-`docflow-worker-staging` runs v13 (`a670eef`), with its worker and beat machines running since
-2026-11-13 (founder's choice). The fictional smoke-test tenant "Smoke Test Distributor"
+`docflow-worker-staging` is release v13 (`a670eef`) with no machines: its worker and beat were
+scaled to 0 on 2026-11-17, before slice 1's staging worker suite was re-run (RUNBOOK 1.4). The fictional smoke-test tenant "Smoke Test Distributor"
 (`1ec22993`) stays, for task 12 or task 8's sweep. Tenant `a7492bf7` still holds the 20,000 test
 items and import `96bc7e0c`. Four `tenant_ready_to_delete` alerts are open, and the leftover line's
-start is tenants 34, founder alerts 8, e-mails 34, scheduled jobs 35, admin rows 12, users with no
-tenant 15 (last read 2026-11-05; task 7 added rows and didn't re-read them). The Healthchecks.io check is live while the worker runs, and paused when it stops.
+start is tenants 35, founder alerts 17, e-mails 44, scheduled jobs 37, admin rows 12, users with no
+tenant 15 (read 2026-11-17, after slice 1's staging suites and their clean-up). The Healthchecks.io check is live while the worker runs, and paused when it stops.
 
 **That paragraph is the current state only** (founder, 2026-10-05; D-191). When it changes, the
 paragraph it replaces moves, word for word, to the top of `docs/status-history.md`, which is not
@@ -2380,7 +2383,7 @@ here is built.
     (main.py:134-143). Fix the wording before the first pilot; step h's
     monitoring covers error tracking (founder, 2026-11-02).
   - **B1's demo half is being built in six slices** (founder's go,
-    2026-11-16). Slice 1 is merged (#106). Slices 2 to 6 are on their own
+    2026-11-16). Slices 1 to 3 are merged (#106 to #108). Slices 4 to 6 are on their own
     branches and go up for review in order; each slice's own bullet says
     where it stands. The design, `docs/designs/b1.md`, comes in on slice
     1's branch and has one copy: later edits go into the slice branch that
@@ -2396,7 +2399,7 @@ here is built.
       service sends the model its text, never its markup; an HTML-only `.eml`
       likewise. An HTML file's preview is that same text, shown escaped. Carry
       item 38 is closed by it.
-    - **Slice 3, built, not pushed** (`phase55/b1-s3-label-core`; D-245).
+    - **Slice 3, merged (#108)** (`phase55/b1-s3-label-core`; D-245).
       Core only: the labelling call for an email's text, the decision on
       whether it becomes a document, and the forwarded-block detector, with
       nothing calling them yet. Four new catalog entries: INT-012, VAL-019,
@@ -2404,6 +2407,21 @@ here is built.
       VAL-019's and VAL-021's writers, VAL-021's acknowledgement at approval
       and their tests come with slice 4. VAL-020 is never a document
       warning. The catalog spells it "email" (REQ-002 and INT-011 changed).
+    - **Slice 4a, on its branch** (`phase55/b1-s4-wiring`; D-246; `main`
+      merged in after #109). An email's text with no attachment is
+      labelled by one call and becomes a document or an INT-012 row; a
+      failed call or a text left pending past the timeout becomes a
+      document with no label. INT-001 has its new wording. The label
+      call's cost is on the text document it made, and a call that made
+      none counts in AI spend, gross margin and the tenant list's month.
+      The text document runs the normal pipeline with VAL-019, VAL-021
+      and no VAL-013 between an email's own documents. Sixteen fixture
+      emails run end to end against label and extraction answers
+      recorded live in two runs ($0.1908), and the label prompt gained
+      one sentence (fixture 16). Slice 4b (a held text sent for
+      labelling when its email is released, and the velocity rule)
+      comes next; the staging suites run once on 4b's head, before
+      4b merges.
   - **What B1 defers past the demo** (founder, 2026-11-03; D-230 item 11):
     - labels on attachments;
     - item 4's rule for attachments (D-230 item 4);

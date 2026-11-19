@@ -381,9 +381,13 @@ def _count_example_tokens(client: Any, examples: list[PromptExample]) -> int | N
 def build_text_content(text: str) -> list[dict[str, Any]]:
     """
     Wrap document text in explicit delimiters (CLAUDE.md Section 7.2) -- the
-    text is never interpolated bare into the prompt.
+    text is never interpolated bare into the prompt. The text is data: a tag
+    in it that names one of this module's fences is written as `[document]`
+    / `[/document]` (`_defang`), the same as an example's text and the
+    labelling call's (B1; D-246), so the envelope is always the one this
+    function writes. Text with no such tag goes in byte for byte.
     """
-    return [{"type": "text", "text": f"<document>\n{text}\n</document>"}]
+    return [{"type": "text", "text": f"<document>\n{_defang(text)}\n</document>"}]
 
 
 def wrap_document_content(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -393,13 +397,21 @@ def wrap_document_content(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     document produces several parts -- e.g. a multi-page TIFF converted to
     one image per page, or an Outlook message whose body and attachment are
     both part of the same purchase order -- so the model still sees exactly
-    one <document> envelope.
+    one <document> envelope. Each text part is data, as in
+    `build_text_content`; image and PDF parts are passed as they are.
     """
     return [
         {"type": "text", "text": "<document>"},
-        *parts,
+        *(_as_data(part) for part in parts),
         {"type": "text", "text": "</document>"},
     ]
+
+
+def _as_data(part: dict[str, Any]) -> dict[str, Any]:
+    """A text part with its fence tags written as data; any other part as it is."""
+    if part.get("type") == "text" and isinstance(part.get("text"), str):
+        return {**part, "text": _defang(part["text"])}
+    return part
 
 
 def build_image_content(image_bytes_b64: str, media_type: str) -> list[dict[str, Any]]:

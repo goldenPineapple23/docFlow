@@ -1,0 +1,45 @@
+From: Pat Buyer <pat.buyer@acmetest.example>
+To: orders@intake.docflow.example
+Subject: Purchase order attached
+Date: Mon, 16 Nov 2026 09:30:00 -0500
+Message-ID: <04_cover_note_with_pdf@mail.acmetest.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============0869969410217088097=="
+
+--===============0869969410217088097==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hello,
+
+Our purchase order is attached. Please confirm receipt.
+
+Kind regards,
+Pat Buyer
+
+--===============0869969410217088097==
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="PO-BCH-2291.pdf"
+MIME-Version: 1.0
+
+JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250
+IC9IZWx2ZXRpY2EgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL0xlbmd0aCA0ODAgPj4Kc3RyZWFtCkJU
+IC9GMSAxMiBUZiA3MiA3MjAgVGQgKFBVUkNIQVNFIE9SREVSIFBPIE51bWJlcjogQkNILTIyOTEg
+T3JkZXIgRGF0ZTogMjAyNi0wMy0xNCBCdXllcjogQWNtZSdzIFRlc3QgQ29mZmVlIEhvdXNlIENv
+bnRhY3Q6IG9yZGVyc0BhY21ldGVzdGNvZmZlZS5leGFtcGxlIFBheW1lbnQgVGVybXM6IE5ldCAz
+MCAgU0tVLCBEZXNjcmlwdGlvbiwgUXR5LCBVbml0LCBVbml0IFByaWNlLCBMaW5lIFRvdGFsIENG
+LTEwMDEsIENvbG9tYmlhbiBXaG9sZSBCZWFuIDVsYiwgMTIsIENTLCA0Ny41MCwgNTcwLjAwIENG
+LTIyMTAsIEV0aGlvcGlhbiBZaXJnYWNoZWZmZSA1bGIsIDYsIENTLCA2Mi4wMCwgMzcyLjAwIFNZ
+LTAwNDUsIFZhbmlsbGEgU3lydXAgNzUwbWwsIDI0LCBFQSwgOC4yNSwgMTk4LjAwIENVUC0xMiwg
+MTJveiBQYXBlciBDdXBzIFwoMTAwMGN0XCksIDQsIEJPWCwgNTQuMDAsIDIxNi4wMCAgT3JkZXIg
+VG90YWw6IDEzNTYuMDAgKSBUaiBFVAplbmRzdHJlYW0KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUg
+L1BhZ2UgL1BhcmVudCA0IDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvUmVzb3VyY2VzIDw8
+IC9Gb250IDw8IC9GMSAxIDAgUiA+PiA+PiAvQ29udGVudHMgMiAwIFIgPj4KZW5kb2JqCjQgMCBv
+YmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjUgMCBv
+YmoKPDwgL1R5cGUgL0NhdGFsb2cgL1BhZ2VzIDQgMCBSID4+CmVuZG9iagp4cmVmCjAgNgowMDAw
+MDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA3OSAwMDAwMCBuIAow
+MDAwMDAwNjEwIDAwMDAwIG4gCjAwMDAwMDA3MzYgMDAwMDAgbiAKMDAwMDAwMDc5MyAwMDAwMCBu
+IAp0cmFpbGVyCjw8IC9TaXplIDYgL1Jvb3QgNSAwIFIgPj4Kc3RhcnR4cmVmCjg0MgolJUVPRgo=
+
+--===============0869969410217088097==--

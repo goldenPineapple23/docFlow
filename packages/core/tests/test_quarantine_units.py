@@ -45,6 +45,42 @@ def test_an_email_with_no_attachment_is_rejected_even_while_a_ceiling_is_tripped
     assert evaluate_email(0, CLEAN, False, 0, "abuse_ceiling").reject_no_attachment is True
 
 
+# ── B1: "has a body" (docs/designs/b1.md 2.1 step 4 and section 6) ──────────
+
+
+def test_an_email_with_text_and_no_attachment_is_read_not_refused():
+    decision = evaluate_email(0, CLEAN, True, 0, has_body=True)
+    assert decision.reject_no_attachment is False and decision.quarantine_reason is None
+
+
+def test_an_email_with_neither_text_nor_an_attachment_is_still_int_001():
+    assert evaluate_email(0, CLEAN, True, 0, has_body=False).reject_no_attachment is True
+    assert evaluate_email(0, CLEAN, True, 0).reject_no_attachment is True  # the default: no text
+
+
+@pytest.mark.parametrize(
+    ("args", "reason"),
+    [
+        ((AuthResult("fail", "fail", "fail"), False, 99, "abuse_ceiling", False), "abuse_ceiling"),
+        ((CLEAN, False, 99, "cost_breaker", True), "cost_breaker"),
+        ((AuthResult("pass", "pass", "fail"), True, 0, None, True), "auth_fail"),
+        ((CLEAN, False, 0, None, False), "sender_not_allowed"),
+        ((CLEAN, False, 20, None, True), "unknown_sender_velocity"),
+        ((CLEAN, True, 500, None, True), None),  # a known sender is never velocity-held
+    ],
+)
+def test_every_hold_applies_to_text_with_no_attachment_in_the_same_order(args, reason):
+    decision = evaluate_email(0, *args, has_body=True)
+    assert decision.reject_no_attachment is False
+    assert decision.quarantine_reason == reason
+
+
+@pytest.mark.parametrize("has_body", [False, True])
+def test_the_attachment_cap_counts_attachments_only(has_body):
+    assert evaluate_email(10, CLEAN, True, 0, has_body=has_body).quarantine_reason is None
+    assert evaluate_email(11, CLEAN, True, 0, has_body=has_body).quarantine_reason == "attachment_cap"
+
+
 def test_the_allowlist_matches_an_address_or_a_domain_case_insensitively():
     listed = ["Buyer@Example.test", "trusted.example.test"]
     assert sender_is_allowed("buyer@example.test", listed)

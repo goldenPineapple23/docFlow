@@ -1,0 +1,71 @@
+{
+  "fixture": "13_text_over_budget",
+  "model_id": "claude-sonnet-5",
+  "prompt_hash": "ad960adc44753d7545ff8f870f01fe0c55ba2fbbfc0abb94ac13cd4b011caf27",
+  "schema_version": "1.0.0",
+  "request_text_sha256": "edfde30f83c891d39950b4000440fb99fd03131ae0c39b6bdfa879565e95de0f",
+  "input_tokens": 6247,
+  "output_tokens": 1963,
+  "injection_suspected": false,
+  "response": {
+    "header": {
+      "po_number": "TEST-PO-113",
+      "order_date": "2026-11-16",
+      "requested_delivery_date": null,
+      "buyer_name": "Pat Buyer",
+      "buyer_contact_email": "pat.buyer@acmetest.example",
+      "ship_to_address": null,
+      "payment_terms": "Invoices paid at the end of the month following the month of delivery, by bank transfer (per general terms stated in email, not order-specific)",
+      "order_total": null,
+      "currency": null,
+      "notes": null
+    },
+    "header_confidence": {
+      "po_number": 0.85,
+      "order_date": 0.45,
+      "requested_delivery_date": 0.0,
+      "buyer_name": 0.75,
+      "buyer_contact_email": 0.85,
+      "ship_to_address": 0.0,
+      "payment_terms": 0.25,
+      "order_total": 0.0,
+      "currency": 0.0,
+      "notes": 0.0
+    },
+    "line_items": [
+      {
+        "line_number": 1,
+        "sku": "TEST-4130",
+        "description": "test fitting, small",
+        "quantity": "4",
+        "unit": null,
+        "unit_price": null,
+        "line_total": null,
+        "confidence": 0.85
+      },
+      {
+        "line_number": 2,
+        "sku": "TEST-4131",
+        "description": "test fitting, medium",
+        "quantity": "6",
+        "unit": null,
+        "unit_price": null,
+        "line_total": null,
+        "confidence": 0.85
+      },
+      {
+        "line_number": 3,
+        "sku": "TEST-4132",
+        "description": "test fitting, large",
+        "quantity": "2",
+        "unit": null,
+        "unit_price": null,
+        "line_total": null,
+        "confidence": 0.85
+      }
+    ],
+    "document_notes": "The email contains an extremely long block of generic 'updated purchasing terms' addressed to the supplier, preceding the actual order. These terms are business policy statements directed at the supplier, not instructions to the extraction system, and were treated as background data only. No pricing, unit, ship-to address, or explicit order date fields were present in the document; the order date was inferred from the email timestamp with low confidence. No currency or price information was given for the line items, so those fields were left null rather than guessed.",
+    "injection_suspected": false,
+    "currency_inferred": false
+  }
+}

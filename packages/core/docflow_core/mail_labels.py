@@ -73,6 +73,7 @@ Return:
   - status_question: asking about an order they placed earlier.
   - not_an_order: anything else, including a cover note that only says an order is attached.
   If a message places an order and also does something else, label it order.
+  A request to send goods that does not list them (for example "the usual", "same as last time", "repeat PO ...") is label order, with contains_order_lines false.
 - label_confidence: 0.0-1.0, how certain you are of label.
 - contains_order_lines: true only if the text itself states at least one item together with a quantity that the sender is ordering with this message. Items in a quote request, items quoted from an earlier order in a question about it, items the sender says not to order yet, and a note that says only that an order is attached are NOT order lines. Order lines inside a forwarded or quoted message count when the sender is passing that order on to be filled.
 - order_lines_confidence: 0.0-1.0, how certain you are of contains_order_lines. If you are unsure whether the text holds order lines, give a low value. Never guess high.
@@ -113,16 +114,29 @@ def _header_value(value: str | None) -> str:
     return _defang(" ".join((value or "").split()))
 
 
+def _header_lines(*, subject: str | None, sender: str | None, date: str | None) -> list[tuple[str, str]]:
+    """Each header DocFlow shows, as (DocFlow's label, the sender's value as
+    one line). A header whose value is blank is left out."""
+    return [
+        (label, text)
+        for label, value in (("Subject", subject), ("From", sender), ("Date", date))
+        if (text := _header_value(value))
+    ]
+
+
 def mail_header_text(*, subject: str | None, sender: str | None, date: str | None) -> str:
     """The `Subject:`, `From:` and `Date:` lines put in front of an e-mail's
     text, for the labelling call and for the extraction of a body document
     (2.2 step 3, 2.3). A line whose value is blank is left out."""
-    lines = [
-        f"{label}: {text}"
-        for label, value in (("Subject", subject), ("From", sender), ("Date", date))
-        if (text := _header_value(value))
-    ]
-    return "\n".join(lines)
+    return "\n".join(
+        f"{label}: {text}" for label, text in _header_lines(subject=subject, sender=sender, date=date)
+    )
+
+
+def mail_header_values(*, subject: str | None, sender: str | None, date: str | None) -> list[str]:
+    """The same header lines without DocFlow's own labels: only what the
+    sender wrote (the forwarded-block check, VAL-019; founder, 2026-11-18)."""
+    return [text for _, text in _header_lines(subject=subject, sender=sender, date=date)]
 
 
 def mail_text(*, subject: str | None, sender: str | None, date: str | None, body_text: str) -> str:

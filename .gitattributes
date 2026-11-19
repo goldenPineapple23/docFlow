@@ -1,3 +1,8 @@
 # The parse service fixtures are exact bytes with fixed SHA-256 hashes
 # (Stage 3c, test D2): never convert their line endings.
 apps/parse/tests/fixtures/** -text
+# B1 slice 4's fixture emails and their recordings (D-246): each label
+# recording holds the hash of the exact text its fixture gives, so the bytes
+# must be the same on every checkout.
+apps/api/tests/fixtures/mail/** -text
+apps/worker/tests/fixtures/mail_recordings/** -text

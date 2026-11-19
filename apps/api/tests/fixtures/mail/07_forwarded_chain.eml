@@ -1,0 +1,24 @@
+From: Sam Lead <sam.lead@acmetest.example>
+To: orders@intake.docflow.example
+Subject: Fwd: PO TEST-PO-107
+Date: Mon, 16 Nov 2026 09:30:00 -0500
+Message-ID: <07_forwarded_chain@mail.acmetest.example>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Hi team, please process the order below for our warehouse.
+
+Sam Lead
+
+---------- Forwarded message ---------
+From: Pat Buyer <pat.buyer@acmetest.example>
+Date: Fri, 13 Nov 2026 at 16:05
+Subject: PO TEST-PO-107
+To: Sam Lead <sam.lead@acmetest.example>
+
+Please order:
+8 x TEST-170 hinge 75 mm
+1 x TEST-270 door closer
+
+Pat

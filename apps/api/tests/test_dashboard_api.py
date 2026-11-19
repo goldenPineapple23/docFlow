@@ -31,7 +31,7 @@ from docflow_core import metrics
 from docflow_core.db import platform_session, tenant_session
 from sqlalchemy import text
 
-from tests.conftest import requires_console_schema, requires_review_schema
+from tests.conftest import requires_console_schema, requires_mail_body_schema, requires_review_schema
 from tests.tenant_cleanup import purge_test_tenant
 from tests.test_console_api import _Console, _environment  # noqa: F401 -- fixtures
 from tests.test_review_api import CLEAN_LINES, _ReviewTenant, _secrets  # noqa: F401 -- fixture
@@ -201,8 +201,32 @@ def _cleanup(tenant_id: UUID) -> None:
 # ── The section's required test ─────────────────────────────────────────────
 
 
+def _seed_label_only_call(tenant, cost: str) -> None:
+    """A label call about an email's text that made no text document (B1;
+    D-246): a `raw_emails` row and its finished `mail_label` run."""
+    raw_email_id = uuid4()
+    with platform_session() as session:
+        session.execute(
+            text(
+                "INSERT INTO raw_emails (id, tenant_id, sender_email, subject, attachment_count, outcome, "
+                "body_state, created_at) VALUES (:id, :t, 'buyer@acmetest.example', 'Quote please', 0, "
+                "'rejected', 'labelled', now())"
+            ),
+            {"id": str(raw_email_id), "t": str(tenant.tenant_id)},
+        )
+        session.execute(
+            text(
+                "INSERT INTO extraction_runs (id, tenant_id, document_id, raw_email_id, run_kind, model_id, "
+                "input_tokens, output_tokens, est_cost_usd, succeeded, created_at) "
+                "VALUES (:id, :t, NULL, :e, 'mail_label', 'claude-haiku-4-5', 900, 40, :cost, true, now())"
+            ),
+            {"id": str(uuid4()), "t": str(tenant.tenant_id), "e": str(raw_email_id), "cost": cost},
+        )
+
+
 @requires_metrics_schema
 @requires_review_schema
+@requires_mail_body_schema
 def test_every_kpi_equals_an_independent_query():
     """Section 7.15.3: "for a seeded staging dataset, every KPI card must
     equal an independent hand-written SQL query within rounding"."""
@@ -215,6 +239,8 @@ def test_every_kpi_equals_an_independent_query():
             # One still waiting, and one abandoned review (over the ceiling).
             _seed_order(tenant, cost="0.10", match_method=None)
             _seed_order(tenant, approved_minutes=200, review_seconds=3600, cost="0.08")
+            # A label call that made no document: AI spend only (B1; D-246).
+            _seed_label_only_call(tenant, cost="0.0020")
             _roll(tenant.tenant_id)
 
             day = _today(tenant.tenant_id)
@@ -282,6 +308,15 @@ def test_every_kpi_equals_an_independent_query():
                     text("SELECT count(*) FROM review_actions WHERE tenant_id = :t AND action = 'edited'"),
                     {"t": str(tenant.tenant_id)},
                 ).scalar_one()
+                label_only = session.execute(
+                    text(
+                        "SELECT coalesce(sum(r.est_cost_usd), 0) FROM extraction_runs r "
+                        "WHERE r.tenant_id = :t AND r.run_kind = 'mail_label' AND r.run_state = 'finished' "
+                        "AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.raw_email_id = r.raw_email_id "
+                        "AND d.email_part = 'body')"
+                    ),
+                    {"t": str(tenant.tenant_id)},
+                ).scalar_one()
 
             assert kpis["documents_received"] == truth["received"]
             assert kpis["documents_approved"] == truth["approved"]
@@ -293,7 +328,8 @@ def test_every_kpi_equals_an_independent_query():
             assert kpis["matched_lines"] == lines["matched"]
             assert kpis["learned_rule_lines"] == lines["learned"]
             assert kpis["edited_actions"] == edits
-            assert kpis["est_cost_usd"] == Decimal(truth["cost"])
+            assert kpis["est_cost_usd"] == Decimal(truth["cost"]) + Decimal(label_only)
+            assert Decimal(label_only) == Decimal("0.0020")
             # Shares, from the independent counts.
             assert kpis["zero_edit_share"] == (
                 Decimal(truth["zero_edit"]) / Decimal(truth["approved"])
@@ -432,6 +468,38 @@ def test_the_tenant_list_carries_the_dashboard_columns(client):
             assert Decimal(row["ai_cost_this_month"]) == Decimal("0.20")
             assert row["last_document_at"] is not None
             assert row["mean_confidence_30"] is not None
+        finally:
+            _cleanup(tenant.tenant_id)
+
+
+@requires_metrics_schema
+@requires_console_schema
+@requires_review_schema
+@requires_mail_body_schema
+def test_the_tenant_lists_month_cost_is_the_sum_of_its_daily_costs_with_a_label_only_call(client):
+    """Founder, 2026-11-18, answer 4: the list's "AI cost this month" adds the
+    label calls that made no text document, by the rollup's own rule."""
+    with _Console() as console, _ReviewTenant("Acme Test Distributor -- month cost") as tenant:
+        try:
+            _seed_order(tenant, cost="0.11")
+            _seed_order(tenant, approved_minutes=10, review_seconds=30, cost="0.09")
+            _seed_label_only_call(tenant, cost="0.0020")
+            _roll(tenant.tenant_id)
+            with platform_session() as session:
+                daily = session.execute(
+                    text(
+                        "SELECT coalesce(sum(m.est_cost_usd), 0) FROM tenant_daily_metrics m "
+                        "JOIN tenants t ON t.id = m.tenant_id WHERE m.tenant_id = :t "
+                        "AND m.day >= date_trunc('month', now() AT TIME ZONE "
+                        "coalesce(nullif(t.timezone, ''), 'UTC'))::date"
+                    ),
+                    {"t": str(tenant.tenant_id)},
+                ).scalar_one()
+
+            rows = client.get("/admin/tenants", headers=console.headers()).json()
+            row = next(r for r in rows if r["id"] == str(tenant.tenant_id))
+            assert Decimal(row["ai_cost_this_month"]) == Decimal(daily)
+            assert Decimal(daily) == Decimal("0.2020")  # the label-only call is in both
         finally:
             _cleanup(tenant.tenant_id)
 

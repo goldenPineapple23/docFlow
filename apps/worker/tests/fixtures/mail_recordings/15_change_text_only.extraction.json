@@ -1,0 +1,51 @@
+{
+  "fixture": "15_change_text_only",
+  "model_id": "claude-sonnet-5",
+  "prompt_hash": "ad960adc44753d7545ff8f870f01fe0c55ba2fbbfc0abb94ac13cd4b011caf27",
+  "schema_version": "1.0.0",
+  "request_text_sha256": "53e009a5a6db13d58be4b96dbc5b9430a09cf459a855209b81d7e62b8650f74f",
+  "input_tokens": 2387,
+  "output_tokens": 1028,
+  "injection_suspected": false,
+  "response": {
+    "header": {
+      "po_number": "TEST-PO-77",
+      "order_date": null,
+      "requested_delivery_date": null,
+      "buyer_name": "Pat Buyer",
+      "buyer_contact_email": "pat.buyer@acmetest.example",
+      "ship_to_address": null,
+      "payment_terms": null,
+      "order_total": null,
+      "currency": null,
+      "notes": "Email requests changing quantity of TEST-100 hex bolts from 4 to 6 on existing PO TEST-PO-77; all other terms unchanged per sender."
+    },
+    "header_confidence": {
+      "po_number": 0.9,
+      "order_date": 0.0,
+      "requested_delivery_date": 0.0,
+      "buyer_name": 0.6,
+      "buyer_contact_email": 0.9,
+      "ship_to_address": 0.0,
+      "payment_terms": 0.0,
+      "order_total": 0.0,
+      "currency": 0.0,
+      "notes": 0.7
+    },
+    "line_items": [
+      {
+        "line_number": 1,
+        "sku": "TEST-100",
+        "description": "hex bolts",
+        "quantity": "6",
+        "unit": null,
+        "unit_price": null,
+        "line_total": null,
+        "confidence": 0.5
+      }
+    ],
+    "document_notes": "This document is an email referencing a change to a prior purchase order (TEST-PO-77), not the original PO itself; most header fields (dates, address, payment terms, totals) are not present in this document. The email specifies changing the quantity of SKU TEST-100 from 4 to 6, but no unit price or other line item details are given.",
+    "injection_suspected": false,
+    "currency_inferred": false
+  }
+}

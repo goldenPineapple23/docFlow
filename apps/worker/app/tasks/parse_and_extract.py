@@ -22,6 +22,7 @@ doesn't apply here; this module is not `/admin/*` and must never import it).
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import logging
 import time
@@ -37,6 +38,7 @@ from docflow_core import (
     field_schema,
     file_types,
     founder_alerts,
+    mail_bodies,
     model_provider,
     model_runs,
     parse_client,
@@ -66,6 +68,7 @@ from docflow_core.extraction import (
     wrap_document_content,
 )
 from docflow_core.field_schema import FieldSchema
+from docflow_core.mail_bodies import DocumentPart
 from docflow_core.matching import bump_times_applied, match_document_lines
 from docflow_core.numbers import plain_or_none
 from docflow_core.storage import (
@@ -75,7 +78,7 @@ from docflow_core.storage import (
     read_file,
     save_derived,
 )
-from docflow_core.validation import record_parse_warnings, validate_document
+from docflow_core.validation import CODE_FORWARDED_MESSAGE, record_parse_warnings, validate_document
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -194,6 +197,93 @@ def _store_extracted_text(tenant_id: UUID, document_id: UUID, parts: list[dict])
         logger.error(
             "extracted_text_store_failed document_id=%s error_type=%s", document_id, type(exc).__name__
         )
+
+
+def _wait_for_storage(tid: UUID, did: UUID) -> None:
+    """A Storage outage: the document waits it out without using an attempt
+    (Stage 3d: a real `processing -> pending` wait, retried by the dispatcher
+    every STORAGE_WAIT_RETRY_MINUTES, no maximum)."""
+    with tenant_session(tid) as session:
+        document_status.to_waiting(
+            session,
+            did,
+            cause="storage",
+            retry_after_seconds=STORAGE_WAIT_RETRY_MINUTES * 60,
+            error_label="storage_unavailable",
+        )
+        founder_alerts.raise_storage_unavailable(session, tenant_id=tid, where="worker")
+
+
+def _read_html_part(tid: UUID, did: UUID, path: str) -> bytes | None:
+    """A text document's email HTML part (answer 2), or None when it is
+    missing or its path is refused (reported, Stage 3b). An outage raises:
+    the caller waits, as for the document's own part."""
+    try:
+        return read_file(tid, path)
+    except UnsafeStoragePathError as exc:
+        founder_alerts.report_refused_storage_path(exc, tenant_id=tid, where="worker", ref_id=did)
+        return None
+    except StorageObjectMissingError:
+        logger.error("text_document_html_part_missing document_id=%s", did)
+        return None
+
+
+def _parse_html_part(did: UUID, content: bytes) -> parse_client.ParseAnswer | None:
+    """The parse service's answer for the HTML part, or None when it never
+    got in, got lost, or answered something unreadable: the text part is
+    then read (b1.md question 1's rule, as in the labelling task)."""
+    try:
+        return parse_client.parse_document(content, mail_bodies.TEXT_DOCUMENT_FILENAMES["html"])
+    except (parse_client.ParseUnavailable, parse_client.ParseLost, parse_client.ParseAnswerInvalid) as exc:
+        logger.error(
+            "text_document_html_part_not_parsed document_id=%s error_type=%s", did, type(exc).__name__
+        )
+        return None
+
+
+def _read_email_text(
+    tid: UUID,
+    did: UUID,
+    email: mail_bodies.EmailText,
+    answer: parse_client.ParseAnswer,
+    html_answer: parse_client.ParseAnswer | None,
+    html_content: bytes | None,
+) -> tuple[parse_client.ParseAnswer, bool] | None:
+    """
+    A text document's read (B1; b1.md 2.3; D-246), from the parse service's
+    answer for its stored part:
+
+    * With the email's HTML part beside a text part no labelling task read,
+      `mail_bodies.choose_read_text` -- the task's own rule -- picks the
+      part, and a document that reads the HTML part takes its path, hash and
+      filename (founder, 2026-11-18, answer 2). An HTML part the service
+      couldn't read loses to the text part, as in the task.
+    * One text part: the email's Subject / From / Date lines, then the text
+      (`mail_bodies.full_text`, as the label call read it), so extraction
+      reads a PO number from the subject. It sits inside the one document
+      envelope like the rest (Section 7.2).
+    * Whether what the sender wrote holds a forwarded or quoted block
+      (VAL-019): the Subject, From and Date values and the text, without
+      DocFlow's own labels (`mail_bodies.forwarded_block_in`).
+
+    None when the document left `processing` under us.
+    """
+    if html_answer is not None and html_content is not None and email.html_path is not None:
+        html_text = mail_bodies.parsed_text(html_answer.parts) if html_answer.outcome == "ok" else None
+        chosen = mail_bodies.choose_read_text(mail_bodies.parsed_text(answer.parts), html_text)
+        if chosen is not None and chosen[0] == "html":
+            part = DocumentPart(
+                storage_path=email.html_path, kind="html", sha256=hashlib.sha256(html_content).hexdigest()
+            )
+            with tenant_session(tid) as session:
+                if not mail_bodies.read_part_chosen(session, did, part):
+                    return None
+            logger.info("text_document_reads_html_part document_id=%s", did)
+            answer = html_answer
+    body_text = mail_bodies.parsed_text(answer.parts)
+    whole = mail_bodies.full_text(email, body_text)
+    forwarded = mail_bodies.forwarded_block_in(email, body_text)
+    return dataclasses.replace(answer, parts=[{"type": "text", "text": whole}]), forwarded
 
 
 def _plan_examples(
@@ -802,7 +892,8 @@ def _parse_and_extract(tid: UUID, did: UUID) -> None:
         row = session.execute(
             text(
                 "SELECT storage_path, original_filename, status, sender_email, "
-                "current_extraction_run_id, content_sha256 FROM documents WHERE id = :id"
+                "current_extraction_run_id, content_sha256, raw_email_id, email_part "
+                "FROM documents WHERE id = :id"
             ),
             {"id": str(did)},
         ).mappings().first()
@@ -833,6 +924,12 @@ def _parse_and_extract(tid: UUID, did: UUID) -> None:
         # D-206: paid calls already made whose answer was never saved. Read
         # after close_lost_runs, so a call the last attempt died in counts.
         unsaved_calls = 0 if already_extracted else model_runs.unsaved_answer_calls(session, did)
+        # B1 (b1.md 2.3; D-246): a document made from an email's text reads
+        # the email's Subject / From / Date lines in front of its text.
+        email: mail_bodies.EmailText | None = None
+        if row.get("email_part") == "body" and row.get("raw_email_id") is not None:
+            email = mail_bodies.load_email_text(session, UUID(str(row["raw_email_id"])))
+        choose_part = email is not None and mail_bodies.needs_read_choice(email, storage_path)
 
     if already_extracted:
         # An earlier attempt saved the model's answer and then stopped (a
@@ -855,19 +952,8 @@ def _parse_and_extract(tid: UUID, did: UUID) -> None:
     try:
         content = read_file(tid, storage_path)
     except StorageUnavailableError:
-        # An outage: the document waits it out without using an attempt
-        # (Stage 3d: a real `processing -> pending` wait, retried by the
-        # dispatcher every STORAGE_WAIT_RETRY_MINUTES, no maximum).
         logger.error("storage_read_failed document_id=%s", did)
-        with tenant_session(tid) as session:
-            document_status.to_waiting(
-                session,
-                did,
-                cause="storage",
-                retry_after_seconds=STORAGE_WAIT_RETRY_MINUTES * 60,
-                error_label="storage_unavailable",
-            )
-            founder_alerts.raise_storage_unavailable(session, tenant_id=tid, where="worker")
+        _wait_for_storage(tid, did)
         return
     except StorageObjectMissingError:
         # Not an outage: waiting would retry it forever. A data fault, loudly.
@@ -962,6 +1048,29 @@ def _parse_and_extract(tid: UUID, did: UUID) -> None:
         _fail_parse_ours(tid, did, fault=_error_fault(answer), release_tag=answer.release, detail="error")
         return
 
+    forwarded = False
+    if email is not None:
+        # The email's HTML part, for the text-or-HTML choice (answer 2). Only
+        # an outage waits; any other failure to read or parse it leaves the
+        # text part read, as in the labelling task -- the HTML part never
+        # fails or delays a document whose own part was read.
+        html_content: bytes | None = None
+        html_answer: parse_client.ParseAnswer | None = None
+        if choose_part and email.html_path is not None:
+            try:
+                html_content = _read_html_part(tid, did, email.html_path)
+            except StorageUnavailableError:
+                logger.error("storage_read_failed document_id=%s part=html", did)
+                _wait_for_storage(tid, did)
+                return
+            if html_content is not None:
+                html_answer = _parse_html_part(did, html_content)
+        read = _read_email_text(tid, did, email, answer, html_answer, html_content)
+        if read is None:
+            logger.info("parse_and_extract_moved_on document_id=%s", did)
+            return
+        answer, forwarded = read
+
     parts = answer.parts
     content_blocks = _envelope(parts)
 
@@ -1020,7 +1129,7 @@ def _parse_and_extract(tid: UUID, did: UUID) -> None:
         return
 
     try:
-        _save_extraction(tid, did, plan, result, started.extraction, lost=answer.lost)
+        _save_extraction(tid, did, plan, result, started.extraction, lost=answer.lost, forwarded=forwarded)
     except Exception as exc:  # noqa: BLE001 -- the document must not be stranded (M3)
         # Nothing of the answer was written (one transaction). Keep the paid
         # answer on the failed document, with a code, and tell the founder.
@@ -1047,18 +1156,23 @@ def _save_extraction(
     started_run_id: UUID | None = None,
     *,
     lost: list[dict] | None = None,
+    forwarded: bool = False,
 ) -> None:
     """The model's answer, the header, the lines and the run record, in one
     transaction. The status stays `processing`: nothing is reviewable yet.
 
     `lost` is what the parse step couldn't read from an .eml or .msg: its
     warnings (VAL-017, VAL-018) are written here, in the same transaction,
-    so the answer is never saved without them (D-207). A resumed document
-    already has them; validation leaves them alone."""
+    so the answer is never saved without them (D-207). `forwarded`: an
+    email's text that holds a forwarded or quoted block, VAL-019, written
+    the same way (B1; D-246). A resumed document already has them;
+    validation leaves them alone."""
     header = result.header
     with tenant_session(tid) as session:
         if lost:
             record_parse_warnings(session, tid, did, lost)
+        if forwarded:
+            record_parse_warnings(session, tid, did, [{"code": CODE_FORWARDED_MESSAGE, "filename": None}])
         # The tenant's field schema decides which fields count towards the
         # document's confidence and which are checked (D-120). Recorded on the
         # document, so a later change never makes its numbers unexplainable.
@@ -1072,7 +1186,15 @@ def _save_extraction(
                 SET model_id = :model_id, prompt_hash = :prompt_hash,
                     schema_version = :schema_version, input_tokens = :input_tokens,
                     output_tokens = :output_tokens,
-                    injection_suspected = :injection_suspected,
+                    -- B1 (founder, 2026-11-18, gap 1): a text document keeps a
+                    -- true its label call found; extraction's false never
+                    -- clears it. Every other document takes extraction's
+                    -- own answer, as before.
+                    injection_suspected = CASE
+                        WHEN email_part = 'body'
+                        THEN coalesce(injection_suspected, false) OR :injection_suspected
+                        ELSE :injection_suspected
+                    END,
                     overall_confidence = :overall_confidence, raw_json = :raw_json,
                     field_schema_version = :field_schema_version,
                     current_extraction_run_id = :run_id

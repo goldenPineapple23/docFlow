@@ -474,10 +474,13 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         code="INT-001",
         title="No attachment to process",
         message=(
-            "This email didn't include an attachment DocFlow recognizes as a document, "
-            "so nothing was processed."
+            "This email had no attachment DocFlow recognizes as a document and no text "
+            "DocFlow could read, so nothing was processed."
         ),
-        action="Resend with the purchase order attached as a PDF, Word, or Excel file.",
+        action=(
+            "Ask the sender to send the purchase order as an attachment (PDF, Word or Excel), "
+            "or with the items and quantities typed in the message."
+        ),
         severity="warning",
         audience="tenant",
     ),
@@ -754,11 +757,11 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
         audience="tenant",
     ),
     # B1 (D-230; D-245). Founder's wordings, final 2026-11-17
-    # (docs/designs/b1.md section 12). No code raises any of the three yet.
+    # (docs/designs/b1.md section 12).
     #
     # VAL-019: one warning on a document made from an email's text that holds
-    # a forwarded or quoted block (`mail_labels.has_forwarded_block`). Its
-    # writer comes with slice 4, which makes those documents.
+    # a forwarded or quoted block (`mail_labels.has_forwarded_block`), written
+    # by the parse step with the extraction (a parse-step code, D-246).
     "VAL-019": ErrorCatalogEntry(
         code="VAL-019",
         title="This email includes a forwarded or quoted message",
@@ -780,8 +783,8 @@ CATALOG: dict[str, ErrorCatalogEntry] = {
     ),
     # VAL-021: on the document made from an email's text when one of its
     # attachments also became a document; only the body document carries it,
-    # acknowledged at approval like any open warning. Its writer and its tests
-    # come with slice 4.
+    # acknowledged at approval like any open warning. Computed by validation
+    # (`validation._document_warnings`; D-246).
     "VAL-021": ErrorCatalogEntry(
         code="VAL-021",
         title="The email's text may repeat its attachment's order",

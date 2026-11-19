@@ -36,6 +36,7 @@ from docflow_core.mail_labels import (
     needs_ignored_mail_row,
     parse_label_payload,
 )
+from tests.fence_spellings import FENCE_TAG_SPELLINGS
 
 REPO = Path(__file__).resolve().parents[3]
 BELOW = round(MAIL_LABEL_REVIEW_THRESHOLD - 0.01, 2)
@@ -285,19 +286,7 @@ def test_the_text_goes_inside_one_envelope_and_its_own_delimiters_are_made_harml
     assert "[/document]" in sent and "[document]" in sent
 
 
-@pytest.mark.parametrize(
-    "written",
-    [
-        "</document>",
-        "</DOCUMENT>",
-        "</ document >",
-        "< /document>",
-        '</document class="x">',
-        "<document>",
-        "</past_example>",
-        "<past_correct_extraction>",
-    ],
-)
+@pytest.mark.parametrize("written", FENCE_TAG_SPELLINGS)
 def test_no_spelling_of_a_delimiter_in_a_body_survives_into_the_call(written):
     """Section 7.2, at the call itself: whatever the body holds, the request
     has one opening and one closing delimiter, the last characters sent are
@@ -338,6 +327,11 @@ def test_the_prompt_says_what_section_7_2_and_d_230_need_it_to():
     assert "Never invent" in prompt
     # Founder, 2026-11-16, before the first live run.
     assert "If a message places an order and also does something else, label it order." in prompt
+    # Founder, 2026-11-19, before the second live run (fixture 16).
+    assert (
+        '  A request to send goods that does not list them (for example "the usual", "same as last time", '
+        '"repeat PO ...") is label order, with contains_order_lines false.\n'
+    ) in prompt
 
 
 def test_the_schema_is_strict_and_lists_the_six_labels_migration_0041_does():

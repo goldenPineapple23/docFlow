@@ -252,6 +252,22 @@ def release(
     # Received order, as selected above (Section 7.16.4), minus any that
     # someone else released or cleared in the meantime.
     ordered = [document_id for document_id in candidates if document_id in moved]
+    if ordered:
+        # B1 (docs/designs/b1.md section 6): a released text document goes
+        # straight to extraction with no label call -- a person has decided
+        # it is real -- and its email's text is no longer held.
+        session.execute(
+            text(
+                """
+            UPDATE raw_emails SET body_state = 'released'
+            WHERE tenant_id = :t AND body_state = 'held'
+              AND id IN (SELECT raw_email_id FROM documents
+                         WHERE tenant_id = :t AND email_part = 'body'
+                           AND id = ANY(CAST(string_to_array(:ids, ',') AS uuid[])))
+            """
+            ),
+            {"t": str(tenant_id), "ids": ",".join(str(i) for i in ordered)},
+        )
     # They count now, so the 80% / 100% notices may fire.
     allowance.record_thresholds(session, tenant_id)
     return ReleaseResult(

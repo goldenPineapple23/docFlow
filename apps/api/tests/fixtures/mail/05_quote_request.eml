@@ -1,0 +1,20 @@
+From: Pat Buyer <pat.buyer@acmetest.example>
+To: orders@intake.docflow.example
+Subject: Quote please
+Date: Mon, 16 Nov 2026 09:30:00 -0500
+Message-ID: <05_quote_request@mail.acmetest.example>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Hi,
+
+Could you send us a price for the following before we order?
+
+40 x TEST-130 anchor bolt
+25 x TEST-230 cable tie pack
+
+We have not decided yet, so please don't ship anything.
+
+Thanks,
+Pat Buyer

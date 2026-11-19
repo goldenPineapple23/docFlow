@@ -43,6 +43,19 @@ logger = logging.getLogger(__name__)
 # approved_at - review_started_at <= 120 s".
 REVIEW_TARGET_SECONDS = 120
 
+# Label calls about an email's text that made no text document (cover notes,
+# quote requests): AI spend and gross margin only. A text document's own label
+# call is in its est_cost_usd already, so it is never counted twice (B1;
+# D-246; founder, 2026-11-18, answers 3 and 4). One predicate over
+# `extraction_runs r`, read by the rollup below and by the Console's tenant
+# list (admin_data_access.list_tenants), so the two can never disagree.
+LABEL_ONLY_RUNS = """
+    r.run_kind = 'mail_label' AND r.run_state = 'finished' AND r.document_id IS NULL
+    AND NOT EXISTS (SELECT 1 FROM documents body_document
+                     WHERE body_document.raw_email_id = r.raw_email_id
+                       AND body_document.email_part = 'body')
+"""
+
 
 @dataclass(frozen=True)
 class DayResult:
@@ -59,7 +72,7 @@ def compute_day(session: Session, tenant_id: UUID, day: date) -> DayResult:
     """
     row = session.execute(
         text(
-            """
+            f"""
             WITH tz AS (
                 SELECT coalesce(nullif(timezone, ''), 'UTC') AS name FROM tenants WHERE id = :t
             ),
@@ -79,6 +92,14 @@ def compute_day(session: Session, tenant_id: UUID, day: date) -> DayResult:
                 WHERE d.deleted_at IS NULL AND NOT d.is_test_batch
                   AND d.approved_at IS NOT NULL
                   AND (d.approved_at AT TIME ZONE tz.name)::date = :day
+            ),
+            -- Label calls that made no text document (LABEL_ONLY_RUNS), by
+            -- the day of the call.
+            label_only AS (
+                SELECT r.est_cost_usd
+                FROM extraction_runs r CROSS JOIN tz
+                WHERE r.tenant_id = :t AND {LABEL_ONLY_RUNS}
+                  AND (r.created_at AT TIME ZONE tz.name)::date = :day
             ),
             lines AS (
                 SELECT l.id, l.match_method
@@ -124,7 +145,8 @@ def compute_day(session: Session, tenant_id: UUID, day: date) -> DayResult:
                  )), '[]'::jsonb) FROM approved) AS approval_hours,
                 (SELECT coalesce(jsonb_agg(est_cost_usd), '[]'::jsonb) FROM received
                   WHERE est_cost_usd IS NOT NULL) AS document_costs,
-                (SELECT coalesce(sum(est_cost_usd), 0) FROM received) AS est_cost_usd,
+                (SELECT coalesce(sum(est_cost_usd), 0) FROM received)
+                  + (SELECT coalesce(sum(est_cost_usd), 0) FROM label_only) AS est_cost_usd,
                 (SELECT coalesce(sum(input_tokens), 0) FROM received) AS input_tokens,
                 (SELECT coalesce(sum(output_tokens), 0) FROM received) AS output_tokens
             """

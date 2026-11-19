@@ -1,0 +1,17 @@
+From: Pat Buyer <pat.buyer@acmetest.example>
+To: orders@intake.docflow.example
+Subject: Delivery question and an order
+Date: Mon, 16 Nov 2026 09:30:00 -0500
+Message-ID: <08_question_and_order@mail.acmetest.example>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Hi,
+
+Can you confirm you still deliver to the new dock on Test Street?
+
+Also, please ship PO TEST-PO-108: 10 x TEST-180 corner bracket.
+
+Thanks,
+Pat Buyer
