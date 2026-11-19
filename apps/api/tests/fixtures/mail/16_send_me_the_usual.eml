@@ -1,0 +1,15 @@
+From: Pat Buyer <pat.buyer@acmetest.example>
+To: orders@intake.docflow.example
+Subject: This week
+Date: Mon, 16 Nov 2026 09:30:00 -0500
+Message-ID: <16_send_me_the_usual@mail.acmetest.example>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Hi,
+
+Please send me the usual for this week.
+
+Thanks,
+Pat

@@ -1,0 +1,51 @@
+{
+  "fixture": "03_text_and_html_order",
+  "model_id": "claude-sonnet-5",
+  "prompt_hash": "ad960adc44753d7545ff8f870f01fe0c55ba2fbbfc0abb94ac13cd4b011caf27",
+  "schema_version": "1.0.0",
+  "request_text_sha256": "3008e6ea5e7bb0528bf53b571b0078bee783ce508e833a0045b8f6070cbc96ce",
+  "input_tokens": 2355,
+  "output_tokens": 566,
+  "injection_suspected": false,
+  "response": {
+    "header": {
+      "po_number": "TEST-PO-103",
+      "order_date": "2026-11-16",
+      "requested_delivery_date": null,
+      "buyer_name": "Pat Buyer",
+      "buyer_contact_email": "pat.buyer@acmetest.example",
+      "ship_to_address": null,
+      "payment_terms": null,
+      "order_total": null,
+      "currency": null,
+      "notes": null
+    },
+    "header_confidence": {
+      "po_number": 0.9,
+      "order_date": 0.5,
+      "requested_delivery_date": 0.0,
+      "buyer_name": 0.8,
+      "buyer_contact_email": 0.9,
+      "ship_to_address": 0.0,
+      "payment_terms": 0.0,
+      "order_total": 0.0,
+      "currency": 0.0,
+      "notes": 0.0
+    },
+    "line_items": [
+      {
+        "line_number": 1,
+        "sku": "TEST-120",
+        "description": "threaded rod 1 m",
+        "quantity": "5",
+        "unit": null,
+        "unit_price": null,
+        "line_total": null,
+        "confidence": 0.7
+      }
+    ],
+    "document_notes": "This document is an informal email rather than a formal purchase order; many standard PO fields (ship-to address, payment terms, pricing, currency) are absent. Order date was inferred from the email timestamp.",
+    "injection_suspected": false,
+    "currency_inferred": false
+  }
+}

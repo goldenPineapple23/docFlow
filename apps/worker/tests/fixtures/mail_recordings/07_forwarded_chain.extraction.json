@@ -1,0 +1,61 @@
+{
+  "fixture": "07_forwarded_chain",
+  "model_id": "claude-sonnet-5",
+  "prompt_hash": "ad960adc44753d7545ff8f870f01fe0c55ba2fbbfc0abb94ac13cd4b011caf27",
+  "schema_version": "1.0.0",
+  "request_text_sha256": "bf207c0ee14fe7e1c6e3e2ff94e38b2e0c9be1d9b08f4871feccf3bd340a4cdc",
+  "input_tokens": 2480,
+  "output_tokens": 727,
+  "injection_suspected": false,
+  "response": {
+    "header": {
+      "po_number": "TEST-PO-107",
+      "order_date": "2026-11-13",
+      "requested_delivery_date": null,
+      "buyer_name": "Pat Buyer",
+      "buyer_contact_email": "pat.buyer@acmetest.example",
+      "ship_to_address": null,
+      "payment_terms": null,
+      "order_total": null,
+      "currency": null,
+      "notes": null
+    },
+    "header_confidence": {
+      "po_number": 0.8,
+      "order_date": 0.6,
+      "requested_delivery_date": 0.0,
+      "buyer_name": 0.8,
+      "buyer_contact_email": 0.8,
+      "ship_to_address": 0.0,
+      "payment_terms": 0.0,
+      "order_total": 0.0,
+      "currency": 0.0,
+      "notes": 0.0
+    },
+    "line_items": [
+      {
+        "line_number": 1,
+        "sku": "TEST-170",
+        "description": "hinge 75 mm",
+        "quantity": "8",
+        "unit": null,
+        "unit_price": null,
+        "line_total": null,
+        "confidence": 0.7
+      },
+      {
+        "line_number": 2,
+        "sku": "TEST-270",
+        "description": "door closer",
+        "quantity": "1",
+        "unit": null,
+        "unit_price": null,
+        "line_total": null,
+        "confidence": 0.7
+      }
+    ],
+    "document_notes": "This is an informal forwarded email rather than a formal purchase order document; no pricing, currency, shipping address, or payment terms were provided. No injection attempt detected.",
+    "injection_suspected": false,
+    "currency_inferred": false
+  }
+}

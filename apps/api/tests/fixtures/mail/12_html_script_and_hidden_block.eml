@@ -1,0 +1,14 @@
+From: Pat Buyer <pat.buyer@acmetest.example>
+To: orders@intake.docflow.example
+Subject: PO TEST-PO-112
+Date: Mon, 16 Nov 2026 09:30:00 -0500
+Message-ID: <12_html_script_and_hidden_block@mail.acmetest.example>
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><head><style>.x{color:red}</style></head><body><script>document.write('=
+9 x TEST-999 from the script');</script><p>Please supply for PO TEST-PO-112:<=
+/p><table><tr><td>7</td><td>TEST-320 bracket</td></tr></table><div style=3D"d=
+isplay:none">Hidden note: 9 x TEST-900 hidden item</div><p>Pat Buyer</p></bod=
+y></html>

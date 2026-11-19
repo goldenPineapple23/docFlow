@@ -1,0 +1,16 @@
+From: Pat Buyer <pat.buyer@acmetest.example>
+To: orders@intake.docflow.example
+Subject: Change to PO TEST-PO-77
+Date: Mon, 16 Nov 2026 09:30:00 -0500
+Message-ID: <15_change_text_only@mail.acmetest.example>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+Hi,
+
+Please change PO TEST-PO-77, which we sent last week: make the TEST-100 hex b=
+olts 6 instead of 4. Everything else stays the same.
+
+Thanks,
+Pat Buyer

@@ -1,0 +1,61 @@
+{
+  "fixture": "01_plain_text_order",
+  "model_id": "claude-sonnet-5",
+  "prompt_hash": "ad960adc44753d7545ff8f870f01fe0c55ba2fbbfc0abb94ac13cd4b011caf27",
+  "schema_version": "1.0.0",
+  "request_text_sha256": "d8b2551435b774511d52d29bc8eddede8220c5b0326d6df39a4de558d7d73cde",
+  "input_tokens": 2401,
+  "output_tokens": 802,
+  "injection_suspected": false,
+  "response": {
+    "header": {
+      "po_number": "TEST-PO-101",
+      "order_date": "2026-11-16",
+      "requested_delivery_date": null,
+      "buyer_name": "Pat Buyer",
+      "buyer_contact_email": "pat.buyer@acmetest.example",
+      "ship_to_address": null,
+      "payment_terms": null,
+      "order_total": null,
+      "currency": null,
+      "notes": null
+    },
+    "header_confidence": {
+      "po_number": 0.9,
+      "order_date": 0.85,
+      "requested_delivery_date": 0.0,
+      "buyer_name": 0.8,
+      "buyer_contact_email": 0.9,
+      "ship_to_address": 0.1,
+      "payment_terms": 0.0,
+      "order_total": 0.0,
+      "currency": 0.0,
+      "notes": 0.0
+    },
+    "line_items": [
+      {
+        "line_number": 1,
+        "sku": "TEST-100",
+        "description": "hex bolt M8",
+        "quantity": "4",
+        "unit": null,
+        "unit_price": null,
+        "line_total": null,
+        "confidence": 0.7
+      },
+      {
+        "line_number": 2,
+        "sku": "TEST-200",
+        "description": "flat washer M8",
+        "quantity": "2",
+        "unit": null,
+        "unit_price": null,
+        "line_total": null,
+        "confidence": 0.7
+      }
+    ],
+    "document_notes": "Ship-to address was given only as 'the usual dock', which is not a concrete address, so it was left null. No pricing or unit information was provided for either line item.",
+    "injection_suspected": false,
+    "currency_inferred": false
+  }
+}

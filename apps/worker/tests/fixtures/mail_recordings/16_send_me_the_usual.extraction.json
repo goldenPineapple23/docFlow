@@ -1,0 +1,40 @@
+{
+  "fixture": "16_send_me_the_usual",
+  "model_id": "claude-sonnet-5",
+  "prompt_hash": "ad960adc44753d7545ff8f870f01fe0c55ba2fbbfc0abb94ac13cd4b011caf27",
+  "schema_version": "1.0.0",
+  "request_text_sha256": "50056621ecddb44ac792ab1c133d1382006b708cf6390805630b96fc862a7631",
+  "input_tokens": 2331,
+  "output_tokens": 360,
+  "injection_suspected": false,
+  "response": {
+    "header": {
+      "po_number": null,
+      "order_date": null,
+      "requested_delivery_date": null,
+      "buyer_name": "Pat",
+      "buyer_contact_email": "pat.buyer@acmetest.example",
+      "ship_to_address": null,
+      "payment_terms": null,
+      "order_total": null,
+      "currency": null,
+      "notes": null
+    },
+    "header_confidence": {
+      "po_number": 0.0,
+      "order_date": 0.0,
+      "requested_delivery_date": 0.0,
+      "buyer_name": 0.2,
+      "buyer_contact_email": 0.6,
+      "ship_to_address": 0.0,
+      "payment_terms": 0.0,
+      "order_total": 0.0,
+      "currency": 0.0,
+      "notes": 0.0
+    },
+    "line_items": [],
+    "document_notes": "This document is an informal email with no purchase order details, line items, totals, or shipping information. It references 'the usual for this week' without specifying any actual order contents, making it impossible to extract meaningful PO data.",
+    "injection_suspected": false,
+    "currency_inferred": false
+  }
+}

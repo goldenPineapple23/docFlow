@@ -1,0 +1,61 @@
+{
+  "fixture": "02_html_only_order",
+  "model_id": "claude-sonnet-5",
+  "prompt_hash": "ad960adc44753d7545ff8f870f01fe0c55ba2fbbfc0abb94ac13cd4b011caf27",
+  "schema_version": "1.0.0",
+  "request_text_sha256": "b80fba89da07db094dde5e75c6b280b022207593bbad132201d277b4573a4732",
+  "input_tokens": 2392,
+  "output_tokens": 781,
+  "injection_suspected": false,
+  "response": {
+    "header": {
+      "po_number": "TEST-PO-102",
+      "order_date": "2026-11-16",
+      "requested_delivery_date": null,
+      "buyer_name": "Pat Buyer",
+      "buyer_contact_email": "pat.buyer@acmetest.example",
+      "ship_to_address": null,
+      "payment_terms": null,
+      "order_total": null,
+      "currency": null,
+      "notes": null
+    },
+    "header_confidence": {
+      "po_number": 0.9,
+      "order_date": 0.8,
+      "requested_delivery_date": 0.0,
+      "buyer_name": 0.85,
+      "buyer_contact_email": 0.9,
+      "ship_to_address": 0.0,
+      "payment_terms": 0.0,
+      "order_total": 0.0,
+      "currency": 0.0,
+      "notes": 0.0
+    },
+    "line_items": [
+      {
+        "line_number": 1,
+        "sku": "TEST-110",
+        "description": "Hex nut M10",
+        "quantity": "6",
+        "unit": null,
+        "unit_price": null,
+        "line_total": null,
+        "confidence": 0.8
+      },
+      {
+        "line_number": 2,
+        "sku": "TEST-210",
+        "description": "Spring washer M10",
+        "quantity": "3",
+        "unit": null,
+        "unit_price": null,
+        "line_total": null,
+        "confidence": 0.8
+      }
+    ],
+    "document_notes": "This document is an informal email-style purchase order lacking pricing, payment terms, shipping address, and delivery date information; these fields were not present in the source text.",
+    "injection_suspected": false,
+    "currency_inferred": false
+  }
+}

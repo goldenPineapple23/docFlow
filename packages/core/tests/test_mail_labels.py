@@ -327,6 +327,11 @@ def test_the_prompt_says_what_section_7_2_and_d_230_need_it_to():
     assert "Never invent" in prompt
     # Founder, 2026-11-16, before the first live run.
     assert "If a message places an order and also does something else, label it order." in prompt
+    # Founder, 2026-11-19, before the second live run (fixture 16).
+    assert (
+        '  A request to send goods that does not list them (for example "the usual", "same as last time", '
+        '"repeat PO ...") is label order, with contains_order_lines false.\n'
+    ) in prompt
 
 
 def test_the_schema_is_strict_and_lists_the_six_labels_migration_0041_does():

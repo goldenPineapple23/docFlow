@@ -1,0 +1,26 @@
+From: Pat Buyer <pat.buyer@acmetest.example>
+To: orders@intake.docflow.example
+Subject: PO TEST-PO-103
+Date: Mon, 16 Nov 2026 09:30:00 -0500
+Message-ID: <03_text_and_html_order@mail.acmetest.example>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============0238228807640427156=="
+
+--===============0238228807640427156==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Please send 5 x TEST-120 threaded rod 1 m for PO TEST-PO-103.
+
+Pat Buyer
+
+--===============0238228807640427156==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Please send <b>5 x TEST-120</b> threaded rod 1 m for PO TEST-P=
+O-103.</p><p>Pat Buyer</p></body></html>
+
+--===============0238228807640427156==--

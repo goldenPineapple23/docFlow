@@ -1,0 +1,81 @@
+{
+  "_about": "B1 slice 4 commit 7 (D-246; docs/designs/b1.md sections 7 and 9). What each fixture email must do: written before any recording, never edited to fit one. All data is fictional. label_call: the webhook sends the labelling task and the task makes one call. text_document: the email's text becomes a document. ignored_mail: the intake_rejections row, if any. extraction: the facts a recorded extraction must read (null: none recorded); absent_skus: SKUs no line may carry; exact_lines: every line with a SKU or a quantity is one of lines, nothing more (founder, 2026-11-19: 12, 13 and 16 recorded too; 13 reshaped before any recording). 15 changed before the second run (founder, 2026-11-19): a text document, aligned with D-230 item 5 (a change with order lines becomes a document), not with the recorded answer.",
+  "01_plain_text_order": {
+    "strict_mode": false, "held": false, "label_call": true, "attachment_documents": 0,
+    "text_document": true, "ignored_mail": null, "val_019": false,
+    "extraction": {"po_number": "TEST-PO-101", "lines": [["TEST-100", "4"], ["TEST-200", "2"]]}
+  },
+  "02_html_only_order": {
+    "strict_mode": false, "held": false, "label_call": true, "attachment_documents": 0,
+    "text_document": true, "ignored_mail": null, "val_019": false,
+    "extraction": {"po_number": "TEST-PO-102", "lines": [["TEST-110", "6"], ["TEST-210", "3"]]}
+  },
+  "03_text_and_html_order": {
+    "strict_mode": false, "held": false, "label_call": true, "attachment_documents": 0,
+    "text_document": true, "ignored_mail": null, "val_019": false,
+    "extraction": {"po_number": "TEST-PO-103", "lines": [["TEST-120", "5"]]}
+  },
+  "04_cover_note_with_pdf": {
+    "strict_mode": false, "held": false, "label_call": true, "attachment_documents": 1,
+    "text_document": false, "ignored_mail": null, "val_019": false, "extraction": null
+  },
+  "05_quote_request": {
+    "strict_mode": false, "held": false, "label_call": true, "attachment_documents": 0,
+    "text_document": false, "ignored_mail": {"code": "INT-012", "label": "quote_request"}, "val_019": false,
+    "extraction": null
+  },
+  "06_status_question": {
+    "strict_mode": false, "held": false, "label_call": true, "attachment_documents": 0,
+    "text_document": false, "ignored_mail": {"code": "INT-012", "label": "status_question"}, "val_019": false,
+    "extraction": null
+  },
+  "07_forwarded_chain": {
+    "strict_mode": false, "held": false, "label_call": true, "attachment_documents": 0,
+    "text_document": true, "ignored_mail": null, "val_019": true,
+    "extraction": {"po_number": "TEST-PO-107", "lines": [["TEST-170", "8"], ["TEST-270", "1"]]}
+  },
+  "08_question_and_order": {
+    "strict_mode": false, "held": false, "label_call": true, "attachment_documents": 0,
+    "text_document": true, "ignored_mail": null, "val_019": false,
+    "extraction": {"po_number": "TEST-PO-108", "lines": [["TEST-180", "10"]]}
+  },
+  "09_blank_text": {
+    "strict_mode": false, "held": false, "label_call": false, "attachment_documents": 0,
+    "text_document": false, "ignored_mail": {"code": "INT-001", "label": null}, "val_019": false,
+    "extraction": null
+  },
+  "10_injection_in_text": {
+    "strict_mode": false, "held": false, "label_call": true, "attachment_documents": 0,
+    "text_document": true, "ignored_mail": null, "val_019": false,
+    "extraction": {"po_number": "TEST-PO-110", "lines": [["TEST-300", "3"]], "injection": true}
+  },
+  "11_injection_in_subject": {
+    "strict_mode": false, "held": false, "label_call": true, "attachment_documents": 0,
+    "text_document": true, "ignored_mail": null, "val_019": false,
+    "extraction": {"po_number": "TEST-PO-111", "lines": [["TEST-310", "2"]], "injection": true}
+  },
+  "12_html_script_and_hidden_block": {
+    "strict_mode": false, "held": false, "label_call": true, "attachment_documents": 0,
+    "text_document": true, "ignored_mail": null, "val_019": false,
+    "extraction": {"po_number": "TEST-PO-112", "lines": [["TEST-320", "7"]], "absent_skus": ["TEST-999"]}
+  },
+  "13_text_over_budget": {
+    "strict_mode": false, "held": false, "label_call": true, "attachment_documents": 0,
+    "text_document": true, "ignored_mail": null, "val_019": false,
+    "extraction": {"po_number": "TEST-PO-113", "lines": [["TEST-4130", "4"], ["TEST-4131", "6"], ["TEST-4132", "2"]], "exact_lines": true}
+  },
+  "14_held_unlisted_sender_strict_mode": {
+    "strict_mode": true, "held": true, "label_call": false, "attachment_documents": 0,
+    "text_document": false, "ignored_mail": null, "val_019": false, "extraction": null
+  },
+  "15_change_text_only": {
+    "strict_mode": false, "held": false, "label_call": true, "attachment_documents": 0,
+    "text_document": true, "ignored_mail": null, "val_019": false,
+    "extraction": {"po_number": "TEST-PO-77", "lines": [["TEST-100", "6"]], "exact_lines": true}
+  },
+  "16_send_me_the_usual": {
+    "strict_mode": false, "held": false, "label_call": true, "attachment_documents": 0,
+    "text_document": true, "ignored_mail": null, "val_019": false,
+    "extraction": {"po_number": null, "lines": [], "exact_lines": true}
+  }
+}
