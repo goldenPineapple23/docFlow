@@ -189,7 +189,7 @@ def test_twenty_unknown_senders_text_only_emails_count_twenty_before_and_after_t
 def test_a_labelled_text_with_no_document_still_counts_once_and_a_known_sender_is_never_held(client, celery):
     with _TestIntakeTenant("Acme Test Distributor") as tenant:
         tenant.seed_document("known-buyer@example.test", status="pending")
-        for i in range(20):
+        for i in range(19):
             sender = f"cover{i}@unknown{i}.example.test"
             assert _post_from(client, tenant, sender, text_body="Thanks!") == "received"
         # Their texts are labelled "not an order": no document, still counted.
@@ -201,8 +201,8 @@ def test_a_labelled_text_with_no_document_still_counts_once_and_a_known_sender_i
                 {"t": str(tenant.tenant_id)},
             )
         # The seeded document (the known sender's first, so counted as a
-        # document, as before) plus the 20 label-only emails.
-        assert _velocity_count(tenant) == 21
+        # document, as before) plus the 19 label-only emails: 20, the limit.
+        assert _velocity_count(tenant) == 20
 
         outcome = _post_from(
             client,
@@ -212,8 +212,8 @@ def test_a_labelled_text_with_no_document_still_counts_once_and_a_known_sender_i
             attachments=[_pm_attachment("known.txt", b"known sender PO")],
         )
         assert outcome == "processed"  # known senders are never affected by the rule
-        last = _post_from(client, tenant, "cover20@unknown20.example.test", text_body="Thanks!")
-        assert last == "quarantined"
+        last = _post_from(client, tenant, "cover19@unknown19.example.test", text_body="Thanks!")
+        assert last == "quarantined"  # the next unknown sender is held
 
 
 def test_an_email_that_arrived_over_an_hour_ago_or_whose_text_was_held_is_not_counted(client, celery):

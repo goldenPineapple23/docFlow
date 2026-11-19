@@ -835,6 +835,64 @@ def test_an_email_without_text_sends_nothing_to_labelling_when_its_attachment_is
 
 @requires_database
 @requires_quarantine_schema
+@requires_mail_body_schema
+def test_releasing_two_attachments_of_one_email_in_one_call_sends_one_task(client, celery):
+    with _Tenant() as t:
+        _strict_mode(t)
+        email = _held_attachment_email_with_text(client, t, attachments=2)
+        both = [str(d["id"]) for d in t.rows("SELECT id FROM documents WHERE tenant_id = :t")]
+        assert len(both) == 2
+
+        r = client.post("/held/release", headers=t.headers(), json={"document_ids": both})
+        assert r.status_code == 200, r.text
+        assert [s["args"] for s in _label_tasks(celery)] == [[str(t.tenant_id), str(email["id"])]]
+
+
+@requires_database
+@requires_quarantine_schema
+@requires_mail_body_schema
+def test_a_qua_001_refusal_labels_nothing_and_leaves_the_text_held(client, celery):
+    """The owner may not release a founder-only hold: refused whole, so the
+    email's text is neither moved nor sent."""
+    with _Tenant() as t:
+        _strict_mode(t)
+        _held_attachment_email_with_text(client, t)
+        with platform_session() as session:
+            session.execute(
+                text("UPDATE documents SET quarantine_reason = 'auth_fail' WHERE tenant_id = :t"),
+                {"t": str(t.tenant_id)},
+            )
+        [doc] = [d["id"] for d in t.rows("SELECT id FROM documents WHERE tenant_id = :t")]
+
+        r = client.post("/held/release", headers=t.headers(), json={"document_ids": [str(doc)]})
+        assert r.status_code == 403 and r.json()["detail"]["code"] == "QUA-001"
+        assert _label_tasks(celery) == []
+        [after] = t.rows("SELECT body_state FROM raw_emails WHERE tenant_id = :t")
+        assert after["body_state"] == "held"
+
+
+@requires_database
+@requires_quarantine_schema
+@requires_mail_body_schema
+def test_a_clear_labels_nothing_and_leaves_the_text_held(client, celery):
+    with _Console() as console, _Tenant("Acme Test Clear") as t:
+        _strict_mode(t)
+        _held_attachment_email_with_text(client, t)
+        [doc] = [d["id"] for d in t.rows("SELECT id FROM documents WHERE tenant_id = :t")]
+
+        r = client.post(
+            f"/admin/tenants/{t.tenant_id}/quarantine/clear",
+            headers=console.headers(),
+            json={"document_ids": [str(doc)], "confirm_name": "Acme Test Clear"},
+        )
+        assert r.status_code == 200, r.text
+        assert _label_tasks(celery) == []
+        [after] = t.rows("SELECT body_state FROM raw_emails WHERE tenant_id = :t")
+        assert after["body_state"] == "held"
+
+
+@requires_database
+@requires_quarantine_schema
 def test_a_sender_known_through_a_buyer_is_spared_the_velocity_rule_but_free_mail_is_not(client, celery):
     with _Tenant() as t:
         with platform_session() as session:
