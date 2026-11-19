@@ -313,6 +313,69 @@ def _released_text_document(tenant: WorkerTestTenant, raw_email_id: UUID) -> UUI
     return document_id
 
 
+def test_a_released_emails_text_labelled_order_goes_to_extraction_and_is_never_held_again(monkeypatch):
+    """B1 slice 4b (D-248 item 1). An unknown sender's email is held with its
+    attachment and its text (`held`); the attachment is released, which moves
+    the text to `pending` and names the email for labelling; the label call
+    (a stub) answers order with lines. The text document then goes to
+    extraction with no second release: the unknown-sender and velocity rules
+    run only when mail arrives, never when a label decides, and the velocity
+    count is over its limit here to prove it."""
+    with WorkerTestTenant("Acme Test Released Text") as tenant:
+        raw_email_id = _email(tenant, ORDER_TEXT)
+        attachment_id = _attachment_document(tenant, raw_email_id)
+        with platform_session() as session:
+            session.execute(
+                text(
+                    "UPDATE raw_emails SET body_state = 'held', outcome = 'quarantined' WHERE id = :e"
+                ),
+                {"e": str(raw_email_id)},
+            )
+            session.execute(
+                text(
+                    "UPDATE documents SET status = 'quarantined', "
+                    "quarantine_reason = 'unknown_sender_velocity', quarantined_at = now(), "
+                    "sender_email = 'buyer@acmetest.example', source = 'email' "
+                    "WHERE id = :d"
+                ),
+                {"d": str(attachment_id)},
+            )
+        with platform_session() as session:
+            session.execute(  # 25 unknown senders in the last hour: over the limit of 20
+                text(
+                    "INSERT INTO documents (id, tenant_id, original_filename, storage_path, source, "
+                    "status, content_sha256, sender_email, created_at) "
+                    "SELECT gen_random_uuid(), :t, 'x.txt', 'tenants/seed/x.txt', 'email', 'pending', "
+                    "md5(g::text), 'seed' || g || '@unknown.example.test', now() "
+                    "FROM generate_series(1, 25) g"
+                ),
+                {"t": str(tenant.tenant_id)},
+            )
+        assert _email_row(raw_email_id)["body_state"] == "held"
+
+        with tenant_session(tenant.tenant_id) as session:
+            result = quarantine.release(
+                session, tenant.tenant_id, [attachment_id], role="owner", actor_user_id=tenant.user_id
+            )
+        assert result.label_emails == [raw_email_id]
+        assert _email_row(raw_email_id)["body_state"] == "pending"
+
+        client = StubLabelClient(ORDER)
+        _run(monkeypatch, tenant, raw_email_id, client)
+
+        assert len(client.calls) == 1
+        [document] = _text_documents(raw_email_id)
+        assert document["status"] == "pending"  # not `quarantined`: no second release is needed
+        assert _row(
+            "SELECT quarantine_reason FROM documents WHERE id = :d", d=str(document["id"])
+        )["quarantine_reason"] is None
+        assert _email_row(raw_email_id)["body_state"] == "labelled"
+
+        fake = _extract(monkeypatch, tenant, UUID(str(document["id"])))
+        assert len([c for c in fake.calls if "messages" in c]) == 1  # it reached extraction
+        assert _document(UUID(str(document["id"])))["status"] == "needs_review"
+
+
 @pytest.mark.parametrize("path", ["held", "sweep"])
 def test_a_stub_text_part_beside_a_full_html_order_makes_extraction_read_the_html_part(monkeypatch, path):
     with WorkerTestTenant("Acme Test Text Pipeline") as tenant:

@@ -35,6 +35,7 @@ from tests.test_label_mail_body_db import (
     StubLabelClient,
     _assert_decided,
     _assert_no_label,
+    _attachment_document,
     _email,
     _email_row,
     _ignored,
@@ -251,3 +252,55 @@ def test_a_text_decided_with_no_label_is_never_picked_up_again(monkeypatch, path
         _age_started_runs(email, PAST * 2)
         assert _sweep(tenant).texts_made_documents == []
         assert len(_text_documents(email)) == 1
+
+
+def _release_attachment(document_id: UUID, minutes_ago: int) -> None:
+    """The release's own mark on an attachment document (`released_at`), set
+    to `minutes_ago` so a test can age it without waiting."""
+    with platform_session() as session:
+        session.execute(
+            text("UPDATE documents SET released_at = now() - make_interval(mins => :m) WHERE id = :d"),
+            {"m": minutes_ago, "d": str(document_id)},
+        )
+
+
+def test_a_text_released_long_after_it_arrived_is_aged_from_its_release_not_its_arrival():
+    """B1 slice 4b (D-248 item 2). The email arrived long ago and was held; its
+    attachment was just released, which moved the text to `pending`. The sweep
+    must not take it at once: it ages from the release, and once the timeout
+    has passed since the release it is decided like any other stuck text."""
+    with WorkerTestTenant("Acme Test Sweep") as tenant:
+        email = _email(tenant, ORDER_TEXT)
+        attachment = _attachment_document(tenant, email)
+        _age_email(email, PAST * 100)  # arrived long ago
+        _release_attachment(attachment, 0)  # released just now
+
+        assert _sweep(tenant).texts_made_documents == []
+        assert _email_row(email)["body_state"] == "pending" and _text_documents(email) == []
+
+        _release_attachment(attachment, PAST)  # the release itself is now past the timeout
+        assert _sweep(tenant).texts_made_documents == [email]
+        _assert_no_label(_assert_decided(email))
+
+
+def test_a_text_is_aged_from_the_latest_release_of_any_of_its_emails_documents():
+    with WorkerTestTenant("Acme Test Sweep") as tenant:
+        email = _email(tenant, ORDER_TEXT)
+        first = _attachment_document(tenant, email)
+        second = _attachment_document(tenant, email)
+        _age_email(email, PAST * 100)
+        _release_attachment(first, PAST * 10)  # an old release ...
+        _release_attachment(second, 0)  # ... and a new one
+
+        assert _sweep(tenant).texts_made_documents == []
+
+
+def test_an_email_nobody_released_is_still_aged_from_its_arrival():
+    """A NULL `released_at` (the usual attachment email) must not hide a stuck
+    text: `greatest` ignores it and the arrival time decides, as before."""
+    with WorkerTestTenant("Acme Test Sweep") as tenant:
+        email = _email(tenant, ORDER_TEXT)
+        _attachment_document(tenant, email)
+        _age_email(email, PAST)
+
+        assert _sweep(tenant).texts_made_documents == [email]

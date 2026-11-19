@@ -18,7 +18,7 @@ find your way around; go to the linked file for the detail.
 **Keeping this file current:** update it at the end of every slice, in the same
 commit as the slice.
 
-**Status, as of 2026-11-19, with B1 slices 1 to 3 and the Playwright install split merged, and B1 slice 4a on its branch:** Phase 5.5,
+**Status, as of 2026-11-19, with B1 slices 1 to 4a and the Playwright install split merged, and B1 slice 4b on its branch:** Phase 5.5,
 **Stage 5**. **M7 is merged** (PR #76; D-214). The nightly rollup raises the three missing alerts
 (review backlog, confidence drift, staging TTL). INT-011 names Postmark's retry API, with RUNBOOK 2.5.
 CLAUDE.md has the Grants rules. **Migration 0039 is applied to staging** (2026-10-23): both snapshots
@@ -213,9 +213,9 @@ password-only session with AUTH-006. No staging suites (D-223 item 5).
 stack's ports moved from 54320-54329 to 25320-25329, below the range Linux assigns automatically;
 the five reservation steps are removed; the port printout stays, on the new block, as
 `scripts/ci/show_stack_ports.sh`.
-**B1's demo half** (D-230): slices 1 to 3 are merged (#106, `a86a0d0`, with migration 0041
-applied to staging on 2026-11-17; #107, `1124945`, D-244; #108, `a3aa843`, D-245). Slice 4a is on
-its branch (D-246), with `main` merged in after #109; 4b is next, and the staging suites run once
+**B1's demo half** (D-230): slices 1 to 4a are merged (#106, `a86a0d0`, with migration 0041
+applied to staging on 2026-11-17; #107, `1124945`, D-244; #108, `a3aa843`, D-245; #110, `d87cb3e`; main's
+push run #590 green; D-246). Slice 4b is on its branch (`phase55/b1-s4b-release`; D-248), and the staging suites run once
 on 4b's head. Each slice's state is in the B1 list below.
 **Next, in order (D-235 item 18):** the API's redeploy under a Grant, its startup log read for no
 `console_mfa_enforcement_off` line, and the web app's Vercel redeploy (D-241 item 11).
@@ -2383,7 +2383,7 @@ here is built.
     (main.py:134-143). Fix the wording before the first pilot; step h's
     monitoring covers error tracking (founder, 2026-11-02).
   - **B1's demo half is being built in six slices** (founder's go,
-    2026-11-16). Slices 1 to 3 are merged (#106 to #108). Slices 4 to 6 are on their own
+    2026-11-16). Slices 1 to 4a are merged (#106 to #108, #110). Slices 4b to 6 are on their own
     branches and go up for review in order; each slice's own bullet says
     where it stands. The design, `docs/designs/b1.md`, comes in on slice
     1's branch and has one copy: later edits go into the slice branch that
@@ -2407,8 +2407,8 @@ here is built.
       VAL-019's and VAL-021's writers, VAL-021's acknowledgement at approval
       and their tests come with slice 4. VAL-020 is never a document
       warning. The catalog spells it "email" (REQ-002 and INT-011 changed).
-    - **Slice 4a, on its branch** (`phase55/b1-s4-wiring`; D-246; `main`
-      merged in after #109). An email's text with no attachment is
+    - **Slice 4a, merged (#110, `d87cb3e`; main's push run #590 green)** (`phase55/b1-s4-wiring`; D-246).
+      An email's text with no attachment is
       labelled by one call and becomes a document or an INT-012 row; a
       failed call or a text left pending past the timeout becomes a
       document with no label. INT-001 has its new wording. The label
@@ -2418,10 +2418,19 @@ here is built.
       and no VAL-013 between an email's own documents. Sixteen fixture
       emails run end to end against label and extraction answers
       recorded live in two runs ($0.1908), and the label prompt gained
-      one sentence (fixture 16). Slice 4b (a held text sent for
-      labelling when its email is released, and the velocity rule)
-      comes next; the staging suites run once on 4b's head, before
-      4b merges.
+      one sentence (fixture 16).
+    - **Slice 4b, on its branch** (`phase55/b1-s4b-release`; D-248, which
+      extends D-246). Releasing any attachment of a held email moves the
+      email's held text to `pending` and sends it for labelling, once, in
+      received order, from the tenant's and the Console's release routes;
+      the text document it then makes goes to extraction with no second
+      release. A released text is aged by the stuck sweep from the later
+      of its arrival and its latest release. The unknown-sender velocity
+      count is every document, as before, plus each unknown-sender email
+      in the trailing hour whose text was sent to labelling and that has
+      no document of its own. Its API and worker tests run in CI after
+      the push; the RUNBOOK 1.4 staging suites run once on 4b's head
+      after CI is green, under a Grant, before 4b merges.
   - **What B1 defers past the demo** (founder, 2026-11-03; D-230 item 11):
     - labels on attachments;
     - item 4's rule for attachments (D-230 item 4);

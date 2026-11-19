@@ -432,6 +432,59 @@ def count_unknown_sender_documents_last_hour(session: Session, tenant_id: UUID) 
     return int(row["c"]) if row else 0
 
 
+def count_unknown_sender_mail_texts_last_hour(session: Session, tenant_id: UUID) -> int:
+    """
+    B1 slice 4b (D-248 item 3): the e-mails the document count above can't see.
+    A text-only e-mail costs a label call before it has any document (and
+    never gets one when the label says it is no order), so a flood of them
+    would pass the limit uncounted. Counted here: each unknown-sender e-mail
+    that arrived in the trailing hour (by arrival time, `raw_emails.created_at`)
+    whose text was sent to labelling (`pending` or `labelled`: counted when it
+    was sent, at arrival, not after the async call) and that has NO document
+    of its own, attachment or text.
+
+    An e-mail with a document is already counted as that document, so an
+    attachment e-mail with a cover note counts once, exactly as today; a
+    text-only e-mail counts once before and after its text becomes a document.
+    "Unknown" is the document count's own test: no earlier non-quarantined
+    document from the same sender at the moment the e-mail arrived.
+    """
+    row = session.execute(
+        text(
+            """
+            SELECT count(*) AS c
+            FROM raw_emails r
+            WHERE r.tenant_id = :tenant_id
+              AND r.sender_email IS NOT NULL
+              AND r.created_at > now() - interval '1 hour'
+              AND r.body_state IN ('pending', 'labelled')
+              AND NOT EXISTS (
+                  SELECT 1 FROM documents own
+                  WHERE own.tenant_id = r.tenant_id AND own.raw_email_id = r.id
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM documents d2
+                  WHERE d2.tenant_id = r.tenant_id
+                    AND d2.sender_email = r.sender_email
+                    AND d2.status != 'quarantined'
+                    AND d2.created_at < r.created_at
+              )
+            """
+        ),
+        {"tenant_id": str(tenant_id)},
+    ).mappings().first()
+    return int(row["c"]) if row else 0
+
+
+def count_unknown_sender_mail_last_hour(session: Session, tenant_id: UUID) -> int:
+    """What the velocity rule compares with `UNKNOWN_SENDER_HOURLY_LIMIT`:
+    every unknown-sender document in the trailing hour, as before, plus each
+    unknown-sender e-mail whose text was labelled and made no document."""
+    return count_unknown_sender_documents_last_hour(
+        session, tenant_id
+    ) + count_unknown_sender_mail_texts_last_hour(session, tenant_id)
+
+
 def evaluate_email(
     num_attachments: int,
     auth: AuthResult,
@@ -1067,7 +1120,7 @@ def process_inbound_email(tenant_id: UUID, parsed: ParsedEmail) -> ProcessResult
 
         sender_known = is_known_sender(session, tenant_id, parsed.sender_email)
         unknown_sender_count = (
-            0 if sender_known else count_unknown_sender_documents_last_hour(session, tenant_id)
+            0 if sender_known else count_unknown_sender_mail_last_hour(session, tenant_id)
         )
         ceiling_hold = intake_gate.hold_reason(session, tenant_id)
         strict = bool(tenant is not None and tenant["strict_sender_mode"])
