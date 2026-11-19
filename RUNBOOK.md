@@ -1191,6 +1191,8 @@ in `packages/core/docflow_core/constants.py`.
 | `MAIL_LABEL_REVIEW_THRESHOLD` | 0.80 | The text becomes a document when the call says it holds order lines, or when the call's confidence in that answer is below this. A failed call, an answer that doesn't validate, a text that was cut and `injection_suspected` all count as below it. Read by one function, `mail_labels.decide_body`. It is applied to a confidence the model reports about itself, so it is checked against the demo content's labels once that content has run. |
 | `MAIL_LABEL_TEXT_CHAR_BUDGET` | 12,000 | The most characters of an e-mail's text the labelling call reads. A text past it becomes a document. |
 
+The labelling task's own time limit, `MAIL_LABEL_TASK_TIME_LIMIT_SECONDS`, is in 5.2.
+
 ---
 
 ## 3. Onboarding a new tenant — checklist
@@ -1461,6 +1463,7 @@ which starts a real prefork worker in CI (Linux). On Windows it skips.
 | `SCHEDULED_JOBS_TASK_TIME_LIMIT_SECONDS` | 10 min | Check-ins, reminders, digests. |
 | `LIFECYCLE_SWEEP_TASK_TIME_LIMIT_SECONDS` / `LIFECYCLE_SWEEP_TIME_BOX_SECONDS` | 10 min / 4 min | Past the time box the sweep takes no new tenant; the next tick takes the rest. |
 | `STUCK_SWEEP_TASK_TIME_LIMIT_SECONDS` | 4 min | The stuck sweep. |
+| `MAIL_LABEL_TASK_TIME_LIMIT_SECONDS` | 15 min | Hard limit on labelling one email's text (B1; D-246 item 3). Above the task's slowest clean failure, about 661 s, and under `DOCUMENT_TASK_TIME_LIMIT_SECONDS` and `STUCK_PROCESSING_TIMEOUT_MIN`, each held by a test. A text whose task was cut off stays `pending`, and the stuck sweep makes it a document with no label (D-246 item 5). |
 | `PAGES_TASK_TIME_LIMIT_SECONDS` | 15 min | Hard limit on drawing one document's page images (viewer A3, D-232). The worst case is far past it, about 5 hours; a document cut off keeps `page_count` NULL, for the viewer's fallback and A6's backfill. Revisit only if the logs show `pages_failed ... error_type=deadline` on real documents. |
 | `PAGES_UPLOAD_ALLOWANCE_SECONDS` | 60 s | What the render's deadline allows for re-sending the original (at most 25 MB) to the parse service, and only that: an estimate, unmeasured, to be checked on staging at A6. Storing pages needs none of it: each page is stored only after a deadline check passes. The deadline, `PAGES_DEADLINE_SECONDS` in `app.tasks.render_pages`, is 900 - (45 + 60 + 210) = 585 s, checked before each answer and each page's upload. There is no soft limit. |
 | `PAGES_RETRY_COUNTDOWNS_SECONDS` | 60, 300, 900 s | The waits before each retry of a render the parse service or Storage couldn't serve. After the last, the render gives up: its page keys are deleted and both columns stay NULL. |
