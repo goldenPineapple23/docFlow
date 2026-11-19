@@ -90,13 +90,53 @@ jobs:
       # The API is stubbed at the network boundary -- its own behaviour is
       # proven against real Postgres in the api job below. WebKit runs the
       # review screen's 375 px layout spec (D-234), and the viewer and the
-      # security headers at desktop size (D-237); --with-deps installs each
+      # security headers at desktop size (D-237); `install-deps` installs each
       # browser's Linux system libraries.
-      # D-238: at most two attempts of 5 min, 30 s apart (#95's web install ran
-      # 1 h 41 min on a DNS failure with no limit). The step's limit covers both.
-      - name: Install Playwright browsers
+      # D-247: apt's own limits first, then the system packages and the
+      # browser as two steps, each with its own limit and one retry. The
+      # packages run as root through the local binary (no npx, root's own
+      # HOME), so the root `timeout` reaches apt-get; the browser is cached
+      # by Playwright's version and skipped on a hit.
+      - name: apt's own limits (D-247)
+        timeout-minutes: 1
+        run: bash "${{ github.workspace }}/scripts/ci/apt_timeouts.sh"
+      - name: Playwright's version
+        id: pw_version
+        timeout-minutes: 1
+        run: echo "version=$(./node_modules/.bin/playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - name: Restore Playwright's browsers
+        id: pw_cache
+        timeout-minutes: 5
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw_version.outputs.version }}-chromium-webkit
+      - name: Install Playwright's system packages
         timeout-minutes: 11
-        run: bash "${{ github.workspace }}/scripts/ci/playwright_install.sh" npx playwright install --with-deps chromium webkit
+        env:
+          PW_TITLE: Playwright system packages
+          PW_APT_RECOVERY: "1"
+        run: bash "${{ github.workspace }}/scripts/ci/playwright_install.sh" sudo env "PATH=$PATH" HOME=/root timeout --kill-after=10 290 ./node_modules/.bin/playwright install-deps chromium webkit
+      - name: No root-owned file left by the system packages step (D-247)
+        timeout-minutes: 1
+        run: |
+          found=$(find "$HOME/.npm" node_modules -user root 2>/dev/null | head -5)
+          if [ -n "$found" ]; then echo "::error title=Root-owned files::$found"; exit 1; fi
+          echo "No root-owned file under ~/.npm or apps/web/node_modules."
+      - name: Install Playwright's browsers
+        if: steps.pw_cache.outputs.cache-hit != 'true'
+        timeout-minutes: 7
+        env:
+          PW_TITLE: Playwright browsers
+          PW_ATTEMPT_SECONDS: "180"
+        run: bash "${{ github.workspace }}/scripts/ci/playwright_install.sh" ./node_modules/.bin/playwright install chromium webkit
+      - name: Save Playwright's browsers
+        if: steps.pw_cache.outputs.cache-hit != 'true'
+        timeout-minutes: 5
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw_version.outputs.version }}-chromium-webkit
       - name: End-to-end tests (playwright)
         run: npm run test:e2e
       # D-219: a high or critical advisory in a runtime dependency blocks
@@ -268,11 +308,56 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci
         working-directory: apps/web
-      # D-238: the same two attempts and limit as the web job's install.
-      - name: Install Playwright browser
-        timeout-minutes: 11
-        run: bash "${{ github.workspace }}/scripts/ci/playwright_install.sh" npx playwright install --with-deps chromium
+      # D-247: apt's own limits first, then the system packages and the
+      # browser as two steps, each with its own limit and one retry. The
+      # packages run as root through the local binary (no npx, root's own
+      # HOME), so the root `timeout` reaches apt-get; the browser is cached
+      # by Playwright's version and skipped on a hit.
+      - name: apt's own limits (D-247)
+        timeout-minutes: 1
+        run: bash "${{ github.workspace }}/scripts/ci/apt_timeouts.sh"
         working-directory: apps/web
+      - name: Playwright's version
+        id: pw_version
+        timeout-minutes: 1
+        run: echo "version=$(./node_modules/.bin/playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+        working-directory: apps/web
+      - name: Restore Playwright's browsers
+        id: pw_cache
+        timeout-minutes: 5
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw_version.outputs.version }}-chromium
+      - name: Install Playwright's system packages
+        timeout-minutes: 11
+        env:
+          PW_TITLE: Playwright system packages
+          PW_APT_RECOVERY: "1"
+        run: bash "${{ github.workspace }}/scripts/ci/playwright_install.sh" sudo env "PATH=$PATH" HOME=/root timeout --kill-after=10 290 ./node_modules/.bin/playwright install-deps chromium
+        working-directory: apps/web
+      - name: No root-owned file left by the system packages step (D-247)
+        timeout-minutes: 1
+        run: |
+          found=$(find "$HOME/.npm" node_modules -user root 2>/dev/null | head -5)
+          if [ -n "$found" ]; then echo "::error title=Root-owned files::$found"; exit 1; fi
+          echo "No root-owned file under ~/.npm or apps/web/node_modules."
+        working-directory: apps/web
+      - name: Install Playwright's browsers
+        if: steps.pw_cache.outputs.cache-hit != 'true'
+        timeout-minutes: 7
+        env:
+          PW_TITLE: Playwright browsers
+          PW_ATTEMPT_SECONDS: "180"
+        run: bash "${{ github.workspace }}/scripts/ci/playwright_install.sh" ./node_modules/.bin/playwright install chromium
+        working-directory: apps/web
+      - name: Save Playwright's browsers
+        if: steps.pw_cache.outputs.cache-hit != 'true'
+        timeout-minutes: 5
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw_version.outputs.version }}-chromium
       # Nothing is stubbed here: a real browser, the real API, real Postgres,
       # real RLS and a real sign-in (DECISIONS.md D-166). It has its own job
       # because it needs a database and two servers, and because a failure
