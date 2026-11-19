@@ -18,7 +18,7 @@ from uuid import uuid4
 
 import pytest
 
-from docflow_core import mail_bodies
+from docflow_core import mail_bodies, mail_labels
 from docflow_core.constants import MAIL_LABEL_TEXT_CHAR_BUDGET
 from docflow_core.mail_bodies import call_and_decide, choose_read_text, visible_characters
 from docflow_core.mail_labels import REASON_NO_ORDER_LINES, REASON_ORDER_LINES, REASON_TEXT_CUT, mail_text
@@ -274,6 +274,17 @@ def test_a_text_documents_whole_text_is_the_label_calls_own():
         date="Mon, 16 Nov 2026 09:30:00 -0500",
         body_text="4 x TEST-100",
     )
+
+
+def test_val_019_reads_the_senders_header_values_but_never_docflows_labels():
+    """Founder, 2026-11-18: the Subject's value is the sender's and counts;
+    only DocFlow's own "Subject:" / "From:" / "Date:" labels are skipped."""
+    plain = _email_text()
+    # The labels alone would make a From / Date / To block with this text.
+    assert not mail_bodies.forwarded_block_in(plain, "To: Acme Test Sales\n4 x TEST-100")
+    assert mail_bodies.forwarded_block_in(_email_text(subject="--- Forwarded message ---"), "4 x TEST-100")
+    assert mail_bodies.forwarded_block_in(plain, "4 x TEST-100\n> 2 x TEST-200")
+    assert mail_labels.mail_header_values(subject=" PO\n7 ", sender=None, date="") == ["PO 7"]
 
 
 def test_a_parse_answers_text_is_its_text_parts_joined():

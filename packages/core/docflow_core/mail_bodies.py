@@ -61,8 +61,10 @@ from docflow_core.mail_labels import (
     MailLabelResult,
     cut_for_label,
     decide_body,
+    has_forwarded_block,
     label_content,
     label_mail_body,
+    mail_header_values,
     mail_label_input_cost,
     mail_text,
     needs_ignored_mail_row,
@@ -142,6 +144,18 @@ def full_text(email: EmailText, body_text: str) -> str:
     return mail_text(
         subject=email.subject, sender=email.sender_email, date=email.date_header, body_text=body_text
     )
+
+
+def forwarded_block_in(email: EmailText, body_text: str) -> bool:
+    """
+    VAL-019's check on everything the sender wrote: the Subject, From and
+    Date values, each as the model reads it, then the chosen part's text.
+    Only DocFlow's own labels ("Subject:", "From:", "Date:") are left out --
+    with them, the three lines would read as a quoted message's header block
+    on every email (founder, 2026-11-18).
+    """
+    values = mail_header_values(subject=email.subject, sender=email.sender_email, date=email.date_header)
+    return has_forwarded_block("\n".join([*values, body_text]))
 
 
 def read_part_chosen(session: Session, document_id: UUID, part: DocumentPart) -> bool:

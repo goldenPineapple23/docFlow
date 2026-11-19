@@ -360,3 +360,17 @@ def test_a_missing_html_part_never_fails_the_text_document_which_reads_its_text_
         assert read["status"] == "needs_review"
         assert read["storage_path"] == parts["body_storage_path"]
         assert read["original_filename"] == "E-mail text.txt"
+
+
+@pytest.mark.parametrize("body", [ORDER_TEXT, FORWARDED_TEXT], ids=["plain_text", "forwarded_text"])
+def test_a_subject_that_matches_val_019s_rule_raises_it_once(monkeypatch, body):
+    """Founder, 2026-11-18: the Subject's value is the sender's and counts --
+    once, however many places match."""
+    with WorkerTestTenant("Acme Test Text Pipeline") as tenant:
+        raw_email_id = _email(tenant, body, subject="--- Forwarded message ---")
+        _run(monkeypatch, tenant, raw_email_id, StubLabelClient(ORDER))
+        [document] = _text_documents(raw_email_id)
+        document_id = UUID(str(document["id"]))
+        _extract(monkeypatch, tenant, document_id)
+
+        assert _codes(document_id).count("VAL-019") == 1

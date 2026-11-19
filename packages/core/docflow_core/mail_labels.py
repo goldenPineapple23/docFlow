@@ -113,16 +113,29 @@ def _header_value(value: str | None) -> str:
     return _defang(" ".join((value or "").split()))
 
 
+def _header_lines(*, subject: str | None, sender: str | None, date: str | None) -> list[tuple[str, str]]:
+    """Each header DocFlow shows, as (DocFlow's label, the sender's value as
+    one line). A header whose value is blank is left out."""
+    return [
+        (label, text)
+        for label, value in (("Subject", subject), ("From", sender), ("Date", date))
+        if (text := _header_value(value))
+    ]
+
+
 def mail_header_text(*, subject: str | None, sender: str | None, date: str | None) -> str:
     """The `Subject:`, `From:` and `Date:` lines put in front of an e-mail's
     text, for the labelling call and for the extraction of a body document
     (2.2 step 3, 2.3). A line whose value is blank is left out."""
-    lines = [
-        f"{label}: {text}"
-        for label, value in (("Subject", subject), ("From", sender), ("Date", date))
-        if (text := _header_value(value))
-    ]
-    return "\n".join(lines)
+    return "\n".join(
+        f"{label}: {text}" for label, text in _header_lines(subject=subject, sender=sender, date=date)
+    )
+
+
+def mail_header_values(*, subject: str | None, sender: str | None, date: str | None) -> list[str]:
+    """The same header lines without DocFlow's own labels: only what the
+    sender wrote (the forwarded-block check, VAL-019; founder, 2026-11-18)."""
+    return [text for _, text in _header_lines(subject=subject, sender=sender, date=date)]
 
 
 def mail_text(*, subject: str | None, sender: str | None, date: str | None, body_text: str) -> str:

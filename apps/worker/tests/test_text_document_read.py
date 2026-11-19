@@ -71,11 +71,11 @@ def test_a_closing_tag_in_a_header_line_stays_inside_the_one_envelope(field):
     )
 
 
-def test_the_header_lines_docflow_adds_are_never_read_as_a_forwarded_block():
-    """The check reads the email's own text only. A text opening with a
-    "To:" line would, with the From and Date lines DocFlow puts in front,
+def test_the_labels_docflow_adds_are_never_read_as_a_forwarded_block():
+    """Only DocFlow's own labels are left out. A text opening with a "To:"
+    line would, with the "From:" and "Date:" lines DocFlow puts in front,
     make a From / Date / To block -- so this fails if the check read the
-    whole text."""
+    labels too."""
     body = "To: Acme Test Sales\nPlease ship:\n4 x TEST-100 hex bolt\n"
     answer, forwarded = _read(_email(), body)
     assert forwarded is False
@@ -87,4 +87,14 @@ def test_the_header_lines_docflow_adds_are_never_read_as_a_forwarded_block():
 def test_a_quoted_message_in_the_text_is_found():
     quoted = ORDER_TEXT + "\nOn Mon, 16 Nov 2026 at 09:30, A Buyer wrote:\n> 2 x TEST-200\n"
     _, forwarded = _read(_email(), quoted)
+    assert forwarded is True
+
+
+@pytest.mark.parametrize(
+    "field", ["subject", "sender_email", "date_header"], ids=["Subject", "From", "Date"]
+)
+def test_a_header_value_the_sender_wrote_that_matches_the_rule_counts(field):
+    """Founder, 2026-11-18: the Subject's value (and From's, and Date's) is
+    the sender's, so it is checked like the text; only the labels aren't."""
+    _, forwarded = _read(_email(**{field: "--- Forwarded message ---"}), ORDER_TEXT)
     assert forwarded is True

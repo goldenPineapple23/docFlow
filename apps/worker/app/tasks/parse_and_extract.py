@@ -69,7 +69,6 @@ from docflow_core.extraction import (
 )
 from docflow_core.field_schema import FieldSchema
 from docflow_core.mail_bodies import DocumentPart
-from docflow_core.mail_labels import has_forwarded_block
 from docflow_core.matching import bump_times_applied, match_document_lines
 from docflow_core.numbers import plain_or_none
 from docflow_core.storage import (
@@ -263,8 +262,9 @@ def _read_email_text(
       (`mail_bodies.full_text`, as the label call read it), so extraction
       reads a PO number from the subject. It sits inside the one document
       envelope like the rest (Section 7.2).
-    * Whether the text holds a forwarded or quoted block (VAL-019), from the
-      text alone: the header lines DocFlow adds would otherwise read as one.
+    * Whether what the sender wrote holds a forwarded or quoted block
+      (VAL-019): the Subject, From and Date values and the text, without
+      DocFlow's own labels (`mail_bodies.forwarded_block_in`).
 
     None when the document left `processing` under us.
     """
@@ -282,7 +282,7 @@ def _read_email_text(
             answer = html_answer
     body_text = mail_bodies.parsed_text(answer.parts)
     whole = mail_bodies.full_text(email, body_text)
-    forwarded = has_forwarded_block(body_text)
+    forwarded = mail_bodies.forwarded_block_in(email, body_text)
     return dataclasses.replace(answer, parts=[{"type": "text", "text": whole}]), forwarded
 
 
