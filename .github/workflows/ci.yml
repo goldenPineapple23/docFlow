@@ -96,7 +96,9 @@ jobs:
       # browser as two steps, each with its own limit and one retry. The
       # packages run as root through the local binary (no npx, root's own
       # HOME), so the root `timeout` reaches apt-get; the browser is cached
-      # by Playwright's version and skipped on a hit.
+      # by Playwright's version and skipped on a hit. Each packages attempt
+      # prints the runner's apt mirror list; a retry after attempt 1 stopped
+      # at its limit runs without the first-priority mirror (D-247 item 8).
       - name: apt's own limits (D-247)
         timeout-minutes: 1
         run: bash "${{ github.workspace }}/scripts/ci/apt_timeouts.sh"
@@ -312,7 +314,9 @@ jobs:
       # browser as two steps, each with its own limit and one retry. The
       # packages run as root through the local binary (no npx, root's own
       # HOME), so the root `timeout` reaches apt-get; the browser is cached
-      # by Playwright's version and skipped on a hit.
+      # by Playwright's version and skipped on a hit. Each packages attempt
+      # prints the runner's apt mirror list; a retry after attempt 1 stopped
+      # at its limit runs without the first-priority mirror (D-247 item 8).
       - name: apt's own limits (D-247)
         timeout-minutes: 1
         run: bash "${{ github.workspace }}/scripts/ci/apt_timeouts.sh"

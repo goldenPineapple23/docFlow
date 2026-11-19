@@ -594,6 +594,85 @@ def test_the_install_script_recovers_apt_before_its_retry_only_when_asked():
     assert "sudo kill -KILL ${leftover}" in script
 
 
+NEXT_MIRROR_SCRIPT = REPO / "scripts" / "ci" / "apt_next_mirror.sh"
+
+
+def test_each_packages_attempt_prints_the_mirror_list_and_a_stalled_first_attempt_drops_its_mirror():
+    """D-247 item 8 (#582): every packages attempt prints the runner's mirror
+    list; only when attempt 1 stopped at its limit (124 or 137) does attempt 2
+    run without the first-priority mirror. No apt clean: the archives attempt
+    1 downloaded stay. The proof proxy's apt file sorts after 99ci-timeouts,
+    so its own timeouts win."""
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    assert "MIRRORS=/etc/apt/apt-mirrors.txt" in script
+    assert '    before=$(apt_pids)\n    show_mirrors "${attempt}"\n' in script
+    assert (
+        '    if [ "${APT_RECOVERY}" = "1" ] && '
+        '{ [ "${status}" -eq 124 ] || [ "${status}" -eq 137 ]; }; then\n'
+        "      drop_first_mirror\n"
+    ) in script
+    assert 'bash "${NEXT_MIRROR}" "${MIRRORS}"' in script and 'sudo tee "${MIRRORS}"' in script
+    assert "apt-get clean" not in script and "apt clean" not in script
+    assert "PROVE_CONF=/etc/apt/apt.conf.d/99zz-ci-prove-stall" in script
+    assert "99zz-ci-prove-stall" > "99ci-timeouts"
+
+
+def test_no_mirror_address_is_written_into_the_ci_files():
+    """D-247 item 8: the retry uses the runner's own list; the repo names no
+    mirror."""
+    for path in [WORKFLOW, *sorted((REPO / "scripts" / "ci").glob("*.sh"))]:
+        assert not re.search(r"[a-z0-9-]+\.ubuntu\.com", path.read_text(encoding="utf-8")), path.name
+
+
+def _next_mirror(tmp_path: Path, listing: str) -> subprocess.CompletedProcess:
+    mirrors = tmp_path / "apt-mirrors.txt"
+    mirrors.write_bytes(listing.encode("utf-8"))
+    return subprocess.run(
+        [_bash(), str(NEXT_MIRROR_SCRIPT), str(mirrors)], capture_output=True, text=True, timeout=30
+    )
+
+
+@pytest.mark.parametrize(
+    ("listing", "left", "message"),
+    [
+        (
+            "http://slow.example/ubuntu/\tpriority:1\nhttps://next.example/ubuntu/\tpriority:2\n"
+            "https://third.example/ubuntu/\tpriority:3\n",
+            "https://next.example/ubuntu/\tpriority:2\nhttps://third.example/ubuntu/\tpriority:3\n",
+            "removed the first-priority mirror: http://slow.example/ubuntu/\tpriority:1",
+        ),
+        (
+            "https://b.example/\tpriority:5\nhttp://a.example/\tpriority:2\n",
+            "https://b.example/\tpriority:5\n",
+            "removed the first-priority mirror: http://a.example/\tpriority:2",
+        ),
+        (
+            "# comment\nhttp://x.example/\n\nhttp://y.example/\n",
+            "# comment\n\nhttp://y.example/\n",
+            "removed the first-priority mirror: http://x.example/",
+        ),
+        (
+            "http://only.example/\tpriority:1\n",
+            "http://only.example/\tpriority:1\n",
+            "only one mirror listed; nothing removed",
+        ),
+    ],
+)
+def test_the_next_mirror_list_drops_only_the_first_priority_mirror(tmp_path, listing, left, message):
+    done = _next_mirror(tmp_path, listing)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == left
+    assert done.stderr.strip() == message
+
+
+def test_the_next_mirror_list_refuses_without_a_file(tmp_path):
+    done = subprocess.run(
+        [_bash(), str(NEXT_MIRROR_SCRIPT), str(tmp_path / "missing.txt")],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert done.returncode == 2 and "give one mirror list file" in done.stderr
+
+
 def _bash() -> str:
     found = shutil.which("bash")
     assert found, "bash is needed to run scripts/ci/playwright_install.sh"
