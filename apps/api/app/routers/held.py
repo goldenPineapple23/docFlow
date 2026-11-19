@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from app.celery_client import nudge_dispatcher
+from app.celery_client import nudge_dispatcher, send_label_tasks
 from app.deps import AuthenticatedIdentity, get_current_identity, require_tenant_member
 from app.errors import catalog_error
 
@@ -110,6 +110,8 @@ def release_held(body: ReleaseBody, identity: AuthenticatedIdentity = Depends(ge
     # Nudged after the transaction commits.
     if result.released:
         nudge_dispatcher()
+    # A released attachment's held text goes to labelling (D-248 item 1).
+    send_label_tasks(tenant_id, result.label_emails)
     return {
         "released": [str(i) for i in result.released],
         "skipped": [str(i) for i in result.skipped],

@@ -68,7 +68,7 @@ from fastapi.exception_handlers import http_exception_handler
 from pydantic import BaseModel, EmailStr, Field
 
 from app.actor import Actor
-from app.celery_client import celery_client, nudge_dispatcher
+from app.celery_client import celery_client, nudge_dispatcher, send_label_tasks
 from app.deps import (
     AuthenticatedIdentity,
     ConsoleRefused,
@@ -1788,6 +1788,8 @@ def release_quarantine(
         # them oldest first, the order they were received. Nudged after commit.
         if result.released:
             nudge_dispatcher()
+        # A released attachment's held text goes to labelling (D-248 item 1).
+        send_label_tasks(tenant_id, result.label_emails)
         return {"released": [str(i) for i in result.released], "skipped": [str(i) for i in result.skipped]}
 
 

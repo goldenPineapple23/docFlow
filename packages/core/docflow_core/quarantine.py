@@ -23,7 +23,7 @@ file stays until the retention period ends and the founder removes it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
@@ -186,6 +186,10 @@ def list_held(session: Session, tenant_id: UUID, *, limit: int = 500) -> list[di
 class ReleaseResult:
     released: list[UUID]  # in received order, which is the order to enqueue
     skipped: list[UUID]  # not held any more, or not this tenant's
+    # B1 slice 4b: emails whose held text this release moved to `pending`, in
+    # received order. The caller sends one labelling task for each, after the
+    # transaction commits (`email_intake.LABEL_MAIL_BODY_TASK`).
+    label_emails: list[UUID] = field(default_factory=list)
 
 
 def release(
@@ -252,6 +256,7 @@ def release(
     # Received order, as selected above (Section 7.16.4), minus any that
     # someone else released or cleared in the meantime.
     ordered = [document_id for document_id in candidates if document_id in moved]
+    label_emails: list[UUID] = []
     if ordered:
         # B1 (docs/designs/b1.md section 6): a released text document goes
         # straight to extraction with no label call -- a person has decided
@@ -268,12 +273,53 @@ def release(
             ),
             {"t": str(tenant_id), "ids": ",".join(str(i) for i in ordered)},
         )
+        # B1 slice 4b (D-248 item 1): a released ATTACHMENT's email carries its
+        # held text with it. The release covers the whole email, so the text
+        # is sent for labelling now, once -- the first release of any of the
+        # email's attachments moves it `held` -> `pending`; a later release of
+        # another attachment finds it no longer `held`. Nothing is labelled
+        # here: the caller sends the task after the commit. Received order.
+        label_emails = [
+            UUID(str(row["id"]))
+            for row in session.execute(
+                text(
+                    """
+                UPDATE raw_emails SET body_state = 'pending'
+                WHERE tenant_id = :t AND body_state = 'held'
+                  AND id IN (SELECT raw_email_id FROM documents
+                             WHERE tenant_id = :t AND email_part = 'attachment'
+                               AND raw_email_id IS NOT NULL
+                               AND id = ANY(CAST(string_to_array(:ids, ',') AS uuid[])))
+                RETURNING id
+                """
+                ),
+                {"t": str(tenant_id), "ids": ",".join(str(i) for i in ordered)},
+            )
+            .mappings()
+            .all()
+        ]
+        label_emails = _in_received_order(session, tenant_id, label_emails)
     # They count now, so the 80% / 100% notices may fire.
     allowance.record_thresholds(session, tenant_id)
     return ReleaseResult(
         released=ordered,
         skipped=[i for i in document_ids if i not in held],
+        label_emails=label_emails,
     )
+
+
+def _in_received_order(session: Session, tenant_id: UUID, raw_email_ids: list[UUID]) -> list[UUID]:
+    """The emails sorted by arrival (`UPDATE ... RETURNING` has no order)."""
+    if len(raw_email_ids) < 2:
+        return raw_email_ids
+    rows = session.execute(
+        text(
+            "SELECT id FROM raw_emails WHERE tenant_id = :t "
+            "AND id = ANY(CAST(string_to_array(:ids, ',') AS uuid[])) ORDER BY created_at, id"
+        ),
+        {"t": str(tenant_id), "ids": ",".join(str(i) for i in raw_email_ids)},
+    ).scalars()
+    return [UUID(str(r)) for r in rows]
 
 
 def clear(

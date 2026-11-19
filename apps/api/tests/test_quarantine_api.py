@@ -664,7 +664,8 @@ def test_strict_allowlist_is_off_by_default_and_holds_rather_than_rejects(client
         # It is the tenant's own call, so the owner can release it.
         r = client.post("/held/release", headers=t.headers(), json={"document_ids": [str(held[0]["id"])]})
         assert r.status_code == 200
-        # Releasing an attachment's document changes no email's outcome.
+        # At the moment of release, releasing an attachment's document changes
+        # no email's outcome (the outcome after labelling follows 4a's rules).
         outcomes = t.rows("SELECT outcome FROM raw_emails WHERE tenant_id = :t AND sender_email = :s",
                           s="stranger2@example.test")
         assert [o["outcome"] for o in outcomes] == ["quarantined"]
@@ -723,6 +724,113 @@ def test_held_text_with_no_attachment_gets_one_held_document_and_release_sends_i
         # attachment's (founder, 2026-11-18, answer 2).
         assert after["outcome"] == "quarantined"
         assert all(task["name"] != "docflow.label_mail_body" for task in celery.sent)
+
+
+def _strict_mode(t: _Tenant) -> None:
+    with platform_session() as session:
+        session.execute(
+            text(
+                "UPDATE tenants SET strict_sender_mode = true, "
+                "sender_allowlist = '{allowed.example.test}' WHERE id = :t"
+            ),
+            {"t": str(t.tenant_id)},
+        )
+
+
+def _held_attachment_email_with_text(client, t: _Tenant, *, attachments: int = 1) -> dict:
+    """An unlisted sender's email with `attachments` attachments and a cover
+    note, held whole by strict mode: its attachments are held documents and
+    its text waits `held`, never sent to the model."""
+    payload = _pm_payload(
+        "stranger@example.test",
+        attachments=[
+            _pm_attachment(f"po-{uuid4().hex[:6]}.txt", f"PO {uuid4()}".encode()) for _ in range(attachments)
+        ],
+    )
+    payload["TextBody"] = "Hello, our purchase order is attached. Thanks."
+    response = client.post(f"/intake/email/{t.token}", json=payload, headers=intake_webhook_headers())
+    assert response.status_code == 200 and response.json()["outcome"] == "quarantined"
+    [email] = t.rows("SELECT id, outcome, body_state FROM raw_emails WHERE tenant_id = :t")
+    assert email["body_state"] == "held"
+    return email
+
+
+def _label_tasks(celery) -> list[dict]:
+    return [s for s in celery.sent if s["name"] == "docflow.label_mail_body"]
+
+
+@requires_database
+@requires_quarantine_schema
+@requires_mail_body_schema
+def test_releasing_a_held_attachment_labels_its_emails_text_once_outcome_unchanged_at_release(
+    client, celery
+):
+    """B1 slice 4b (D-248 item 1). The release covers the whole email: the
+    first release of any of its attachments moves the text `held` -> `pending`
+    and sends one labelling task, after the commit; releasing the second
+    attachment sends nothing more. "Outcome unchanged" is the moment of
+    release only: the email stays `quarantined` until the label decides, and
+    what it becomes after that follows slice 4a's rules."""
+    with _Tenant() as t:
+        _strict_mode(t)
+        email = _held_attachment_email_with_text(client, t, attachments=2)
+        assert _label_tasks(celery) == []  # held: nothing is sent while it is held
+        first, second = [
+            d["id"] for d in t.rows("SELECT id FROM documents WHERE tenant_id = :t ORDER BY created_at, id")
+        ]
+
+        r = client.post("/held/release", headers=t.headers(), json={"document_ids": [str(first)]})
+        assert r.status_code == 200, r.text
+        assert _label_tasks(celery) == [
+            {
+                "name": "docflow.label_mail_body",
+                "args": [str(t.tenant_id), str(email["id"])],
+                "queue": "interactive",
+            }
+        ]
+        [after] = t.rows("SELECT body_state, outcome FROM raw_emails WHERE tenant_id = :t")
+        assert after["body_state"] == "pending"
+        assert after["outcome"] == "quarantined"  # unchanged at the moment of release
+
+        r = client.post("/held/release", headers=t.headers(), json={"document_ids": [str(second)]})
+        assert r.status_code == 200, r.text
+        assert len(_label_tasks(celery)) == 1  # the text was already on its way
+        assert t.rows("SELECT id FROM documents WHERE tenant_id = :t AND email_part = 'body'") == []
+
+
+@requires_database
+@requires_quarantine_schema
+@requires_mail_body_schema
+def test_the_consoles_release_of_a_held_attachment_sends_its_emails_held_text_to_labelling(client, celery):
+    with _Console() as console, _Tenant() as t:
+        _strict_mode(t)
+        email = _held_attachment_email_with_text(client, t)
+        [doc] = [d["id"] for d in t.rows("SELECT id FROM documents WHERE tenant_id = :t")]
+
+        r = client.post(
+            f"/admin/tenants/{t.tenant_id}/quarantine/release",
+            headers=console.headers(),
+            json={"document_ids": [str(doc)]},
+        )
+        assert r.status_code == 200, r.text
+        assert [s["args"] for s in _label_tasks(celery)] == [[str(t.tenant_id), str(email["id"])]]
+        [after] = t.rows("SELECT body_state, outcome FROM raw_emails WHERE tenant_id = :t")
+        assert (after["body_state"], after["outcome"]) == ("pending", "quarantined")
+
+
+@requires_database
+@requires_quarantine_schema
+@requires_mail_body_schema
+def test_an_email_without_text_sends_nothing_to_labelling_when_its_attachment_is_released(client, celery):
+    with _Tenant() as t:
+        _strict_mode(t)
+        assert _email(client, t, "stranger@example.test").json()["outcome"] == "quarantined"
+        [doc] = [d["id"] for d in t.rows("SELECT id FROM documents WHERE tenant_id = :t")]
+        r = client.post("/held/release", headers=t.headers(), json={"document_ids": [str(doc)]})
+        assert r.status_code == 200
+        assert _label_tasks(celery) == []
+        [after] = t.rows("SELECT body_state FROM raw_emails WHERE tenant_id = :t")
+        assert after["body_state"] == "none"
 
 
 @requires_database
