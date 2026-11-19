@@ -461,7 +461,11 @@ def stuck_texts(session: Session, *, timeout_min: int) -> list[UUID]:
     Texts still `pending` past the timeout (b1.md 2.2 step 9). Aged from the
     label call's started row when there is one -- so a call still running is
     never taken (its task's limit is shorter than the timeout) -- otherwise
-    from the email's arrival (founder, 2026-11-18, answer 2). During a
+    from the later of the email's arrival and its latest release (4b; D-248
+    item 2: a text released days after it arrived is not already stuck; the
+    release time is `released_at` on the email's documents, and `greatest`
+    ignores the NULL of an email nobody released) (founder, 2026-11-18,
+    answer 2). During a
     backlog a text that was never claimed can be taken before its label runs
     (accepted for the demo half). `session` is tenant-scoped.
     """
@@ -475,7 +479,10 @@ def stuck_texts(session: Session, *, timeout_min: int) -> list[UUID]:
                    AND coalesce(
                          (SELECT max(s.created_at) FROM extraction_runs s
                            WHERE s.raw_email_id = r.id AND s.run_kind = :kind AND s.run_state = 'started'),
-                         r.created_at
+                         greatest(
+                           r.created_at,
+                           (SELECT max(d.released_at) FROM documents d WHERE d.raw_email_id = r.id)
+                         )
                        ) < now() - make_interval(mins => :t)
                  ORDER BY r.created_at, r.id
                 """
