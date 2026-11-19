@@ -118,8 +118,6 @@ jobs:
         env:
           PW_TITLE: Playwright system packages
           PW_APT_RECOVERY: "1"
-          # PROOF RUN ONLY (D-247 item 6): removed by the next commit.
-          PW_PROVE_STALL: "1"
         run: bash "${{ github.workspace }}/scripts/ci/playwright_install.sh" sudo env "PATH=$PATH" HOME=/root timeout --kill-after=10 290 ./node_modules/.bin/playwright install-deps chromium webkit
       - name: No root-owned file left by the system packages step (D-247)
         timeout-minutes: 1
@@ -340,8 +338,6 @@ jobs:
         env:
           PW_TITLE: Playwright system packages
           PW_APT_RECOVERY: "1"
-          # PROOF RUN ONLY (D-247 item 6): removed by the next commit.
-          PW_PROVE_STALL: "1"
         run: bash "${{ github.workspace }}/scripts/ci/playwright_install.sh" sudo env "PATH=$PATH" HOME=/root timeout --kill-after=10 290 ./node_modules/.bin/playwright install-deps chromium
         working-directory: apps/web
       - name: No root-owned file left by the system packages step (D-247)
