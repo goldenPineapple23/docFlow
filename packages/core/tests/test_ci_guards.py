@@ -515,21 +515,162 @@ def test_every_upload_step_fails_in_5_minutes_and_stays_required():
         assert "continue-on-error" not in step, step
 
 
+APT_LIMITS_SCRIPT = REPO / "scripts" / "ci" / "apt_timeouts.sh"
+_INSTALL = 'run: bash "${{ github.workspace }}/scripts/ci/playwright_install.sh" '
+
+
+def _named(block: str, name: str) -> str:
+    [step] = [step for step in _steps(block) if f"- name: {name}\n" in step]
+    return step
+
+
 @pytest.mark.parametrize(
-    ("job", "browsers"), [("web", "chromium webkit"), ("web-live", "chromium")]
+    ("job", "browsers", "key"),
+    [("web", "chromium webkit", "chromium-webkit"), ("web-live", "chromium", "chromium")],
 )
-def test_each_playwright_install_retries_once_inside_its_own_limit(job, browsers):
-    """Two attempts of 5 min, 30 s apart, inside an 11-min step; --with-deps
-    kept, so a missing library stays a visible install failure (D-238)."""
+def test_each_playwright_install_is_two_steps_each_retried_inside_its_own_limit(job, browsers, key):
+    """D-247 (superseding D-238's single step): apt's limits first; the system
+    packages as root through the local binary, with root's own HOME and a
+    root `timeout` that reaches apt-get; no root-owned file left behind; the
+    browser on its own, skipped when the cache by Playwright's version hits."""
     block = _jobs(WORKFLOW.read_text(encoding="utf-8"))[job]
-    installs = [step for step in _steps(block) if "playwright install" in step]
-    assert len(installs) == 1
-    step = installs[0]
-    assert "\n        timeout-minutes: 11\n" in step
+    names = [m.group(1) for m in re.finditer(r"^      - name: (.+)$", block, re.M)]
+    order = [
+        "apt's own limits (D-247)",
+        "Playwright's version",
+        "Restore Playwright's browsers",
+        "Install Playwright's system packages",
+        "No root-owned file left by the system packages step (D-247)",
+        "Install Playwright's browsers",
+        "Save Playwright's browsers",
+    ]
+    assert [n for n in names if n in order] == order
+    assert "--with-deps" not in block and "npx playwright" not in block
+
+    assert 'scripts/ci/apt_timeouts.sh"' in _named(block, "apt's own limits (D-247)")
+    packages = _named(block, "Install Playwright's system packages")
+    assert "\n        timeout-minutes: 11\n" in packages and 'PW_APT_RECOVERY: "1"' in packages
     assert (
-        'run: bash "${{ github.workspace }}/scripts/ci/playwright_install.sh" '
-        f"npx playwright install --with-deps {browsers}\n"
-    ) in step
+        _INSTALL + 'sudo env "PATH=$PATH" HOME=/root timeout --kill-after=10 290 '
+        f"./node_modules/.bin/playwright install-deps {browsers}\n"
+    ) in packages
+    assert "find \"$HOME/.npm\" node_modules -user root" in _named(
+        block, "No root-owned file left by the system packages step (D-247)"
+    )
+    browser = _named(block, "Install Playwright's browsers")
+    assert "if: steps.pw_cache.outputs.cache-hit != 'true'" in browser
+    assert "\n        timeout-minutes: 7\n" in browser and 'PW_ATTEMPT_SECONDS: "180"' in browser
+    assert (_INSTALL + f"./node_modules/.bin/playwright install {browsers}\n") in browser
+    cache_key = f"key: playwright-${{{{ runner.os }}}}-${{{{ steps.pw_version.outputs.version }}}}-{key}\n"
+    for name in ("Restore Playwright's browsers", "Save Playwright's browsers"):
+        step = _named(block, name)
+        assert cache_key in step and "path: ~/.cache/ms-playwright" in step
+        # actions/cache only warns on a cache service error; and the web job
+        # has no continue-on-error at all (test_npm_audit.py).
+        assert "continue-on-error" not in step
+
+
+def test_apt_gives_up_on_a_silent_mirror_and_waits_for_a_held_lock():
+    """D-247: per file, so the step's limit stays the real bound."""
+    script = APT_LIMITS_SCRIPT.read_text(encoding="utf-8")
+    for line in (
+        'Acquire::Retries "3";',
+        'Acquire::http::Timeout "30";',
+        'Acquire::https::Timeout "30";',
+        'DPkg::Lock::Timeout "180";',
+    ):
+        assert line in script
+    assert "/etc/apt/apt.conf.d/99ci-timeouts" in script
+
+
+def test_the_install_script_recovers_apt_before_its_retry_only_when_asked():
+    """The packages step kills what a failed attempt left running, waits for
+    the dpkg lock and finishes an interrupted unpack (D-247); the proof mode
+    is off unless set."""
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    assert 'APT_RECOVERY="${PW_APT_RECOVERY:-0}"' in script
+    assert 'PROVE_STALL="${PW_PROVE_STALL:-0}"' in script
+    assert 'sudo fuser "${DPKG_LOCK}"' in script and "sudo dpkg --configure -a" in script
+    assert "sudo kill -KILL ${leftover}" in script
+
+
+NEXT_MIRROR_SCRIPT = REPO / "scripts" / "ci" / "apt_next_mirror.sh"
+
+
+def test_each_packages_attempt_prints_the_mirror_list_and_a_stalled_first_attempt_drops_its_mirror():
+    """D-247 item 8 (#582): every packages attempt prints the runner's mirror
+    list; only when attempt 1 stopped at its limit (124 or 137) does attempt 2
+    run without the first-priority mirror. No apt clean: the archives attempt
+    1 downloaded stay. The proof proxy's apt file sorts after 99ci-timeouts,
+    so its own timeouts win."""
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    assert "MIRRORS=/etc/apt/apt-mirrors.txt" in script
+    assert '    before=$(apt_pids)\n    show_mirrors "${attempt}"\n' in script
+    assert (
+        '    if [ "${APT_RECOVERY}" = "1" ] && '
+        '{ [ "${status}" -eq 124 ] || [ "${status}" -eq 137 ]; }; then\n'
+        "      drop_first_mirror\n"
+    ) in script
+    assert 'bash "${NEXT_MIRROR}" "${MIRRORS}"' in script and 'sudo tee "${MIRRORS}"' in script
+    assert "apt-get clean" not in script and "apt clean" not in script
+    assert "PROVE_CONF=/etc/apt/apt.conf.d/99zz-ci-prove-stall" in script
+    assert "99zz-ci-prove-stall" > "99ci-timeouts"
+
+
+def test_no_mirror_address_is_written_into_the_ci_files():
+    """D-247 item 8: the retry uses the runner's own list; the repo names no
+    mirror."""
+    for path in [WORKFLOW, *sorted((REPO / "scripts" / "ci").glob("*.sh"))]:
+        assert not re.search(r"[a-z0-9-]+\.ubuntu\.com", path.read_text(encoding="utf-8")), path.name
+
+
+def _next_mirror(tmp_path: Path, listing: str) -> subprocess.CompletedProcess:
+    mirrors = tmp_path / "apt-mirrors.txt"
+    mirrors.write_bytes(listing.encode("utf-8"))
+    return subprocess.run(
+        [_bash(), str(NEXT_MIRROR_SCRIPT), str(mirrors)], capture_output=True, text=True, timeout=30
+    )
+
+
+@pytest.mark.parametrize(
+    ("listing", "left", "message"),
+    [
+        (
+            "http://slow.example/ubuntu/\tpriority:1\nhttps://next.example/ubuntu/\tpriority:2\n"
+            "https://third.example/ubuntu/\tpriority:3\n",
+            "https://next.example/ubuntu/\tpriority:2\nhttps://third.example/ubuntu/\tpriority:3\n",
+            "removed the first-priority mirror: http://slow.example/ubuntu/\tpriority:1",
+        ),
+        (
+            "https://b.example/\tpriority:5\nhttp://a.example/\tpriority:2\n",
+            "https://b.example/\tpriority:5\n",
+            "removed the first-priority mirror: http://a.example/\tpriority:2",
+        ),
+        (
+            "# comment\nhttp://x.example/\n\nhttp://y.example/\n",
+            "# comment\n\nhttp://y.example/\n",
+            "removed the first-priority mirror: http://x.example/",
+        ),
+        (
+            "http://only.example/\tpriority:1\n",
+            "http://only.example/\tpriority:1\n",
+            "only one mirror listed; nothing removed",
+        ),
+    ],
+)
+def test_the_next_mirror_list_drops_only_the_first_priority_mirror(tmp_path, listing, left, message):
+    done = _next_mirror(tmp_path, listing)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == left
+    assert done.stderr.strip() == message
+
+
+def test_the_next_mirror_list_refuses_without_a_file(tmp_path):
+    done = subprocess.run(
+        [_bash(), str(NEXT_MIRROR_SCRIPT), str(tmp_path / "missing.txt")],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert done.returncode == 2 and "give one mirror list file" in done.stderr
 
 
 def _bash() -> str:
