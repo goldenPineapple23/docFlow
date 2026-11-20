@@ -6820,3 +6820,26 @@ D-240 item 9's PR, built from `main` at `c0db23a` (#102's merge), and rebased on
 **Founder approval:** 2026-11-20 (an attempt-1 limit per job, about twice its healthy attempt time; web-live at 120 s, the same as web; the wording fixed to name the limit that fired; step and job limits left as they are).
 
 **Related:** D-238, D-247; `.github/workflows/ci.yml`, `scripts/ci/playwright_install.sh`, `packages/core/tests/test_ci_guards.py`.
+
+## D-250 — The live-bucket tests run against Storage off this machine only with DOCFLOW_STAGING_RUN=1 (founder, 2026-11-20)
+
+**Context:** `packages/core/tests/test_storage_bucket_live.py` writes, reads and deletes real objects. Until now it ran wherever Storage was configured: in CI against the runner's own local stack, and on the founder's machine against the endpoint in the root `.env`, which is staging's. A local run that blocked only the database could therefore reach the staging bucket (D-207 item 11). The database guard already refuses a database off this machine unless `DOCFLOW_STAGING_RUN=1` is in the process's own environment (D-211); Storage had no such guard.
+
+1. **The guard** (`packages/core/tests/bucket_guard.py`): `refusal(endpoint, environ)` allows an endpoint whose host is `127.0.0.1`, `localhost` or `::1`, in any letter case. Any other endpoint, including one that doesn't parse or is empty, is refused unless `environ` has `DOCFLOW_STAGING_RUN` set to exactly `1`. The flag's name comes from the database guard, so the two can't drift. The refusal says why and how to run the tests on a granted staging run (RUNBOOK 1.4). It never names the endpoint, since a staging host carries the project's reference.
+2. **Where it applies:** a module-level mark in `test_storage_bucket_live.py` skips all four live-bucket tests with the refusal as the reason, before any fixture runs, so the `probe` fixture never writes. The module passes `os.environ`, never the settings, so a flag written in `.env` doesn't open it. Storage that isn't configured keeps its own skip, as before.
+3. **CI is unaffected.** Each Python job's step "Point Storage at this runner's own bucket (Stage 3b)" runs `scripts/ci/local_storage_env.py`, which reads `supabase status -o env`, refuses any endpoint that doesn't start with `http://127.0.0.1` or `http://localhost`, and writes the `STORAGE_S3_*` settings and `DOCFLOW_TEST_ANON_KEY` to `$GITHUB_ENV`. The endpoint is loopback, so the four tests run in CI as before, with no flag.
+4. **A granted staging run is unaffected.** It already sets `DOCFLOW_STAGING_RUN=1` (RUNBOOK 1.4), so it still reaches the staging bucket.
+5. **Tests** (`packages/core/tests/test_bucket_guard.py`, 19, no network):
+   - four loopback endpoints are allowed with no flag;
+   - six other endpoints are refused with no flag, and the reason names neither host: a hosted project's endpoint, a host that begins `127.0.0.1.`, one with `localhost@` before the host, a private address, text that isn't a URL, and an empty endpoint;
+   - six flag values other than `1` are refused (`0`, empty, `true`, `yes`, and `1` with a space before or after);
+   - the flag set to `1` allows a remote endpoint;
+   - a child-process run of the live module, with a remote endpoint, no flag, a dead proxy and an unresolvable database, reads `4 skipped`, with the refusal four times and no storage call;
+   - the module passes `os.environ`, and the guard reads neither the settings nor `.env`.
+6. **Counts.** CI expected: core 1,865 (1,841 on `main`, with 5 more from D-249's tests and these 19), 0 skipped; every other job unchanged. Locally, with every outside service blocked, core reads `1861 passed, 4 skipped`: the four skips are the live-bucket tests, refused.
+
+**Not changed:** a configured local Storage that can't be reached still fails the four tests rather than skipping them (D-207 item 12); the database guard; `scripts/ci/local_storage_env.py`; CI's workflow; every other suite; application code, migrations, staging, Fly, Vercel, Supabase and Stripe settings.
+
+**Founder approval:** 2026-11-20 (the live-bucket tests refuse any Storage endpoint that isn't local unless an explicit opt-in variable is set, and CI keeps running them as it does today).
+
+**Related:** D-207 items 11 and 12, D-211; RUNBOOK 1.4; `packages/core/tests/bucket_guard.py`, `packages/core/tests/test_storage_bucket_live.py`, `packages/core/tests/test_bucket_guard.py`, `packages/core/tests/database_guard.py`, `scripts/ci/local_storage_env.py`.
