@@ -6,16 +6,23 @@
 #
 #   PW_TITLE="Playwright system packages" PW_APT_RECOVERY=1 \
 #     scripts/ci/playwright_install.sh \
-#     sudo env "PATH=$PATH" HOME=/root timeout --kill-after=10 290 \
+#     sudo env "PATH=$PATH" HOME=/root timeout --kill-after=10 __inner_limit__ \
 #     ./node_modules/.bin/playwright install-deps chromium
 #
-# The arguments are the command, run as given. At most two attempts, each
-# stopped after PW_ATTEMPT_SECONDS (300). The packages command carries its
-# own root `timeout`, a little shorter: Playwright then runs apt-get as root
-# with no sudo of its own, so that timeout's kill of its process group
-# reaches apt-get. On #580 a sudo started inside the install put apt-get
-# out of reach of the non-root `timeout`, and the retry failed on the dpkg
-# lock that apt-get still held (D-247).
+# The arguments are the command, run as given. At most two attempts.
+# Attempt 1 is stopped after PW_ATTEMPT1_SECONDS (each job's own figure;
+# PW_ATTEMPT_SECONDS when unset), attempt 2 after PW_ATTEMPT_SECONDS (300).
+# The packages command carries its own root `timeout`, 10 s shorter:
+# Playwright then runs apt-get as root with no sudo of its own, so that
+# timeout's kill of its process group reaches apt-get. On #580 a sudo
+# started inside the install put apt-get out of reach of the non-root
+# `timeout`, and the retry failed on the dpkg lock that apt-get still held
+# (D-247). An argument that is exactly `__inner_limit__` is replaced, for each
+# attempt, by that attempt's limit less 10 s, so the root `timeout` follows
+# the attempt's limit. The limit an attempt prints, and the one a stopped
+# attempt is said to have reached, is the one that fires first: the root
+# `timeout`'s when the command carries it. (#595's web job said "stopped at
+# its 300 s limit" after 290 s: the root `timeout`'s fixed 290 had fired.)
 #
 # PW_APT_RECOVERY=1 (the packages step): each attempt first prints the
 # runner's apt mirror list (/etc/apt/apt-mirrors.txt). After a failed attempt,
@@ -46,6 +53,9 @@ fi
 
 TITLE="${PW_TITLE:-Playwright install}"
 ATTEMPT_SECONDS="${PW_ATTEMPT_SECONDS:-300}"
+ATTEMPT1_SECONDS="${PW_ATTEMPT1_SECONDS:-${ATTEMPT_SECONDS}}"
+INNER_TOKEN="__inner_limit__"
+INNER_MARGIN=10
 WAIT_SECONDS="${PW_WAIT_SECONDS:-0}"
 LOCK_WAIT_SECONDS="${PW_LOCK_WAIT_SECONDS:-120}"
 APT_RECOVERY="${PW_APT_RECOVERY:-0}"
@@ -140,7 +150,33 @@ prove_stall_lock() {
   echo "::notice title=${TITLE} (proof)::the dpkg lock is held for 40 s from $(now)"
 }
 
+for seconds in "${ATTEMPT1_SECONDS}" "${ATTEMPT_SECONDS}"; do
+  if ! [[ "${seconds}" =~ ^[0-9]+$ ]] || [ "${seconds}" -le "${INNER_MARGIN}" ]; then
+    echo "::error title=${TITLE}::an attempt limit must be a whole number of seconds above ${INNER_MARGIN}"
+    exit 2
+  fi
+done
+
 for attempt in 1 2; do
+  limit="${ATTEMPT_SECONDS}"
+  if [ "${attempt}" -eq 1 ]; then
+    limit="${ATTEMPT1_SECONDS}"
+  fi
+  inner=$((limit - INNER_MARGIN))
+  command=()
+  has_inner=0
+  for arg in "$@"; do
+    if [ "${arg}" = "${INNER_TOKEN}" ]; then
+      command+=("${inner}")
+      has_inner=1
+    else
+      command+=("${arg}")
+    fi
+  done
+  stop_at="${limit}"
+  if [ "${has_inner}" -eq 1 ]; then
+    stop_at="${inner}"
+  fi
   before=""
   if [ "${APT_RECOVERY}" = "1" ]; then
     before=$(apt_pids)
@@ -150,8 +186,8 @@ for attempt in 1 2; do
     prove_stall_start
   fi
   started=$(date +%s)
-  echo "${TITLE}, attempt ${attempt} of 2 (at most ${ATTEMPT_SECONDS} s), $(now): $*"
-  timeout --kill-after=10 "${ATTEMPT_SECONDS}" "$@"
+  echo "${TITLE}, attempt ${attempt} of 2 (at most ${stop_at} s), $(now): ${command[*]}"
+  timeout --kill-after=10 "${limit}" "${command[@]}"
   status=$?
   took=$(( $(date +%s) - started ))
   if [ "${status}" -eq 0 ]; then
@@ -159,7 +195,13 @@ for attempt in 1 2; do
     exit 0
   fi
   if [ "${status}" -eq 124 ] || [ "${status}" -eq 137 ]; then
-    why="stopped at its ${ATTEMPT_SECONDS} s limit"
+    # The root `timeout` (stop_at) fires first; the outer one, at `limit`,
+    # is the backstop, and only it lets an attempt run that long.
+    if [ "${has_inner}" -eq 1 ] && [ "${took}" -lt "${limit}" ]; then
+      why="stopped at its ${inner} s limit"
+    else
+      why="stopped at its ${limit} s limit"
+    fi
   else
     why="exit ${status}"
   fi
@@ -180,5 +222,5 @@ for attempt in 1 2; do
   fi
 done
 
-echo "::error title=${TITLE}::both attempts failed (each at most ${ATTEMPT_SECONDS} s); the cause is in the attempts' output above"
+echo "::error title=${TITLE}::both attempts failed (attempt 1 at most ${ATTEMPT1_SECONDS} s, attempt 2 at most ${ATTEMPT_SECONDS} s); the cause is in the attempts' output above"
 exit 1

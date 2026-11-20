@@ -6803,3 +6803,43 @@ D-240 item 9's PR, built from `main` at `c0db23a` (#102's merge), and rebased on
 **Founder approval:** 2026-11-19: the plan's four commits, with the three answers (count a text at arrival; a new D-248 that extends D-246; the B1 sentences edited in place in 4b's records commit), the change to commit 3 (count emails, not texts on top of documents) and the addition to commit 1 (a released email's text must not be held again); and, on 2026-11-19, commit 5 (the velocity test sized to its own seed, and three release tests) and this entry's wording.
 
 **Related:** D-163, D-230 items 4 and 5, D-245, D-246 items 2, 3, 5 and 8; `docs/designs/b1.md` sections 2, 6, 9 and 10; RUNBOOK 2.6.
+
+## D-249 — Playwright's system packages: an attempt-1 limit of its own in each web job, and a root `timeout` that follows each attempt (founder, 2026-11-20)
+
+**Context:** extends D-247, which is unchanged. D-247 gave the system packages step two attempts of 300 s, with the command's own root `timeout` fixed at 290 s so that its kill reaches apt-get (#580). On the last five green CI runs the step's healthy attempt took about 40 to 55 s in web and 17 to 61 s in web-live; the long ones were slow mirrors: web's 221 s (#594), web-live's 245 s (#595) and 278 s (#594). In web, attempt 1 stopped at the limit on three of those five runs (#595, #593, #590), and each retry on the next mirror then finished in about 40 to 55 s, so each run spent 290 s on a stalled first attempt.
+
+1. **Each job's attempt 1 has its own limit, `PW_ATTEMPT1_SECONDS`:** 120 s in web and 120 s in web-live (founder: web-live's 245 and 278 s were slow mirrors, not its normal time). Attempt 2 keeps `PW_ATTEMPT_SECONDS`, 300 s. A slow first-priority mirror is now left after 110 s, and attempt 2 runs without it (D-247 item 8).
+2. **The root `timeout` follows each attempt.** The packages command carries `__inner_limit__` where it had `290`; the wrapper replaces it, for each attempt, with that attempt's limit less 10 s (110 s, then 290 s). The root `timeout` stays inside sudo, so its kill still reaches apt-get (D-247 item 3). The outer `timeout` at the attempt's own limit stays as the backstop. The placeholder has no braces: Git Bash on Windows strips them from an argument when Python starts it.
+3. **The limit a stopped attempt names is the one that fired.** #595's warning read "stopped at its 300 s limit" after 290 s: the fixed root `timeout` had fired, and the wrapper named the outer limit. An attempt now prints the limit that fires first, and a stop before the outer limit is reported as the root `timeout`'s. The closing error names both attempts' limits.
+4. **A limit of 10 s or less, or one that isn't a whole number, is refused** (exit 2, an error annotation).
+5. **Step and job limits are unchanged.** The packages step's worst case is now 120 + 120 (the dpkg lock wait) + 300 + 20 (two kill-afters) = 560 s, inside its 11-minute limit in both jobs.
+6. **Tests** (`packages/core/tests/test_ci_guards.py`): each job's attempt-1 limit and the placeholder in its command; attempt 1 stopped at its own limit and attempt 2 at the shared one; the placeholder replaced per attempt and the stop named by the limit that fired; limits of 10 s or less, 0 and a non-number refused. The hung-attempt test's limit is 12 s (limits of 10 s or less are now refused).
+
+**Not changed:** D-247's text; apt's own limits; the browsers step (two attempts of 180 s); every step and job time limit; application code, migrations, staging, Fly, Vercel, Supabase and Stripe settings.
+
+**Founder approval:** 2026-11-20 (an attempt-1 limit per job, about twice its healthy attempt time; web-live at 120 s, the same as web; the wording fixed to name the limit that fired; step and job limits left as they are).
+
+**Related:** D-238, D-247; `.github/workflows/ci.yml`, `scripts/ci/playwright_install.sh`, `packages/core/tests/test_ci_guards.py`.
+
+## D-250 — The live-bucket tests run against Storage off this machine only with DOCFLOW_STAGING_RUN=1 (founder, 2026-11-20)
+
+**Context:** `packages/core/tests/test_storage_bucket_live.py` writes, reads and deletes real objects. Until now it ran wherever Storage was configured: in CI against the runner's own local stack, and on the founder's machine against the endpoint in the root `.env`, which is staging's. A local run that blocked only the database could therefore reach the staging bucket (D-207 item 11). The database guard already refuses a database off this machine unless `DOCFLOW_STAGING_RUN=1` is in the process's own environment (D-211); Storage had no such guard.
+
+1. **The guard** (`packages/core/tests/bucket_guard.py`): `refusal(endpoint, environ)` allows an endpoint whose host is `127.0.0.1`, `localhost` or `::1`, in any letter case. Any other endpoint, including one that doesn't parse or is empty, is refused unless `environ` has `DOCFLOW_STAGING_RUN` set to exactly `1`. The flag's name comes from the database guard, so the two can't drift. The refusal says why and how to run the tests on a granted staging run (RUNBOOK 1.4). It never names the endpoint, since a staging host carries the project's reference.
+2. **Where it applies:** a module-level mark in `test_storage_bucket_live.py` skips all four live-bucket tests with the refusal as the reason, before any fixture runs, so the `probe` fixture never writes. The module passes `os.environ`, never the settings, so a flag written in `.env` doesn't open it. Storage that isn't configured keeps its own skip, as before.
+3. **CI is unaffected.** Each Python job's step "Point Storage at this runner's own bucket (Stage 3b)" runs `scripts/ci/local_storage_env.py`, which reads `supabase status -o env`, refuses any endpoint that doesn't start with `http://127.0.0.1` or `http://localhost`, and writes the `STORAGE_S3_*` settings and `DOCFLOW_TEST_ANON_KEY` to `$GITHUB_ENV`. The endpoint is loopback, so the four tests run in CI as before, with no flag.
+4. **A granted staging run is unaffected.** It already sets `DOCFLOW_STAGING_RUN=1` (RUNBOOK 1.4), so it still reaches the staging bucket.
+5. **Tests** (`packages/core/tests/test_bucket_guard.py`, 19, no network):
+   - four loopback endpoints are allowed with no flag;
+   - six other endpoints are refused with no flag, and the reason names neither host: a hosted project's endpoint, a host that begins `127.0.0.1.`, one with `localhost@` before the host, a private address, text that isn't a URL, and an empty endpoint;
+   - six flag values other than `1` are refused (`0`, empty, `true`, `yes`, and `1` with a space before or after);
+   - the flag set to `1` allows a remote endpoint;
+   - a child-process run of the live module, with a remote endpoint, no flag, a dead proxy and an unresolvable database, reads `4 skipped`, with the refusal four times and no storage call;
+   - the module passes `os.environ`, and the guard reads neither the settings nor `.env`.
+6. **Counts.** CI expected: core 1,865 (1,841 on `main`, with 5 more from D-249's tests and these 19), 0 skipped; every other job unchanged. Locally, with every outside service blocked, core reads `1861 passed, 4 skipped`: the four skips are the live-bucket tests, refused.
+
+**Not changed:** a configured local Storage that can't be reached still fails the four tests rather than skipping them (D-207 item 12); the database guard; `scripts/ci/local_storage_env.py`; CI's workflow; every other suite; application code, migrations, staging, Fly, Vercel, Supabase and Stripe settings.
+
+**Founder approval:** 2026-11-20 (the live-bucket tests refuse any Storage endpoint that isn't local unless an explicit opt-in variable is set, and CI keeps running them as it does today).
+
+**Related:** D-207 items 11 and 12, D-211; RUNBOOK 1.4; `packages/core/tests/bucket_guard.py`, `packages/core/tests/test_storage_bucket_live.py`, `packages/core/tests/test_bucket_guard.py`, `packages/core/tests/database_guard.py`, `scripts/ci/local_storage_env.py`.
