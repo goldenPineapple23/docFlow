@@ -4,9 +4,11 @@ Stage 3b item 2, against the real bucket: `docflow-files` is private and
 reaches a file -- not the public URL, not the anon key, and not a customer's
 own signed-in token.
 
-Runs wherever Storage is configured: against staging from the founder's
-machine (STORAGE_S3_* and SUPABASE_ANON_KEY in the root .env), and against
-the runner's local stack in CI (scripts/ci/local_storage_env.py sets both).
+Runs wherever Storage is configured and on this machine: against the
+runner's local stack in CI (scripts/ci/local_storage_env.py sets both). An
+endpoint off this machine, such as staging's in the founder's root .env, is
+refused before any fixture runs, unless the process's own environment carries
+DOCFLOW_STAGING_RUN=1, set only for a granted staging run (tests/bucket_guard.py).
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import pytest
 
 from docflow_core import storage
 from docflow_core.config import get_settings
+from tests import bucket_guard
 
 
 def _anon_key() -> str:
@@ -30,6 +33,14 @@ def _anon_key() -> str:
 requires_bucket = pytest.mark.skipif(
     not (get_settings().storage_s3_endpoint and _anon_key()),
     reason="Storage is not configured here (STORAGE_S3_* and an anon key) -- see .env.example.",
+)
+
+# Every test here writes to a real bucket: refused off this machine unless the
+# granted run's flag is in the process's own environment (tests/bucket_guard.py).
+REFUSAL = bucket_guard.refusal(get_settings().storage_s3_endpoint or "", os.environ)
+pytestmark = pytest.mark.skipif(
+    bool(get_settings().storage_s3_endpoint) and REFUSAL is not None,
+    reason=REFUSAL or "",
 )
 
 
