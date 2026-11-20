@@ -1,19 +1,16 @@
 """
 The live-bucket tests run only against Storage on this machine, unless the
-run says otherwise.
+run says otherwise (D-250).
 
 `test_storage_bucket_live.py` writes, reads and deletes real objects. In CI
 its endpoint is the runner's own local stack (scripts/ci/local_storage_env.py
-refuses anything else), so it always runs there. On the founder's machine the
-root `.env` points Storage at docflow-staging: on 2026-10-18 and again on
-2026-11-19, local runs that blocked only the database reached the staging
-bucket through these tests without a Grant.
+refuses anything else), so it always runs there.
 
-So an endpoint whose host is not loopback is refused, before any fixture or
-request, unless the process's own environment carries DOCFLOW_STAGING_RUN=1,
-the flag a staging run under the founder's Grant already sets (RUNBOOK 1.4;
-D-211). The flag is read from the environment only, never from `.env`, as the
-database guard reads it (tests/database_guard.py).
+An endpoint whose host is not loopback (127.0.0.1, localhost or ::1) is
+refused, before any fixture or request, unless the process's own environment
+carries DOCFLOW_STAGING_RUN=1, the flag a granted staging run already sets
+(RUNBOOK 1.4; D-211). The flag is read from the environment only, never from
+`.env`, as the database guard reads it (tests/database_guard.py).
 """
 
 from __future__ import annotations
