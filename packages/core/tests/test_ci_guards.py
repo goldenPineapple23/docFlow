@@ -525,10 +525,13 @@ def _named(block: str, name: str) -> str:
 
 
 @pytest.mark.parametrize(
-    ("job", "browsers", "key"),
-    [("web", "chromium webkit", "chromium-webkit"), ("web-live", "chromium", "chromium")],
+    ("job", "browsers", "key", "attempt1"),
+    [
+        ("web", "chromium webkit", "chromium-webkit", "120"),
+        ("web-live", "chromium", "chromium", "360"),
+    ],
 )
-def test_each_playwright_install_is_two_steps_each_retried_inside_its_own_limit(job, browsers, key):
+def test_each_playwright_install_is_two_steps_each_retried_inside_its_own_limit(job, browsers, key, attempt1):
     """D-247 (superseding D-238's single step): apt's limits first; the system
     packages as root through the local binary, with root's own HOME and a
     root `timeout` that reaches apt-get; no root-owned file left behind; the
@@ -550,8 +553,12 @@ def test_each_playwright_install_is_two_steps_each_retried_inside_its_own_limit(
     assert 'scripts/ci/apt_timeouts.sh"' in _named(block, "apt's own limits (D-247)")
     packages = _named(block, "Install Playwright's system packages")
     assert "\n        timeout-minutes: 11\n" in packages and 'PW_APT_RECOVERY: "1"' in packages
+    # Each job's own attempt-1 limit: about twice its healthy attempt time
+    # (founder, 2026-11-20); attempt 2 keeps the script's 300 s.
+    assert f'PW_ATTEMPT1_SECONDS: "{attempt1}"' in packages and "PW_ATTEMPT_SECONDS" not in packages
+    # The root `timeout` follows each attempt's limit, 10 s inside it.
     assert (
-        _INSTALL + 'sudo env "PATH=$PATH" HOME=/root timeout --kill-after=10 290 '
+        _INSTALL + 'sudo env "PATH=$PATH" HOME=/root timeout --kill-after=10 __inner_limit__ '
         f"./node_modules/.bin/playwright install-deps {browsers}\n"
     ) in packages
     assert "find \"$HOME/.npm\" node_modules -user root" in _named(
@@ -679,8 +686,13 @@ def _bash() -> str:
     return found
 
 
-def _install(command: list[str], tmp_path: Path, attempt_seconds: int = 300) -> subprocess.CompletedProcess:
+def _install(
+    command: list[str], tmp_path: Path, attempt_seconds: int = 300, attempt1_seconds: int | None = None
+) -> subprocess.CompletedProcess:
     env = {**os.environ, "PW_ATTEMPT_SECONDS": str(attempt_seconds), "PW_WAIT_SECONDS": "0"}
+    env.pop("PW_ATTEMPT1_SECONDS", None)
+    if attempt1_seconds is not None:
+        env["PW_ATTEMPT1_SECONDS"] = str(attempt1_seconds)
     return subprocess.run(
         [_bash(), str(INSTALL_SCRIPT), *command],
         capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60,
@@ -704,8 +716,46 @@ def test_the_install_script_fails_loudly_after_two_attempts(tmp_path):
 
 def test_the_install_script_stops_a_hung_attempt_at_its_limit(tmp_path):
     started = time.monotonic()
-    done = _install(["sleep", "50"], tmp_path, attempt_seconds=2)
+    done = _install(["sleep", "50"], tmp_path, attempt_seconds=12)
     assert done.returncode == 1
-    assert done.stdout.count("stopped at its 2 s limit") == 2
+    assert done.stdout.count("stopped at its 12 s limit") == 2
+    assert time.monotonic() - started < 40
+
+
+def test_attempt_1_has_its_own_limit_and_attempt_2_keeps_the_shared_one(tmp_path):
+    """Founder, 2026-11-20: each job's attempt 1 is cut at its own limit; a
+    retry still gets PW_ATTEMPT_SECONDS."""
+    started = time.monotonic()
+    done = _install(["sleep", "50"], tmp_path, attempt_seconds=14, attempt1_seconds=11)
+    assert done.returncode == 1
+    assert "attempt 1 of 2 (at most 11 s)" in done.stdout and "attempt 2 of 2 (at most 14 s)" in done.stdout
+    assert "attempt 1 of 2 failed (stopped at its 11 s limit)" in done.stdout
+    assert "attempt 2 of 2 failed (stopped at its 14 s limit)" in done.stdout
+    assert "both attempts failed (attempt 1 at most 11 s, attempt 2 at most 14 s)" in done.stdout
+    assert time.monotonic() - started < 50
+
+
+def test_the_inner_limit_follows_each_attempt_and_names_the_limit_that_fired(tmp_path):
+    """The `__inner_limit__` argument becomes each attempt's limit less 10 s,
+    and a stop by it is reported as that limit, not the outer one: #595
+    said "stopped at its 300 s limit" after 290 s, when the fixed inner 290
+    had fired."""
+    started = time.monotonic()
+    done = _install(
+        ["timeout", "__inner_limit__", "sleep", "50"], tmp_path, attempt_seconds=13, attempt1_seconds=12
+    )
+    assert done.returncode == 1
+    assert "attempt 1 of 2 (at most 2 s)" in done.stdout and ": timeout 2 sleep 50" in done.stdout
+    assert "attempt 2 of 2 (at most 3 s)" in done.stdout and ": timeout 3 sleep 50" in done.stdout
+    assert "attempt 1 of 2 failed (stopped at its 2 s limit) after 2 s" in done.stdout
+    assert "attempt 2 of 2 failed (stopped at its 3 s limit) after 3 s" in done.stdout
+    assert "__inner_limit__" not in done.stdout
     assert time.monotonic() - started < 20
+
+
+@pytest.mark.parametrize("bad", ["10", "0", "abc"])
+def test_an_attempt_limit_at_or_under_the_inner_margin_is_refused(tmp_path, bad):
+    done = _install(["true"], tmp_path, attempt1_seconds=bad)  # type: ignore[arg-type]
+    assert done.returncode == 2
+    assert "an attempt limit must be a whole number of seconds above 10" in done.stdout
 
