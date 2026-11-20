@@ -6803,3 +6803,20 @@ D-240 item 9's PR, built from `main` at `c0db23a` (#102's merge), and rebased on
 **Founder approval:** 2026-11-19: the plan's four commits, with the three answers (count a text at arrival; a new D-248 that extends D-246; the B1 sentences edited in place in 4b's records commit), the change to commit 3 (count emails, not texts on top of documents) and the addition to commit 1 (a released email's text must not be held again); and, on 2026-11-19, commit 5 (the velocity test sized to its own seed, and three release tests) and this entry's wording.
 
 **Related:** D-163, D-230 items 4 and 5, D-245, D-246 items 2, 3, 5 and 8; `docs/designs/b1.md` sections 2, 6, 9 and 10; RUNBOOK 2.6.
+
+## D-249 — Playwright's system packages: an attempt-1 limit of its own in each web job, and a root `timeout` that follows each attempt (founder, 2026-11-20)
+
+**Context:** extends D-247, which is unchanged. D-247 gave the system packages step two attempts of 300 s, with the command's own root `timeout` fixed at 290 s so that its kill reaches apt-get (#580). On the last five green CI runs the step's healthy attempt took about 40 to 55 s in web and 17 to 61 s in web-live; the long ones were slow mirrors: web's 221 s (#594), web-live's 245 s (#595) and 278 s (#594). In web, attempt 1 stopped at the limit on three of those five runs (#595, #593, #590), and each retry on the next mirror then finished in about 40 to 55 s, so each run spent 290 s on a stalled first attempt.
+
+1. **Each job's attempt 1 has its own limit, `PW_ATTEMPT1_SECONDS`:** 120 s in web and 120 s in web-live (founder: web-live's 245 and 278 s were slow mirrors, not its normal time). Attempt 2 keeps `PW_ATTEMPT_SECONDS`, 300 s. A slow first-priority mirror is now left after 110 s, and attempt 2 runs without it (D-247 item 8).
+2. **The root `timeout` follows each attempt.** The packages command carries `__inner_limit__` where it had `290`; the wrapper replaces it, for each attempt, with that attempt's limit less 10 s (110 s, then 290 s). The root `timeout` stays inside sudo, so its kill still reaches apt-get (D-247 item 3). The outer `timeout` at the attempt's own limit stays as the backstop. The placeholder has no braces: Git Bash on Windows strips them from an argument when Python starts it.
+3. **The limit a stopped attempt names is the one that fired.** #595's warning read "stopped at its 300 s limit" after 290 s: the fixed root `timeout` had fired, and the wrapper named the outer limit. An attempt now prints the limit that fires first, and a stop before the outer limit is reported as the root `timeout`'s. The closing error names both attempts' limits.
+4. **A limit of 10 s or less, or one that isn't a whole number, is refused** (exit 2, an error annotation).
+5. **Step and job limits are unchanged.** The packages step's worst case is now 120 + 120 (the dpkg lock wait) + 300 + 20 (two kill-afters) = 560 s, inside its 11-minute limit in both jobs.
+6. **Tests** (`packages/core/tests/test_ci_guards.py`): each job's attempt-1 limit and the placeholder in its command; attempt 1 stopped at its own limit and attempt 2 at the shared one; the placeholder replaced per attempt and the stop named by the limit that fired; limits of 10 s or less, 0 and a non-number refused. The hung-attempt test's limit is 12 s (limits of 10 s or less are now refused).
+
+**Not changed:** D-247's text; apt's own limits; the browsers step (two attempts of 180 s); every step and job time limit; application code, migrations, staging, Fly, Vercel, Supabase and Stripe settings.
+
+**Founder approval:** 2026-11-20 (an attempt-1 limit per job, about twice its healthy attempt time; web-live at 120 s, the same as web; the wording fixed to name the limit that fired; step and job limits left as they are).
+
+**Related:** D-238, D-247; `.github/workflows/ci.yml`, `scripts/ci/playwright_install.sh`, `packages/core/tests/test_ci_guards.py`.

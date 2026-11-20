@@ -339,7 +339,7 @@ jobs:
         env:
           PW_TITLE: Playwright system packages
           PW_APT_RECOVERY: "1"
-          PW_ATTEMPT1_SECONDS: "360"
+          PW_ATTEMPT1_SECONDS: "120"
         run: bash "${{ github.workspace }}/scripts/ci/playwright_install.sh" sudo env "PATH=$PATH" HOME=/root timeout --kill-after=10 __inner_limit__ ./node_modules/.bin/playwright install-deps chromium
         working-directory: apps/web
       - name: No root-owned file left by the system packages step (D-247)

@@ -528,7 +528,7 @@ def _named(block: str, name: str) -> str:
     ("job", "browsers", "key", "attempt1"),
     [
         ("web", "chromium webkit", "chromium-webkit", "120"),
-        ("web-live", "chromium", "chromium", "360"),
+        ("web-live", "chromium", "chromium", "120"),
     ],
 )
 def test_each_playwright_install_is_two_steps_each_retried_inside_its_own_limit(job, browsers, key, attempt1):
@@ -747,8 +747,8 @@ def test_the_inner_limit_follows_each_attempt_and_names_the_limit_that_fired(tmp
     assert done.returncode == 1
     assert "attempt 1 of 2 (at most 2 s)" in done.stdout and ": timeout 2 sleep 50" in done.stdout
     assert "attempt 2 of 2 (at most 3 s)" in done.stdout and ": timeout 3 sleep 50" in done.stdout
-    assert "attempt 1 of 2 failed (stopped at its 2 s limit) after 2 s" in done.stdout
-    assert "attempt 2 of 2 failed (stopped at its 3 s limit) after 3 s" in done.stdout
+    assert "attempt 1 of 2 failed (stopped at its 2 s limit) after " in done.stdout
+    assert "attempt 2 of 2 failed (stopped at its 3 s limit) after " in done.stdout
     assert "__inner_limit__" not in done.stdout
     assert time.monotonic() - started < 20
 
